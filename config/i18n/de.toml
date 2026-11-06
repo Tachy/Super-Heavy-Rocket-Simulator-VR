@@ -1,0 +1,24 @@
+# German texts of the game (default language). Sections are text groups, keys are dotted: [report] legacy = ... is the
+# key report.legacy. TomlLite subset: one-line strings, no escapes, no double quote inside a value.
+# Placeholders {name} or {name:spec}; see game/util/i18n.gd. Every key exists in en.toml too.
+
+[report]
+legacy = "{text}"
+command.internal_error = "Interner Fehler im Befehl"
+
+[ui]
+language.label = "Sprache"
+language.de = "Deutsch"
+language.en = "English"
+time_panel.start_planning = "Start wird geplant ..."
+time_panel.start_refused = "Start abgelehnt: {reason}"
+time_panel.start_refused_unknown = "Start abgelehnt: unbekannter Grund"
+time_panel.start_not_accepted = "Start abgelehnt: Befehl nicht angenommen"
+
+[event]
+start_refused = "Start abgelehnt: {reason}"
+start_failed = "Start fehlgeschlagen"
+no_return = "Keine Rückkehr: {reason}"
+no_return_no_ship = "Keine Rückkehr: kein Schiff im Orbit"
+no_return_no_capsule = "Keine Rückkehr: keine Kapsel im Orbit"
+dispersion_warning = " - Achtung: {note}"

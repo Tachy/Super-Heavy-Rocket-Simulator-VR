@@ -250,6 +250,8 @@ public:
     // The downloads of a snapshot: [{url, first_byte, last_byte (-1: whole object / open end), file_name}]; idx_text
     // is the GFS index file's text (ignored for ERA5 / analog). Empty with an error when a record is missing.
     godot::Array weather_requests(const godot::Dictionary& snapshot, const godot::String& idx_text) const;
+    // Every report code of the core: [{code: String, params: PackedStringArray}] (the game checks its tables against it).
+    godot::Array report_codes() const;
     godot::String weather_gfs_index_url(const godot::Dictionary& snapshot) const;
     // Cycle hours (hours since 1900) to probe, newest first, from the cycle at or before the wall clock.
     godot::PackedInt64Array weather_gfs_cycle_candidates(double wall_utc_hour_f, int64_t count) const;

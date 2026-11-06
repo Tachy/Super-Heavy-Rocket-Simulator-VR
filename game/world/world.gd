@@ -383,7 +383,7 @@ func start_mission(mission_id: String, on_pad := false) -> bool:
 	return flight.start_mission(mission_id, clock.tdb_s, on_pad)
 
 
-func _on_mission_started(ok: bool, _message: String) -> void:
+func _on_mission_started(ok: bool, _report: Dictionary) -> void:
 	if not ok:
 		return
 	clock.set_time(flight.sim.mission_start_tdb_s())

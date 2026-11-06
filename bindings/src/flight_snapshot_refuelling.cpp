@@ -36,7 +36,7 @@ godot::Dictionary build_transfer_state(const sim::FlightSession& session) {
     godot::Dictionary d;
     d["present"] = true;
     d["phase"] = godot::String::utf8(phase_name(t.phase));
-    d["status"] = german(t.status);
+    d["status"] = legacy_report(t.status);
     d["elapsed_s"] = t.elapsed_s;
     d["delivered_oxidizer_kg"] = t.delivered_kg[sim::transfer_oxidizer];
     d["delivered_fuel_kg"] = t.delivered_kg[sim::transfer_fuel];
@@ -56,7 +56,7 @@ godot::Dictionary build_campaign_flight_state(const sim::FlightSession& session)
     godot::Dictionary d;
     d["present"] = true;
     d["phase"] = godot::String::utf8(sim::to_string(st.phase));
-    d["status"] = german(st.status);
+    d["status"] = legacy_report(st.status);
     d["tankers_flown"] = st.tankers_flown;
     d["tankers_planned"] = st.tankers_planned;
     d["depot_propellant_kg"] = st.depot_propellant_kg;
@@ -69,7 +69,7 @@ godot::Dictionary build_campaign_flight_state(const sim::FlightSession& session)
         row["number"] = r.number;
         row["hls"] = r.hls;
         row["failed"] = r.failed;
-        row["note"] = german(r.note);
+        row["note"] = legacy_report(r.note);
         row["launch_tdb_s"] = r.launch.tdb_seconds_past_j2000();
         row["arrival_tdb_s"] = r.arrival.tdb_seconds_past_j2000();
         row["delivered_kg"] = r.delivered_kg;
@@ -100,7 +100,7 @@ godot::Dictionary build_campaign_flight_state(const sim::FlightSession& session)
     if (st.first_return) d["first_return"] = godot::String::utf8(sim::to_string(*st.first_return));
     godot::Array misses;
     if (st.phase == sim::CampaignFlightPhase::Complete) {
-        for (const auto& m : driver->comparison_misses()) misses.push_back(german(m));
+        for (const auto& m : driver->comparison_misses()) misses.push_back(legacy_report(m));
     }
     d["misses"] = misses;
     return d;
@@ -132,7 +132,7 @@ godot::Dictionary campaign_dictionary(const sim::CampaignReport& r, const time::
     const auto utc = [&](time::Epoch t) { return godot::String(time.to_utc(t).to_iso_string().substr(0, 19).c_str()); };
     godot::Dictionary d;
     d["closes"] = r.result.closes;
-    d["reason"] = german(r.result.reason);
+    d["reason"] = legacy_report(r.result.reason);
     d["tanker_flights"] = r.result.tanker_flights;
     d["duration_d"] = r.result.duration_s / constants::seconds_per_day;
     d["demand_t"] = r.demand_kg / kg_per_t;

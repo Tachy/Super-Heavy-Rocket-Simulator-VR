@@ -25,7 +25,7 @@ const MISSION_START_EVENT := "Mission wird gestartet"
 const MISSION_HOLD_TDB_S := 0.0
 
 ## Outcome of start_mission (from the simulation thread): ok, and the refusal reason or the start warnings.
-signal mission_started(ok: bool, message: String)
+signal mission_started(ok: bool, report: Dictionary)
 
 var sim := FlightSim.new()
 var launch_site_id := ""  ## site of the current flight (its tower shows the flight's arm state)
@@ -108,7 +108,7 @@ func _clear_views() -> void:
 
 
 ## Outcome of a command on the simulation thread (emitted from FlightSim.advance_to / wait_idle).
-func _on_command_finished(id: int, command: String, ok: bool, message: String) -> void:
+func _on_command_finished(id: int, command: String, ok: bool, report: Dictionary) -> void:
 	match command:
 		"launch_from_site":
 			if id != _pending_launch.get("id", 0):
@@ -118,7 +118,7 @@ func _on_command_finished(id: int, command: String, ok: bool, message: String) -
 			if ok:
 				last_event = _pending_launch["text"]  # the clamped vehicle counts down and lifts off at T-0
 			else:
-				last_event = "Start abgelehnt: %s" % message if message != "" else "Start fehlgeschlagen"
+				last_event = _refusal_event(report)
 			_pending_launch = {}
 		"start_mission":
 			if id != _pending_mission.get("id", 0):
@@ -130,11 +130,11 @@ func _on_command_finished(id: int, command: String, ok: bool, message: String) -
 				var name := sim.mission_display_name()
 				last_event = "Mission: %s" % (name if name != "" else mission_id)
 			else:
-				last_event = "Start abgelehnt: %s" % message if message != "" else "Start fehlgeschlagen"
+				last_event = _refusal_event(report)
 				_clock_resync = true  # the refused start may have placed a vehicle at its own epoch
-			mission_started.emit(ok, message)
+			mission_started.emit(ok, report)
 		"engage_ascent_autopilot":
-			last_event = "Aufstiegs-Autopilot aktiv" if ok else "Start abgelehnt: %s" % message
+			last_event = "Aufstiegs-Autopilot aktiv" if ok else I18n.text("event.start_refused", {"reason": I18n.report_text(report)})
 		"engage_orbit_autopilot":
 			if ok:
 				last_event = "Autopilot: Orbit halten"
@@ -145,12 +145,26 @@ func _on_command_finished(id: int, command: String, ok: bool, message: String) -
 			if ok:
 				last_event = "Rückkehr geplant: Deorbit-Brennvorgang, Eintritt, Fang am Turm" + _dispersion_warning()
 			else:
-				last_event = "Keine Rückkehr: %s" % sim.autopilot_status().get("return", {}).get("reason", "kein Schiff im Orbit")
+				last_event = _no_return_event("event.no_return_no_ship")
 		"plan_capsule_return":
 			if ok:
 				last_event = "Rückkehr geplant: Deorbit-Brennvorgang, Eintritt, Wasserung" + _dispersion_warning()
 			else:
-				last_event = "Keine Rückkehr: %s" % sim.autopilot_status().get("return", {}).get("reason", "keine Kapsel im Orbit")
+				last_event = _no_return_event("event.no_return_no_capsule")
+
+
+## A refused start as the event line: "Start abgelehnt: <reason>", or "Start fehlgeschlagen" without a reason.
+func _refusal_event(report: Dictionary) -> String:
+	var reason := I18n.report_text(report)
+	return I18n.text("event.start_refused", {"reason": reason}) if reason != "" else I18n.text("event.start_failed")
+
+
+## The event for a return the planner refused: its reason, or the key's text when there is no plan (no ship / capsule).
+func _no_return_event(missing_key: String) -> String:
+	var plan: Dictionary = sim.autopilot_status().get("return", {})
+	if not plan.has("reason"):
+		return I18n.text(missing_key)
+	return I18n.text("event.no_return", {"reason": I18n.report_text(plan["reason"])})
 
 
 ## The planned return's note when its pass does not fly every dispersed case (the planner's fallback), else "".
@@ -158,7 +172,7 @@ func _dispersion_warning() -> String:
 	var plan: Dictionary = sim.autopilot_status().get("return", {})
 	if plan.get("dispersion_robust", true):
 		return ""
-	return " - Achtung: %s" % plan.get("dispersion_note", "nicht gegen alle Streuungen robust")
+	return I18n.text("event.dispersion_warning", {"note": I18n.report_text(plan.get("dispersion_note", {}))})
 
 
 ## While a mission start runs: the work the core reports for it (a lunar landing's touchdown search on a background
@@ -166,7 +180,7 @@ func _dispersion_warning() -> String:
 func _show_mission_start_status() -> void:
 	if _pending_mission.is_empty():
 		return  # the outcome came in this frame
-	var status: String = sim.autopilot_status().get("mission_start_status", "")
+	var status: String = I18n.report_text(sim.autopilot_status().get("mission_start_status", {}))
 	if status != "":
 		last_event = status
 

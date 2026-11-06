@@ -32,7 +32,7 @@ godot::Dictionary lunar_descent(const sim::FlightSession& session) {
     if (!plan) return d;
     const auto& p = plan->touchdown;
     d["feasible"] = plan->feasible;
-    d["reason"] = german(plan->reason);
+    d["reason"] = legacy_report(plan->reason);
     d["pdi_epoch_tdb_s"] = plan->pdi_epoch.tdb_seconds_past_j2000();
     d["touchdown_latitude_deg"] = p.latitude_rad * constants::rad_to_deg;
     d["touchdown_longitude_deg"] = p.longitude_rad * constants::rad_to_deg;
@@ -61,7 +61,7 @@ godot::Dictionary lunar_return(const sim::FlightSession& session) {
     d["present"] = plan != nullptr;
     if (!plan) return d;
     d["feasible"] = plan->feasible;
-    d["reason"] = german(plan->reason);
+    d["reason"] = legacy_report(plan->reason);
     d["tei_delta_v_mps"] = plan->tei_delta_v_mps;
     d["braking_delta_v_mps"] = plan->braking_delta_v_mps;
     d["interface_epoch_tdb_s"] = plan->arrival.interface_epoch.tdb_seconds_past_j2000();
@@ -95,7 +95,7 @@ godot::Dictionary build_lunar_state(const sim::FlightSession& session) {
     d["present"] = present;
     if (!present) return d;
     d["step"] = godot::String::utf8(sim::to_string(session.lunar_step()));
-    d["status"] = german(session.lunar_status());
+    d["status"] = legacy_report(session.lunar_status());
     d["mission_complete"] = session.lunar_mission_complete();
     d["mission_ended"] = session.lunar_mission_ended();
     d["burns"] = lunar_burns(session);

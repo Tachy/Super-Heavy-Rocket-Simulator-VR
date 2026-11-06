@@ -37,6 +37,8 @@ var _vehicle_list: Array[Dictionary] = []
 var _mission_list: Array[Dictionary] = []
 var _start_button: Button
 var _start_status := Label.new()
+var _start_key := ""  ## table key of the start status text ("" none); a refusal (_start_refusal) takes precedence
+var _start_refusal: Dictionary = {}  ## report of a refused start; resolved at draw time so a language switch re-renders it
 var _warp_before_pause := 1.0
 var _axes_button: Button
 var _wizard := FreeCameraWizard.new()
@@ -110,6 +112,7 @@ func _ready() -> void:
 		EarthNearShadow.enabled = on
 		EarthNearShadow.save_enabled_setting(on))
 	box.add_child(earth_shadow_box)
+	box.add_child(_language_row())
 
 	box.add_child(HSeparator.new())
 	var launch_label := Label.new()
@@ -130,6 +133,7 @@ func _ready() -> void:
 	box.add_child(_start_status)
 	world.flight.mission_started.connect(_on_start_finished)
 	world.flight.sim.command_finished.connect(_on_command_finished)
+	I18n.events.language_changed.connect(_on_language_changed)
 	_refill_vehicles()
 
 
@@ -287,7 +291,7 @@ func _on_start_pressed() -> void:
 	var mission_id := _selected_id(_mission_list, _missions)
 	# disabled before posting: a fast outcome may already arrive inside the call (_on_start_finished)
 	_start_button.disabled = true
-	_start_status.text = "Start wird geplant ..."
+	_set_start_status("ui.time_panel.start_planning", {})
 	var started := false
 	if mission_id == MissionCatalogue.FREE_FLIGHT:
 		var site: Dictionary = _place_list[_places.selected]["site"]
@@ -298,21 +302,56 @@ func _on_start_pressed() -> void:
 	else:
 		started = world.start_mission(mission_id, not (_place_list[_places.selected]["site"] as Dictionary).is_empty())
 	if not started:
-		_on_start_finished(false, "Befehl nicht angenommen")
+		_start_button.disabled = false
+		_set_start_status("ui.time_panel.start_not_accepted", {})
 
 
-func _on_command_finished(_id: int, command: String, ok: bool, message: String) -> void:
+func _on_command_finished(_id: int, command: String, ok: bool, report: Dictionary) -> void:
 	if command == "launch_from_site" and _start_button.disabled:
-		_on_start_finished(ok, message)
+		_on_start_finished(ok, report)
 
 
-func _on_start_finished(ok: bool, message: String) -> void:
+func _on_start_finished(ok: bool, report: Dictionary) -> void:
 	_start_button.disabled = false
 	if ok:
-		_start_status.text = ""
+		_set_start_status("", {})
 		_focus.select(VEHICLE_FOCUS_INDEX)  # World follows the started vehicle
 	else:
-		_start_status.text = "Start abgelehnt: %s" % (message if message != "" else "unbekannter Grund")
+		_set_start_status("", report if report.get("code", "ok") != "ok" else {"code": "ok"}, true)
+
+
+## The start status line: a table key, or (refused) a report. Both are kept as data and drawn by _render_start_status.
+func _set_start_status(key: String, report: Dictionary, refused := false) -> void:
+	_start_key = key
+	_start_refusal = report if refused else {}
+	_render_start_status()
+
+
+func _render_start_status() -> void:
+	if not _start_refusal.is_empty():
+		var reason := I18n.report_text(_start_refusal)
+		_start_status.text = I18n.text("ui.time_panel.start_refused", {"reason": reason}) if reason != "" 				else I18n.text("ui.time_panel.start_refused_unknown")
+	else:
+		_start_status.text = I18n.text(_start_key) if _start_key != "" else ""
+
+
+func _on_language_changed(_language: String) -> void:
+	_render_start_status()
+
+
+## The "Sprache" row: label and a drop-down with the languages (saved in user://settings.cfg [ui] language).
+func _language_row() -> HBoxContainer:
+	var row := HBoxContainer.new()
+	var label := Label.new()
+	I18n.bind_text(label, "text", "ui.language.label")
+	row.add_child(label)
+	var option := OptionButton.new()
+	for code in I18n.LANGUAGES:
+		option.add_item(I18n.text("ui.language." + code))
+	option.select(I18n.LANGUAGES.find(I18n.language()))
+	option.item_selected.connect(func(index: int) -> void: I18n.set_language(I18n.LANGUAGES[index]))
+	row.add_child(option)
+	return row
 
 
 func _button(text: String, action: Callable) -> Button:

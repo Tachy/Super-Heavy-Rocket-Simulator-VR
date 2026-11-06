@@ -1,0 +1,22 @@
+# English texts of the game. Same keys as de.toml; a missing key falls back to the German text.
+
+[report]
+legacy = "{text}"
+command.internal_error = "Internal error in command"
+
+[ui]
+language.label = "Language"
+language.de = "Deutsch"
+language.en = "English"
+time_panel.start_planning = "Planning the launch ..."
+time_panel.start_refused = "Start refused: {reason}"
+time_panel.start_refused_unknown = "Start refused: unknown reason"
+time_panel.start_not_accepted = "Start refused: command not accepted"
+
+[event]
+start_refused = "Start refused: {reason}"
+start_failed = "Start failed"
+no_return = "No return: {reason}"
+no_return_no_ship = "No return: no ship in orbit"
+no_return_no_capsule = "No return: no capsule in orbit"
+dispersion_warning = " - Caution: {note}"

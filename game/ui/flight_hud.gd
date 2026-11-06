@@ -79,8 +79,8 @@ func _process_unprofiled(_delta: float) -> void:
 	lines.append("Steuerung       %s" % ("Ratensteuerung (SAS)" if world.flight.rate_mode else "Direkt (Gimbal)"))
 	if t["clamped"]:
 		lines.append("--- am Startplatz gehalten ---")
-	if t.get("breakup_reason", "") != "":
-		lines.append("*** %s ***" % t["breakup_reason"])
+	if t.get("breakup_reason", {}).get("code", "ok") != "ok":
+		lines.append("*** %s ***" % I18n.report_text(t["breakup_reason"]))
 	elif t["impacted"]:
 		lines.append("*** Bodenkontakt ***")
 	var tower: Dictionary = sim.tower_state()
@@ -126,7 +126,7 @@ func _process_unprofiled(_delta: float) -> void:
 			# the pass's dispersion note concerns the deorbit and the interface: shown until the entry (Task 7 M16).
 			# Also a return the mission planned (ISS undocking, capsule mission).
 			if not r.get("dispersion_robust", true):
-				lines.append("  Achtung       %s" % r.get("dispersion_note", "nicht gegen alle Streuungen robust"))
+				lines.append("  Achtung       %s" % I18n.report_text(r.get("dispersion_note", {})))
 	if world.flight.last_event != "":
 		lines.append("Ereignis: %s" % world.flight.last_event)
 	lines.append("")

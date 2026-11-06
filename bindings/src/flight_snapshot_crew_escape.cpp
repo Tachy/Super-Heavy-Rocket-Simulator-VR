@@ -17,7 +17,7 @@ godot::Dictionary member_dictionary(const sim::FlightSession& session, const sim
     d["peak_load_g"] = m.peak_load_g;
     d["min_clearance_m"] = m.min_clearance_m;
     d["outcome"] = godot::String::utf8(sim::to_string(m.outcome));
-    d["reason"] = godot::String::utf8(m.reason.c_str());
+    d["reason"] = legacy_report(m.reason);
     d["body_index"] = m.body_index ? static_cast<int64_t>(*m.body_index) : int64_t{-1};
     if (m.body_index && *m.body_index < session.body_count()) {
         const auto& body = session.body(*m.body_index);
@@ -48,7 +48,7 @@ godot::Dictionary build_crew_escape_state(const sim::FlightSession& session) {
     d["armed"] = s->armed;
     d["fired"] = s->fired;
     d["early"] = s->early;
-    d["reason"] = godot::String::utf8(s->give_up_reason.c_str());
+    d["reason"] = legacy_report(s->give_up_reason);
     d["give_up_time_s"] = s->give_up_time_s;
     godot::Array members;
     for (const auto& m : s->members) members.push_back(member_dictionary(session, m));

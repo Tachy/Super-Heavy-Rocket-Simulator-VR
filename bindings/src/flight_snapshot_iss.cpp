@@ -24,8 +24,8 @@ godot::Dictionary absent() {
 
 godot::Array warnings(const sim::FlightSession& session) {
     godot::Array a;
-    for (const auto& w : session.rendezvous_warnings()) a.push_back(german(w));
-    for (const auto& w : session.proximity_warnings()) a.push_back(german(w));
+    for (const auto& w : session.rendezvous_warnings()) a.push_back(legacy_report(w));
+    for (const auto& w : session.proximity_warnings()) a.push_back(legacy_report(w));
     return a;
 }
 
@@ -74,9 +74,9 @@ godot::Dictionary build_rendezvous_plan(const sim::FlightSession& session) {
     godot::Dictionary d;
     d["present"] = true;
     d["feasible"] = plan->feasible;
-    d["reason"] = german(plan->reason);
+    d["reason"] = legacy_report(plan->reason);
     d["step"] = german(sim::to_string(session.rendezvous_step()));
-    d["status"] = german(session.rendezvous_status());
+    d["status"] = legacy_report(session.rendezvous_status());
     d["replans"] = session.rendezvous_replans();
     d["total_delta_v_mps"] = plan->total_delta_v_mps;
     d["propellant_kg"] = plan->propellant_kg;
@@ -117,7 +117,7 @@ godot::Dictionary build_docking_state(const sim::FlightSession& session) {
     d["proximity_phase"] = proximity ? german(gnc::to_string(*proximity)) : godot::String();
     d["docking_phase"] = docking ? german(contact::to_string(*docking)) : godot::String();
     d["departure_phase"] = departure ? german(gnc::to_string(*departure)) : godot::String();
-    d["status"] = german(!session.docking_status().empty() ? session.docking_status() : session.proximity_status());
+    d["status"] = legacy_report(!session.docking_status().empty() ? session.docking_status() : session.proximity_status());
     if (rel) {
         d["position_port_m"] = to_godot(rel->position_m);
         d["velocity_port_mps"] = to_godot(rel->velocity_mps);
@@ -199,7 +199,7 @@ godot::Dictionary build_iss_mission(const sim::FlightSession& session, const Sna
     godot::Dictionary d;
     d["present"] = true;
     d["leg"] = german(sim::to_string(session.iss_mission_leg()));
-    d["status"] = german(session.iss_mission_status());
+    d["status"] = legacy_report(session.iss_mission_status());
     d["port"] = q ? german(q->station_port) : godot::String();
     d["liftoff_tdb_s"] = context.iss_liftoff_tdb_s;
     d["separation_tdb_s"] = context.iss_separation_tdb_s;

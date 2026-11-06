@@ -7,6 +7,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include "report_dict.hpp"
 #include "starsim/config/crew_escape_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
@@ -108,7 +109,11 @@ std::uint64_t FlightSim::post(const char* name, SessionCommand command) {
     }
     auto outcome = std::make_shared<Outcome>();
     const auto id = runner_->post([command = std::move(command), outcome](sim::FlightSession& session) {
-        *outcome = command(session);
+        try {
+            *outcome = command(session);
+        } catch (const report::Refusal& refusal) {
+            *outcome = Outcome{false, report_dict(refusal.report())};
+        }
     });
     commands_[id] = {godot::String(name), outcome};
     while (commands_.size() > max_kept_commands) commands_.erase(commands_.begin());
@@ -117,7 +122,7 @@ std::uint64_t FlightSim::post(const char* name, SessionCommand command) {
 
 std::uint64_t FlightSim::post_active(const char* name, SessionCommand command) {
     return post(name, [command = std::move(command)](sim::FlightSession& session) {
-        if (!session.active()) return Outcome{false, godot::String::utf8("Kein aktiver Flug")};
+        if (!session.active()) return Outcome{false, legacy_report("Kein aktiver Flug")};
         return command(session);
     });
 }
@@ -126,7 +131,7 @@ std::uint64_t FlightSim::post_deferred_active(const char* name, std::function<Se
     return post_deferred(name, [command = std::move(command)](sim::FlightSession& session) -> SessionPoll {
         if (!session.active()) {
             return [](sim::FlightSession&) -> std::optional<Outcome> {
-                return Outcome{false, godot::String::utf8("Kein aktiver Flug")};
+                return Outcome{false, legacy_report("Kein aktiver Flug")};
             };
         }
         return command(session);
@@ -142,17 +147,26 @@ std::uint64_t FlightSim::post_deferred(const char* name, std::function<SessionPo
     auto outcome = std::make_shared<Outcome>();
     const auto id = runner_->post_deferred(
         [command = std::move(command), outcome](sim::FlightSession& session) -> sim::SessionRunner::Poll {
-            auto poll = command(session);
-            if (auto now = poll(session)) {  // decided at once
-                *outcome = std::move(*now);
-                return {};
+            try {
+                auto poll = command(session);
+                if (auto now = poll(session)) {  // decided at once
+                    *outcome = std::move(*now);
+                    return sim::SessionRunner::Poll{};
+                }
+                return sim::SessionRunner::Poll{[poll = std::move(poll), outcome](sim::FlightSession& s) {
+                    try {
+                        auto later = poll(s);
+                        if (!later) return false;
+                        *outcome = std::move(*later);
+                    } catch (const report::Refusal& refusal) {
+                        *outcome = Outcome{false, report_dict(refusal.report())};
+                    }
+                    return true;
+                }};
+            } catch (const report::Refusal& refusal) {
+                *outcome = Outcome{false, report_dict(refusal.report())};
+                return sim::SessionRunner::Poll{};
             }
-            return [poll = std::move(poll), outcome](sim::FlightSession& s) {
-                auto later = poll(s);
-                if (!later) return false;
-                *outcome = std::move(*later);
-                return true;
-            };
         },
         hold_session);
     commands_[id] = {godot::String(name), outcome};
@@ -164,10 +178,10 @@ godot::Dictionary FlightSim::result(int64_t id) const {
     godot::Dictionary d;
     d["done"] = false;
     d["ok"] = false;
-    d["message"] = godot::String();
+    d["report"] = report_dict(report::Report{});
     if (!runner_ || id <= 0) {
         d["done"] = true;
-        d["message"] = "unknown command id";
+        d["report"] = legacy_report("unknown command id");
         return d;
     }
     const auto r = runner_->result(static_cast<std::uint64_t>(id));
@@ -175,13 +189,13 @@ godot::Dictionary FlightSim::result(int64_t id) const {
     d["done"] = true;
     const auto it = commands_.find(static_cast<std::uint64_t>(id));
     if (r.threw) {
-        d["message"] = godot::String::utf8(r.error.c_str());
+        d["report"] = legacy_report(r.error);
     } else if (it != commands_.end()) {
         d["ok"] = it->second.second->ok;
-        d["message"] = it->second.second->message;
+        d["report"] = it->second.second->report;
         d["data"] = it->second.second->data;
     } else {
-        d["message"] = "unknown command id";
+        d["report"] = legacy_report("unknown command id");
     }
     return d;
 }
@@ -196,8 +210,8 @@ void FlightSim::emit_finished() {
         const auto it = commands_.find(id);
         const godot::String name = it != commands_.end() ? it->second.first : godot::String();
         const auto d = result(static_cast<int64_t>(id));
-        if (r.threw) godot::UtilityFunctions::push_error("FlightSim." + name + ": " + godot::String(d["message"]));
-        emit_signal("command_finished", static_cast<int64_t>(id), name, d["ok"], d["message"]);
+        if (r.threw) godot::UtilityFunctions::push_error("FlightSim." + name + ": " + godot::String::utf8(r.error.c_str()));
+        emit_signal("command_finished", static_cast<int64_t>(id), name, d["ok"], d["report"]);
     }
 }
 
@@ -218,7 +232,7 @@ FlightSim::Outcome FlightSim::engage_planned(sim::FlightSession& session, const 
         observe(session, session.epoch());  // "Startvorbereitung": the pad and the planning flag while the plan runs
     }
     const auto reason = sim::engage_pad_ascent(session, target);
-    return Outcome{reason.empty(), godot::String::utf8(reason.c_str())};
+    return Outcome{reason.empty(), legacy_report(reason)};
 }
 
 int64_t FlightSim::launch_from_site(const godot::String& vehicle_id, const godot::String& site_id, double heading_deg,
@@ -265,7 +279,7 @@ int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s, 
             planning.emplace(context_.planning);
             observe(session, session.epoch());
         }
-        context_.mission_start_status = godot::String();
+        context_.mission_start_status = report_dict(report::Report{});
         auto start = sim::start_mission_deferred(session, config_dir_, id, epoch(tdb_s), time_, options);
         planning.reset();
         if (start.done) {
@@ -273,17 +287,17 @@ int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s, 
                 return outcome;
             };
         }
-        context_.mission_start_status = godot::String::utf8(start.status.c_str());  // the snapshot after this call
+        context_.mission_start_status = legacy_report(start.status);  // the snapshot after this call
         return [this, id, poll = std::move(start.poll)](sim::FlightSession& s) -> std::optional<Outcome> {
             std::optional<sim::MissionStart> later;
             try {
                 later = poll(s);
             } catch (...) {
-                context_.mission_start_status = godot::String();
+                context_.mission_start_status = report_dict(report::Report{});
                 throw;
             }
             if (!later) return std::nullopt;
-            context_.mission_start_status = godot::String();
+            context_.mission_start_status = report_dict(report::Report{});
             return mission_started(*later, id);
         };
     }, true));
@@ -296,15 +310,15 @@ FlightSim::Outcome FlightSim::mission_started(const sim::MissionStart& s, const 
     context_.mission_warnings = godot::Array();
     std::string joined;
     for (const auto& w : s.warnings) {
-        context_.mission_warnings.push_back(godot::String::utf8(w.c_str()));
+        context_.mission_warnings.push_back(legacy_report(w));
         joined += (joined.empty() ? "" : "; ") + w;
     }
     const bool from_window = s.launch_window && s.launch_window->feasible;
     context_.iss_liftoff_tdb_s = from_window ? s.launch_window->liftoff.tdb_seconds_past_j2000() : 0.0;
     context_.iss_separation_tdb_s = from_window ? s.launch_window->separation.tdb_seconds_past_j2000() : 0.0;
     context_.iss_plane_bias_deg = from_window ? s.launch_window->plane_bias_rad * constants::rad_to_deg : 0.0;
-    if (!s.refusal.empty()) return Outcome{false, godot::String::utf8(s.refusal.c_str())};
-    return Outcome{true, godot::String::utf8(joined.c_str())};
+    if (!s.refusal.empty()) return Outcome{false, legacy_report(s.refusal)};
+    return Outcome{true, legacy_report(joined)};
 }
 
 int64_t FlightSim::launch_from_pad(const godot::String& vehicle_id, double latitude_deg, double longitude_deg,
@@ -388,7 +402,7 @@ int64_t FlightSim::set_moon_rocks(bool enabled) {
 int64_t FlightSim::abort_landing(int index) {
     return static_cast<int64_t>(post_active("abort_landing", [index](sim::FlightSession& session) {
         if (index < 0 || static_cast<size_t>(index) >= session.body_count()) {
-            return Outcome{false, godot::String::utf8("Ungültiger Körperindex")};
+            return Outcome{false, legacy_report("Ungültiger Körperindex")};
         }
         return Outcome{session.abort_landing(static_cast<size_t>(index)), {}};
     }));
@@ -582,7 +596,7 @@ int64_t FlightSim::plan_ship_return() {
             std::string cancelled;
             const auto done = s.ship_return_request_outcome(id, &cancelled);
             if (!done) return std::nullopt;
-            return Outcome{*done, godot::String::utf8(cancelled.c_str())};
+            return Outcome{*done, legacy_report(cancelled)};
         };
     }));
 }
@@ -632,17 +646,17 @@ godot::Dictionary FlightSim::earth_surface(double latitude_deg, double longitude
 int64_t FlightSim::complete_pilot_correction() {
     return static_cast<int64_t>(post_active("complete_pilot_correction", [](sim::FlightSession& session) {
         if (session.lunar_step() != sim::LunarStep::PilotCorrection) {
-            return Outcome{false, godot::String::utf8("Keine Korrektur von Hand anstehend")};
+            return Outcome{false, legacy_report("Keine Korrektur von Hand anstehend")};
         }
         session.complete_pilot_correction();
-        return Outcome{true, godot::String::utf8(session.lunar_status().c_str())};
+        return Outcome{true, legacy_report(session.lunar_status())};
     }));
 }
 
 int64_t FlightSim::replan_lunar_return() {
     return static_cast<int64_t>(post_active("replan_lunar_return", [](sim::FlightSession& session) {
         const bool ok = session.replan_lunar_return();
-        return Outcome{ok, godot::String::utf8(session.lunar_status().c_str())};
+        return Outcome{ok, legacy_report(session.lunar_status())};
     }));
 }
 
@@ -677,7 +691,7 @@ int64_t FlightSim::set_crew_escape(const godot::String& id) {
         try {
             session.set_crew_escape(config::load_crew_escape(config_dir_, crew_id));
         } catch (const std::exception& e) {
-            return Outcome{false, godot::String::utf8(e.what())};
+            return Outcome{false, legacy_report(e.what())};
         }
         return Outcome{true, {}};
     }));
@@ -715,9 +729,9 @@ int64_t FlightSim::refuelling_campaign(const godot::Dictionary& params) {
     }
     if (refusal.empty()) refusal = sim::campaign_lever_error(levers);
     return static_cast<int64_t>(post("refuelling_campaign", [this, levers, refusal](sim::FlightSession&) {
-        if (!refusal.empty()) return Outcome{false, godot::String::utf8(refusal.c_str())};
+        if (!refusal.empty()) return Outcome{false, legacy_report(refusal)};
         const auto report = sim::plan_refuelling_campaign({ephemeris_, earth_, moon_, time_, config_dir_}, levers);
-        return Outcome{report.result.closes, godot::String::utf8(report.result.reason.c_str()),
+        return Outcome{report.result.closes, legacy_report(report.result.reason),
                        campaign_dictionary(report, time_)};
     }));
 }
@@ -725,42 +739,42 @@ int64_t FlightSim::refuelling_campaign(const godot::Dictionary& params) {
 int64_t FlightSim::proximity_hold() {
     return static_cast<int64_t>(post_active("proximity_hold", [](sim::FlightSession& session) {
         const bool ok = session.proximity_hold();
-        return Outcome{ok, godot::String::utf8(session.proximity_status().c_str())};
+        return Outcome{ok, legacy_report(session.proximity_status())};
     }));
 }
 
 int64_t FlightSim::proximity_retreat() {
     return static_cast<int64_t>(post_active("proximity_retreat", [](sim::FlightSession& session) {
         const bool ok = session.proximity_retreat();
-        return Outcome{ok, godot::String::utf8(session.proximity_status().c_str())};
+        return Outcome{ok, legacy_report(session.proximity_status())};
     }));
 }
 
 int64_t FlightSim::proximity_abort() {
     return static_cast<int64_t>(post_active("proximity_abort", [](sim::FlightSession& session) {
         const bool ok = session.proximity_abort();
-        return Outcome{ok, godot::String::utf8(session.proximity_status().c_str())};
+        return Outcome{ok, legacy_report(session.proximity_status())};
     }));
 }
 
 int64_t FlightSim::proximity_resume() {
     return static_cast<int64_t>(post_active("proximity_resume", [](sim::FlightSession& session) {
         const bool ok = session.proximity_resume();
-        return Outcome{ok, godot::String::utf8(session.proximity_status().c_str())};
+        return Outcome{ok, legacy_report(session.proximity_status())};
     }));
 }
 
 int64_t FlightSim::undock() {
     return static_cast<int64_t>(post_active("undock", [](sim::FlightSession& session) {
         const bool ok = session.undock();
-        return Outcome{ok, godot::String::utf8(session.docking_status().c_str())};
+        return Outcome{ok, legacy_report(session.docking_status())};
     }));
 }
 
 int64_t FlightSim::settle(bool enabled) {
     return static_cast<int64_t>(post_active("settle", [enabled](sim::FlightSession& session) {
         const bool ok = session.settle(enabled);
-        return Outcome{ok, godot::String::utf8(ok ? "" : "Settling nicht möglich: angedockt oder im Anflug")};
+        return Outcome{ok, legacy_report(std::string(ok ? "" : "Settling nicht möglich: angedockt oder im Anflug"))};
     }));
 }
 
@@ -888,7 +902,7 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("target_orbit_points", "count"), &FlightSim::target_orbit_points);
     ClassDB::bind_method(D_METHOD("body_velocity_gcrf_mps", "index"), &FlightSim::body_velocity_gcrf_mps);
     ADD_SIGNAL(MethodInfo("command_finished", PropertyInfo(Variant::INT, "id"), PropertyInfo(Variant::STRING, "name"),
-                          PropertyInfo(Variant::BOOL, "ok"), PropertyInfo(Variant::STRING, "message")));
+                          PropertyInfo(Variant::BOOL, "ok"), PropertyInfo(Variant::DICTIONARY, "report")));
 }
 
 }  // namespace starsim::bindings

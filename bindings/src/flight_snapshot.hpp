@@ -13,6 +13,7 @@
 #include <godot_cpp/variant/variant.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include "report_dict.hpp"
 #include "starsim/environment/lunar_terrain.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/refuelling_campaign_flight.hpp"
@@ -45,9 +46,9 @@ struct SnapshotContext {
     // ["planning"] while the command runs (ascent trajectory and staging, Task 5; final review item 2).
     bool planning = false;
     // A mission start whose work runs on a background thread (follow-up U-7: the lunar landing's touchdown search):
-    // its German status ("Landeplatz wird geprüft") in autopilot_status()["mission_start_status"] until the outcome;
-    // "" otherwise.
-    godot::String mission_start_status;
+    // its status report in autopilot_status()["mission_start_status"] until the outcome;
+    // ok otherwise.
+    godot::Dictionary mission_start_status = report_dict(report::Report{});  // a report (ok when idle)
 };
 
 // Everything the main thread reads, built on the simulation thread after every command and chunk (immutable once

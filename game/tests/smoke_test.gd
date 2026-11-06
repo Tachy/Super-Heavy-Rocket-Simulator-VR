@@ -501,8 +501,8 @@ func _check_thread(config_dir: String, tdb: float) -> bool:
 	_check(reached <= tdb + 2.0, "advance_to returns the snapshot's epoch, never ahead")
 	var bad: int = sim.start_mission("no_such_mission", tdb)
 	sim.wait_idle(10.0)
-	_check(not sim.result(bad).get("ok", true) and str(sim.result(bad).get("message", "")) != "",
-			"unknown mission: refused with a message")
+	_check(not sim.result(bad).get("ok", true) and str(sim.result(bad).get("report", {}).get("code", "ok")) != "ok",
+			"unknown mission: refused with a report")
 	# External view: mission timeline, body serials, tank levels, countdown start.
 	_advance(sim, tdb + 200.0)
 	var timeline: Dictionary = sim.mission_timeline()
@@ -637,7 +637,7 @@ func _check_falcon9(config_dir: String, tdb: float) -> bool:
 	refused.wait_idle(60.0)
 	var refusal: Dictionary = refused.result(refusal_id)
 	_check(refusal.get("done", false) and not refusal.get("ok", true)
-			and str(refusal.get("message", "")) == "Kein Fangturm am Startplatz.",
+			and str(refusal.get("report", {}).get("params", {}).get("text", "")) == "Kein Fangturm am Startplatz.",
 			"Starship at SLC-40: the launch is refused with the German reason (%s)" % str(refusal))
 	_check(refused.is_active() and refused.autopilot_status().get("state", "") == "aus"
 			and not refused.autopilot_status().get("planning", true), "refused launch: on the pad, autopilot off, not planning")
@@ -719,7 +719,7 @@ func _check_lunar(config_dir: String, tdb: float) -> bool:
 	ret.setup(config_dir)
 	var id: int = ret.start_mission("ship_lunar_return_llo", tdb)
 	_check(ret.wait_idle(120.0), "lunar return planned within 120 s")
-	_check(ret.result(id).get("ok", false), "lunar return mission starts: %s" % ret.result(id).get("message", ""))
+	_check(ret.result(id).get("ok", false), "lunar return mission starts: %s" % I18n.report_text(ret.result(id).get("report", {})))
 	var t: Dictionary = ret.telemetry(ret.controlled_index())
 	_check(t.get("reference_body", "") == "moon", "return ship is Moon-referenced")
 	_check(absf(float(t.get("altitude_terrain_m", -1.0)) - float(t["altitude_m"])) < 1e-6,
@@ -741,12 +741,12 @@ func _check_lunar(config_dir: String, tdb: float) -> bool:
 	var touchdown_status_seen := false
 	var status_wait := Time.get_ticks_msec()
 	while Time.get_ticks_msec() - status_wait < 120000 and not land.result(lid).get("done", false):
-		if land.autopilot_status().get("mission_start_status", "") == "Landeplatz wird geprüft":
+		if land.autopilot_status().get("mission_start_status", {}).get("params", {}).get("text", "") == "Landeplatz wird geprüft":
 			touchdown_status_seen = true
 		OS.delay_msec(5)
 	_check(land.wait_idle(120.0) and land.result(lid).get("ok", false), "lunar landing mission starts")
 	_check(touchdown_status_seen, "lunar landing start: \"Landeplatz wird geprüft\" while the touchdown search runs")
-	_check(land.autopilot_status().get("mission_start_status", "x") == "",
+	_check(land.autopilot_status().get("mission_start_status", {}).get("code", "x") == "ok",
 			"lunar landing start: the status is cleared with the outcome")
 	var site: Dictionary = land.lunar_site()
 	_check(site.get("present", false), "landing site present")
@@ -761,7 +761,7 @@ func _check_lunar(config_dir: String, tdb: float) -> bool:
 	nrho.setup(config_dir)
 	var nid: int = nrho.start_mission("hls_lunar_nrho", tdb)
 	nrho.wait_idle(180.0)
-	_check(not nrho.result(nid).get("ok", true) and "nicht durchführbar" in str(nrho.result(nid).get("message", "")),
+	_check(not nrho.result(nid).get("ok", true) and "nicht durchführbar" in str(nrho.result(nid).get("report", {}).get("params", {}).get("text", "")),
 			"NRHO landing at 120 t is refused honestly")
 	print("  NRHO landing start (refused): %.1f s" % ((Time.get_ticks_msec() - started) / 1000.0))
 	return true
@@ -774,7 +774,7 @@ func _check_iss(config_dir: String, tdb: float) -> bool:
 	var started := Time.get_ticks_msec()
 	var id: int = sim.start_mission("crew_dragon_iss", tdb)
 	_check(sim.wait_idle(120.0), "ISS rendezvous planned within 120 s")
-	_check(sim.result(id).get("ok", false), "crew_dragon_iss starts: %s" % sim.result(id).get("message", ""))
+	_check(sim.result(id).get("ok", false), "crew_dragon_iss starts: %s" % I18n.report_text(sim.result(id).get("report", {})))
 	print("  ISS rendezvous start: %.1f s" % ((Time.get_ticks_msec() - started) / 1000.0))
 	var iss: Dictionary = sim.iss_state()
 	_check(iss.get("present", false) and iss["ports"].size() == 2, "iss_state with both ports")

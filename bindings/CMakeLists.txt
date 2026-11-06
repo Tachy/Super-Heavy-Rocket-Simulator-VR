@@ -17,6 +17,7 @@ add_subdirectory("${GODOT_CPP_DIR}" "${CMAKE_BINARY_DIR}/godot-cpp" SYSTEM)
 
 add_library(starsim_gdext SHARED
     src/register_types.cpp
+    src/report_dict.cpp
     src/starsim_core.cpp
     src/flight_sim.cpp
     src/flight_snapshot.cpp

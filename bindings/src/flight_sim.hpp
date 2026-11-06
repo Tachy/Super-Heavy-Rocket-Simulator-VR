@@ -28,8 +28,8 @@ namespace starsim::bindings {
 // Positions are GCRF metres (float64), attitudes body -> GCRF.
 //
 // The session runs on its own simulation thread (sim::SessionRunner, l6). Commands are queued and return a command id
-// (> 0; 0 when refused before posting, e.g. no setup()); their outcome arrives as result(id) -> {done, ok, message} and
-// the signal command_finished(id, name, ok, message), emitted on the main thread from advance_to and wait_idle.
+// (> 0; 0 when refused before posting, e.g. no setup()); their outcome arrives as result(id) -> {done, ok, report} and
+// the signal command_finished(id, name, ok, report), emitted on the main thread from advance_to and wait_idle.
 // Getters read a snapshot, built on the simulation thread after every command and step chunk: the returned containers
 // are shared with it and must be treated as read-only. advance_to pins the latest snapshot for the frame, so every
 // getter until the next advance_to reads the same instant (the thread publishes several per frame; mixing them made
@@ -104,7 +104,7 @@ public:
     bool wait_idle(double timeout_s);
     // Wall seconds the running command has taken so far (a return plan: seconds); the simulation clock stands meanwhile.
     double planning_s() const;
-    // {done, ok, message} of a command id; done == false while it is queued or running.
+    // {done, ok, report} of a command id; done == false while it is queued or running.
     godot::Dictionary result(int64_t id) const;
 
     void set_input(double pitch, double yaw, double roll, double throttle);
@@ -294,8 +294,11 @@ protected:
 private:
     struct Outcome {  // written by the command on the worker, read once the runner reports it done
         bool ok = false;
-        godot::String message;
-        godot::Dictionary data;  // result(id)["data"] (refuelling_campaign)
+        godot::Dictionary report = report_dict(report::Report{});  // result(id)["report"]; ok when nothing to say
+        godot::Dictionary data;                                      // result(id)["data"] (refuelling_campaign)
+        Outcome() = default;
+        Outcome(bool ok_, godot::Dictionary report_ = {}, godot::Dictionary data_ = {})
+            : ok(ok_), report(report_.is_empty() ? report_dict(report::Report{}) : report_), data(data_) {}
     };
     using SessionCommand = std::function<Outcome(sim::FlightSession&)>;
 
@@ -304,7 +307,7 @@ private:
     // Snapshot body `index`, nullptr (error pushed) when there is none.
     const FlightSnapshot::Body* body(const FlightSnapshot& s, int index) const;
     std::uint64_t post(const char* name, SessionCommand command);
-    // Commands that need an active flight: refused with a German message otherwise.
+    // Commands that need an active flight: refused with a report otherwise.
     std::uint64_t post_active(const char* name, std::function<Outcome(sim::FlightSession&)> command);
     // A command that may go on after it returns (sim::SessionRunner::post_deferred, Task 11b): it returns a poll that
     // gives the outcome once it is there (none: still planning; the session flies on). Needs an active flight.

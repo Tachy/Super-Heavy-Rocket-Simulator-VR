@@ -40,6 +40,7 @@
 #include "starsim/environment/terrain_horizon.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/config/geoid_config.hpp"
 #include "starsim/sim/earth_terrain_loader.hpp"
 #include "starsim/sim/terrain_cache.hpp"
@@ -953,6 +954,26 @@ godot::Dictionary StarsimCore::weather_bracket(double utc_hour_f, int64_t step_h
     }
 }
 
+godot::Array StarsimCore::report_codes() const {
+    godot::Array codes;
+    for (const auto& info : report::code_table()) {
+        godot::PackedStringArray names;
+        const std::string list(info.params);
+        size_t start = 0;
+        while (start < list.size()) {
+            auto comma = list.find(',', start);
+            if (comma == std::string::npos) comma = list.size();
+            names.push_back(godot::String::utf8(list.substr(start, comma - start).c_str()));
+            start = comma + 1;
+        }
+        godot::Dictionary d;
+        d["code"] = godot::String::utf8(std::string(info.id).c_str());
+        d["params"] = names;
+        codes.push_back(d);
+    }
+    return codes;
+}
+
 godot::Array StarsimCore::weather_requests(const godot::Dictionary& snapshot, const godot::String& idx_text) const {
     godot::Array out;
     try {
@@ -1533,6 +1554,7 @@ void StarsimCore::_bind_methods() {
     ClassDB::bind_method(D_METHOD("weather_bracket", "utc_hour_f", "step_h", "era5_zattrs", "latest_gfs_cycle_hour",
                                   "analog_year"), &StarsimCore::weather_bracket);
     ClassDB::bind_method(D_METHOD("weather_requests", "snapshot", "idx_text"), &StarsimCore::weather_requests);
+    ClassDB::bind_method(D_METHOD("report_codes"), &StarsimCore::report_codes);
     ClassDB::bind_method(D_METHOD("weather_gfs_index_url", "snapshot"), &StarsimCore::weather_gfs_index_url);
     ClassDB::bind_method(D_METHOD("weather_gfs_cycle_candidates", "wall_utc_hour_f", "count"),
                          &StarsimCore::weather_gfs_cycle_candidates);

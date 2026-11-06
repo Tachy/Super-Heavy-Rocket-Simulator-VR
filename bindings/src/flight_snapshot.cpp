@@ -126,7 +126,7 @@ godot::Dictionary telemetry(const sim::FlightSession& session, size_t index) {
     d["heat_rate_w_m2"] = body.heat_rate_w_m2();
     d["heat_load_j_m2"] = body.heat_load_j_m2();
     d["heat_warning"] = body.heat_warning();
-    d["breakup_reason"] = godot::String::utf8(body.breakup_reason().c_str());
+    d["breakup_reason"] = legacy_report(body.breakup_reason());
     d["skipped_out"] = body.skipped_out();
     if (const auto* e = session.entry_status(index)) {  // entry guidance setpoint (flight director)
         d["entry_phase"] = godot::String::utf8(gnc::to_string(e->phase));
@@ -395,7 +395,7 @@ godot::Dictionary autopilot_status(const sim::FlightSession& session) {
     d["has_direction"] = ap.state == sim::AutopilotState::Booster || ap.state == sim::AutopilotState::Staging ||
                          ap.state == sim::AutopilotState::UpperStage || burning;
     d["settling"] = session.settling();  // refuelling f3: the cold-gas push (autopilot or manual) is on
-    d["burn_abort_reason"] = godot::String::utf8(session.burn_abort_reason().c_str());
+    d["burn_abort_reason"] = legacy_report(session.burn_abort_reason());
     if (burning) {
         godot::Dictionary b;
         b["time_to_ignition_s"] = ap.burn.time_to_ignition_s;
@@ -407,7 +407,7 @@ godot::Dictionary autopilot_status(const sim::FlightSession& session) {
     if (const auto* plan = session.ship_return_plan()) {
         godot::Dictionary r;
         r["feasible"] = plan->feasible;
-        r["reason"] = godot::String::utf8(plan->reason.c_str());
+        r["reason"] = legacy_report(plan->reason);
         r["delta_v_mps"] = plan->delta_v_mps;
         r["propellant_t"] = plan->propellant_kg / 1000.0;
         r["burn_in_s"] = plan->node.epoch - session.epoch();
@@ -416,7 +416,7 @@ godot::Dictionary autopilot_status(const sim::FlightSession& session) {
         r["crossrange_reach_km"] = plan->crossrange_reach_m / 1000.0;
         // false: no pass flew every dispersed entry; the pass with the most dispersed cases flying was taken
         r["dispersion_robust"] = plan->dispersion_robust;
-        r["dispersion_note"] = godot::String::utf8(plan->dispersion_note.c_str());
+        r["dispersion_note"] = legacy_report(plan->dispersion_note);
         // Task 12b: main-tank residue vented before the interface (planned; still to vent / vented after the burn)
         r["entry_vent_planned_t"] = plan->entry_vent_kg / 1000.0;
         r["entry_vent_remaining_t"] = session.entry_vent_remaining_kg() / 1000.0;
