@@ -112,6 +112,9 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
     on the chord between the plan's nodes (~1.9 s apart in the pair phase, ~3 m above the braking path), so it flew
     higher and slower than planned and every re-plan ended later; the reference now follows the plan's own path
     (`gnc::plan_path`, docs/subsystems/gnc-core.md). Catch 2.74 s at most, 1.00 s within the last 10 s.
+    Open, measured, all landing vehicles (docs/subsystems/gnc-core.md, "Open points"): the planner drifts +0.9 s by
+    re-plan 14 even under perfect tracking (+0.5 s jump at ~5 s to go); the approach sink limit holds at nodes only
+    (~3 m/s violated mid-interval on the first ship plan); the dropped engine's run-down thrust is missing from phase 1.
   - Fixed on the way: the booster's landing-ignition forecast just past the apex (-54.7 s, a sink near zero; now the mean
     sink of the fall ahead is its floor: +8.6 s); `frames::fixed_to_geodetic` NaN within ~0.1 m of the axis (the
     yaw-demand fixture starts over the pole). Mass-relative fixtures restated: no usable corridor at 10.9 km/s (0.13

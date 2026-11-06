@@ -27,6 +27,13 @@ PlanPath plan_path(const DescentPlan& plan, const DescentModel& model) {
     const int n = plan.nodes_per_phase;
     const int last = static_cast<int>(plan.reference.x.size()) - 1;
     if (n < 2 || last < 1 || static_cast<int>(plan.reference.u.size()) != last + 1) return path;
+    size_t samples = 1;
+    for (int k = 0; k < last; ++k) {
+        const double dt = plan.node_time_s(k + 1) - plan.node_time_s(k);
+        if (dt > 0.0) samples += static_cast<size_t>(std::max(1.0, std::ceil(dt / plan_path_step_s)));
+    }
+    path.t_s.reserve(samples);
+    path.x.reserve(samples);
     for (int k = 0; k < last; ++k) {
         const int phase = descent_node_phase(k, n);
         const double t0 = plan.node_time_s(k);
@@ -42,7 +49,8 @@ PlanPath plan_path(const DescentPlan& plan, const DescentModel& model) {
             const double s = i * h;
             path.t_s.push_back(t0 + s);
             path.x.push_back(x);
-            // RK4 as the discretisation (linearize_interval), first-order hold over the interval
+            // RK4 over the first-order-hold thrust like linearize_interval, but with a finer step and a normalised
+            // quaternion: the interval's end differs from its node by the planner's RK4 truncation plus its defect.
             const auto k1 = f(x, s);
             const auto k2 = f(x + k1 * (0.5 * h), s + 0.5 * h);
             const auto k3 = f(x + k2 * (0.5 * h), s + 0.5 * h);
@@ -57,6 +65,7 @@ PlanPath plan_path(const DescentPlan& plan, const DescentModel& model) {
 }
 
 DescentState path_state(const PlanPath& path, double t) {
+    if (path.t_s.empty()) return DescentState{};
     if (t <= path.t_s.front()) return path.x.front();
     if (t >= path.t_s.back()) return path.x.back();
     const size_t i = static_cast<size_t>(std::upper_bound(path.t_s.begin(), path.t_s.end(), t) - path.t_s.begin()) - 1;

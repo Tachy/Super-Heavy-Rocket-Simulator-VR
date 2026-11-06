@@ -69,7 +69,7 @@ TEST_CASE("The plan path follows the planned dynamics between nodes, not their c
 }
 
 TEST_CASE("A plan path turns with the planned rate", "[gnc][tracking]") {
-    // Hovering, the gimbaled thrust tilted so that its torque spins the body up about z at a constant rate of change:
+    // Braking at 5 m/s^2 net (braking_plan), the gimbaled thrust tilted so that its torque spins the body up about z at a constant rate of change:
     // the path's rate grows linearly, the chord's is the nodes' (zero at both ends of a phase that starts at rest).
     auto plan = braking_plan();
     const auto model = vacuum_model();
@@ -83,4 +83,12 @@ TEST_CASE("A plan path turns with the planned rate", "[gnc][tracking]") {
     CHECK(std::abs(std::abs(ref.rate_plan_radps.z) - alpha * 1.0) < 1e-3 * alpha);
     CHECK(std::abs(std::abs(ref.angular_acceleration_plan_radps2.z) - alpha) < 1e-2 * alpha);
     CHECK(norm(sample_plan(plan, m, 1.0, 1.0).rate_plan_radps) == 0.0);
+}
+
+TEST_CASE("An empty plan path has the zero state and a plan without nodes builds none", "[gnc][tracking]") {
+    const PlanPath empty;
+    const auto x = path_state(empty, 1.0);
+    for (int i = 0; i < 14; ++i) CHECK(x[i] == 0.0);
+    DescentPlan plan;
+    CHECK(plan_path(plan, vacuum_model()).t_s.empty());
 }

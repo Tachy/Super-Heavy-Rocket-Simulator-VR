@@ -783,3 +783,8 @@ The `docs/known-issues.md` entry as it stood before the re-measure (all green si
   2026-11-04): a paced Mach 2.6 run under the full parallel test load (7-13 s solves) that never waited flew 2 plans in
   the whole burn and struck the tower; a 3 s bound flew 8 plans, still struck (sink 3.7 m/s); the bound of one re-plan
   interval (1 s) flew 17 plans, caught 0.13 m. Current rule: `docs/subsystems/gnc-core.md`.
+- Tracking reference chord vs plan path (r1 fix 2026-11-06): the SCvx tracking used to interpolate the plan nodes
+  linearly (`DescentPlan::state_at`). On the ship's pair phase (~1.9 s between nodes) that chord ran up to 3.3 m /
+  3 m/s / 1.6 deg off the planned braking path - always above it while braking - and the position loop and lateral LQR
+  held the ship there: higher, slower, each re-plan later. Flip and catch: catch prediction 4.30 -> 2.74 s (gate 4.0),
+  2.13 -> 1.00 s within the last 10 s. Current rule: `gnc::plan_path`, `docs/subsystems/gnc-core.md`.

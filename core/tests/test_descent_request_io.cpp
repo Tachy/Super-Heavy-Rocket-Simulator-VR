@@ -14,6 +14,7 @@
 #include "starsim/gnc/booster_return.hpp"
 #include "starsim/gnc/descent_discretization.hpp"
 #include "starsim/gnc/descent_request_io.hpp"
+#include "starsim/gnc/descent_tracking.hpp"
 #include "starsim/gnc/scvx_landing.hpp"
 #include "starsim/math/constants.hpp"
 
@@ -356,4 +357,53 @@ TEST_CASE("A fresh sea-abort plan passes a transient of its virtual control and 
     const Vec3 end = state_position(plan.reference.x.back());
     const Vec3 sea = normalized(r.target.sea_target_m);
     CHECK(dot(end, sea) >= r.target.sea_min_distance_m - 1.0);  // beyond the shoreline
+}
+
+TEST_CASE("The propagated path of a real plan meets each next node within the planner's defect tolerance",
+          "[gnc][descent][scvx][falcon9][asds][tracking]") {
+    // The claim behind gnc::plan_path (descent_tracking.hpp): propagating an interval from its start node with the plan's
+    // first-order-hold thrust ends at the next node, to the converged plan's defect. The last sample of each interval
+    // is stepped once more to the node time and compared in the planner's own scaled components against its
+    // defect_tolerance (measured 3.4e-4 at the time of writing; the path steps finer and normalises the quaternion).
+    auto r = read_plan_request(std::string(STARSIM_FIXTURE_DIR) + "/scvx/falcon9_asds_first_plan_47m.txt");
+    const auto f9 = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
+    const auto own = booster_return_parameters(f9, f9.stages.front(), true).scvx.settings;
+    r.settings.fresh_trust_region_weight = own.fresh_trust_region_weight;
+    r.settings.fresh_attitude_violation_weight = own.fresh_attitude_violation_weight;
+    DescentPlanner planner;
+    const auto plan = default_plan_function()(planner, r);
+    REQUIRE(plan.converged);
+    const auto path = plan_path(plan, r.model);
+    REQUIRE(!path.t_s.empty());
+    const int n = plan.nodes_per_phase;
+    const int last = static_cast<int>(plan.reference.x.size()) - 1;
+    const auto scale = descent_state_scales();
+    double worst = 0.0;
+    for (int k = 0; k < last; ++k) {
+        const double t0 = plan.node_time_s(k), t1 = plan.node_time_s(k + 1);
+        if (!(t1 > t0)) continue;
+        // the last sample inside [t0, t1)
+        size_t i = static_cast<size_t>(std::lower_bound(path.t_s.begin(), path.t_s.end(), t1) - path.t_s.begin()) - 1;
+        while (i > 0 && path.t_s[i] >= t1) --i;
+        const double dt_all = t1 - t0, h = t1 - path.t_s[i];
+        const int phase = descent_node_phase(k, n);
+        const Vec3& u0 = plan.reference.u[static_cast<size_t>(k)];
+        const Vec3& u1 = plan.reference.u[static_cast<size_t>(k + 1)];
+        const auto f = [&](const DescentState& y, double t) {
+            return r.model.derivative(y, u0 + (u1 - u0) * ((t - t0) / dt_all), phase);
+        };
+        const double ta = path.t_s[i];
+        const DescentState& x = path.x[i];
+        const auto k1 = f(x, ta);
+        const auto k2 = f(x + k1 * (0.5 * h), ta + 0.5 * h);
+        const auto k3 = f(x + k2 * (0.5 * h), ta + 0.5 * h);
+        const auto k4 = f(x + k3 * h, ta + h);
+        const DescentState end = x + (k1 + k2 * 2.0 + k3 * 2.0 + k4) * (h / 6.0);
+        for (int c = 0; c < 14; ++c) {
+            worst = std::max(worst, std::abs(plan.reference.x[static_cast<size_t>(k + 1)][c] - end[c]) / scale[static_cast<size_t>(c)]);
+        }
+    }
+    CHECK(worst < r.settings.defect_tolerance);
+    std::printf("[plan_path] worst scaled interval-end deviation %.3e (defect tolerance %.1e, flyable %.1e)\n", worst,
+                r.settings.defect_tolerance, r.settings.flyable_defect_tolerance);
 }

@@ -63,7 +63,7 @@ serial and the acting part's name.
     `ShipLandingGuidance::catch_epoch` (the pins' touch: the landing burn plan's end - pins catch_clearance_m above
     the arm tops at catch_sink_mps, held past it - plus clearance / sink = 1.0 s; 212 t ship from a trimmed start:
     -2.74 s at most, 1.00 s within the last 10 s since the tracking follows the plan's own path between its nodes,
-    r1 fix 2026-11-06; was -3.11 / 0.75 s at planner plan Task 3b, -4.30 / 2.13 s before the fix).
+    r1 fix 2026-11-06; earlier figures: `docs/history/mission-timeline.md`).
   - The entry interface of a capsule return whose trunk is still on carries the capsule's serial: the trunk keeps the
     stack's at the jettison, the capsule becomes the next body (`FlightSession::next_body_serial`).
   - Not predicted (no guidance holds a time): the boostback ignition (the flip ends on attitude), Falcon 9's entry

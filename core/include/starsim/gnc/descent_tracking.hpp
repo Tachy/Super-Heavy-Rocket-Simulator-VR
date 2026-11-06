@@ -21,8 +21,8 @@ struct TrackingReference {
 };
 
 // The plan's own trajectory between its nodes: every interval propagated through the planning model from its start
-// node with the plan's first-order-hold thrust (as the discretisation does; the converged plan meets the next node
-// within the defect tolerance), sampled at most plan_path_step_s apart. The nodes alone are a chord of it: on the
+// node with the plan's first-order-hold thrust (like the discretisation, with a finer step; the converged plan meets the
+// next node within the planner's defect tolerance), sampled at most plan_path_step_s apart. The nodes alone are a chord of it: on the
 // ship's long pair phase (~1.9 s between nodes) the chord ran up to ~3 m above the braking path (an upward
 // acceleration a bends the path below the chord by ~a dt^2 / 8) and 1.6 deg off its axis, and the tracking held the
 // vehicle on that chord - higher and slower than planned, every re-plan later (r1 fix, 2026-11-06).
@@ -30,10 +30,12 @@ struct PlanPath {
     std::vector<double> t_s;         // from the plan's start, increasing
     std::vector<DescentState> x;
 };
-// Sample spacing: the linear interpolation between samples leaves ~a h^2 / 8 = 2 mm of the path at a = 7 m/s^2.
+// Sample spacing: the linear interpolation between samples leaves ~a h^2 / 8 of the path: 2 mm at the ship's 7 m/s^2,
+// 6 mm at the ~20 m/s^2 of a Falcon 9 hoverslam near empty.
 constexpr double plan_path_step_s = 0.05;
 PlanPath plan_path(const DescentPlan& plan, const DescentModel& model);
-// The path's state at t_s (linear between samples, quaternion normalised); t_s clamped to the path.
+// The path's state at t_s (linear between samples, quaternion normalised); t_s clamped to the path. An empty path has
+// no state: the zero state is returned (callers check PlanPath::t_s.empty(), as sample_plan does).
 DescentState path_state(const PlanPath& path, double t_s);
 
 // The reference at t_s: the path's state (empty path: the nodes' linear interpolation, DescentPlan::state_at).

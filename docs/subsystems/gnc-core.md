@@ -62,9 +62,8 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   plan's own path, `gnc::plan_path`: each interval propagated through the planning model from its start node with
   the first-order-hold thrust, as the discretisation does, sampled every 0.05 s (`plan_path_step_s`; ~2 mm of chord
   at 7 m/s^2), built once per accepted plan on the plan's snapshot model. The nodes' chord (`DescentPlan::state_at`,
-  still the warm start's) ran up to 3.3 m / 3 m/s / 1.6 deg off the ship's braking path between nodes ~1.9 s apart -
-  during braking always above it - and the loop held the ship there: higher, slower, each re-plan later (flip and
-  catch: catch prediction 4.30 -> 2.74 s, r1 fix 2026-11-06). `sim/landing_outcome` (shoreline `[site.sea]`, "Wasserung"); tower `CatchPhase::Aborted` (arms stay
+  still the warm start's) is not tracked (why: `docs/history/guidance-missions.md`).
+  `sim/landing_outcome` (shoreline `[site.sea]`, "Wasserung"); tower `CatchPhase::Aborted` (arms stay
   open). Re-plans may draw on half the propellant reserve at a penalty, aborts on all of it (not the ship); a converged
   plan that tilts the final set > 3 deg beyond its soft limit counts as unreachable where there is a sea.
   First plans in real-time play (planner plan Task 11b fix round 1, `gnc::FirstPlanHold`): planned on the worker from
@@ -125,6 +124,15 @@ Index of the guidance / missions topics: `docs/subsystems/guidance-missions.md`.
   Propellant: Falcon 9 N2 tanks (600 / 80 kg carved out of the dry masses; not in `propellant_kg()`),
   Starship / Super Heavy ullage gas from the main tanks (Isp 70 s [E]). The burn executor counts the realised RCS force
   while a translation is commanded. Not modelled: thrust rise / tail-off, short-pulse Isp loss, pressure blowdown.
+
+## Open points (measured, all vehicles)
+- Planner self-consistency: re-planning along the plan's own path (perfect tracking) still drifts the landing later
+  (+0.9 s by re-plan 14) and jumps +0.5 s at ~5 s to go (final phase -> 0). The planner is not a fixed point of itself.
+- The approach sink limit (sink <= 1 + h / 1.4 s) is enforced at the nodes only: the first ship plan violates it by
+  ~3 m/s between its last pair nodes; the same request on 20 / 40 nodes ends 0.5 / 0.4 s later. Fix: path constraints
+  within the intervals.
+- The 3 -> 2 engine switch: phase 1 of the plan does not model the dropped engine's run-down thrust (measured 2.27 MN
+  against the plan's 1.46 MN).
 
 ## Validation
 - Booster catch/return validation (`[gnc][catch][validation]`, booster descent drag) is in vehicle-data.md.

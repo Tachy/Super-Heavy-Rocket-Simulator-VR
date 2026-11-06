@@ -84,3 +84,7 @@ Plan: `docs/superpowers/archive/plans/2026-10-22-external-view.md` (Tasks 1-4). 
   Hidden probe `"Return prediction probe"` (STARSIM_VERBOSE=1, STARSIM_PROBE_CAPSULE for the Crew Dragon): a ship /
   capsule return from orbit with the predictions' errors; STARSIM_DEBUG_PREDICTIONS prints every sample.
 
+- Ship catch prediction (`ShipLandingGuidance::catch_epoch`, 212 t ship from a trimmed start): -3.11 s at most /
+  0.75 s within the last 10 s at planner plan Task 3b; -4.30 / 2.13 s again before the r1 fix 2026-11-06 (tracking held
+  the chord between the plan's nodes); -2.74 / 1.00 s since the tracking follows the plan's own path. Current:
+  `docs/subsystems/mission-timeline.md`.
