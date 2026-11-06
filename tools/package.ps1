@@ -3,9 +3,9 @@
 #   2. core + GDExtension (tools/build.ps1 -NoTests) and the Godot smoke test
 #   3. the exe (PCK embedded) with the version stamped in, plus the GDExtension and D3D12 DLLs
 #   4. the package folder: exe, launchers, config/, the base data (with data/weather/analog), CREDITS.md, READMEs; the parts terrain
-#      (data/terrain/earth) and imagery (data/imagery); a self-check of the exported exe with and without the parts
+#      (data/terrain/earth), imagery (data/imagery) and Diviner (data/terrain/diviner_rock_abundance.*, optional); a self-check of the exported exe with and without the parts
 #   5. ZIPs: build/Super-Heavy-Rocket-Simulator-VR-<version>-windows.zip (playable, base data),
-#      ...-data-terrain.zip, ...-data-imagery.zip (each unpacks into the game folder); none may reach 2 GB
+#      ...-data-terrain.zip, ...-data-imagery.zip, ...-data-diviner.zip (each unpacks into the game folder); none may reach 2 GB
 #   6. build/Super-Heavy-Rocket-Simulator-VR-<version>-setup.exe (Inno Setup, everything; installed once if missing)
 #
 #   powershell -ExecutionPolicy Bypass -File tools/package.ps1 [-Version 1.2.3] [-SkipTests] [-NoInstaller]
@@ -168,7 +168,8 @@ Step "Package"
 $package = Join-Path $Build "package"
 $terrainPart = Join-Path $Build "part_terrain"
 $imageryPart = Join-Path $Build "part_imagery"
-foreach ($dir in @($package, $terrainPart, $imageryPart)) { if (Test-Path $dir) { Remove-Item $dir -Recurse -Force } }
+$divinerPart = Join-Path $Build "part_diviner"
+foreach ($dir in @($package, $terrainPart, $imageryPart, $divinerPart)) { if (Test-Path $dir) { Remove-Item $dir -Recurse -Force } }
 Mirror $export $package @()
 Copy-Item (Join-Path $PSScriptRoot "release\*.cmd") $package
 # CREDITS.md carries the full licence texts the binaries must reproduce (BSD-3 clause 2: Bruneton's atmosphere code;
@@ -183,7 +184,7 @@ Mirror (Join-Path $Root "config") (Join-Path $package "config") @()
 # base data: everything the game reads except the two large parts; never the raw downloads, webcasts or validation
 Mirror $Data (Join-Path $package "data") @("/XD", (Join-Path $Data "raw"), (Join-Path $Data "webcasts"),
     (Join-Path $Data "validation"), (Join-Path $Data "imagery"), (Join-Path $Data "terrain\earth"),
-    (Join-Path $Data "weather"), "/XF", "README.md")
+    (Join-Path $Data "weather"), "/XF", "README.md", "diviner_rock_abundance.toml", "diviner_rock_abundance.i16")
 # the offline weather analog set (M8: 48 ERA5 hours downsampled to 1 deg, a few hundred MB) rides in the base data so the
 # typical-weather fallback works on a first start without internet; downloaded weather caches (data/weather/cache) do not
 $analog = Join-Path $Data "weather\analog"
@@ -193,12 +194,14 @@ if (-not (Test-Path (Join-Path $package "data\textures\moon_detail\moon_detail.t
     throw "The package lacks data/textures/moon_detail (python tools/data_pipeline/fetch.py moon_detail)"
 }
 if (-not (Test-Path (Join-Path $package "data\atmosphere\earth_atmosphere.bin"))) { throw "The package lacks data/atmosphere/earth_atmosphere.bin" }
-# the lunar landing mission loads the Moon surface with rocks (sim::shared_moon_surface(..., {true, true})) and refuses to
-# start without the Diviner rock abundance map (the renderer alone would fall back to detail without rocks)
+# The Diviner rock abundance map (88 MB) is an optional data part (user 2026-11-06): the lunar landing mission and the
+# renderer fall back to the global statistical rock abundance with a log line when it is absent.
 foreach ($f in @("diviner_rock_abundance.toml", "diviner_rock_abundance.i16")) {
-    if (-not (Test-Path (Join-Path $package "data\terrain\$f"))) {
-        throw "The package lacks data/terrain/$f (python tools/data_pipeline/fetch.py diviner_rock_abundance): the lunar landing mission needs it"
+    if (-not (Test-Path (Join-Path $Data "terrain\$f"))) {
+        throw "data/terrain/$f is missing (python tools/data_pipeline/fetch.py diviner_rock_abundance): the Diviner part needs it"
     }
+    New-Item -ItemType Directory -Force (Join-Path $divinerPart "data	errain") | Out-Null
+    Copy-Item (Join-Path $Data "terrain\$f") (Join-Path $divinerPart "data	errain\$f")
 }
 Mirror (Join-Path $Data "terrain\earth") (Join-Path $terrainPart "data\terrain\earth") @()
 Mirror (Join-Path $Data "imagery") (Join-Path $imageryPart "data\imagery") @()
@@ -213,6 +216,7 @@ if (-not $SkipTests) {
     Mirror $package $full @()
     Mirror $terrainPart $full @()
     Mirror $imageryPart $full @()
+    Mirror $divinerPart $full @()
     $line = SelfCheck (Join-Path $full $ExeName)
     if ($line -notmatch 'earth_terrain=yes imagery=yes') { throw "Full package should find the terrain and imagery: $line" }
     Remove-Item $full -Recurse -Force
@@ -223,6 +227,7 @@ Step "ZIPs"
 Zip $package (Join-Path $Build "$Prefix-$Version-windows.zip")
 Zip $terrainPart (Join-Path $Build "$Prefix-$Version-data-terrain.zip")
 Zip $imageryPart (Join-Path $Build "$Prefix-$Version-data-imagery.zip")
+Zip $divinerPart (Join-Path $Build "$Prefix-$Version-data-diviner.zip")
 
 # --- 6. installer ------------------------------------------------------------------------------------------------
 if (-not $NoInstaller) {
@@ -243,7 +248,7 @@ if (-not $NoInstaller) {
         if (-not $iscc) { throw "Inno Setup could not be installed (ISCC.exe not found)." }
     }
     $isccOut = Run $iscc @("/DAppVersion=$Version", "/DFileVersion=$fileVersion", "/DSourceDir=$package",
-        "/DTerrainDir=$terrainPart", "/DImageryDir=$imageryPart", "/DOutputDir=$Build", (Join-Path $PSScriptRoot "installer.iss"))
+        "/DTerrainDir=$terrainPart", "/DImageryDir=$imageryPart", "/DDivinerDir=$divinerPart", "/DOutputDir=$Build", (Join-Path $PSScriptRoot "installer.iss"))
     if ($LASTEXITCODE -ne 0) { $isccOut | Select-Object -Last 15 | ForEach-Object { Write-Host $_ }; throw "Inno Setup failed ($LASTEXITCODE)." }
     $setup = Join-Path $Build "$Prefix-$Version-setup.exe"
     $size = (Get-Item $setup).Length

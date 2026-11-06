@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <stdexcept>
 
@@ -113,8 +114,16 @@ RockAbundanceMap make_rock_abundance_map(const config::RockAbundanceFile& file) 
 std::shared_ptr<const RockAbundanceMap> load_rock_abundance_map(const config::RockPopulation& rocks,
                                                                 const std::filesystem::path& terrain_dir) {
     if (rocks.abundance_source != "diviner") return nullptr;
+    const auto toml_path = terrain_dir / config::rock_abundance_file_name;
+    if (!std::filesystem::exists(toml_path)) {
+        // The Diviner map is an optional data part (user 2026-11-06): without it the global statistical abundance
+        // (abundance_scale, as for "uniform") applies everywhere. A present but broken file still throws.
+        std::fprintf(stderr, "Felsenhäufigkeitskarte (Diviner) nicht installiert (%s): globale statistische Häufigkeit.\n",
+                     toml_path.string().c_str());
+        return nullptr;
+    }
     return std::make_shared<const RockAbundanceMap>(
-        make_rock_abundance_map(config::load_rock_abundance_file(terrain_dir / config::rock_abundance_file_name)));
+        make_rock_abundance_map(config::load_rock_abundance_file(toml_path)));
 }
 
 }  // namespace starsim::environment

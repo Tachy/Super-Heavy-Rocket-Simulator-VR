@@ -1,10 +1,10 @@
 ﻿; Installer of Super Heavy: Rocket Simulator VR (Inno Setup 6), built by tools/package.ps1:
 ;   ISCC /DAppVersion=1.2.3 /DFileVersion=1.2.3.0 /DSourceDir=<build\package> /DTerrainDir=<build\part_terrain>
-;        /DImageryDir=<build\part_imagery> /DOutputDir=<build> installer.iss
+;        /DImageryDir=<build\part_imagery> /DDivinerDir=<build\part_diviner> /DOutputDir=<build> installer.iss
 ; Per user, no admin rights: %LOCALAPPDATA%\Programs\Super-Heavy-Rocket-Simulator-VR.
 ; Everything is inside (the repository is private, so the installer cannot fetch the data from the release); the
-; Earth terrain and the aerial imagery are optional components. A newer installer installs over an older one (same
-; AppId); the two data parts are removed first, so a component deselected later does not stay half there.
+; Earth terrain, the aerial imagery and the Diviner rock map are optional components. A newer installer installs over an older one (same
+; AppId); the three data parts are removed first, so a component deselected later does not stay half there.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -20,6 +20,9 @@
 #endif
 #ifndef ImageryDir
   #define ImageryDir "..\build\part_imagery"
+#endif
+#ifndef DivinerDir
+  #define DivinerDir "..uild\part_diviner"
 #endif
 #ifndef OutputDir
   #define OutputDir "..\build"
@@ -75,6 +78,8 @@ german.CompTerrain=Erdgelände um die Startplätze (hochauflösend; ohne: flache
 english.CompTerrain=Earth terrain around the launch sites (high resolution; without: flat ground)
 german.CompImagery=Luftbilder der Startplätze (NAIP / Sentinel-2)
 english.CompImagery=Aerial imagery of the launch sites (NAIP / Sentinel-2)
+german.CompDiviner=Felsenhäufigkeitskarte des Mondes (Diviner; ohne: globale statistische Häufigkeit)
+english.CompDiviner=Lunar rock abundance map (Diviner; without: global statistical abundance)
 
 [Types]
 Name: "full"; Description: "{cm:TypeFull}"
@@ -84,6 +89,7 @@ Name: "custom"; Description: "{cm:TypeCustom}"; Flags: iscustom
 Name: "main"; Description: "{cm:CompMain}"; Types: full custom; Flags: fixed
 Name: "terrain"; Description: "{cm:CompTerrain}"; Types: full
 Name: "imagery"; Description: "{cm:CompImagery}"; Types: full
+Name: "diviner"; Description: "{cm:CompDiviner}"; Types: full
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -91,11 +97,14 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\data\terrain\earth"
 Type: filesandordirs; Name: "{app}\data\imagery"
+Type: files; Name: "{app}\data	errain\diviner_rock_abundance.toml"
+Type: files; Name: "{app}\data	errain\diviner_rock_abundance.i16"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Components: main; Flags: ignoreversion recursesubdirs
 Source: "{#TerrainDir}\*"; DestDir: "{app}"; Components: terrain; Flags: ignoreversion recursesubdirs
 Source: "{#ImageryDir}\*"; DestDir: "{app}"; Components: imagery; Flags: ignoreversion recursesubdirs
+Source: "{#DivinerDir}\*"; DestDir: "{app}"; Components: diviner; Flags: ignoreversion recursesubdirs
 
 [Icons]
 Name: "{group}\{#AppLinkName}"; Filename: "{app}\Start-VR.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\{#AppExe}"; Flags: runminimized

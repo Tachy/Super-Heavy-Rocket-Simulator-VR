@@ -978,13 +978,10 @@ TEST_CASE("abundance_source selects the abundance law", "[moon_surface][environm
     // "uniform": a passed map is ignored.
     const LunarRocks uniform(shared_detail(), constant_map(3.0 * cfg.abundance_reference_area_fraction));
     CHECK(uniform.abundance_factor(direction(0.0, 0.3)) == cfg.abundance_scale);
-    // "diviner" without a map: German error naming the fetch target.
-    try {
-        const LunarRocks missing(diviner_detail());
-        FAIL("no exception");
-    } catch (const std::invalid_argument& e) {
-        CHECK(std::string(e.what()).find("fetch.py diviner_rock_abundance") != std::string::npos);
-    }
+    // "diviner" without a map (optional data part): the global statistical abundance, same as "uniform".
+    const LunarRocks missing(diviner_detail());
+    CHECK(missing.abundance_factor(direction(0.0, 0.3)) == cfg.abundance_scale);
+    CHECK(missing.abundance_factor(direction(30.0 * deg, 1.0)) == uniform.abundance_factor(direction(30.0 * deg, 1.0)));
     // A map that is entirely no data has nothing to fill from: the uniform law.
     auto empty = std::make_shared<environment::RockAbundanceMap>(*constant_map(1.0));
     std::fill(empty->area_fraction.begin(), empty->area_fraction.end(), std::numeric_limits<float>::quiet_NaN());
@@ -1079,16 +1076,17 @@ TEST_CASE("The Diviner rock abundance file loads into the map", "[moon_surface][
         }
     }
     CHECK(std::abs(map->at(5.0 * deg, 75.0 * deg) - ring / 8.0) < 1e-6);  // its centre (5 deg, 75 deg)
-    // "uniform" reads nothing; "diviner" with no file names fetch.py.
+    // "uniform" reads nothing; "diviner" with no file is a logged fallback (null map), not an error.
     diviner_cfg.abundance_source = "uniform";
     CHECK(environment::load_rock_abundance_map(diviner_cfg, dir / "absent") == nullptr);
     diviner_cfg.abundance_source = "diviner";
-    try {
-        (void)environment::load_rock_abundance_map(diviner_cfg, dir / "absent");
-        FAIL("no exception");
-    } catch (const config::ConfigError& e) {
-        CHECK(std::string(e.what()).find("fetch.py diviner_rock_abundance") != std::string::npos);
+    CHECK(environment::load_rock_abundance_map(diviner_cfg, dir / "absent") == nullptr);
+    // A present but truncated file stays an error.
+    {
+        std::ofstream values(dir / "diviner_rock_abundance.i16", std::ios::binary | std::ios::app);
+        values.write(" ", 1);
     }
+    CHECK_THROWS(environment::load_rock_abundance_map(diviner_cfg, dir));
     std::filesystem::remove_all(dir);
 }
 

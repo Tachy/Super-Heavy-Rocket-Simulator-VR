@@ -280,8 +280,9 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   contact - the 8-14 campaign case is red since the Task 12 head; seeds 16 / 19 settle 0.85 m off. Traced in follow-up
   U-8 (2026-11-06, `docs/subsystems/moon-surface.md` open points): not foot slip but rigid-body rocking after the
   engines-off first contact on one uphill foot - the hull pivots through the slope, overshoots onto a single downhill
-  foot and swings round that sticking foot (1.17 m of the 1.52 m with no slip). No physics defect found; kept red
-  pending a user decision (gate definition, a controlled settling law, or the slope limit), not a fitted fix.
+  foot and swings round that sticking foot (1.17 m of the 1.52 m with no slip). No physics defect found; accepted
+  by the user 2026-11-06 as real behaviour of a tall lander with free roll at the 8 deg slope limit; seed 14 stays a known
+  red in `[lunar_campaign][slow]` (gate 1 m, not loosened).
 
 ## Moon procedural surface plan, Task 16: Sun shadows on the Earth (2026-11-05)
 - The Earth's near-field shadow map covers 500 m-4 km of view depth around the eye (terrain-rendering.md "Near-field Sun

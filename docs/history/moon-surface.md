@@ -222,3 +222,9 @@ At Task 5 fix round 1: 21 / 21, misses 0.01-0.91 m (seed 17 0.91 m and seed 5 0.
   held the attitude with the RCS after the first contact (a rate damper about the line through two feet - now
   released at contact) and the regularised leg friction crept under any tangential load (now Coulomb stick-slip,
   `contact::leg_contact`).
+
+### Diviner map required by the lunar mission (superseded 2026-11-06)
+Standing decision until U-2: a missing Diviner map was an error, "not a silent fallback": `load_rock_abundance_map` (via
+`load_rock_abundance_file`) threw a German `ConfigError` naming `fetch.py diviner_rock_abundance`, and `LunarRocks` with
+`abundance_source = "diviner"` and no map threw `std::invalid_argument`; `tools/package.ps1` refused to build a package
+without the map in the base data. Replaced because the map is an 88 MB optional data part (user 2026-11-06).

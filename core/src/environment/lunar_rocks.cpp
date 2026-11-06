@@ -55,11 +55,7 @@ LunarRocks::LunarRocks(std::shared_ptr<const LunarSurfaceDetail> detail,
     if (rocks.abundance_source == "uniform") {
         abundance_ = nullptr;
     } else if (rocks.abundance_source == "diviner") {
-        if (!abundance_) {
-            throw std::invalid_argument(
-                "LunarRocks: abundance_source = \"diviner\" braucht die Diviner-Felsenhäufigkeitskarte - bitte python "
-                "tools/data_pipeline/fetch.py diviner_rock_abundance ausführen");
-        }
+        // Without a map (optional data part) the global statistical abundance applies, as for "uniform".
     } else {
         throw std::invalid_argument("LunarRocks: unbekannte abundance_source '" + rocks.abundance_source + "'");
     }

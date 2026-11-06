@@ -147,7 +147,7 @@ Each GitHub release carries:
   Earth terrain and the aerial imagery of the launch sites are optional components; without them the ground near the
   pads is flat and untextured. Start menu: the simulator (VR, OpenXR runtime running) and its desktop mode.
 - `...-windows.zip` - the same game without installer, playable with the base data (`Start-VR.cmd`,
-  `Start-Desktop.cmd`); `...-data-terrain.zip` and `...-data-imagery.zip` unpack into the same folder.
+  `Start-Desktop.cmd`); `...-data-terrain.zip`, `...-data-imagery.zip` and `...-data-diviner.zip` unpack into the same folder.
 
 ## Building (Windows)
 

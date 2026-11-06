@@ -158,7 +158,7 @@ Jedes GitHub-Release enthält:
   Erdgelände und die Luftbilder der Startplätze sind optionale Komponenten; ohne sie ist der Boden um die Rampen flach
   und ohne Textur. Startmenü: der Simulator (VR, OpenXR-Runtime gestartet) und sein Desktop-Modus.
 - `...-windows.zip` – dasselbe Spiel ohne Installer, mit den Basisdaten spielbar (`Start-VR.cmd`,
-  `Start-Desktop.cmd`); `...-data-terrain.zip` und `...-data-imagery.zip` werden in denselben Ordner entpackt.
+  `Start-Desktop.cmd`); `...-data-terrain.zip`, `...-data-imagery.zip` und `...-data-diviner.zip` werden in denselben Ordner entpackt.
 
 ## Bauen (Windows)
 

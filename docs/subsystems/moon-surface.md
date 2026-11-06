@@ -145,8 +145,10 @@ on top of that relief.
   where the rock is not above its base height. "Above" is against `base_height_m` only, not the local ground at `unit`.
 - Abundance: `abundance_source` selects it. "uniform": `abundance_scale` everywhere (a passed map is ignored).
   "diviner": `load_rock_abundance_map(rocks, data/terrain)` reads the Diviner map (`RockAbundanceMap`, cylindrical
-  float grid, area fraction, |lat| <= 60 deg, no data = NaN); `LunarRocks` without a map then throws a German error
-  naming `fetch.py diviner_rock_abundance`, like the LOLA loader (decision: error, not a silent fallback). Inside the
+  float grid, area fraction, |lat| <= 60 deg, no data = NaN). A missing map (toml absent) is a logged fallback: the loader
+  prints one German line to stderr and returns no map, and `LunarRocks` with "diviner" and no map uses `abundance_scale`
+  everywhere, exactly the "uniform" law (user 2026-11-06: the Diviner map is an optional data part). A present but
+  corrupt / truncated file still throws. Inside the
   map the factor is map / `abundance_reference_area_fraction` (0.0068), blended smoothstep to 1 over the last 5 deg
   below the map edge (`abundance_blend_band_rad`, 150 km: no step). No-data pixels are filled at load (`fill_rock_abundance_gaps`: mean of the valid 8-neighbours, front by
   front, deterministic), so the factor is continuous across gaps; an all-NaN map gives the uniform law.
@@ -770,7 +772,7 @@ on top of that relief.
   `RockAbundanceMap` (`at`: bilinear over valid neighbours), `make_rock_abundance_map(file)` (checks the grid layout),
   `load_rock_abundance_map(rocks config, terrain_dir)`. `core/include/starsim/config/rock_abundance_file.hpp`,
   `core/src/config/rock_abundance_file.cpp`: `load_rock_abundance_file` (TOML header + int16 DN; German ConfigError
-  naming fetch.py when missing).
+  naming fetch.py when the values file is missing; a missing toml is handled one level up, in `load_rock_abundance_map`).
 - `tools/data_pipeline/rock_abundance.py` (fetch target `diviner_rock_abundance`, kind `rock_abundance`): downloads
   DGDR_RA_AVG_CYL_032 (Diviner GDR L3 rock abundance average, 32 px/deg, 3840 x 11520 int16 LSB, 88 MB; layout from
   its PDS3 label: line 0 = 60 N, zero_line 1919.5, zero_sample -0.5, RA = DN x 0.001, missing -32768) into
@@ -936,10 +938,10 @@ on top of that relief.
   - cover fraction: formula 0.0311 / 0.00678; real plan-view area of the 8083 rocks of 0.05-0.2 m in a 43 m disc at the
     site, measured with `rock_top` on 64 sunflower columns per rock: 0.00759 vs formula 0.00745 (+1.86 %, tolerance
     5 %); measured footprint / sum of pi D^2 / 4 = 1.0080 (tolerance 2 %); every rock's a <= 1.144 D;
-  - abundance source: "uniform" ignores a map, "diviner" without a map throws (names the fetch target), an all-NaN map
+  - abundance source: "uniform" ignores a map, "diviner" without a map gives the uniform law (same factors as "uniform"), an all-NaN map
     gives the uniform law; gap fill: filled values lie in the valid range and the factor swept across a 10 x 20 hole and
     a single missing pixel changes by no more than the map's own pixel step; a 12 x 36 file in the real format (TOML
-    header + int16, one missing DN) loads: pixel centres, longitude wrap, the gap filled with its neighbours' mean; a missing file names fetch.py;
+    header + int16, one missing DN) loads: pixel centres, longitude wrap, the gap filled with its neighbours' mean; a missing file is a logged fallback (null map), a truncated file throws;
   - `[slow]` summed roughness (median plane-detrended 125 mm window std, 600 windows over 2 km, rock tops entered as
     max(ground, rock top)): site craters + roughness 3.772 mm, + rock tops 4.003 mm vs the measured total 4.000 mm
     (+0.1 %, tolerance 10 %); near the cube corner (1,1,1) 4.001 -> 4.139 mm (+3.5 %). The corner excess of the skewed
@@ -1383,7 +1385,7 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   globe's (Hapke's surge narrower than K&S's linear one, close to ROLO's), at 7 deg 5.8 % above.
 - Diviner rock abundance does not cover the shipped site (-84.8 deg); there the uniform population applies (done). The
   full 88 MB product is loaded by `shared_moon_surface` (0.44 s incl. gap fill) and must be fetched
-  (`fetch.py diviner_rock_abundance`); how it is packaged for the release is the user's decision (open).
+  (`fetch.py diviner_rock_abundance`); it is its own optional data part of the release (`...-data-diviner.zip`, installer component; user 2026-11-06), without it the uniform population applies (logged).
 - Contact surface: the pads feel the relief on an 8 cm lattice (sub-lattice RMS 4.4 mm) and rocks >= 5 cm (both [E],
   below the pad sinkage); the 8 cm (instead of 4 cm) lattice was chosen in fix round 1 of Task 4 for the six-pad cost
   gate (sliding 34-36 us against 48-51 us) - one constant (`contact_lattice_level`) if the controller wants 4 cm back.
@@ -1433,9 +1435,9 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   Probes (not kept, seed 14 / 17 / 5): landing thrusters at minimum thrust until three feet touch 1.11 / 0.47 / 0.27 m
   (constant thrust only scales gravity: the rocking geometry is unchanged); an RCS roll-rate damper 1.35 / 0.49 /
   0.16 m; crush force 1.0 MN 1.39 / 0.41 / 0.14 m; a commanded touchdown roll 0.50 m (a leg pointing downhill) or
-  1.93 m (an edge downhill) for seed 14 alone - terrain-dependent, no rule. Baseline 1.52 / 0.63 / 0.18 m. Open:
-  a user decision (follow-up U-8 report: gate at the first contact plus a settle bound, a controlled settling law
-  with the landing thrusters, or a slope limit from the settle physics).
+  1.93 m (an edge downhill) for seed 14 alone - terrain-dependent, no rule. Baseline 1.52 / 0.63 / 0.18 m. Accepted
+  by the user 2026-11-06 as the real behaviour of a tall lander with free roll at the 8 deg slope limit; seed 14 stays a
+  known red in `[lunar_campaign][slow]` (the 1 m gate is not loosened).
 - Two Moon surfaces in one tick: the body's own ground contact (`FlightBody::resolve_ground_contact` via
   `ReferenceBody`) uses the full-detail point surface (relief at every point, rocks >= 1 cm, exact `rock_top`, normal
   over +-1 m, ~13 / ~50 us), the legs and base ring the contact surface (8 cm lattice, rocks >= 5 cm, interpolated
