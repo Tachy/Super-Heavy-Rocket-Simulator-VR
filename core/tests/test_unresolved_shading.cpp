@@ -5,6 +5,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <string>
+#include <thread>
+#include <functional>
+#include <fstream>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <limits>
@@ -620,8 +625,13 @@ TEST_CASE("Light factors from an oblique eye: the zenith view is the nadir law, 
                     environment::rock_shadow_table(m, ev * deg));
         CHECK(environment::rock_view_excess_table(m, es * deg, ev * deg, dphi * deg) >= 0.0);
     }
-    // Down-Sun the eye sees the rocks' lit sides: brighter than from the zenith; up-Sun their dark sides.
-    CHECK(environment::rock_view_gain_ratio_table(m, 20 * deg, 20 * deg, 0.0) > 1.0);
+    // Down-Sun the eye sees the rocks' lit sides: per cover more light than from the zenith (the image share
+    // 1 + sigma(e_v) times the gain ratio; Task 13: the ratio is per that share, which holds the plan view, so a tilted
+    // rock's lit ground under its near bulge makes the ratio itself dip below 1 at phase 0), and more than up-Sun, where
+    // the eye sees their dark sides.
+    const double down = environment::rock_view_gain_ratio_table(m, 20 * deg, 20 * deg, 0.0);
+    CHECK((1.0 + environment::rock_shadow_table(m, 20 * deg)) * down > 1.0);
+    CHECK(down > environment::rock_view_gain_ratio_table(m, 20 * deg, 20 * deg, pi));
     CHECK(environment::rock_view_gain_ratio_table(m, 20 * deg, 20 * deg, pi) < 1.0);
     // The near-field shadow map takes the Sun's drawn-rock shadows and the drawn relief's G1 off the statistics; the
     // earthshine keeps them.
@@ -730,7 +740,11 @@ TEST_CASE("Rock view tables' file cache: bit-identical round trip, the key guard
     CHECK(key == environment::rock_view_cache_key(mean, sd));
     CHECK(key != environment::rock_view_cache_key(mean, sd + 0.01));
     CHECK(key != environment::rock_view_cache_key(mean + 0.01, sd));
-    const auto dir = std::filesystem::temp_directory_path() / "starsim_rock_view_cache_test";
+    // A directory of its own (ctest runs cases as parallel processes; Task 13, review n4 of Task 12).
+    const auto dir = std::filesystem::temp_directory_path() /
+                     ("starsim_rock_view_cache_test_" +
+                      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "_" +
+                      std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id())));
     std::filesystem::remove_all(dir);
     const auto file = dir / environment::rock_view_cache_name;
     environment::RockViewModel model{m.rock_view_excess, m.rock_view_gain_ratio};
@@ -754,4 +768,31 @@ TEST_CASE("Rock view tables' file cache: bit-identical round trip, the key guard
     CHECK(read.excess == model.excess);
     CHECK(read.gain_ratio == model.gain_ratio);
     std::filesystem::remove_all(dir);
+    // A failed write reports false (a cache path under a plain file cannot be created).
+    {
+        const auto blocker = std::filesystem::temp_directory_path() /
+                             ("starsim_rock_view_cache_blocker_" +
+                              std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::ofstream(blocker) << "x";
+        CHECK_FALSE(environment::write_rock_view_cache(blocker / "sub" / environment::rock_view_cache_name, key, model));
+        std::filesystem::remove(blocker);
+    }
+    // The version guard (review n4): a checksum of the shipped tables (rounded to 1e-6, so last-bit differences between
+    // CPUs do not matter) pinned per rock_view_cache_version. When it fails, the tables changed: if the templates, the
+    // burial law and the grids did not change, the algorithm did - bump rock_view_cache_version; then pin the printed sum.
+    std::uint64_t sum = 1469598103934665603ULL;
+    for (const std::vector<double>* t : {&m.rock_view_excess, &m.rock_view_gain_ratio}) {
+        for (const double v : *t) {
+            const auto r = static_cast<std::int64_t>(std::llround(v * 1e6));
+            for (int b = 0; b < 8; ++b) {
+                sum ^= static_cast<std::uint64_t>((r >> (8 * b)) & 0xFF);
+                sum *= 1099511628211ULL;
+            }
+        }
+    }
+    std::printf("  rock view tables: version %llu, checksum %llu\n",
+                static_cast<unsigned long long>(environment::rock_view_cache_version), static_cast<unsigned long long>(sum));
+    constexpr std::uint64_t pinned_version = 2, pinned_checksum = 5551542726429447617ULL;  // update together
+    CHECK(environment::rock_view_cache_version == pinned_version);
+    CHECK(sum == pinned_checksum);
 }

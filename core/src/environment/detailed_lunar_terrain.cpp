@@ -577,8 +577,8 @@ DetailedLunarTerrain::DiscSupport DetailedLunarTerrain::support_under_disc(const
     // spacing 2 a / footprint_columns); measured against the brute-force maximum: <= 0.15 mm (test_detailed_lunar_terrain
     // "pivoting footpad" cases), below the contact tolerance of 1 mm.
     const double slope = std::hypot(gx, gy);
-    // Per-thread buffers reused across calls (the contact path allocates nothing per call once warm; the patches the
-    // previous call held are released here).
+    // Per-thread buffers reused across calls (the contact path allocates nothing per call once warm; the patches are
+    // released at the end of the call).
     thread_local RockQuery q;
     q.candidates.clear(), q.held.clear(), q.max_peak_m = -std::numeric_limits<double>::infinity();
     gather_rocks(centre_unit, r, q);
@@ -748,6 +748,10 @@ DetailedLunarTerrain::DiscSupport DetailedLunarTerrain::support_under_disc(const
         if (const auto top = rocks_->rock_top(rock, at(winner_x, winner_y), normal)) normal = top->second;
         else normal = winner->peak_normal;
     }
+    // Release the cache patches this call pinned (the buffers keep their capacity; Task 17 re-review M4: the
+    // thread_local query held them until the next call or the thread's end).
+    q.held.clear();
+    candidates.clear();
     return {mean + best, normal};
 }
 

@@ -635,6 +635,10 @@ godot::Dictionary StarsimCore::moon_unresolved_shading() {
     // Task 12: the oblique eye's rock terms and the fill light's hemispherical albedo.
     result["rock_view_excess"] = packed(m.rock_view_excess);
     result["rock_view_gain_ratio"] = packed(m.rock_view_gain_ratio);
+    // Task 13 (review n4 of Task 12): 0 none, 1 read, 2 written, 3 write failed (the game warns: ~8 s at every start).
+    result["rock_view_cache_status"] = m.rock_view_cache_status;
+    const std::u8string cache_file = (moon_cache_dir_ / environment::rock_view_cache_name).u8string();
+    result["rock_view_cache_file"] = godot::String::utf8(reinterpret_cast<const char*>(cache_file.c_str()));
     result["view_elevation_samples"] = environment::UnresolvedShadingModel::view_elevation_samples;
     result["view_elevation_step_rad"] = environment::UnresolvedShadingModel::view_elevation_step_rad;
     result["view_azimuth_samples"] = environment::UnresolvedShadingModel::view_azimuth_samples;

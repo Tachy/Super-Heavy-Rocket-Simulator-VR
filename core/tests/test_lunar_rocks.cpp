@@ -790,7 +790,7 @@ TEST_CASE("The arc maximum over the rock tops is exact", "[moon_surface][environ
             ++found;
             CHECK(peak->value >= brute - 1e-12);
             worst_gap = std::max(worst_gap, peak->value - brute);
-            CHECK(peak->value - brute < 1e-4);
+            CHECK(peak->value - brute < 2e-5);  // the brute force's sampling gap (4.9e-6 seen; Task 17 re-review M3)
             const double ux = q.u0x + q.ax * peak->nudged_cos + q.bx * peak->nudged_sin;
             const double uy = q.u0y + q.ay * peak->nudged_cos + q.by * peak->nudged_sin;
             const auto top = t.column_top(id, ux, uy);

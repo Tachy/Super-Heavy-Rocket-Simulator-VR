@@ -88,6 +88,9 @@ struct UnresolvedShadingModel {
     // Hapke directional-hemispherical albedo A_h(mu0) of the regolith (the globe's parameters and theta_bar) at
     // elevations k x lit_gain_step_rad (mu0 = sin e): the terrain inter-reflection fill (Task 12).
     std::vector<double> hemispherical_albedo;
+    // How the rock view tables' file cache was used at the build (0 none, 1 read, 2 written, 3 write failed;
+    // RockViewCacheStatus).
+    int rock_view_cache_status = 0;
 };
 
 // Builds the model from the generator (octave spacings and amplitude scale), its configuration (craters, Hapke) and
@@ -191,6 +194,10 @@ struct RockViewTables {
 };
 inline constexpr int rock_view_yaws = 2;  // [D] yaws per rock (the 32 templates' own orientations are random)
 RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut);
+// The ground region a mesh's exposed part (above z = cut) hides from a direction (elevation, horizontal azimuth toward
+// the light / eye), the plan view included, per plan-view area minus 1 (the cast shadow per cover sigma for a light;
+// Task 13): lines along the azimuth, each the interval from the farthest pushed point to the plan view's near end.
+double rock_mesh_shadow(const TemplateMesh& mesh, double cut, double elevation_rad, double azimuth_rad);
 // The generator's mean over the 32 templates (LOD 2 meshes) and the burial law (as template_rock_light_tables); the
 // excess as the template mean, the gain ratio as mean(flux) / mean(1 + hidden) over the zenith view's gain. Cached,
 // thread-safe.
@@ -198,20 +205,27 @@ struct RockViewModel {
     std::vector<double> excess;
     std::vector<double> gain_ratio;
 };
+// How the file cache was used (Task 13, review n4 of Task 12: an installed build may not be allowed to write there).
+enum class RockViewCacheStatus { none, read, written, write_failed };
 // cache_file non-empty (review I5 of Task 12: the tables cost ~8 s of the model build): read from that file when its
-// key matches (rock_view_cache_key), else computed and written there (a failed write is ignored). The tables are
-// deterministic, so the cached ones are the computed ones bit for bit.
+// key matches (rock_view_cache_key), else computed and written there (status: write_failed when that did not work;
+// the tables are used either way). The tables are deterministic, so the cached ones are the computed ones bit for bit.
 RockViewModel template_rock_view_tables(double burial_mean, double burial_sd,
-                                        const std::filesystem::path& cache_file = {});
-// The file cache's key: FNV-1a over a format version, the grid sizes, the burial law and the templates' LOD-2 meshes
-// (vertices and indices) the tables are built from.
+                                        const std::filesystem::path& cache_file = {},
+                                        RockViewCacheStatus* status = nullptr);
+// The tables' algorithm version, part of the cache key: bump it whenever the tables' computation changes (the key's
+// other inputs - grids, burial law, template meshes - change it by themselves). The test "Rock view tables' file
+// cache" pins a checksum of the shipped tables per version, so a change that forgets the bump fails there.
+inline constexpr std::uint64_t rock_view_cache_version = 2;  // 2: Task 13 line regions, z-buffer seen faces, plan hulls
+// The file cache's key: FNV-1a over rock_view_cache_version, the grid sizes, the burial law and the templates' LOD-2
+// meshes (vertices and indices) the tables are built from.
 std::uint64_t rock_view_cache_key(double burial_mean, double burial_sd);
 // The cache file's name in a cache directory.
 inline constexpr const char* rock_view_cache_name = "rock_view_tables.bin";
 // The cache file's read (false: missing, another key or a broken file; out untouched) and write (a unique temporary
-// renamed over the file; failures ignored).
+// renamed over the file; false when it could not be written).
 bool read_rock_view_cache(const std::filesystem::path& file, std::uint64_t key, RockViewModel& out);
-void write_rock_view_cache(const std::filesystem::path& file, std::uint64_t key, const RockViewModel& m);
+bool write_rock_view_cache(const std::filesystem::path& file, std::uint64_t key, const RockViewModel& m);
 // Model table lookups (trilinear; elevations clamped to [floor, 90 deg], dphi folded to [0, pi]).
 double rock_view_excess_table(const UnresolvedShadingModel& m, double light_elevation_rad, double view_elevation_rad,
                               double azimuth_difference_rad);

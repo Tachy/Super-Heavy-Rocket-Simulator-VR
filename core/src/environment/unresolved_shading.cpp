@@ -307,9 +307,12 @@ UnresolvedShadingModel make_unresolved_shading_model(const LunarSurfaceDetail& d
         m.rock_lit_gain = tables.gain;
         m.rock_shadow = tables.shadow;
         // Oblique views (Task 12): the ground the rocks hide from the eye and their seen sides.
+        RockViewCacheStatus cache_status = RockViewCacheStatus::none;
         const RockViewModel view =
             template_rock_view_tables(cfg.rocks.burial_fraction_mean, cfg.rocks.burial_fraction_sd,
-                                      cache_dir.empty() ? std::filesystem::path{} : cache_dir / rock_view_cache_name);
+                                      cache_dir.empty() ? std::filesystem::path{} : cache_dir / rock_view_cache_name,
+                                      &cache_status);
+        m.rock_view_cache_status = static_cast<int>(cache_status);
         m.rock_view_excess = view.excess;
         m.rock_view_gain_ratio = view.gain_ratio;
         // The rocks' share of the globe's mean slope (header comment): out of the regolith's budget.
@@ -543,6 +546,135 @@ RockLightTables rock_light_tables(const std::vector<RockColumn>& columns, double
     return out;
 }
 
+namespace {
+
+// Ground regions of a template's exposed part (the mesh above z = cut) by lines along an azimuth (Task 13, ruling
+// T17-A: the Task 17 templates are not convex - lobes, spalls and steps leave lit ground between the shadows of two
+// parts on one line - and the per-column bins read the shadow ~5 % long). The region a rock hides from a direction
+// (elevation e: cot e; horizontal azimuth psi toward the light / eye) is the union of its points pushed away by
+// height x cot e and of its plan view (the ground under a bulge above the cut is hidden from the zenith but may be
+// lit). On each line along psi (across-coordinate w_j, midpoint rule in w) the line's vertical plane cuts the mesh
+// triangles in segments (clipped to z >= cut); the line's region is the union of the segments pushed by height x cot
+// and of their plan intervals (exact on the line: the solid's projection is the projection of its surface; matches a
+// raster of the projected triangles within 0.2 % on the templates, Task 13 diagnostic).
+// plan = the plan view's area (the union at cot 0); areas[k] = the region's area for cots[k] (>= plan).
+constexpr int region_lines = 128;  // [D] lines across the unit rock (spacing 1/64): a half-spheroid's law within 1e-4
+
+void line_region_areas(const TemplateMesh& mesh, double cut, double psi, const std::vector<double>& cots, double& plan,
+                       std::vector<double>& areas) {
+    const double cp = std::cos(psi), sp = std::sin(psi);
+    const size_t nc = cots.size();
+    const double step = 2.0 / region_lines;
+    struct Segment {
+        double s0, z0, s1, z1;
+        double high() const { return std::max(s0, s1); }
+    };
+    std::vector<std::vector<Segment>> lines(region_lines);
+    struct Q {
+        double s, w, z;
+    };
+    std::vector<Q> q(mesh.vertices.size());
+    for (size_t i = 0; i < mesh.vertices.size(); ++i) {
+        const math::Vec3& v = mesh.vertices[i];
+        q[i] = {v.x * cp + v.y * sp, -v.x * sp + v.y * cp, v.z - cut};
+    }
+    for (size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
+        const Q tri[3] = {q[static_cast<size_t>(mesh.indices[t])], q[static_cast<size_t>(mesh.indices[t + 1])],
+                          q[static_cast<size_t>(mesh.indices[t + 2])]};
+        if (tri[0].z < 0.0 && tri[1].z < 0.0 && tri[2].z < 0.0) continue;
+        const double w_lo = std::min({tri[0].w, tri[1].w, tri[2].w}), w_hi = std::max({tri[0].w, tri[1].w, tri[2].w});
+        const int j0 = std::max(0, static_cast<int>(std::ceil((w_lo + 1.0) / step - 0.5)));
+        const int j1 = std::min(region_lines - 1, static_cast<int>(std::floor((w_hi + 1.0) / step - 0.5)));
+        for (int j = j0; j <= j1; ++j) {
+            const double wj = -1.0 + (j + 0.5) * step;
+            // The triangle's segment on the plane w = w_j (two edge crossings, half-open in w).
+            double ps[2], pz[2];
+            int n = 0;
+            for (int e = 0; e < 3 && n < 2; ++e) {
+                const Q& a = tri[e];
+                const Q& b = tri[(e + 1) % 3];
+                if ((a.w < wj) == (b.w < wj)) continue;
+                const double f = (wj - a.w) / (b.w - a.w);
+                ps[n] = a.s + f * (b.s - a.s);
+                pz[n] = a.z + f * (b.z - a.z);
+                ++n;
+            }
+            if (n < 2) continue;
+            // Clip to z >= 0 (above the cut).
+            if (pz[0] < 0.0 && pz[1] < 0.0) continue;
+            if (pz[0] < 0.0 || pz[1] < 0.0) {
+                const int lo = pz[0] < 0.0 ? 0 : 1;
+                const double f = pz[lo] / (pz[lo] - pz[1 - lo]);
+                ps[lo] = ps[lo] + f * (ps[1 - lo] - ps[lo]);
+                pz[lo] = 0.0;
+            }
+            lines[static_cast<size_t>(j)].push_back({ps[0], pz[0], ps[1], pz[1]});
+        }
+    }
+    plan = 0.0;
+    areas.assign(nc, 0.0);
+    using Interval = std::pair<double, double>;
+    // Merges intervals (sorted in place by their low end) into disjoint ones.
+    const auto merge = [](std::vector<Interval>& iv, std::vector<Interval>& merged) {
+        std::sort(iv.begin(), iv.end());
+        merged.clear();
+        for (const Interval& x : iv) {
+            if (merged.empty() || x.first > merged.back().second) {
+                merged.push_back(x);
+            } else {
+                merged.back().second = std::max(merged.back().second, x.second);
+            }
+        }
+    };
+    const auto length = [](const std::vector<Interval>& merged) {
+        double l = 0.0;
+        for (const Interval& x : merged) l += x.second - x.first;
+        return l;
+    };
+    std::vector<Interval> iv, plan_merged, merged;
+    for (const std::vector<Segment>& line : lines) {
+        if (line.empty()) continue;
+        iv.clear();
+        for (const Segment& g : line) iv.emplace_back(std::min(g.s0, g.s1), std::max(g.s0, g.s1));
+        merge(iv, plan_merged);
+        plan += length(plan_merged) * step;
+        for (size_t c = 0; c < nc; ++c) {
+            // The segments pushed by height x cot (no curtain: the ground under an overhang may be lit) with the plan.
+            iv.assign(plan_merged.begin(), plan_merged.end());
+            for (const Segment& g : line) {
+                const double a = g.s0 - g.z0 * cots[c], b = g.s1 - g.z1 * cots[c];
+                iv.emplace_back(std::min(a, b), std::max(a, b));
+            }
+            merge(iv, merged);
+            areas[c] += length(merged) * step;
+        }
+    }
+}
+
+// cot of the light-table elevations (k x lit_gain_step_rad, floor lit_gain_floor_rad; 0 at the zenith).
+std::vector<double> table_cots() {
+    std::vector<double> c(static_cast<size_t>(UnresolvedShadingModel::lit_gain_samples));
+    for (int k = 0; k < UnresolvedShadingModel::lit_gain_samples; ++k) {
+        const double e = std::clamp(k * UnresolvedShadingModel::lit_gain_step_rad, lit_gain_floor_rad, 0.5 * pi);
+        c[static_cast<size_t>(k)] = k == UnresolvedShadingModel::lit_gain_samples - 1 ? 0.0 : std::cos(e) / std::sin(e);
+    }
+    return c;
+}
+
+// [D] The mesh the light tables' cast shadow is measured on: LOD 1 (icosphere 4, the near drawn mesh; its regions
+// within ~1 % of LOD 0's, Task 13 diagnostic).
+constexpr int rock_shadow_lod = 1;
+
+}  // namespace
+
+double rock_mesh_shadow(const TemplateMesh& mesh, double cut, double elevation_rad, double azimuth_rad) {
+    const std::vector<double> cots{elevation_rad >= 0.5 * pi ? 0.0 : std::cos(elevation_rad) / std::sin(elevation_rad)};
+    std::vector<double> areas;
+    double plan = 0.0;
+    line_region_areas(mesh, cut, azimuth_rad, cots, plan, areas);
+    return plan > 0.0 ? areas[0] / plan - 1.0 : 0.0;
+}
+
 RockLightTables template_rock_light_tables(double burial_mean, double burial_sd) {
     static std::mutex mutex;
     static std::map<std::pair<double, double>, RockLightTables> cache;
@@ -569,6 +701,35 @@ RockLightTables template_rock_light_tables(double burial_mean, double burial_sd)
             }
         }
     }
+    // The cast shadow per cover from the mesh's ground regions (line_region_areas; Task 13: the columns' per-bin
+    // intervals read it ~5 % long on the Task 17 shapes): sigma = |P(e) u plan| / |plan| - 1, azimuth mean.
+    const std::vector<double> cots = table_cots();
+    std::vector<std::vector<double>> region_shadow(static_cast<size_t>(RockTemplates::count) * burial_nodes);
+    {
+        std::vector<std::thread> workers;
+        for (int id = 0; id < RockTemplates::count; ++id) {
+            workers.emplace_back([&, id] {
+                const TemplateMesh& mesh = templates.mesh(id, rock_shadow_lod);
+                std::vector<double> areas;
+                for (int q = 0; q < burial_nodes; ++q) {
+                    const double z = q - 0.5 * (burial_nodes - 1);
+                    const double f = std::clamp(burial_mean + burial_sd * z, 0.0, LunarRocks::max_burial_fraction);
+                    const double cut = templates.bottom_z(id) + f * (templates.top_z(id) - templates.bottom_z(id));
+                    std::vector<double>& s = region_shadow[static_cast<size_t>(id) * burial_nodes + static_cast<size_t>(q)];
+                    s.assign(n, 0.0);
+                    for (int a = 0; a < rock_light_azimuths; ++a) {
+                        double plan = 0.0;
+                        line_region_areas(mesh, cut, 2.0 * pi * (a + 0.5) / rock_light_azimuths, cots, plan, areas);
+                        if (!(plan > 0.0)) continue;
+                        for (int k = 0; k < n; ++k) {
+                            s[static_cast<size_t>(k)] += (areas[static_cast<size_t>(k)] / plan - 1.0) / rock_light_azimuths;
+                        }
+                    }
+                }
+            });
+        }
+        for (std::thread& w : workers) w.join();
+    }
     RockLightTables out;
     out.gain.assign(n, 0.0);
     out.shadow.assign(n, 0.0);
@@ -584,9 +745,11 @@ RockLightTables template_rock_light_tables(double burial_mean, double burial_sd)
                 if (t.z > cut) columns.push_back({t.x, t.y, t.z - cut, t.normal});
             }
             const RockLightTables one = rock_light_tables(columns, cell);
+            const std::vector<double>& shadow =
+                region_shadow[static_cast<size_t>(id) * burial_nodes + static_cast<size_t>(q)];
             for (int k = 0; k < n; ++k) {
                 out.gain[static_cast<size_t>(k)] += weight * one.gain[static_cast<size_t>(k)];
-                out.shadow[static_cast<size_t>(k)] += weight * one.shadow[static_cast<size_t>(k)];
+                out.shadow[static_cast<size_t>(k)] += weight * shadow[static_cast<size_t>(k)];
             }
             out.mean_tan += weight * one.mean_tan;
             weights += weight;
@@ -771,6 +934,110 @@ double trilinear_view(const std::vector<double>& t, double light_elevation_rad, 
 
 }  // namespace
 
+namespace {
+
+// The exposed part's faces as clipped polygons (heights above the cut) with their outward unit normals.
+struct ExposedPolygon {
+    std::vector<math::Vec3> points;
+    math::Vec3 normal;
+};
+std::vector<ExposedPolygon> exposed_polygons(const TemplateMesh& mesh, double cut) {
+    std::vector<ExposedPolygon> out;
+    for (size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
+        const math::Vec3 tri[3] = {mesh.vertices[static_cast<size_t>(mesh.indices[t])],
+                                   mesh.vertices[static_cast<size_t>(mesh.indices[t + 1])],
+                                   mesh.vertices[static_cast<size_t>(mesh.indices[t + 2])]};
+        ExposedPolygon p;
+        for (int i = 0; i < 3; ++i) {
+            const math::Vec3& a = tri[i];
+            const math::Vec3& b = tri[(i + 1) % 3];
+            const double da = a.z - cut, db = b.z - cut;
+            if (da >= 0.0) p.points.push_back({a.x, a.y, da});
+            if ((da >= 0.0) != (db >= 0.0)) {
+                const math::Vec3 x = a + (b - a) * (da / (da - db));
+                p.points.push_back({x.x, x.y, 0.0});
+            }
+        }
+        if (p.points.size() < 3) continue;
+        math::Vec3 n{0.0, 0.0, 0.0};
+        for (size_t i = 1; i + 1 < p.points.size(); ++i) {
+            n = n + math::cross(p.points[i] - p.points[0], p.points[i + 1] - p.points[0]);
+        }
+        const double len = std::sqrt(math::dot(n, n));
+        if (!(len > 0.0)) continue;
+        p.normal = n / len;
+        out.push_back(std::move(p));
+    }
+    return out;
+}
+
+// The polygons' areas the eye really sees from direction v (elevation ev, azimuth phi): a z-buffer of the orthographic
+// view over the projected part's bounding box (pixel zbuffer_pixel of the unit rock), per polygon the visible pixels x
+// the pixel area (Task 13: the Task 17 shapes are not convex, so a front face may be hidden behind another part; the
+// convex-hull rule summed every front face).
+constexpr double zbuffer_pixel = 2.1 / 128.0;  // [D] 1/61 of the rock size: the seen flux within ~1 % of 4x finer
+
+void visible_areas(const std::vector<ExposedPolygon>& polys, double ev, double phi, std::vector<double>& areas,
+                   std::vector<double>& depth, std::vector<int>& owner) {
+    const math::Vec3 v{std::cos(ev) * std::cos(phi), std::cos(ev) * std::sin(phi), std::sin(ev)};
+    const math::Vec3 u1{-std::sin(phi), std::cos(phi), 0.0};
+    const math::Vec3 u2 = math::cross(v, u1);
+    constexpr double px = zbuffer_pixel;
+    double x_lo = std::numeric_limits<double>::infinity(), x_hi = -x_lo, y_lo = x_lo, y_hi = -x_lo;
+    for (const ExposedPolygon& p : polys) {
+        for (const math::Vec3& q : p.points) {
+            const double a = math::dot(q, u1), b = math::dot(q, u2);
+            x_lo = std::min(x_lo, a), x_hi = std::max(x_hi, a), y_lo = std::min(y_lo, b), y_hi = std::max(y_hi, b);
+        }
+    }
+    areas.assign(polys.size(), 0.0);
+    if (!(x_hi > x_lo) || !(y_hi > y_lo)) return;
+    const int nx = static_cast<int>(std::ceil((x_hi - x_lo) / px)) + 1;
+    const int ny = static_cast<int>(std::ceil((y_hi - y_lo) / px)) + 1;
+    const size_t cells = static_cast<size_t>(nx) * static_cast<size_t>(ny);
+    depth.assign(cells, -std::numeric_limits<double>::infinity());
+    owner.assign(cells, -1);
+    for (size_t f = 0; f < polys.size(); ++f) {
+        const ExposedPolygon& p = polys[f];
+        if (math::dot(p.normal, v) <= 0.0) continue;  // back face
+        for (size_t k = 1; k + 1 < p.points.size(); ++k) {
+            const math::Vec3* q[3] = {&p.points[0], &p.points[k], &p.points[k + 1]};
+            double sx[3], sy[3], sz[3];
+            for (int i = 0; i < 3; ++i) {
+                sx[i] = (math::dot(*q[i], u1) - x_lo) / px;
+                sy[i] = (math::dot(*q[i], u2) - y_lo) / px;
+                sz[i] = math::dot(*q[i], v);
+            }
+            const double det = (sx[1] - sx[0]) * (sy[2] - sy[0]) - (sx[2] - sx[0]) * (sy[1] - sy[0]);
+            if (det == 0.0) continue;
+            const int i0 = std::max(0, static_cast<int>(std::floor(std::min({sx[0], sx[1], sx[2]}))));
+            const int i1 = std::min(nx - 1, static_cast<int>(std::floor(std::max({sx[0], sx[1], sx[2]}))));
+            const int j0 = std::max(0, static_cast<int>(std::floor(std::min({sy[0], sy[1], sy[2]}))));
+            const int j1 = std::min(ny - 1, static_cast<int>(std::floor(std::max({sy[0], sy[1], sy[2]}))));
+            for (int i = i0; i <= i1; ++i) {
+                const double x = i + 0.5;
+                for (int j = j0; j <= j1; ++j) {
+                    const double y = j + 0.5;
+                    const double w1 = ((x - sx[0]) * (sy[2] - sy[0]) - (sx[2] - sx[0]) * (y - sy[0])) / det;
+                    const double w2 = ((sx[1] - sx[0]) * (y - sy[0]) - (x - sx[0]) * (sy[1] - sy[0])) / det;
+                    const double w0 = 1.0 - w1 - w2;
+                    if (w0 < 0.0 || w1 < 0.0 || w2 < 0.0) continue;
+                    const double z = w0 * sz[0] + w1 * sz[1] + w2 * sz[2];
+                    const size_t idx = static_cast<size_t>(i) * static_cast<size_t>(ny) + static_cast<size_t>(j);
+                    if (z <= depth[idx]) continue;
+                    depth[idx] = z;
+                    owner[idx] = static_cast<int>(f);
+                }
+            }
+        }
+    }
+    for (size_t i = 0; i < cells; ++i) {
+        if (owner[i] >= 0) areas[static_cast<size_t>(owner[i])] += px * px;
+    }
+}
+
+}  // namespace
+
 RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut) {
     using M = UnresolvedShadingModel;
     RockViewTables out;
@@ -782,12 +1049,26 @@ RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut) {
     std::vector<ExposedFace> faces;
     exposed_part(mesh, cut, points, faces);
     if (points.size() < 3) return out;
-    const double plan_area = polygon_area(projection(points, 0.0, 1.0, 0.0));
-    if (!(plan_area > 0.0)) return out;
-    struct SeenFace {
-        double weight, mu, a, b;
-    };
-    std::vector<SeenFace> seen;
+    // The hull regions carry the plan view too (Task 13): each point also at the ground (height 0), so a region is
+    // the hull of the pushed points and the plan view - the ground under a bulge, hidden from the zenith but lit at a
+    // low Sun, belongs to the plan's "1" of the ground loss 1 + sigma + X, not to the excess X as well.
+    {
+        const size_t n = points.size();
+        for (size_t i = 0; i < n; ++i) {
+            if (points[i].z > 0.0) points.push_back({points[i].x, points[i].y, 0.0});
+        }
+    }
+    const double hull_plan_area = polygon_area(projection(points, 0.0, 1.0, 0.0));
+    if (!(hull_plan_area > 0.0)) return out;
+    const std::vector<ExposedPolygon> polys = exposed_polygons(mesh, cut);
+    // The view elevations' cot (0 at the zenith) for the line regions.
+    std::vector<double> view_cots(static_cast<size_t>(M::view_elevation_samples));
+    for (int kv = 0; kv < M::view_elevation_samples; ++kv) {
+        const double ev = view_elevation_at(kv);
+        view_cots[static_cast<size_t>(kv)] = kv == M::view_elevation_samples - 1 ? 0.0 : std::cos(ev) / std::sin(ev);
+    }
+    std::vector<double> region_areas, seen_areas, depth;
+    std::vector<int> owner;
     for (int yaw = 0; yaw < rock_view_yaws; ++yaw) {
         const double psi = 2.0 * pi * (yaw + 0.5) / rock_view_yaws;  // the light's azimuth
         std::vector<std::vector<Point2>> light_regions(M::lit_gain_samples);
@@ -795,38 +1076,40 @@ RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut) {
             const double e = light_elevation_at(k);
             light_regions[static_cast<size_t>(k)] = projection(points, std::cos(e) / std::sin(e), std::cos(psi), std::sin(psi));
         }
-        for (int kv = 0; kv < M::view_elevation_samples; ++kv) {
-            const double ev = view_elevation_at(kv);
-            const double sev = std::sin(ev), cev = std::cos(ev);
-            for (int ka = 0; ka < M::view_azimuth_samples; ++ka) {
-                const double phi = psi + ka * M::view_azimuth_step_rad;  // the eye's azimuth
+        for (int ka = 0; ka < M::view_azimuth_samples; ++ka) {
+            const double phi = psi + ka * M::view_azimuth_step_rad;  // the eye's azimuth
+            // The ground hidden from the eye (the light tables' measure: line regions, plan view included).
+            double plan = 0.0;
+            line_region_areas(mesh, cut, phi, view_cots, plan, region_areas);
+            if (!(plan > 0.0)) continue;
+            for (int kv = 0; kv < M::view_elevation_samples; ++kv) {
+                const double ev = view_elevation_at(kv);
+                const double sev = std::sin(ev), cev = std::cos(ev);
+                const double hidden = region_areas[static_cast<size_t>(kv)] / plan - 1.0;
                 const std::vector<Point2> view_region = projection(points, cev / sev, std::cos(phi), std::sin(phi));
                 const double view_area = polygon_area(view_region);
+                // The faces the eye sees (z-buffer): visible area, mu, and the light's cosine as ce x a + se x b.
+                visible_areas(polys, ev, phi, seen_areas, depth, owner);
                 const math::Vec3 v{cev * std::cos(phi), cev * std::sin(phi), sev};
-                // The faces the eye sees: projected area, mu, and the light's cosine as ce x a + se x b.
-                seen.clear();
-                double den = 0.0;
-                for (const ExposedFace& f : faces) {
-                    const double mu = math::dot(f.normal, v);
-                    if (mu <= 0.0) continue;
-                    den += f.area * mu;
-                    seen.push_back({f.area * mu, mu, f.normal.x * std::cos(psi) + f.normal.y * std::sin(psi), f.normal.z});
-                }
                 for (int k = 0; k < M::lit_gain_samples; ++k) {
                     const double e = light_elevation_at(k);
                     const double se = std::sin(e), ce = std::cos(e);
                     const size_t i = view_index(kv, ka, k);
                     out.excess[i] += (view_area - intersection_area(view_region, light_regions[static_cast<size_t>(k)])) /
-                                     plan_area;
-                    out.hidden[i] += view_area / plan_area - 1.0;
-                    // Seen radiance: Lommel-Seeliger per seen face, projected-area weighted, over the flat ground's.
+                                     hull_plan_area;
+                    out.hidden[i] += hidden;
+                    // Seen radiance: Lommel-Seeliger per visible face area over the flat ground's, per plan area (the
+                    // image of a plan area A seen at elevation ev covers A sin ev).
                     double num = 0.0;
-                    for (const SeenFace& f : seen) {
-                        const double mu0 = ce * f.a + se * f.b;
-                        if (mu0 > 0.0) num += f.weight * mu0 / (mu0 + f.mu);
+                    for (size_t f = 0; f < polys.size(); ++f) {
+                        if (!(seen_areas[f] > 0.0)) continue;
+                        const math::Vec3& nrm = polys[f].normal;
+                        const double mu = math::dot(nrm, v);
+                        const double mu0 = ce * (nrm.x * std::cos(psi) + nrm.y * std::sin(psi)) + se * nrm.z;
+                        if (mu0 > 0.0 && mu > 0.0) num += seen_areas[f] * mu0 / (mu0 + mu);
                     }
                     const double flat = se / (se + sev);
-                    if (den > 0.0) out.flux[i] += num / den / flat * (view_area / plan_area);
+                    out.flux[i] += num / flat / (plan * sev);
                 }
             }
         }
@@ -847,7 +1130,6 @@ namespace {
 constexpr int rock_view_burial_nodes = 5;  // [D] N in [-2, 2] step 1 (the tails beyond weigh < 3 %: the view terms vary slowly with the burial)
 constexpr int rock_view_lod = 3;           // [D] icosphere 2, 162 vertices: the polygons' areas within ~1 % of the next finer LOD (Task 11 test); the Task 17 relief is mostly below its spacing, so the convex-hull regions below are close
 // Bump when the tables' algorithm changes (the key also holds the inputs).
-constexpr std::uint64_t rock_view_cache_version = 1;
 constexpr std::uint64_t rock_view_cache_magic = 0x5356'5452'4F43'4B31ULL;  // "SVTROCK1"
 
 struct Fnv {
@@ -881,8 +1163,8 @@ bool read_rock_view_cache(const std::filesystem::path& file, std::uint64_t key, 
     return true;
 }
 
-void write_rock_view_cache(const std::filesystem::path& file, std::uint64_t key, const RockViewModel& m) {
-    if (m.excess.size() != view_table_size || m.gain_ratio.size() != view_table_size) return;
+bool write_rock_view_cache(const std::filesystem::path& file, std::uint64_t key, const RockViewModel& m) {
+    if (m.excess.size() != view_table_size || m.gain_ratio.size() != view_table_size) return false;
     std::error_code ec;
     std::filesystem::create_directories(file.parent_path(), ec);
     // A unique temporary beside it, then renamed over the cache (no reader sees a half-written file).
@@ -894,7 +1176,7 @@ void write_rock_view_cache(const std::filesystem::path& file, std::uint64_t key,
     tmp += "." + std::to_string(unique.h) + ".tmp";
     {
         std::ofstream outf(tmp, std::ios::binary | std::ios::trunc);
-        if (!outf) return;
+        if (!outf) return false;
         const std::uint64_t head[3] = {rock_view_cache_magic, key, view_table_size};
         outf.write(reinterpret_cast<const char*>(head), sizeof head);
         outf.write(reinterpret_cast<const char*>(m.excess.data()),
@@ -904,11 +1186,16 @@ void write_rock_view_cache(const std::filesystem::path& file, std::uint64_t key,
         if (!outf) {
             outf.close();
             std::filesystem::remove(tmp, ec);
-            return;
+            return false;
         }
     }
     std::filesystem::rename(tmp, file, ec);
-    if (ec) std::filesystem::remove(tmp, ec);
+    if (ec) {
+        std::error_code ignored;
+        std::filesystem::remove(tmp, ignored);
+        return false;
+    }
+    return true;
 }
 
 namespace {
@@ -946,16 +1233,23 @@ std::uint64_t rock_view_cache_key(double burial_mean, double burial_sd) {
     return f.h;
 }
 
-RockViewModel template_rock_view_tables(double burial_mean, double burial_sd, const std::filesystem::path& cache_file) {
+RockViewModel template_rock_view_tables(double burial_mean, double burial_sd, const std::filesystem::path& cache_file,
+                                        RockViewCacheStatus* status) {
     static std::mutex mutex;
     static std::map<std::pair<double, double>, RockViewModel> cache;
     const std::lock_guard<std::mutex> lock(mutex);
+    if (status != nullptr) *status = RockViewCacheStatus::none;
     if (const auto it = cache.find({burial_mean, burial_sd}); it != cache.end()) return it->second;
     RockViewModel out;
     const std::uint64_t key = cache_file.empty() ? 0 : rock_view_cache_key(burial_mean, burial_sd);
-    if (cache_file.empty() || !read_rock_view_cache(cache_file, key, out)) {
+    if (!cache_file.empty() && read_rock_view_cache(cache_file, key, out)) {
+        if (status != nullptr) *status = RockViewCacheStatus::read;
+    } else {
         out = compute_template_rock_view_tables(burial_mean, burial_sd);
-        if (!cache_file.empty()) write_rock_view_cache(cache_file, key, out);
+        if (!cache_file.empty()) {
+            const bool written = write_rock_view_cache(cache_file, key, out);
+            if (status != nullptr) *status = written ? RockViewCacheStatus::written : RockViewCacheStatus::write_failed;
+        }
     }
     cache.emplace(std::make_pair(burial_mean, burial_sd), out);
     return out;

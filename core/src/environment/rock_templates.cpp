@@ -1150,7 +1150,14 @@ std::optional<RockTemplates::ArcPeak> RockTemplates::arc_peak(int id, const ArcQ
             // The plane along the arc: kz z + kc cos + ks sin = const + alpha cos + beta sin; its maximum on the circle.
             const double alpha = q.kz * (t.zx * q.ax + t.zy * q.ay) + q.kc;
             const double beta = q.kz * (t.zx * q.bx + t.zy * q.by) + q.ks;
-            if (const double m = std::sqrt(alpha * alpha + beta * beta); m > 0.0) offer(t, alpha / m, beta / m, -1, 0.0, 0.0);
+            if (const double m = std::sqrt(alpha * alpha + beta * beta); m > 0.0) {
+                offer(t, alpha / m, beta / m, -1, 0.0, 0.0);
+            } else {
+                // Constant along the arc on this facet (a facet parallel to the pad plane, Task 17 re-review M1): every
+                // arc point inside the triangle is a maximum; the arc's middle stands for them (the edge crossings
+                // below cover an arc that leaves the triangle).
+                offer(t, c_mid, s_mid, -1, 0.0, 0.0);
+            }
             // The arc's crossings of the three edges: p + q cos + s sin = 0 on the unit circle.
             for (size_t e = 0; e < 3; ++e) {
                 const double pe = ep[e], qe = eq3[e], se = es3[e];

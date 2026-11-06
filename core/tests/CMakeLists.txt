@@ -184,6 +184,7 @@ add_executable(starsim_core_tests
     test_lunar_rocks.cpp
     test_hapke.cpp
     test_unresolved_shading.cpp
+    test_rock_statistics_exact.cpp
     test_detailed_lunar_terrain.cpp
     test_mission_start_places.cpp
     test_contact_primitives.cpp

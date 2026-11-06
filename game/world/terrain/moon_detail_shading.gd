@@ -37,6 +37,11 @@ static func configure(core: StarsimCore, material: ShaderMaterial, detail_on: bo
 			(Time.get_ticks_usec() - start_us) * 1.0e-3))
 	if not bool(stats.get("present", false)):
 		return {}
+	# Task 13 (review n4 of Task 12): an installed build may not write data/cache - then the ~8 s table build repeats
+	# at every start; say so once.
+	if int(stats.get("rock_view_cache_status", 0)) == 3:
+		push_warning("[MoonDetailShading] rock view tables could not be cached in %s (built at every start)"
+				% String(stats.get("rock_view_cache_file", "")))
 	var drawn := PackedFloat32Array(Array(stats["drawn_table"]))
 	material.set_shader_parameter("detail_total_slope_variance", float(stats["total_slope_variance"]))
 	material.set_shader_parameter("detail_drawn_table", drawn)
