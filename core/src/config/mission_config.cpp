@@ -89,8 +89,7 @@ int positive_integer(const detail::Document& doc, const toml::table& t, std::str
 // The crossrange reach is what the entry guidance can fly with the vehicle (gnc::assess_entry_reach, planner plan Task 7).
 void reject_crossrange_key(const detail::Document& doc, const toml::table& deorbit) {
     if (deorbit.contains("max_crossrange_km")) {
-        doc.fail("deorbit: max_crossrange_km wird aus dem Fahrzeug abgeleitet (Reichweite der Eintrittsführung): "
-                 "Schlüssel entfernen");
+        doc.fail("deorbit: max_crossrange_km is derived from the vehicle (reach of the entry guidance): remove the key");
     }
 }
 

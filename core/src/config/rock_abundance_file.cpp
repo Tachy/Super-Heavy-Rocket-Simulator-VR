@@ -2,6 +2,7 @@
 
 #include <fstream>
 
+#include "starsim/config/data_missing.hpp"
 #include "toml_document.hpp"
 
 namespace starsim::config {
@@ -9,8 +10,9 @@ namespace starsim::config {
 namespace {
 
 [[noreturn]] void missing(const std::filesystem::path& path) {
-    throw ConfigError("Felsenhäufigkeitskarte (Diviner) fehlt: " + path.string() +
-                      " - bitte python tools/data_pipeline/fetch.py diviner_rock_abundance ausführen");
+    throw DataMissing(report::make(report::Code::data_rock_abundance_missing),
+                      "rock abundance map (Diviner) missing: " + path.string() +
+                      " - run python tools/data_pipeline/fetch.py diviner_rock_abundance");
 }
 
 }  // namespace

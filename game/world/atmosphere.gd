@@ -1277,8 +1277,9 @@ func _images_3d(data: PackedFloat32Array, size: Vector3i) -> Array[Image]:
 
 func _upload(result: Dictionary) -> void:
 	if not result.get("ok", false):
-		status_text = str(result.get("error", "Atmosphäre konnte nicht geladen werden"))
-		push_error("Atmosphere: " + status_text)
+		# The player sees the report text (data.atmosphere_unavailable); the cause stays in the English log.
+		status_text = I18n.report_text(result.get("report", {"code": "data.atmosphere_unavailable"}))
+		push_error("Atmosphere: " + str(result.get("error", "load failed")))
 		return
 	parameters = result["parameters"]
 	var s_size: Vector3i = result["scattering_size"]

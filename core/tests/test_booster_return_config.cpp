@@ -370,7 +370,7 @@ TEST_CASE("A returning booster without its return keys is refused", "[gnc][boost
             FAIL("loaded without " << key);
         } catch (const config::ConfigError& e) {
             const std::string what = e.what();
-            CHECK(what.find("Rückkehr") != std::string::npos);  // German, naming the key and the file
+            CHECK(what.find("return") != std::string::npos);  // English, naming the key and the file
             CHECK(what.find(key) != std::string::npos);
             CHECK(what.find(file) != std::string::npos);
         }

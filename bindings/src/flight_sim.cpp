@@ -189,7 +189,7 @@ godot::Dictionary FlightSim::result(int64_t id) const {
     d["report"] = report_dict(report::Report{});
     if (!runner_ || id <= 0) {
         d["done"] = true;
-        d["report"] = legacy_report("unknown command id");
+        d["report"] = report_dict(report::make(report::Code::command_unknown_id));
         return d;
     }
     const auto r = runner_->result(static_cast<std::uint64_t>(id));
@@ -197,13 +197,15 @@ godot::Dictionary FlightSim::result(int64_t id) const {
     d["done"] = true;
     const auto it = commands_.find(static_cast<std::uint64_t>(id));
     if (r.threw) {
-        d["report"] = legacy_report(r.error);
+        // The exception text is for the developer log; the player gets the generic internal-error code.
+        godot::UtilityFunctions::push_error(godot::String("FlightSim: command failed: ") + godot::String::utf8(r.error.c_str()));
+        d["report"] = report_dict(report::make(report::Code::command_internal_error));
     } else if (it != commands_.end()) {
         d["ok"] = it->second.second->ok;
         d["report"] = it->second.second->report;
         d["data"] = it->second.second->data;
     } else {
-        d["report"] = legacy_report("unknown command id");
+        d["report"] = report_dict(report::make(report::Code::command_unknown_id));
     }
     return d;
 }
@@ -695,7 +697,9 @@ int64_t FlightSim::set_crew_escape(const godot::String& id) {
         try {
             session.set_crew_escape(config::load_crew_escape(config_dir_, crew_id));
         } catch (const std::exception& e) {
-            return Outcome{false, legacy_report(e.what())};
+            // The config error text (file, key) is for the developer log.
+            godot::UtilityFunctions::push_error(godot::String("FlightSim.set_crew_escape: ") + godot::String::utf8(e.what()));
+            return Outcome{false, report_dict(report::make(report::Code::command_crew_escape_config_invalid))};
         }
         return Outcome{true, {}};
     }));
@@ -703,21 +707,23 @@ int64_t FlightSim::set_crew_escape(const godot::String& id) {
 
 int64_t FlightSim::refuelling_campaign(const godot::Dictionary& params) {
     sim::CampaignLevers levers;
-    std::string refusal;
+    report::Report refusal;  // ok = no lever refused
     const godot::Array keys = params.keys();
-    for (int64_t k = 0; k < keys.size() && refusal.empty(); ++k) {
+    for (int64_t k = 0; k < keys.size() && refusal.ok(); ++k) {
         const godot::String key = keys[k];
         const godot::Variant value = params[keys[k]];
         if (key == "reference_phasing") {  // f1: the r5 single phasing orbit
             if (value.get_type() != godot::Variant::BOOL) {
-                refusal = "Kampagne: 'reference_phasing' ist kein Wahrheitswert";
+                refusal = report::make(report::Code::command_campaign_lever_not_bool,
+                                       {report::data_name("lever", "reference_phasing")});
                 break;
             }
             levers.reference_phasing = value;
             continue;
         }
         if (value.get_type() != godot::Variant::FLOAT && value.get_type() != godot::Variant::INT) {
-            refusal = "Kampagne: '" + std::string(key.utf8().get_data()) + "' ist keine Zahl";
+            refusal = report::make(report::Code::command_campaign_lever_not_number,
+                                   {report::data_name("lever", key.utf8().get_data())});
             break;
         }
         const double v = value;
@@ -729,12 +735,13 @@ int64_t FlightSim::refuelling_campaign(const godot::Dictionary& params) {
         else if (key == "initial_t") levers.depot_initial_kg = v * 1e3;
         else if (key == "insulation") levers.depot_insulation_scale = v;
         else if (key == "hls_wait_d") levers.hls_wait_s = v * constants::seconds_per_day;
-        else refusal = "Kampagne: unbekannter Parameter '" + std::string(key.utf8().get_data()) + "'";
+        else refusal = report::make(report::Code::command_campaign_lever_unknown,
+                                    {report::data_name("lever", key.utf8().get_data())});
     }
     report::Report lever_error;
-    if (refusal.empty()) lever_error = sim::campaign_lever_error(levers);
+    if (refusal.ok()) lever_error = sim::campaign_lever_error(levers);
     return static_cast<int64_t>(post("refuelling_campaign", [this, levers, refusal, lever_error](sim::FlightSession&) {
-        if (!refusal.empty()) return Outcome{false, legacy_report(refusal)};
+        if (!refusal.ok()) return Outcome{false, report_dict(refusal)};
         if (!lever_error.ok()) return Outcome{false, report_dict(lever_error)};
         const auto report = sim::plan_refuelling_campaign({ephemeris_, earth_, moon_, time_, config_dir_}, levers);
         return Outcome{report.result.closes, report_dict(report.result.reason),

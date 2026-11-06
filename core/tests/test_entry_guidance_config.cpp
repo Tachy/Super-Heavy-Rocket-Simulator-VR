@@ -108,7 +108,7 @@ TEST_CASE("Ship without entry keys is refused", "[ship][entry][config]") {
             FAIL("loaded without " << key);
         } catch (const config::ConfigError& e) {
             const std::string what = e.what();
-            CHECK(what.find("Eintrittsführung") != std::string::npos);  // German, naming the key and the file
+            CHECK(what.find("entry guidance") != std::string::npos);  // English, naming the key and the file
             CHECK(what.find(key) != std::string::npos);
             CHECK(what.find("starship_block3.toml") != std::string::npos);
         }

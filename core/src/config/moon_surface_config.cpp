@@ -23,34 +23,34 @@ public:
 
     const toml::table& table(const toml::table& parent, std::string_view key) const {
         if (auto t = parent[key].as_table()) return *t;
-        fail("Tabelle [" + name(key) + "] fehlt");
+        fail("table [" + name(key) + "] missing");
     }
     double number(const toml::table& t, std::string_view key) const {
         const auto v = t[key].value<double>();
-        if (!v) fail("Schlüssel '" + name(key) + "' fehlt (Zahl erwartet)");
-        if (!std::isfinite(*v)) fail("Schlüssel '" + name(key) + "' muss eine endliche Zahl sein");
+        if (!v) fail("key '" + name(key) + "' missing (number expected)");
+        if (!std::isfinite(*v)) fail("key '" + name(key) + "' must be a finite number");
         return *v;
     }
     double positive(const toml::table& t, std::string_view key) const {
         const double v = number(t, key);
-        if (!(v > 0.0)) fail("Schlüssel '" + name(key) + "' muss positiv sein");
+        if (!(v > 0.0)) fail("key '" + name(key) + "' must be positive");
         return v;
     }
     double non_negative(const toml::table& t, std::string_view key) const {
         const double v = number(t, key);
-        if (v < 0.0) fail("Schlüssel '" + name(key) + "' darf nicht negativ sein");
+        if (v < 0.0) fail("key '" + name(key) + "' must not be negative");
         return v;
     }
     double fraction(const toml::table& t, std::string_view key) const {
         const double v = non_negative(t, key);
-        if (v > 1.0) fail("Schlüssel '" + name(key) + "' muss zwischen 0 und 1 liegen");
+        if (v > 1.0) fail("key '" + name(key) + "' must be between 0 and 1");
         return v;
     }
     std::string choice(const toml::table& t, std::string_view key, std::string_view a, std::string_view b) const {
         const auto v = t[key].value<std::string>();
-        if (!v) fail("Schlüssel '" + name(key) + "' fehlt (Text erwartet)");
+        if (!v) fail("key '" + name(key) + "' missing (text expected)");
         if (*v != a && *v != b) {
-            fail("Schlüssel '" + name(key) + "': \"" + *v + "\" ungültig (erlaubt: \"" + std::string(a) + "\", \"" +
+            fail("key '" + name(key) + "': \"" + *v + "\" invalid (allowed: \"" + std::string(a) + "\", \"" +
                  std::string(b) + "\")");
         }
         return *v;
@@ -74,7 +74,7 @@ SizeFrequency read_sfd(const detail::Document& doc, const toml::table& parent, c
     s.exponent = r.positive(t, "exponent");
     s.min_diameter_m = r.positive(t, "min_diameter_m");
     s.max_diameter_m = r.positive(t, "max_diameter_m");
-    if (s.max_diameter_m <= s.min_diameter_m) r.fail("'" + r.name("max_diameter_m") + "' muss größer als min_diameter_m sein");
+    if (s.max_diameter_m <= s.min_diameter_m) r.fail("'" + r.name("max_diameter_m") + "' must be greater than min_diameter_m");
     return s;
 }
 
@@ -93,18 +93,18 @@ MoonSurfaceConfig load_moon_surface_config(const std::filesystem::path& file) {
     cfg.craters.rim_height_to_diameter = c.non_negative(craters, "rim_height_to_diameter");
     cfg.craters.degraded_fraction = c.fraction(craters, "degraded_fraction");
     if (cfg.craters.depth_to_diameter_degraded > cfg.craters.depth_to_diameter_fresh) {
-        c.fail("'craters.depth_to_diameter_degraded' darf nicht größer als depth_to_diameter_fresh sein");
+        c.fail("'craters.depth_to_diameter_degraded' must not exceed depth_to_diameter_fresh");
     }
 
     const auto& roughness = top.table(doc.root, "roughness");
     const Reader g(doc, "roughness");
     cfg.roughness.hurst_exponent = g.positive(roughness, "hurst_exponent");
-    if (cfg.roughness.hurst_exponent >= 1.0) g.fail("'roughness.hurst_exponent' muss kleiner als 1 sein");
+    if (cfg.roughness.hurst_exponent >= 1.0) g.fail("'roughness.hurst_exponent' must be less than 1");
     cfg.roughness.rms_height_at_baseline_m = g.positive(roughness, "rms_height_at_baseline_m");
     cfg.roughness.baseline_m = g.positive(roughness, "baseline_m");
     cfg.roughness.rms_height_measured_total_m = g.positive(roughness, "rms_height_measured_total_m");
     if (cfg.roughness.rms_height_at_baseline_m > cfg.roughness.rms_height_measured_total_m) {
-        g.fail("'roughness.rms_height_at_baseline_m' (Rest) darf nicht größer als rms_height_measured_total_m sein");
+        g.fail("'roughness.rms_height_at_baseline_m' (remainder) must not exceed rms_height_measured_total_m");
     }
 
     const auto& rocks = top.table(doc.root, "rocks");
@@ -121,10 +121,10 @@ MoonSurfaceConfig load_moon_surface_config(const std::filesystem::path& file) {
     const auto& hapke = top.table(doc.root, "hapke");
     const Reader h(doc, "hapke");
     cfg.hapke.w = h.positive(hapke, "w");
-    if (cfg.hapke.w >= 1.0) h.fail("'hapke.w' muss kleiner als 1 sein");
+    if (cfg.hapke.w >= 1.0) h.fail("'hapke.w' must be less than 1");
     cfg.hapke.b = h.fraction(hapke, "b");
     cfg.hapke.c = h.number(hapke, "c");
-    if (std::abs(cfg.hapke.c) > 1.0) h.fail("'hapke.c' muss zwischen -1 und 1 liegen (Hapke 2012)");
+    if (std::abs(cfg.hapke.c) > 1.0) h.fail("'hapke.c' must be between -1 and 1 (Hapke 2012)");
     cfg.hapke.bs0 = h.non_negative(hapke, "bs0");
     cfg.hapke.hs = h.non_negative(hapke, "hs");
     cfg.hapke.bc0 = h.non_negative(hapke, "bc0");

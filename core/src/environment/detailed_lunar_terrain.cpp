@@ -185,9 +185,9 @@ DetailedLunarTerrain::DetailedLunarTerrain(std::shared_ptr<const LunarTerrain> l
                                            std::shared_ptr<const LunarRocks> rocks, SurfaceDetailOptions options)
     : lola_(std::move(lola)), detail_(std::move(detail)), rocks_(std::move(rocks)), options_(options),
       cache_(std::make_unique<ContactCache>()) {
-    if (!lola_) throw std::invalid_argument("DetailedLunarTerrain: kein Mondgelaende (LOLA) uebergeben");
-    if (options_.detail && !detail_) throw std::invalid_argument("DetailedLunarTerrain: Oberflaechendetail fehlt");
-    if (rocks_on() && !rocks_) throw std::invalid_argument("DetailedLunarTerrain: Felsbrocken fehlen");
+    if (!lola_) throw std::invalid_argument("DetailedLunarTerrain: no lunar terrain (LOLA) given");
+    if (options_.detail && !detail_) throw std::invalid_argument("DetailedLunarTerrain: surface detail missing");
+    if (rocks_on() && !rocks_) throw std::invalid_argument("DetailedLunarTerrain: rocks missing");
     sphere_radius_m_ = lola_->sphere_radius_m();
     max_height_m_ = lola_->max_height_m();
     if (options_.detail) {
@@ -228,7 +228,7 @@ double DetailedLunarTerrain::height_limited_m(const Vec3& unit, double min_wavel
 void DetailedLunarTerrain::heights_limited_m(const std::vector<Vec3>& units, double min_wavelength_m,
                                              double min_rock_diameter_m, std::vector<double>& heights_m) const {
     if (heights_m.size() != units.size()) {
-        throw std::invalid_argument("DetailedLunarTerrain::heights_limited_m: Richtungen und Hoehen verschieden lang");
+        throw std::invalid_argument("DetailedLunarTerrain::heights_limited_m: directions and heights differ in length");
     }
     starsim::environment::detail::for_each_index_budgeted(static_cast<int>(units.size()), [&](int k) {
         const auto i = static_cast<size_t>(k);
@@ -288,12 +288,12 @@ std::optional<std::pair<double, Vec3>> DetailedLunarTerrain::contact_rock_top(co
 }
 
 const LunarSurfaceDetail& DetailedLunarTerrain::detail() const {
-    if (!detail_) throw std::logic_error("DetailedLunarTerrain: kein Oberflaechendetail geladen");
+    if (!detail_) throw std::logic_error("DetailedLunarTerrain: no surface detail loaded");
     return *detail_;
 }
 
 const LunarRocks& DetailedLunarTerrain::rocks() const {
-    if (!rocks_) throw std::logic_error("DetailedLunarTerrain: keine Felsbrocken geladen");
+    if (!rocks_) throw std::logic_error("DetailedLunarTerrain: no rocks loaded");
     return *rocks_;
 }
 

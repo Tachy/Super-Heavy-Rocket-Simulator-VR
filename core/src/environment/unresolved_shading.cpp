@@ -154,7 +154,7 @@ double measured_eta(const LunarRocks& rocks) {
         weighted += cover * sum / count;
         weights += cover;
     }
-    if (weights <= 0.0) throw std::runtime_error("Unaufgeloeste Schattierung: keine Steine zum Vermessen");
+    if (weights <= 0.0) throw std::runtime_error("unresolved shading: no rocks to measure");
     return weighted / weights;
 }
 
@@ -241,7 +241,7 @@ UnresolvedShadingModel make_unresolved_shading_model(const LunarSurfaceDetail& d
     // Regolith: octave k's nodes have variance (scale x relative_amplitude)^2 / 3 = scale^2 (s / baseline)^(2 H) (node
     // values uniform in [-1, 1]); its mean square slope is g x that / s^2 (value_noise_gradient_factor).
     const auto& octaves = detail.roughness_octaves();
-    if (octaves.empty()) throw std::invalid_argument("Unaufgeloeste Schattierung: keine Rauheitsoktaven");
+    if (octaves.empty()) throw std::invalid_argument("unresolved shading: no roughness octaves");
     const double g_noise = value_noise_gradient_factor();
     const double scale = detail.roughness_scale_m();
     for (const auto& o : octaves) {
@@ -323,7 +323,7 @@ UnresolvedShadingModel make_unresolved_shading_model(const LunarSurfaceDetail& d
         const double globe_mean_tan = 0.5 * pi * std::tan(cfg.hapke.theta_bar_rad);
         const double regolith_mean_tan = (globe_mean_tan - m.rock_mean_tan) / (1.0 - m.rock_area_share);
         if (!(regolith_mean_tan > 0.0)) {
-            throw std::invalid_argument("Unaufgeloeste Schattierung: die Steine tragen mehr Hangneigung als der Hapke-Fit");
+            throw std::invalid_argument("unresolved shading: the rocks carry more slope than the Hapke fit");
         }
         const double t = 2.0 / pi * regolith_mean_tan;
         m.total_slope_variance = pi * t * t;

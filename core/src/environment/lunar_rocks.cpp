@@ -46,18 +46,18 @@ double burial_cut(const RockTemplates& templates, int id, double f) {
 LunarRocks::LunarRocks(std::shared_ptr<const LunarSurfaceDetail> detail,
                        std::shared_ptr<const RockAbundanceMap> abundance)
     : detail_(std::move(detail)), abundance_(std::move(abundance)) {
-    if (!detail_) throw std::invalid_argument("LunarRocks: keine Oberflaechendetails uebergeben");
+    if (!detail_) throw std::invalid_argument("LunarRocks: no surface detail given");
     const auto& rocks = detail_->config().rocks;
     const auto& sfd = rocks.sfd;
     if (sfd.form != "power" && sfd.form != "exponential") {
-        throw std::invalid_argument("LunarRocks: unbekannte Groessenverteilung '" + sfd.form + "'");
+        throw std::invalid_argument("LunarRocks: unknown size distribution '" + sfd.form + "'");
     }
     if (rocks.abundance_source == "uniform") {
         abundance_ = nullptr;
     } else if (rocks.abundance_source == "diviner") {
         // Without a map (optional data part) the global statistical abundance applies, as for "uniform".
     } else {
-        throw std::invalid_argument("LunarRocks: unbekannte abundance_source '" + rocks.abundance_source + "'");
+        throw std::invalid_argument("LunarRocks: unknown abundance_source '" + rocks.abundance_source + "'");
     }
     if (abundance_ && (abundance_->lines < 2 || abundance_->samples < 2 || abundance_->lat_limit_rad <= 0.0 ||
                        abundance_->area_fraction.size() !=

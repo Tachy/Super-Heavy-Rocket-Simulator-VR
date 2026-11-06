@@ -524,7 +524,7 @@ TEST_CASE("A snapshot is written next to a foreign file whose name has no ANSI m
     // make the write fail (it threw "No mapping for the Unicode character" on Windows).
     const auto dir = unique_temp("weather_unicode_dir");
     std::filesystem::create_directories(dir);
-    const auto foreign = dir / std::filesystem::path(u8"中文_\U0001F600.txt");
+    const auto foreign = dir / std::filesystem::path(u8"中文_\U0001F600.txt");  // i18n-ok: non-ASCII file name on purpose (Windows path test)
     write_bytes(foreign, {'x'});
     const auto file = dir / "slab.wthr";
     CHECK_NOTHROW(write_weather_snapshot(file, WeatherSnapshot::uniform_slab(9, 16, 2000.0, 3000.0, 3e-4, 1.0)));

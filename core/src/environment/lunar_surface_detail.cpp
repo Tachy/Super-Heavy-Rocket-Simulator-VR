@@ -320,12 +320,12 @@ struct LunarSurfaceDetail::Query {
 
 LunarSurfaceDetail::LunarSurfaceDetail(config::MoonSurfaceConfig config, std::shared_ptr<const LunarTerrain> lola)
     : config_(std::move(config)), lola_(std::move(lola)) {
-    if (!lola_) throw std::invalid_argument("LunarSurfaceDetail: kein Mondgelaende (LOLA) uebergeben");
+    if (!lola_) throw std::invalid_argument("LunarSurfaceDetail: no lunar terrain (LOLA) given");
     static std::atomic<std::uint64_t> next_instance_id{1};
     instance_id_ = next_instance_id.fetch_add(1);
     const auto& sfd = config_.craters.sfd;
     if (sfd.form != "power" && sfd.form != "exponential") {
-        throw std::invalid_argument("LunarSurfaceDetail: unbekannte Groessenverteilung '" + sfd.form + "'");
+        throw std::invalid_argument("LunarSurfaceDetail: unknown size distribution '" + sfd.form + "'");
     }
     sphere_radius_m_ = lola_->sphere_radius_m();
     finest_band_start_m_ = lola_->finest_resolution_m();

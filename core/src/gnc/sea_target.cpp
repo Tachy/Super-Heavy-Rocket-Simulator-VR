@@ -8,7 +8,7 @@
 namespace starsim::gnc {
 
 EntryTarget sea_give_up_target(const LandingSite& site, double margin_m) {
-    if (!site.sea) throw std::invalid_argument("Aufgabe des Schiffs: der Landeplatz hat keine Seeseite");
+    if (!site.sea) throw std::invalid_argument("ship give-up target: the landing site has no sea side");
     const double sl = std::sin(site.latitude_rad), cl = std::cos(site.latitude_rad);
     const double so = std::sin(site.longitude_rad), co = std::cos(site.longitude_rad);
     const math::Vec3 east{-so, co, 0.0}, north{-sl * co, -sl * so, cl};

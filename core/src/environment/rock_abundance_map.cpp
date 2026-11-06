@@ -96,7 +96,7 @@ RockAbundanceMap make_rock_abundance_map(const config::RockAbundanceFile& file) 
                            std::abs(360.0 * ppd - file.samples) < layout_tolerance_px &&
                            file.dn.size() == static_cast<size_t>(file.lines) * static_cast<size_t>(file.samples);
     if (!layout_ok) {
-        throw std::invalid_argument("Felsenhäufigkeitskarte " + file.product + ": unerwartetes Kartenraster");
+        throw std::invalid_argument("rock abundance map " + file.product + ": unexpected map grid");
     }
     RockAbundanceMap map;
     map.lines = file.lines;
@@ -118,7 +118,7 @@ std::shared_ptr<const RockAbundanceMap> load_rock_abundance_map(const config::Ro
     if (!std::filesystem::exists(toml_path)) {
         // The Diviner map is an optional data part (user 2026-11-06): without it the global statistical abundance
         // (abundance_scale, as for "uniform") applies everywhere. A present but broken file still throws.
-        std::fprintf(stderr, "Felsenhäufigkeitskarte (Diviner) nicht installiert (%s): globale statistische Häufigkeit.\n",
+        std::fprintf(stderr, "rock abundance map (Diviner) not installed (%s): global statistical abundance.\n",
                      toml_path.string().c_str());
         return nullptr;
     }

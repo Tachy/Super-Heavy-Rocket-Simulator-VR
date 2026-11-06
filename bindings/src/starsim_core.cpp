@@ -1,5 +1,7 @@
 #include "starsim_core.hpp"
 
+#include "report_dict.hpp"
+
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
@@ -151,8 +153,8 @@ environment::WeatherSnapshotId weather_id_from(const godot::Dictionary& d) {
     return id;
 }
 
-godot::Dictionary weather_failure(const char* german_prefix, const std::exception& e) {
-    const godot::String message = godot::String::utf8(german_prefix) + godot::String::utf8(e.what());
+godot::Dictionary weather_failure(const char* prefix, const std::exception& e) {
+    const godot::String message = godot::String::utf8(prefix) + godot::String::utf8(e.what());
     godot::UtilityFunctions::push_error(message);
     godot::Dictionary result;
     result["ok"] = false;
@@ -293,24 +295,24 @@ godot::Dictionary StarsimCore::load_terrain(const godot::String& config_dir) {
     try {
         coarse_geoid_ = std::make_shared<const environment::Geoid>(config::load_coarse_geoid(config));
     } catch (const std::exception& e) {
-        say(std::string("Geoid nicht ladbar - keine Höhe über NN: ") + e.what());
+        say(std::string("Geoid not loadable - no height above sea level: ") + e.what());
     }
     if (!sim::earth_terrain_available(data_dir)) {
-        say("Erdgelände fehlt - flacher Boden (python tools/data_pipeline/fetch.py)");
+        say("Earth terrain missing - flat ground (python tools/data_pipeline/fetch.py)");
     } else {
         try {
             earth_terrain_ = sim::shared_earth_terrain(config, data_dir);
         } catch (const std::exception& e) {
-            say(std::string("Erdgelände nicht ladbar - flacher Boden: ") + e.what());
+            say(std::string("Earth terrain not loadable - flat ground: ") + e.what());
         }
     }
     if (!std::filesystem::exists(data_dir / "terrain" / "ldem_16.toml")) {
-        say("Mondgelände fehlt - glatte Kugel (python tools/data_pipeline/fetch.py)");
+        say("Lunar terrain missing - smooth sphere (python tools/data_pipeline/fetch.py)");
     } else {
         try {
             moon_terrain_ = sim::shared_lunar_terrain(config, data_dir);
         } catch (const std::exception& e) {
-            say(std::string("Mondgelände nicht ladbar - glatte Kugel: ") + e.what());
+            say(std::string("Lunar terrain not loadable - smooth sphere: ") + e.what());
         }
     }
     moon_surface_.reset();
@@ -320,10 +322,10 @@ godot::Dictionary StarsimCore::load_terrain(const godot::String& config_dir) {
             try {
                 moon_surface_ = sim::shared_moon_surface(config, data_dir, {true, rocks});
                 moon_unresolved_.reset();
-                if (!rocks) say("Mondfelsen ohne Diviner-Karte nicht verfügbar - Oberflächendetail ohne Felsen");
+                if (!rocks) say("Lunar rocks unavailable without the Diviner map - surface detail without rocks");
                 break;
             } catch (const std::exception& e) {
-                if (!rocks) say(std::string("Mondoberflächendetail nicht ladbar - nur LOLA: ") + e.what());
+                if (!rocks) say(std::string("Lunar surface detail not loadable - LOLA only: ") + e.what());
             }
         }
     }
@@ -348,7 +350,7 @@ godot::Dictionary StarsimCore::surface_samples(const godot::String& body, const 
     godot::PackedByteArray water;
     const bool present = terrain != nullptr && latitudes_deg.size() == longitudes_deg.size();
     if (terrain != nullptr && !present) {
-        godot::UtilityFunctions::push_error("StarsimCore.surface_samples: Breiten und Längen müssen gleich viele sein");
+        godot::UtilityFunctions::push_error("StarsimCore.surface_samples: latitudes and longitudes must have the same count");
     }
     if (present) {
         const auto n = static_cast<size_t>(latitudes_deg.size());
@@ -384,7 +386,7 @@ godot::Dictionary StarsimCore::surface_samples_detail(const godot::String& body,
     godot::Dictionary result;
     if (latitudes_deg.size() != longitudes_deg.size()) {
         godot::UtilityFunctions::push_error(
-            "StarsimCore.surface_samples_detail: Breiten und Längen müssen gleich viele sein");
+            "StarsimCore.surface_samples_detail: latitudes and longitudes must have the same count");
         result["present"] = false;
         result["height_m"] = godot::PackedFloat64Array();
         result["water"] = godot::PackedByteArray();
@@ -556,7 +558,7 @@ godot::Dictionary StarsimCore::load_moon_hapke(const godot::String& config_dir) 
                           .hapke;
     } catch (const std::exception& e) {
         result["present"] = false;
-        result["error"] = godot::String::utf8((std::string("Hapke-Parameter nicht ladbar: ") + e.what()).c_str());
+        result["error"] = godot::String::utf8((std::string("Hapke parameters not loadable: ") + e.what()).c_str());
         return result;
     }
     moon_hapke_loaded_ = true;
@@ -775,7 +777,7 @@ double StarsimCore::finest_resolution_of(const environment::Terrain* terrain,
     if (terrain == nullptr) return std::numeric_limits<double>::infinity();
     if (latitudes_deg.size() != longitudes_deg.size()) {
         godot::UtilityFunctions::push_error(godot::String("StarsimCore.") + caller +
-                                            ": Breiten und Längen müssen gleich viele sein");
+                                            ": latitudes and longitudes must have the same count");
         return std::numeric_limits<double>::infinity();
     }
     const auto n = static_cast<size_t>(latitudes_deg.size());
@@ -802,9 +804,8 @@ godot::PackedFloat32Array StarsimCore::horizon_elevations(const godot::String& b
         static_cast<size_t>(n) * static_cast<size_t>(n) != count || azimuth_count < 1 || azimuth_count > 64 ||
         spacing_m <= 0.0 || n < 2 || (n - 1) % 16 != 0 || (layer_major && azimuth_count % 4 != 0)) {
         godot::UtilityFunctions::push_error(
-            "StarsimCore.horizon_elevations: n x n Gitter mit (n - 1) teilbar durch 16, gleich lange Felder, "
-            "azimuth_count in 1..64 (durch 4 teilbar bei layer_major) und spacing_m > 0 "
-            "erwartet");
+            "StarsimCore.horizon_elevations: expected an n x n grid with (n - 1) divisible by 16, fields of equal length, "
+            "azimuth_count in 1..64 (divisible by 4 for layer_major) and spacing_m > 0");
         return result;
     }
     std::vector<double> lat(count), lon(count), height(count);
@@ -875,10 +876,12 @@ godot::Dictionary StarsimCore::load_atmosphere(const godot::String& config_dir, 
         result["irradiance_size"] = godot::Vector2i(s.irradiance_mu_s, s.irradiance_r);
         result["parameters"] = atmosphere_parameters_dictionary(tables->parameters);
     } catch (const std::exception& e) {
-        const godot::String message = godot::String::utf8("Atmosphäre konnte nicht geladen werden: ") + godot::String::utf8(e.what());
+        // The player sees the code (a table text); the developer text with the cause goes to the log and "error".
+        const godot::String message = godot::String::utf8("Atmosphere could not be loaded: ") + godot::String::utf8(e.what());
         godot::UtilityFunctions::push_error(message);
         result["ok"] = false;
         result["error"] = message;
+        result["report"] = report_dict(report::make(report::Code::data_atmosphere_unavailable));
     }
     return result;
 }
@@ -950,7 +953,7 @@ godot::Dictionary StarsimCore::weather_bracket(double utc_hour_f, int64_t step_h
         result["blend"] = bracket.blend;
         return result;
     } catch (const std::exception& e) {
-        return weather_failure("Wetterquelle konnte nicht gewählt werden: ", e);
+        return weather_failure("Weather source could not be selected: ", e);
     }
 }
 
@@ -993,7 +996,7 @@ godot::Array StarsimCore::weather_requests(const godot::Dictionary& snapshot, co
             out.push_back(d);
         }
     } catch (const std::exception& e) {
-        godot::UtilityFunctions::push_error(godot::String::utf8("Wetter-Downloads konnten nicht geplant werden: ") +
+        godot::UtilityFunctions::push_error(godot::String::utf8("Weather downloads could not be planned: ") +
                                             godot::String::utf8(e.what()));
         out.clear();
     }
@@ -1004,7 +1007,7 @@ godot::String StarsimCore::weather_gfs_index_url(const godot::Dictionary& snapsh
     try {
         return godot::String::utf8(environment::gfs_index_url(weather_id_from(snapshot)).c_str());
     } catch (const std::exception& e) {
-        godot::UtilityFunctions::push_error(godot::String::utf8("GFS-Index-Adresse ungültig: ") +
+        godot::UtilityFunctions::push_error(godot::String::utf8("GFS index address invalid: ") +
                                             godot::String::utf8(e.what()));
         return {};
     }
@@ -1017,7 +1020,7 @@ godot::PackedInt64Array StarsimCore::weather_gfs_cycle_candidates(double wall_ut
             out.push_back(c.cycle_hour);
         }
     } catch (const std::exception& e) {
-        weather_failure("GFS-Zyklen konnten nicht bestimmt werden: ", e);
+        weather_failure("GFS cycles could not be determined: ", e);
         out.clear();
     }
     return out;
@@ -1027,7 +1030,7 @@ int64_t StarsimCore::weather_snapshot_step(double warp, double seconds_per_downl
     try {
         return environment::weather_snapshot_step(warp, seconds_per_download);
     } catch (const std::exception& e) {
-        weather_failure("Schrittweite der Wetter-Momentaufnahmen ungültig: ", e);
+        weather_failure("Weather snapshot step invalid: ", e);
         return 0;  // hold
     }
 }
@@ -1054,7 +1057,7 @@ godot::Dictionary StarsimCore::weather_build_snapshot(const godot::Dictionary& s
         result["error"] = godot::String();
         return result;
     } catch (const std::exception& e) {
-        return weather_failure("Wetter-Momentaufnahme konnte nicht berechnet werden: ", e);
+        return weather_failure("Weather snapshot could not be computed: ", e);
     }
 }
 
@@ -1090,7 +1093,7 @@ godot::Dictionary StarsimCore::weather_load_snapshot(const godot::String& file) 
     try {
         const auto snapshot = weather_snapshot_of(utf8_of(file));
         if (!snapshot) {
-            throw std::runtime_error("Datei fehlt, ist beschädigt oder hat ein anderes Format: " + utf8_of(file));
+            throw std::runtime_error("File missing, damaged or of another format: " + utf8_of(file));
         }
         const std::vector<std::uint8_t> texels = environment::cloud_render_texels(*snapshot);
         godot::Dictionary result;
@@ -1126,7 +1129,7 @@ godot::Dictionary StarsimCore::weather_load_snapshot(const godot::String& file) 
         put_weather_id(result, snapshot->id());
         return result;
     } catch (const std::exception& e) {
-        return weather_failure("Wetter-Momentaufnahme konnte nicht geladen werden: ", e);
+        return weather_failure("Weather snapshot could not be loaded: ", e);
     }
 }
 
@@ -1140,7 +1143,7 @@ godot::Dictionary StarsimCore::weather_set_active(const godot::String& before_fi
             // Expected while a file is (re)loading and retried by the caller every frame: no push_error.
             godot::Dictionary miss;
             miss["ok"] = false;
-            miss["error"] = godot::String::utf8("Wetterdatei nicht geladen: ") + *file;
+            miss["error"] = godot::String::utf8("Weather file not loaded: ") + *file;
             return miss;
         }
         {
@@ -1154,7 +1157,7 @@ godot::Dictionary StarsimCore::weather_set_active(const godot::String& before_fi
         result["error"] = godot::String();
         return result;
     } catch (const std::exception& e) {
-        return weather_failure("Aktives Wetter konnte nicht gesetzt werden: ", e);
+        return weather_failure("Active weather could not be set: ", e);
     }
 }
 
@@ -1196,7 +1199,7 @@ godot::Dictionary StarsimCore::weather_cloud_light(const godot::Vector3& positio
         diffuse = environment::cloud_sun_diffuse_transmittance(column_depths, lut.get(), mu0);
     }
     } catch (const std::exception& e) {
-        weather_failure("Wolkenlicht konnte nicht berechnet werden: ", e);
+        weather_failure("Cloud light could not be computed: ", e);
         sun = 1.0;
         sky = 1.0;
         diffuse = 0.0;
@@ -1250,12 +1253,12 @@ godot::PackedVector2Array StarsimCore::weather_cloud_cell_bakes(
     const std::optional<environment::CloudShapeFrame> frame = bake_shape_frame(shape_origins_earth_m);
     if (!frame || cells.size() % stride != 0) {
         godot::UtilityFunctions::push_error(godot::String::utf8(
-            "StarsimCore.weather_cloud_cell_bakes: 12 Werte je Zelle und 3 oder 12 Werte für die Rauschursprünge"));
+            "StarsimCore.weather_cloud_cell_bakes: 12 values per cell and 3 or 12 values for the noise origins"));
         return out;
     }
     try {
         const BakeInputs inputs = bake_inputs(utf8_of(snapshot_path));
-        if (!inputs.field) throw std::runtime_error("Datei fehlt oder ist beschädigt: " + utf8_of(snapshot_path));
+        if (!inputs.field) throw std::runtime_error("File missing or damaged: " + utf8_of(snapshot_path));
         std::vector<environment::CloudCellBox> boxes(static_cast<std::size_t>(cells.size() / stride));
         for (std::size_t i = 0; i < boxes.size(); ++i) {
             const int64_t b = static_cast<int64_t>(i) * stride;
@@ -1361,7 +1364,7 @@ godot::Dictionary StarsimCore::cloud_noise() const {
         result["prefilter_levels"] = static_cast<int64_t>(environment::cloud_shape_prefilter_levels);
         return result;
     } catch (const std::exception& e) {
-        return weather_failure("Wolkenrauschen konnte nicht erzeugt werden: ", e);
+        return weather_failure("Cloud noise could not be generated: ", e);
     }
 }
 
@@ -1416,7 +1419,7 @@ godot::Dictionary StarsimCore::cloud_transfer_table(const godot::String& file) {
         transmittance_lut_ = std::move(lut);
         return result;
     } catch (const std::exception& e) {
-        return weather_failure("Wolken-Transfertabelle konnte nicht gelesen werden: ", e);
+        return weather_failure("Cloud transfer table could not be read: ", e);
     }
 }
 
@@ -1441,7 +1444,7 @@ bool StarsimCore::weather_write_slab_snapshot(const godot::String& file, double 
         weather_evict(utf8_of(file));
         return true;
     } catch (const std::exception& e) {
-        godot::UtilityFunctions::push_error(godot::String::utf8("Wolkenplatte konnte nicht geschrieben werden: ") +
+        godot::UtilityFunctions::push_error(godot::String::utf8("Cloud slab could not be written: ") +
                                             godot::String::utf8(e.what()));
         return false;
     }
@@ -1469,7 +1472,7 @@ godot::Dictionary StarsimCore::weather_write_column_snapshot(const godot::String
         result["ground_m"] = snapshot.ground_heights_m()[cell];
         result["lcl_m"] = snapshot.lcl_heights_m()[cell];
     } catch (const std::exception& e) {
-        godot::UtilityFunctions::push_error(godot::String::utf8("Wolkensäule konnte nicht geschrieben werden: ") +
+        godot::UtilityFunctions::push_error(godot::String::utf8("Cloud column could not be written: ") +
                                             godot::String::utf8(e.what()));
     }
     return result;

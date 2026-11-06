@@ -240,7 +240,7 @@ TEST_CASE("Docking campaign: undock, departure and capsule return to splashdown"
     auto parameters = sim::capsule_return_parameters(mission);
     parameters.search_window_s = 7.0 * 86400.0;
     const bool planned = s.plan_capsule_return(parameters);
-    INFO((s.ship_return_plan() ? report::describe(s.ship_return_plan()->reason) : std::string("kein Plan")) << " / " << test::code_id(s.docking_status()));
+    INFO((s.ship_return_plan() ? report::describe(s.ship_return_plan()->reason) : std::string("no plan")) << " / " << test::code_id(s.docking_status()));
     REQUIRE(planned);
     const double planned_h = (s.ship_return_plan()->node.epoch - s.epoch()) / 3600.0;
     const time::Epoch start = s.epoch();

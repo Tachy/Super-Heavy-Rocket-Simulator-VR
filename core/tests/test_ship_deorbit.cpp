@@ -122,9 +122,9 @@ TEST_CASE("The deorbit burn dispersion is the vehicle's cutoff residual", "[deor
     using Catch::Matchers::ContainsSubstring;
     CHECK_THROWS_WITH(config::load_vehicle(without("starship_block3.toml", "deorbit_cutoff_residual = 0.002"),
                                            "starship_block3"),
-                      ContainsSubstring("Schlüssel 'deorbit_cutoff_residual' fehlt in [stage.recovery]"));
+                      ContainsSubstring("key 'deorbit_cutoff_residual' missing in [stage.recovery]"));
     CHECK_THROWS_WITH(config::load_vehicle(without("crew_dragon.toml", "deorbit_pointing_error_deg = 0.1"), "crew_dragon"),
-                      ContainsSubstring("Schlüssel 'deorbit_pointing_error_deg' fehlt in [stage.recovery]"));
+                      ContainsSubstring("key 'deorbit_pointing_error_deg' missing in [stage.recovery]"));
 }
 
 TEST_CASE("Deorbit burn on the belly Raptor alone", "[ship][burn][validation]") {

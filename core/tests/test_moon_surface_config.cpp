@@ -117,6 +117,6 @@ TEST_CASE("A missing key names it in German", "[moon_surface][config]") {
     } catch (const config::ConfigError& e) {
         const std::string message = e.what();
         CHECK_THAT(message, Catch::Matchers::ContainsSubstring("hurst_exponent"));
-        CHECK_THAT(message, Catch::Matchers::ContainsSubstring("fehlt"));
+        CHECK_THAT(message, Catch::Matchers::ContainsSubstring("missing"));
     }
 }

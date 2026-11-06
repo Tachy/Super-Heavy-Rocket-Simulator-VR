@@ -32,6 +32,7 @@
 #include "starsim/sim/mission_start.hpp"
 #include "starsim/sim/refuelling_mission.hpp"
 #include "starsim/vehicle/boil_off.hpp"
+#include "report_check.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -311,8 +312,8 @@ TEST_CASE("Raise: a burn that runs dry ends the mission with its reason", "[refu
     f.start();
     f.fly_until(IssMissionLeg::Rendezvous, 2.0 * 3600.0);
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Ended);
-    // the cause is the burn abort reason (not yet a code, Task 11)
-    CHECK(report::describe(f.session.iss_mission_status()).find("kein Treibstoff") != std::string::npos);
+    // the cause is the burn abort reason (a code)
+    CHECK(test::cause_is(f.session.iss_mission_status(), report::Code::burn_aborted_no_propellant));
 }
 
 namespace {

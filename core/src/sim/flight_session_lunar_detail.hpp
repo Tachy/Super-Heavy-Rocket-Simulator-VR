@@ -31,7 +31,7 @@ inline report::Param step_ref(const char* name, LunarStep step) {
     return report::ref(name, std::string("phase.lunar_step.") + id_of(step));
 }
 
-// The report an exception stands for: a refusal's own report, else its developer message as a legacy text.
+// The report an exception stands for: a refusal's own report, else its English developer message as a legacy text (Task 16 decides its code).
 inline report::Report exception_report(const std::exception& e) {
     if (const auto* refusal = dynamic_cast<const report::Refusal*>(&e)) return refusal->report();
     if (const auto* missing = dynamic_cast<const config::DataMissing*>(&e)) return missing->report();

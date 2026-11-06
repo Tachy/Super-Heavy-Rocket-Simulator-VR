@@ -559,7 +559,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         const auto* entry = t["entry"].as_table();
         const auto required = [&](std::string_view key) {
             if (!entry || !entry->contains(key)) {
-                doc.fail("Eintrittsführung der Stufe '" + s.id + "': Schlüssel '" + std::string(key) + "' fehlt in [stage.entry]");
+                doc.fail("stage '" + s.id + "' entry guidance: key '" + std::string(key) + "' missing in [stage.entry]");
             }
             const double v = doc.number(*entry, key);
             if (!(v > 0.0)) doc.fail("stage.entry." + std::string(key) + " must be positive");
@@ -849,8 +849,8 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             // Task 7); every key required.
             const auto meco_key = [&](std::string_view key) {
                 if (!drone_ship->contains(key)) {
-                    doc.fail("Drohnenschiff-Rückkehr der Stufe '" + s.id + "': Schlüssel '" + std::string(key) +
-                             "' fehlt in [stage.recovery.drone_ship]");
+                    doc.fail("stage '" + s.id + "' drone-ship return: key '" + std::string(key) +
+                             "' missing in [stage.recovery.drone_ship]");
                 }
                 return doc.number(*drone_ship, key);
             };
@@ -871,12 +871,12 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.return_mission = doc.text_or(*recovery, "return_mission");
         // The propellant a chaser keeps through its rendezvous (required with an active docking port: load_vehicle).
         if (const auto* reserve = (*recovery)["rendezvous_reserve_kg"].as_table()) {
-            // German load errors (fix round 1 of planner Task 8, M1)
+            // Load errors (fix round 1 of planner Task 8, M1)
             const auto amount = [&](const char* key) {
                 const auto v = (*reserve)[key].value<double>();
-                if (!v) doc.fail(std::string("Schlüssel '") + key + "' fehlt in [stage.recovery] rendezvous_reserve_kg");
+                if (!v) doc.fail(std::string("key '") + key + "' missing in [stage.recovery] rendezvous_reserve_kg");
                 if (!std::isfinite(*v) || *v < 0.0) {
-                    doc.fail(std::string("[stage.recovery] rendezvous_reserve_kg.") + key + " muss >= 0 sein");
+                    doc.fail(std::string("[stage.recovery] rendezvous_reserve_kg.") + key + " must be >= 0");
                 }
                 return *v;
             };
@@ -884,24 +884,24 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             r.proximity_kg = amount("proximity");
             r.phasing_kg = amount("phasing");
             if (r.phasing_kg < r.proximity_kg) {
-                doc.fail("[stage.recovery] rendezvous_reserve_kg: 'phasing' darf nicht unter 'proximity' liegen (der "
-                         "Phasing-Plan hält die Reserve des Anflugs)");
+                doc.fail("[stage.recovery] rendezvous_reserve_kg: 'phasing' must not be below 'proximity' (the "
+                         "phasing plan holds the approach reserve)");
             }
             s.rendezvous_reserve = r;
         } else if (recovery->contains("rendezvous_reserve_kg")) {
-            doc.fail("[stage.recovery] rendezvous_reserve_kg muss eine Tabelle { proximity = ..., phasing = ... } sein");
+            doc.fail("[stage.recovery] rendezvous_reserve_kg must be a table { proximity = ..., phasing = ... }");
         }
         const bool returns_from_orbit = (s.recovery_method == "tower_catch" && !s.aero.entry_alpha_table.empty()) ||
                                         s.aero.entry_profile == "capsule";
         if (returns_from_orbit && s.return_mission.empty()) {
-            doc.fail("Rückkehr der Stufe '" + s.id + "' aus dem Orbit: Schlüssel 'return_mission' fehlt in [stage.recovery]");
+            doc.fail("stage '" + s.id + "' return from orbit: key 'return_mission' missing in [stage.recovery]");
         }
         // The deorbit burn's execution errors the planner's pass must fly: required with the return from orbit.
         if (returns_from_orbit) {
             for (const char* key : {"deorbit_cutoff_residual", "deorbit_pointing_error_deg"}) {
                 if (!(*recovery)[key].is_number()) {
-                    doc.fail("Rückkehr der Stufe '" + s.id + "' aus dem Orbit: Schlüssel '" + key +
-                             "' fehlt in [stage.recovery]");
+                    doc.fail("stage '" + s.id + "' return from orbit: key '" + key +
+                             "' missing in [stage.recovery]");
                 }
             }
             s.deorbit_cutoff_residual = doc.positive(*recovery, "deorbit_cutoff_residual");
@@ -919,7 +919,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
                                        s.recovery_method == "leg_landing";
         if (returning_booster) {
             const auto missing = [&](const std::string& key, const std::string& where) {
-                doc.fail("Rückkehr der Stufe '" + s.id + "': Schlüssel '" + key + "' fehlt in [" + where + "]");
+                doc.fail("stage '" + s.id + "' return: key '" + key + "' missing in [" + where + "]");
             };
             for (const auto* profile : {&s.return_profile, s.drone_ship_return ? &*s.drone_ship_return : nullptr}) {
                 if (!profile) continue;
@@ -949,7 +949,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         // A ship caught by the tower (gnc::ship_landing_parameters): every key of its flip and landing burn is required.
         if (s.recovery_method == "tower_catch" && !s.aero.entry_alpha_table.empty()) {
             const auto missing = [&](const std::string& key, const std::string& where) {
-                doc.fail("Schiffslandung der Stufe '" + s.id + "': Schlüssel '" + key + "' fehlt in [" + where + "]");
+                doc.fail("stage '" + s.id + "' ship landing: key '" + key + "' missing in [" + where + "]");
             };
             const auto required = [&](std::string_view key) {
                 if (!recovery->contains(key)) missing(std::string(key), "stage.recovery");
@@ -985,13 +985,13 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     // landing). Every key of its approach and ascent is required (planner plan Task 6).
     const bool lunar_tables = t.contains("lunar_landing") || t.contains("lunar_ascent");
     if (lunar_tables && s.landing_legs.azimuths_rad.empty()) {
-        doc.fail("Mondlandung der Stufe '" + s.id + "': [stage.lunar_landing] / [stage.lunar_ascent] brauchen Landebeine");
+        doc.fail("stage '" + s.id + "' lunar landing: [stage.lunar_landing] / [stage.lunar_ascent] need landing legs");
     }
     if (s.landing_legs.fixed || lunar_tables) {
         const auto read = [&](const char* table, std::string_view key) {
             const auto* section = t[table].as_table();
             if (!section || !section->contains(key)) {
-                doc.fail("Mondlandung der Stufe '" + s.id + "': Schlüssel '" + std::string(key) + "' fehlt in [stage." +
+                doc.fail("stage '" + s.id + "' lunar landing: key '" + std::string(key) + "' missing in [stage." +
                          table + "]");
             }
             return doc.positive(*section, key);
@@ -1137,8 +1137,8 @@ VehicleConfig load_vehicle(const std::filesystem::path& config_dir, std::string_
             if (!port_ids.insert(p.id).second) doc.fail("docking port id '" + p.id + "' on two stages");
             // a chaser (active port) flies the phasing and the proximity flight on its own reserve (planner plan Task 8)
             if (p.soft_capture == SoftCaptureMode::Active && !stage.rendezvous_reserve) {
-                doc.fail("Rendezvous der Stufe '" + stage.id +
-                         "': Schlüssel 'rendezvous_reserve_kg' fehlt in [stage.recovery]");
+                doc.fail("stage '" + stage.id +
+                         "' rendezvous: key 'rendezvous_reserve_kg' missing in [stage.recovery]");
             }
         }
         for (const auto& c : stage.transfer_connectors) {

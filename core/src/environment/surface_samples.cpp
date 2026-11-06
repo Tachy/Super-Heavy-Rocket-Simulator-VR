@@ -9,7 +9,7 @@ namespace starsim::environment {
 SurfaceSamples sample_surface(const Terrain& terrain, std::span<const double> latitude_rad,
                               std::span<const double> longitude_rad) {
     if (latitude_rad.size() != longitude_rad.size()) {
-        throw std::invalid_argument("Geländeproben: Breiten und Längen müssen gleich viele sein");
+        throw std::invalid_argument("surface samples: latitudes and longitudes must have the same count");
     }
     SurfaceSamples samples;
     samples.height_m.reserve(latitude_rad.size());
@@ -24,7 +24,7 @@ SurfaceSamples sample_surface(const Terrain& terrain, std::span<const double> la
 double finest_resolution_m(const Terrain& terrain, std::span<const double> latitude_rad,
                            std::span<const double> longitude_rad) {
     if (latitude_rad.size() != longitude_rad.size()) {
-        throw std::invalid_argument("Geländeauflösung: Breiten und Längen müssen gleich viele sein");
+        throw std::invalid_argument("surface resolution: latitudes and longitudes must have the same count");
     }
     double finest = std::numeric_limits<double>::infinity();
     for (size_t i = 0; i < latitude_rad.size(); ++i) {

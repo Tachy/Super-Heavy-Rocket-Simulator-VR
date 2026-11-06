@@ -206,7 +206,7 @@ TEST_CASE("A lunar lander without its landing or ascent keys is refused", "[vehi
             FAIL("loaded without " << key);
         } catch (const config::ConfigError& e) {
             const std::string what = e.what();
-            CHECK(what.find("Mondlandung") != std::string::npos);  // German, naming the key and the file
+            CHECK(what.find("lunar landing") != std::string::npos);  // English, naming the key and the file
             CHECK(what.find(key) != std::string::npos);
             CHECK(what.find("starship_hls.toml") != std::string::npos);
         }

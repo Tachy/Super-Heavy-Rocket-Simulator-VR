@@ -347,7 +347,7 @@ TEST_CASE("Ship without landing keys is refused", "[ship][landing][config]") {
             FAIL("loaded without " << key);
         } catch (const config::ConfigError& e) {
             const std::string what = e.what();
-            CHECK(what.find("Schiffslandung") != std::string::npos);  // German, naming the key and the file
+            CHECK(what.find("ship landing") != std::string::npos);  // English, naming the key and the file
             CHECK(what.find(key) != std::string::npos);
             CHECK(what.find("starship_block3.toml") != std::string::npos);
         }

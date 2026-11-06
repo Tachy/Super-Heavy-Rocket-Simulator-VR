@@ -142,7 +142,7 @@ TEST_CASE("Phasing and proximity reserves from config", "[rendezvous][phasing][p
             FAIL("loaded without rendezvous_reserve_kg");
         } catch (const config::ConfigError& e) {
             const std::string what = e.what();
-            CHECK(what.find("Rendezvous") != std::string::npos);
+            CHECK(what.find("rendezvous") != std::string::npos);
             CHECK(what.find("rendezvous_reserve_kg") != std::string::npos);
             CHECK(what.find("starship_hls.toml") != std::string::npos);
         }

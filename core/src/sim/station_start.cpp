@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "starsim/math/constants.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/orbit/synthetic_station_orbit.hpp"
 #include "starsim/time/utc_date_time.hpp"
 
@@ -121,9 +122,8 @@ StationStart iss_start(const config::VehicleConfig& iss, const orbit::OemArchive
     switch (source) {
         case IssOrbitSource::Oem:
             if (!covering) {
-                throw std::runtime_error(
-                    "Für dieses Datum liegen keine ISS-Bahndaten (OEM) vor; iss_orbit = \"auto\" oder \"synthetic\" "
-                    "wählen oder tools/data_pipeline/fetch.py ausführen (lädt das aktuelle OEM ins Archiv).");
+                // The player is told through the code; the file hint lives in the table text.
+                throw report::Refusal(report::make(report::Code::data_iss_orbit_missing));
             }
             return from_oem(iss, *covering, epoch);
         case IssOrbitSource::Synthetic:

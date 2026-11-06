@@ -420,7 +420,7 @@ func _check_weather(core: StarsimCore) -> bool:
 	core.weather_set_active(file, file, 0.5)
 	var before_miss: Dictionary = core.weather_cloud_light(pos, Vector3(1, 0, 0))
 	var miss: Dictionary = core.weather_set_active(file, "no_such_dir/never_loaded.wthr", 0.1)
-	_check(not miss.get("ok", true) and "nicht geladen" in String(miss.get("error", "")), "weather_set_active of an unloaded file fails without reading")
+	_check(not miss.get("ok", true) and "not loaded" in String(miss.get("error", "")), "weather_set_active of an unloaded file fails without reading")
 	_check(core.weather_cloud_light(pos, Vector3(1, 0, 0)) == before_miss, "a failed weather_set_active keeps the active pair")
 	var spares: Array = []
 	for i in range(3):

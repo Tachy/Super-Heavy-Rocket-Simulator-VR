@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include "starsim/config/data_missing.hpp"
 #include "starsim/config/earth_terrain_config.hpp"
 #include "starsim/config/geoid_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
@@ -22,15 +23,17 @@ std::filesystem::path earth_dir(const std::filesystem::path& data_dir) { return 
 config::TerrainGridFile load_geographic(const std::filesystem::path& toml, const std::string& height_reference) {
     auto f = config::load_terrain_grid_file(toml);
     if (f.projection != "geographic" || f.height_reference != height_reference) {
-        throw config::ConfigError("Erdgelände: " + toml.string() + " ist kein geografisches Gitter mit " + height_reference +
-                                  " - bitte python tools/data_pipeline/fetch.py ausführen");
+        throw config::DataMissing(report::make(report::Code::data_terrain_outdated),
+                                  "Earth terrain: " + toml.string() + " is not a geographic grid with " + height_reference +
+                                  " - run python tools/data_pipeline/fetch.py");
     }
     return f;
 }
 
 [[noreturn]] void stale(const std::string& tile, const std::string& what) {
-    throw config::ConfigError("Erdgelände: Kachel " + tile + " passt nicht mehr zu earth_terrain.toml (" + what +
-                              ") - bitte python tools/data_pipeline/fetch.py erneut ausführen");
+    throw config::DataMissing(report::make(report::Code::data_terrain_outdated),
+                              "Earth terrain: tile " + tile + " no longer matches earth_terrain.toml (" + what +
+                              ") - run python tools/data_pipeline/fetch.py again");
 }
 
 // A tile cut for another area, level, centre or size than the area now has in config/earth_terrain.toml would be
@@ -41,13 +44,13 @@ environment::GeographicGrid area_tile(const std::filesystem::path& data_dir, con
     auto f = load_geographic(earth_dir(data_dir) / (name + ".toml"), "wgs84_ellipsoid");
     const double rad_to_deg = 1.0 / constants::deg_to_rad;
     const double cell_m = f.step_latitude_deg * constants::deg_to_rad * f.sphere_radius_m;
-    if (f.area != area.id) stale(name, "Gebiet '" + f.area + "'");
-    if (f.level != level) stale(name, "Ebene '" + f.level + "'");
+    if (f.area != area.id) stale(name, "area '" + f.area + "'");
+    if (f.level != level) stale(name, "level '" + f.level + "'");
     if (std::abs(f.area_latitude_deg - area.latitude_rad * rad_to_deg) > f.step_latitude_deg ||
         std::abs(f.area_longitude_deg - area.longitude_rad * rad_to_deg) > f.step_longitude_deg) {
-        stale(name, "Mittelpunkt verschoben");
+        stale(name, "centre moved");
     }
-    if (std::abs(f.half_size_m - half_size_m) > cell_m) stale(name, "Größe geändert");
+    if (std::abs(f.half_size_m - half_size_m) > cell_m) stale(name, "size changed");
     return config::geographic_grid(std::move(f));
 }
 
