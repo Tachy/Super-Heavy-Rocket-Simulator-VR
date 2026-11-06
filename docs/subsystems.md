@@ -19,12 +19,12 @@ Older code comments refer to sections of this file by their former titles; the t
 | Atmosphere rendering (M8) | `subsystems/atmosphere-rendering.md` (index) -> `atmosphere-scattering.md`, `eye-adaptation.md`, `atmosphere-eclipse-refraction.md`, `atmosphere-performance.md` | `history/atmosphere-rendering.md` |
 | Sea state and deck motion | `subsystems/sea-state.md` | `history/sea-state.md` |
 | Weather clouds (M8 weather and clouds) | `subsystems/weather-clouds.md` (field, optics, light, far field, performance, known limits), `subsystems/weather-service.md` (sources, downloads, cache, UI line) | `history/weather-clouds.md` |
-| VR frame budget, perf log, main-thread sections | `subsystems/vr-performance.md` | - |
+| VR frame budget, perf log, main-thread sections | `subsystems/vr-performance.md` | `history/vr-performance.md` |
 | Startup loading screen (desktop layer, VR quad layer, boot steps) | `subsystems/loading-screen.md` | `history/loading-screen.md` |
-| Launch structures (Pad B tower and chopstick model, detail file) | `subsystems/launch-structures.md` | - |
+| Launch structures (Pad B tower and chopstick model, detail file) | `subsystems/launch-structures.md` | `history/launch-structures.md` |
 | Launch structures measurements (Pad B reference measurement pass) | `subsystems/launch-structures-measurements.md` | - |
 | Vehicle detail models (Super Heavy / Starship hull, flaps, grid fins, engines; prototype) | `subsystems/vehicle-models.md` | - |
 | Aero derivation (ascent and booster descent drag from the built models, cross-check) | `subsystems/aero-derivation.md` | - |
-| Moon procedural near-ground surface (craters, regolith roughness, rocks, Hapke) | `subsystems/moon-surface.md` | - |
+| Moon procedural near-ground surface (craters, regolith roughness, rocks, Hapke) | `subsystems/moon-surface.md` | `history/moon-surface.md` |
 
 New subsystems get their own `docs/subsystems/<slug>.md`.

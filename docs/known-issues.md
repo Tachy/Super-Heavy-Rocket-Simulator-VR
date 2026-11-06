@@ -283,8 +283,9 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 
 ## Moon procedural surface plan, Task 16: Sun shadows on the Earth (2026-11-05)
 - The Earth's near-field shadow map covers 500 m-4 km of view depth around the eye (terrain-rendering.md "Near-field Sun
-  shadows (Earth)"); beyond it (and above 20 km, at night) nothing casts. A vehicle's own shadows on itself switch off
-  when the eye climbs through 20 km over the ground (a step, as on the Moon).
+  shadows (Earth)"); beyond it (and above 30 km, at night) nothing casts. A vehicle's own shadows on itself fade out
+  while the eye climbs from 20 to 30 km over the ground (a smoothstep of the shadow opacity; the Moon keeps a step at
+  20 km).
 - The Earth terrain casts no shadow (dunes, levees): only structures and vehicles do; the relief keeps its normal shading.
 - Cost in the stereo mock at the pad: vr-performance.md (Task 13 re-measure); not measured in the headset. With the
   analog weather on the pad view takes 17.2 ms (14.4 ms without the shadows, Task 13b): the clouds' cost, over the
@@ -294,7 +295,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   at noon, -13..-17 % on a shaded one. Not fixed (needs an imagery read at each cube refresh; Task 13b,
   `docs/subsystems/terrain-rendering.md` open points).
 - Earth near shadows: the penumbra grain does not crawl at HIGH in a desktop head-motion test (0.02 deg per frame); not
-  checked in the headset. Vehicle self-shadows fade between 20 and 30 km. The Falcon 9 ship's shadow on the sea is not
+  checked in the headset. The Falcon 9 ship's shadow on the sea is not
   examined (Task 13b).
 - The tower's far tier (alpha-to-coverage box beyond 5 km) casts nothing; at that distance the tower's ground shadow lies
   beyond the shadow range anyway.
@@ -314,8 +315,14 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   (the 512 MB bound is computed from instance counts) are not measured.
 - Boulder fields at the 512 MB pool bound keep near nodes statistical (radiance-continuous; 353 nodes in the jump test):
   the hand-over eviction finds no far node with the near LOD buckets there.
+- Boulder-field camera jump (moon_surface_check, 10 km at 2 m): the rock layer's main-thread share fails its 5 ms gate
+  intermittently with one 21-26 ms pool allocation (the MultiMesh take) - final-review fix pass 2026-11-06: 4 of 5 runs
+  with the LOD-0 shadow mesh, 2 of 4 with the former LOD-1 one (passing runs 3.7-5.0 ms). Task 13's single pass (4.75 ms)
+  was a favourable run; the prewarm does not cover the bucket that allocates. Not fixed; the IM-2 jump passes.
 - Summed roughness at L20 / L19 -7.6 / -6.7 % against the 10 % gate: a systematic deficit of the texture weights' mesh
-  transfer, not one crater tile's realisation (moon-surface.md Validation); more crater tiles would lower it.
+  transfer, not one crater tile's realisation (moon-surface.md Validation); more crater tiles would lower it. The
+  shipped crater realisation is favourable, so the expected L20 margin is smaller than the 2.4 % shown and may reach the
+  gate; the real fix is the texture-weight transfer (open point), not more tiles.
 - Fill light at a grazing Sun: faint steps at the horizon maps' node borders (0.07 deg Sun; Task 12 fix 1) - not fixed.
 - Rock statistics against exact rasters of the drawn meshes (8 deg Sun, eye 60 deg): the hull excess X 0.025 against
   0.045, the rock flux per cover +3.8 %; the GPU rock patch at abundance 10 reads +1.52 % (gate 2 %), abundance 1

@@ -176,7 +176,8 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   + 3 940 bounce = 82 089 lux, a shaded one 11 548. Radiance L = albedo x E / pi against the render (cd/m^2): hardstand (albedo
   0.195) 7 531 predicted / 7 509 rendered at noon, 4 536 / 4 433 at 39 deg; sunlit tower leg (0.16) at 39 deg 4 181 / 3 964 (aerial
   perspective over 300 m, the steel map's grime and contrast: -5 %); leg face seen from the west at noon 782 / 746. So the
-  renderer reproduces the budget within 2-5 %; the tower's legs read 0.099 of the hardstand's radiance at noon (the sky and
+  renderer reproduces the budget within 2-5 % - renderer consistency, not absolute truth: the budget uses the same cube
+  ground albedo as the renderer, whose bounce is itself 30-40 % low (below; final review); the tower's legs read 0.099 of the hardstand's radiance at noon (the sky and
   bounce alone) and 0.89 of it on a Sun-facing face at 39 deg, 0.13 on a shaded one. A tower much darker than the ground at pad
   noon is therefore the physics of vertical faces under a high Sun (and the 0.16 steel against the 0.20 ground), not a missing
   light. Photo of a similar Sun: none dated (the extracted webcast frames carry no date or Sun elevation); f12_1860 (ground view, high

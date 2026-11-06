@@ -198,16 +198,12 @@ wall term with Smith's G1 per lit horizon sector (added last in fix 1) measured 
 against 16.03 / 16.09; not repeated).
 
 ## Earth near-field Sun shadows (moon procedural surface plan Task 16, 2026-11-05)
-Stereo mock (3534 x 2838 per eye), Starbase Pad B with Starship on the mount, 2026-10-15 21:30 UTC (Sun 31 deg), ground
-eye 150 m and 400 m east of the pad aimed at the vehicle (render_check `--vehicle=starship_block3 --site=starbase_pad2
---watch_from_site=150|400`), weather off, median of 120 frames, two interleaved rounds. Before Task 16 (unshaded
-terrain, no shadow map): 4.10 / 4.02 ms (150 m), 4.39 / 4.33 ms (400 m). Task 16, shadows off (the lit terrain's off
-path): 4.19 / 4.20 and 4.28 / 4.28 ms (no measurable cost). Shadows on with the committed settings (8192 px atlas,
-4 splits, PCSS HIGH): 5.48 / 5.50 and 5.50 / 5.51 ms: +1.2-1.3 ms, 5.5 ms of the 11.1 ms frame. Soft-filter quality
-(same views, one session): LOW 4.84 / 4.77 and 4.85 / 4.79 ms (+0.5-0.6), MEDIUM 4.88 / 4.95 and 5.02 / 5.03, HIGH
-5.80 / 5.41 and 5.44 / 5.50; LOW and MEDIUM left a visible grain in the wide penumbrae on the terrain, hence HIGH.
-Some runs shared the machine with another agent's Godot runs; the medians agree within 0.1 ms across
-rounds. Not measured: the headset itself, the pad with weather on (the 45 Hz rule applies there).
+Views (Task 16): stereo mock (3534 x 2838 per eye), Starbase Pad B with Starship on the mount, 2026-10-15 21:30 UTC
+(Sun 31 deg), ground eye 150 m and 400 m east of the pad aimed at the vehicle (render_check `--vehicle=starship_block3
+--site=starbase_pad2 --watch_from_site=150|400`), weather off. The lit terrain's off path costs nothing measurable. Soft
+filter: LOW and MEDIUM left a visible grain in the wide penumbrae on the terrain, hence HIGH (+0.6-0.9 ms over LOW in
+Task 16's 32-bit-atlas measurement, history). Current cost: the 16-bit atlas below and the Task 13 table. Not measured:
+the headset itself, the pad with weather on (the 45 Hz rule applies there).
 Atlas 8192 px 16-bit (128 MB computed; was 32-bit 256 MB with the same image, Task 13b): GPU -0.56 ms in the stereo mock
 (3534 x 2838, pad with Starship, eye 150 m, Sun 32.7 deg: shadows off 7.44 ms, 32-bit 10.55, 16-bit 9.99; analog
 weather on: 14.37 off, 17.19 on - the clouds' cost, known-issues). Active to 30 km (full to 20 km, fading to 30 km).
@@ -251,3 +247,5 @@ field) per frame, gate 5 ms - passes since the pool warms the six LODs' buckets 
 own selection phase max 21 / 52 ms, p99 14.4 / 16.6 ms (known-issues). Pool: 194 MB at IM-2 2 m once warmed (6930 warm
 allocations), the 512 MB bound in the boulder field (353 nodes statistical). The pool's MB are computed from instance
 counts x bytes; the driver's real allocation was not read.
+LOD 0 rocks cast with their own mesh (final review M-6, 2026-11-06; before: LOD 1's): boulder field 2 m, same view and
+settings, two rounds: off 38.17 / 38.33 ms, on 44.52 / 44.65 ms (+6.3 ms) - no measurable cost against the table.

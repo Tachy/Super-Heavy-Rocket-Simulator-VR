@@ -13,10 +13,15 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25 (the per-session context is kept s
   march, and the banded bake of a terrain node's vertex lattice, for the Moon's terrain shadows;
   `StarsimCore.horizon_elevations` / `horizon_elevation_rad`); one shared immutable instance per data set, `sim::shared_earth_terrain` /
   `shared_lunar_terrain`, also read by the renderer through `StarsimCore.surface_samples`; the Moon's procedural
-  near-ground relief below LOLA, `environment::LunarSurfaceDetail` (hashed craters and regolith roughness on cube-face
-  cells, band-limited queries) and its deterministic rocks, `environment::LunarRocks` (size-frequency population per
-  cell, 16 star-shaped templates with mesh LODs, rock tops, Diviner abundance map via `load_rock_abundance_map`;
-  `docs/subsystems/moon-surface.md`); on the Earth terrain a site's
+  near-ground relief below LOLA (all in `environment`, details `docs/subsystems/moon-surface.md`):
+  `LunarSurfaceDetail` (hashed craters and regolith roughness on cube-face cells, band-limited queries);
+  `LunarRocks` (deterministic size-frequency population per cell, Diviner abundance map via `load_rock_abundance_map`,
+  rock tops and contact normals, the cover curve); `RockTemplates` (32 fracture-fragment templates with relief, 5 core
+  mesh LODs; LOD 0 is both the contact body and the renderer's near mesh); `DetailedLunarTerrain` (LOLA + detail +
+  rocks as the physics surface, footpad disc support, `sim::shared_moon_surface` shares it with the renderer);
+  `hapke` (one Hapke parameter set from `config/moon_surface.toml` for the core and the shaders);
+  `UnresolvedShadingModel` (`unresolved_shading`: the statistical shading of the relief and rocks below the drawn
+  resolution - lit gain, cast shadows, oblique-eye view tables, cached); on the Earth terrain a site's
   leg landing tracks bodies within 5 km of the site; the sea state at a drone ship's station: long-crested JONSWAP sea,
   deterministic by seed; the Earth's atmosphere optics and precomputed scattering: a float64 port of Bruneton 2017 -
   transmittance / scattering / irradiance tables in luminance with 5 orders + geometric tail, the WGS84 stretch, CPU
@@ -82,7 +87,12 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25 (the per-session context is kept s
   quadtree: LOD, worker builds, upload / release budgets, morph ranges), `terrain_node_builder.gd` (node mesh data,
   worker-safe), `cube_sphere.gd`, `height_source.gd` (core surface or flat rule), `imagery_source.gd` (NAIP / Sentinel-2
   tile crops), `water_waves.gd`; shaders `terrain_earth/moon.gdshader`, `terrain_morph.gdshaderinc`,
-  `water.gdshaderinc`. Performance run (GPU): `res://tests/terrain_perf.gd`. Details: `docs/subsystems.md` "Terrain
+  `water.gdshaderinc`. Moon near ground (`docs/subsystems/moon-surface.md`): `moon_detail_shading.gd`
+  (`MoonDetailShading`: the detail textures, Hapke and statistics tables for the Moon terrain's shader),
+  `moon_rock_layer.gd` (`MoonRockLayer`: the drawn rocks, MultiMesh pools per LOD, shadow-only casters); in
+  `game/world/`: `moon_near_shadow.gd` / `earth_near_shadow.gd` (`MoonNearShadow` / `EarthNearShadow`: the Sun's
+  near-field shadow map on the Moon / the Earth), `adaptation_meter.gd` (`AdaptationMeter`: the scene-referred eye
+  adaptation's meter). Performance run (GPU): `res://tests/terrain_perf.gd`. Details: `docs/subsystems.md` "Terrain
   rendering". A fresh checkout needs one `godot --headless --path game --import` before `--script` runs resolve new
   `class_name` scripts.
 - `game/shaders/`: Earth/Moon lighting in body-local metres; `eclipse.gdshaderinc` mirrors

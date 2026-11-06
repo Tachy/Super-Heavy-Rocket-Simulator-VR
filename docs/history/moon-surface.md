@@ -93,3 +93,132 @@ Superseded states of `docs/subsystems/moon-surface.md`.
 - Lommel-Seeliger face gains (mu0 / (mu0 + mu) over the flat face's) while the renderer draws Hapke: at a 7-8 deg Sun
   the drawn rock faces are ~13 % brighter than that law said. The hull's flux excess hid most of it: the GPU rock patch
   at abundance 10 read +2.64 % (gate 2 %); with honest geometry and Lommel-Seeliger +4.25 %; with the Hapke faces +1.52 %.
+
+## Moved from the subsystem file in the final-review fix pass (2026-11-06, final review I-1 / 13a review M-5)
+Superseded numbers and per-round records as they stood in `docs/subsystems/moon-surface.md` at bc37da1f (verbatim).
+
+### Model, Rocks (Task 3): template vertex normals
+(central differences over 0.5 of the) LOD's edge angle (0.2 until fix round 1, which drew the vertex staircase of fracture edges as shading teeth)
+
+### Model, Touchdown hazard check (Task 5)
+ (A cheap pair-sum bound before the disc queries was removed in fix round 2: it never
+  fired, not even on all 7,449 candidates with a 1 cm step limit.)
+
+### Model, Baked textures (Task 8): slope-map memory
+GPU memory of the four slope maps ~43 MB with mips (was ~11 MB, with the 512 px tiles before the Task 11 fix round).
+
+### Model, Regolith shading (Task 10): residual theta_res values (13a review M-5 / ledger T10 N2)
+Values (before Task 12's template mean tan, with the half-spheroid's pi eta in the slope budget): L22 (1 cm) 20.1 deg,
+  10 cm 21.7, 1 m 22.3, 10 m 22.7, 100 m 22.9, 1 km 22.97, beyond the bands the regolith's 22.972.
+
+### Model, Rocks drawn (Task 11): retry set
+Before Task 12 (review N1 of the Task 11 fix C re-review) a refused node was never retried and FIFO chose.
+
+### Model, Rocks drawn: flat-normal share per LOD
+Task 17 fix round 1 raised the flat-normal share of LOD 1-2 from 0.25 / 0.6 to 0.4 / 0.75.
+
+### Model, Near-field shadows and fill light (Task 12): wall Sun visibility
+Task 12 fix 1 gated every wall by the receiver's V, which zeroed the fill exactly in terrain shadow.
+
+### Model, Near-field shadows and fill light: the rocks' fill emitter (superseded by Task 17)
+The rocks' call site (`moon_rock.gdshader`) still passes
+  Smith's G1 alone (owned by the rock-look task at the time of fix 2: open point).
+
+### Validation, environment seams (band-limited)
+Before fix round 1 of Task 2 the band-limited step across face edges was up to 1.07 mm, ~1160 x the bound.
+
+### Validation, touchdown hazards (Task 5): IM-2 figures with the Task 3 templates
+IM-2 with full detail: the target moves 28.3 m (slope 3.19 deg, hang 0.461 m, clearance 0.572 m)
+
+### Validation, touchdown hazards (Task 5): synthetic rock case with the Task 3 templates
+(D 8.70 m, pad support 6.18 m above the ground) moves 60.0 m (slope 1.74 deg, hang 0.586 m, clearance 0.738 m, 337-420 ms cold)
+
+### Validation, Regolith shading (Task 10): drawn slope variance
+Before the transfer functions, with "octaves >= L drawn", the model was 1.26-2.40 x the mesh.
+
+### Validation, Site brightness (Task 10): LROC NAC comparison
+  Against the LROC NAC frame M1434867405 (90 cm pixels, a different Sun; `screenshots/moon_surface/task10/
+  nadir_lroc_nac_left_task10_middle_fix1_right.png`): before the fix round the render lacked the 5-20 m craters - not a
+  density error (config N(>D) = 0.0336 D^-2 is Minton et al. 2019 Fit 1, the median of the modern counts; it predicts
+  336 craters > 10 m and 84 > 20 m per km^2) but a drawing gap: a level-13 leaf (5.2 m spacing) draws craters only from
+  ~4 L = 20-40 m and nothing drew the smaller ones (Task 10 review C3). With the crater textures (s2 / s3) the render
+  now shows the 2.5-20 m population; it stays fainter than the NAC frame's because the craters cast no shadows (open
+  point). No crater count was made on the images.
+
+### Validation, detail off identity (Task 10)
+A first version that multiplied the old expression by the factors 1.0 differed in 2-7 px by 1 LSB, so the detail-off branch keeps the old expression.
+
+### Validation, Drawn rocks (Task 11): radiance gate numbers with the Task 11 statistics
+Sun 7 deg d = 0.1 / 0.2 / 0.4 / 0.8 m +1.33 / +1.12 / +1.11 / +1.14 %, Sun 15 deg d = 0.1 / 0.4 m +0.36 / +0.45 %,
+  Sun 30 deg +0.10 / +0.04 %, earthshine only (Earth 7 deg) +1.33 %; against the law's all-statistical mean +2.06 /
+  +1.86 / +1.79 / +1.63 %, +0.64 / +0.71 %, +0.23 / +0.15 %, earthshine +2.06 % (the patch's drawn cover 0.0150 /
+  0.0120 / 0.0093 / 0.0064 against the law's 0.0119 / 0.0089 / 0.0064 / 0.0043).
+
+### Validation, Drawn rocks (Task 11): camera jump with the five-LOD Task 11 rocks
+the rock layer's main-thread share max 1.08-1.19 ms, p99 1.0-1.1 ms (gate 5 ms; largest attach 0.41-0.48 ms); the
+  quadtree's own update without rocks max 13.45 / p99 12.75 ms (`--jump_baseline`). Without a drawn frame between the
+  updates (the earlier harness) one call per run stalled 17 ms on the full staging pool, on whichever call hit it
+  (terrain mesh, MultiMesh mesh or buffer).
+
+### Validation, Near-field shadows (Task 12): rock gate with the Task 12 view tables
+rock gate at Sun 7 deg, e 30, g 60 against the realised drawn cover: abundance 1 -0.26 .. -0.28 %, 3 -1.14 ..
+  -1.30 %, 10 -0.01 .. +0.58 % (Task 11 fix C: +4.93 % at 10; gate 2 %)
+
+### Validation, Near-field shadows (Task 12): handover at the range boundary, first Task 12 numbers
+down-Sun 1.000 / 1.003 / 1.001 / 1.001, across 1.005 / 1.006 / 1.000 / 1.000, into the Sun 0.999 / 0.980 / 0.981 /
+  0.998 (dark ground, 0.3 % of the down-Sun radiance; gate 2 %). Before Smith's visible-lit fraction and the 2-deg view
+  grid it was +2.0 .. +4.2 % (down-Sun).
+
+### Validation: the dated per-round blocks (Task 12 fix 1 / fix 2, Task 17, Task 17 fix round 1)
+- Task 12 fix 1 (2026-11-05). Red step: `moon_shadow_check` with the game files before Task 12 fails (no shadow: "umbra"
+  0.0257 against lit 0.0305, half-shadow 13.8 m); the lander check without the map fails (tip 129.4 m, halfway 0.081 of
+  the lit 0.125). Green: the 2 m box 15.98 m (16.29 +- 1), umbra 0, penumbra 1.25 m; earthshine-only on/off 0 px; off
+  against the Task 11 shader 0 px; the HLS model (63 meshes, 53.7 m tall, feet on flat ground, Sun 20 deg) shadow tip
+  147.7 m (half-shadow point) against the geometric tip 148.0 m (window [tip - penumbra 4.3 m, tip + 1 m]), its shadow
+  halfway keeps no Sun; the setting's file round trip. Relief identity (IM-2 2026-11-13T06:00, Sun 0.07 deg, the eye in
+  terrain shadow, detail on): near shadows on / off with the fill 0 px; fill on / off 1.6 % of the pixels differ (the
+  partly sunlit receivers). That view's near floor gets neither earthshine nor fill (99.5 % of its ground pixels are code 0
+  with the fill off even at a 60 x brighter exposure; its eye adapts to 0 cd/m^2, so the camera exposure is not
+  calibrated there): its ground-row ratios (x9.7 fix 1 ungated, x1.57 receiver-gated, x2.23 per-wall) divide by near-zero
+  codes and are not a measure. Shadowed floors at Sun 6.75 deg (IM-2 2026-11-22, 200 m, camera exposures 8 / 0.004 s /
+  ISO 160 and 4 / 0.02 s / ISO 1600, Task 12 fix 2, review N2): pixels below 2 % of the sunlit median (1192 cd/m^2)
+  2.77 cd/m^2 with the fill (p10 / p50 / p90 1.67 / 2.31 / 3.46), 0.04 cd/m^2 without (no earthshine there: the Earth is
+  below the horizon), 0.23 % of the sunlit median; expected [E] (E / pi) A_h(mu_r) sum sin^2 h mu0 A_h(mu0) / 16 with
+  rim walls h 5-15 deg lit at mu0 0.2-0.4 over half the azimuths ~ 0.1-1 % of the sunlit floor. Sunlit ground x1.0004.
+  Boulder field at the eye 2 m with the near shadows off (Task 12 fix 2, N1): no glow or blotch above the eye's
+  horizontal plane (the rock view-elevation clamp; A/B without it the artifact returns at the same line). Gates
+  unchanged (detail patches -1.49 .. +0.23 %, rock gate at abundance 1 / 3 / 10 as above); handover (A11) across
+  1.011 / 1.002 / 1.000 / 1.000, down-Sun 1.001 / 1.002 / 1.001 / 1.001, into the Sun 0.983 / 0.990 / 0.983 / 0.995;
+  sky_radiance_check PASS (IM2_READ_EXPOSURE 2.5), atmosphere_check PASS. Core: the view tables' cache round trip bit
+  for bit, the key guards burial law and format, a truncated file is refused. Camera jumps (moon_surface_check
+  --rocks_only, 2 runs): IM-2 max 4.52 / 3.26 ms (pass); boulder field 30.7 ms (one 29 ms pool allocation, 3 frames
+  over) / 4.76 ms (pass); without any rock casters the boulder jump also had single 22-28 ms allocation stalls (A/B).
+  Load: the statistics build 1311 ms without the cache file, 439 ms with it (the whole render_check process 36.5 / 35.5 s;
+  the ~8 s of Task 12's first version were the core tests' process - the game shared the build with its other loading).
+- Task 17 (fractured rock templates, 2026-11-05): core [slow] tags 247 / 250 (fail: lunar campaign 8-14, seed 14 at
+  8 deg 1.39-1.51 m - also at the Task 12 head, 1.52 m; contact_speed sliding 51.5-52.8 us alone, 37-39 us with the
+  convex templates; one rim-cut case of "A rock at the rim lifts the pivoting pad": heights within 0.02 mm, normal
+  0.115 rad off on a near-tie of two facets). Campaigns 1-7 / 15-21 7 / 7 (offsets 0.04-0.34 / 0.16-0.84 m). IM-2
+  hazard: offset 28.3 m, slope 3.12 deg unchanged, step 0.467 -> 0.468 m, bell clearance 0.552 -> 0.548 m. Summed
+  roughness at the site + rock tops 4.003 -> 4.014 mm (residual 3.62 mm kept: the formula gives 3.610). Rock patch
+  radiance gates unchanged (within -0.25..+0.06 %). GPU stereo mock: IM-2 2 m 17.7 ms, boulder field 48.2 ms (drawn
+  vertices +1 %). Camera jumps: IM-2 rock share 3.6-3.9 ms; boulder field one 24-31 ms pool allocation per run (2 of 2,
+  T12-C). Images: screenshots/moon_surface/task17/.
+- Task 17 fix round 1 (2026-11-06): core [slow] tags 251 / 252 (fail: lunar campaign 8-14, seed 14 at 8 deg 1.52 m,
+  pre-existing at the Task 12 head); pivoting-pad cases: every rim-cut normal 0.0000 rad off, heights within 1e-4 mm of
+  the brute force (now refined along the rim angle; one peak-under-edge case 0.375 mm above its pattern-search
+  reference, inside the 1 mm gate); new `arc_peak` test: exact minus a 1e5-sample brute force <= 4.9e-6, the nudged
+  point reproduces the value to 1.3e-9. contact_speed alone 25 / 44-46 / 12 us. Campaigns 1-7 / 15-21 7 / 7 (offsets
+  0.03-0.29 / 0.16-0.85 m), 8-14 offsets 0.03-0.68 m + seed 14. IM-2 hazard: offset 28.3 m, slope 3.12 deg unchanged,
+  step 0.468 m, bell clearance 0.548 -> 0.560 m; synthetic step 0.525 m, bell 0.649 m; rock D 8.70 m pad support 5.19 m
+  (proud bound 9.14 m). Summed roughness site + rock tops 4.005 mm (residual formula 3.614 mm, 3.62 kept); regolith
+  theta_bar 23.356 deg, S^2 0.5858. Shape statistics: volume per D^3 mean +0.94 % (single templates within 11.5 %),
+  extent ratios within 0.46 %; dust share 0.3403 (ROCK_DUST_MEAN 0.340); 8 of 32 templates cracked. GPU: moon_shadow_check
+  PASS, smoke PASS. Images: screenshots/moon_surface/task17/fix1/.
+
+### Open points, lunar landing campaign: Task 5 fix round 1 figures and the two-foot stance
+At Task 5 fix round 1: 21 / 21, misses 0.01-0.91 m (seed 17 0.91 m and seed 5 0.89 m are the closest to the gate; seed 7, 1.12 m before
+  the fix, now 0.09 m). The earlier two-foot stance (~50 s, ~2 cm/s creep) had two causes, both fixed: the guidance
+  held the attitude with the RCS after the first contact (a rate damper about the line through two feet - now
+  released at contact) and the regularised leg friction crept under any tangential load (now Coulomb stick-slip,
+  `contact::leg_contact`).
