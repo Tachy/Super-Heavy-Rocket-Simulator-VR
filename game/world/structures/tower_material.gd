@@ -41,6 +41,9 @@ const HEAD_BAND := Color(0.30, 0.30, 0.30)
 const BLACK_PAINT := Color(0.035, 0.035, 0.04)
 
 const MOUNT_SHADER := preload("res://shaders/mount_shell.gdshader")
+const PLINTH_SHADER := preload("res://shaders/plinth_plates.gdshader")
+## [E] Period of the plate map on the plinth (m): the mount's own (12 m: 6 courses of 2 m, 2 plates of 6 m, config [mount]).
+const PLINTH_TILE_M := 12.0
 const MOUNT_MAP := "models/starbase_olp2/mount_panels.png"
 const CONCRETE_MAP := "models/starbase_olp2/pad_concrete.png"
 const APRON_MASK_MAP := "models/starbase_olp2/apron_mask.png"
@@ -108,9 +111,36 @@ static func clad() -> ShaderMaterial:
 	return LitAerial.material(CLAD, 0.8, 0.0)
 
 
-## Plate-clad plinth of the tower (its own material, apart from the cladding plates).
-static func plinth() -> ShaderMaterial:
-	return LitAerial.material(PLINTH, 0.8, 0.0)
+## Plate-clad plinth of the tower (its own material, apart from the cladding plates): the mount's plate map (courses, plates and
+## seam lines, `MOUNT_MAP`) tinted to the plinth's albedo, the seams in metres on the scaled box (plinth_plates.gdshader); without
+## the generated map a plain tinted box.
+static func plinth(tile_m := PLINTH_TILE_M) -> ShaderMaterial:
+	var path := Paths.data_dir().path_join(MOUNT_MAP)
+	var image := Image.load_from_file(path) if FileAccess.file_exists(path) else null
+	if image == null or image.is_empty():
+		return LitAerial.material(PLINTH, 0.8, 0.0)
+	var m := ShaderMaterial.new()
+	m.shader = PLINTH_SHADER
+	m.set_shader_parameter("tint", PLINTH)
+	m.set_shader_parameter("tile_m", tile_m)
+	m.set_shader_parameter("panels_mean", _linear_mean(image))
+	image.generate_mipmaps()
+	m.set_shader_parameter("panels", ImageTexture.create_from_image(image))
+	return m
+
+
+## Linear mean colour of an sRGB image (on a 32 x 32 resample: the map's seams are fine lines, the mean is a few percent of them).
+static func _linear_mean(image: Image) -> Vector3:
+	var small := image.duplicate() as Image
+	if small.is_compressed():
+		small.decompress()
+	small.resize(32, 32, Image.INTERPOLATE_LANCZOS)
+	var sum := Vector3.ZERO
+	for y in 32:
+		for x in 32:
+			var c := small.get_pixel(x, y)
+			sum += Vector3(c.srgb_to_linear().r, c.srgb_to_linear().g, c.srgb_to_linear().b)
+	return sum / 1024.0
 
 
 ## Dark grey matte steel of the QD arm.

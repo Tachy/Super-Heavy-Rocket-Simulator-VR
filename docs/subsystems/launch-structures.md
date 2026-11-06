@@ -100,8 +100,10 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   (f14_2095 crop_f14_plinth, sunlit 104/102/95), its own material and instance node `plinth`; cladding plates neutral mid-grey ~0.13
   (f13_2040); QD arm dark grey matte ~0.04 (`arm_grey`); head walls / bands unchanged albedo, metallic 0; chopsticks / carriage stay matte
   black. Every one of them metallic 0, roughness 0.8-0.95 (frames: satin-matte, no mirror highlight on any member). Metal032 colour map
-  modulates the legs (contrast 0.25) and braces (0.5); its NormalGL map triplanar at strength 0.5 (missing file: smooth). Open: plinth
-  panel seams are not drawn (the plinth is a unit box); the far shader's `leg_colour`, `steel_colour`, `clad_colour` follow the new
+  modulates the legs (contrast 0.25) and braces (0.5); its NormalGL map triplanar at strength 0.5 (missing file: smooth). The plinth
+  draws the mount's plate map (courses, plates, seam lines) projected in metres on the scaled box (`plinth_plates.gdshader`,
+  `TowerMaterial.plinth`, tile 12 m, the map's mean divided out so the tint is the albedo; Task 13b: the seams are drawn;
+  only a band above the tower foot block shows it, the block (`foot`, plain concrete colour) covers the rest); the far shader's `leg_colour`, `steel_colour`, `clad_colour` follow the new
   albedos. Earlier values: `docs/history/launch-structures.md` "Tower colours before the webcast frames".
 - Material (`tower_material.gd`, `shaders/tower_steel.gdshader`): CC0 ambientCG Metal032 colour map (data/materials,
   `python tools/data_pipeline/fetch.py ambientcg_metal032`; missing: plain steel) triplanar in the member's own scaled
@@ -164,6 +166,28 @@ Booster roll at a catch is one-way (`away_from_tower_azimuth_deg` 90, `gnc::catc
   <= 148 m, every value line tagged, loader raises on missing keys / bad units / unknown pattern and checks the deck, core, roof and foot tables;
   `build_models.py` generates into a sibling `.new` directory and swaps it in only when every generator succeeded (a
   failed run leaves the old models and manifest).
+
+- Radiance budget by day (Task 13b, `game/tests/radiance_budget.gd` headless: the core's `atmosphere_illuminance`; render_check
+  `--camera_exposure=8,0.004,100 --luminance_probe=...` on a pad view with the Starship on the mount, 300 m WSW of the pad, eye 40 m,
+  weather off; images `screenshots/earth_pad/task13b/budget_*.png`). Sun 87.5 deg (2025-06-15 18:30 UTC): beam 103 821 lux, sky
+  17 607 lux on a horizontal plane (14.5 % of the global 121 329 lux); a vertical face: direct 4 550 (only toward the Sun) + sky
+  8 804 + ground bounce 6 542 lux (the cube's ground, albedo 0.108) - the face seen from the west, 86 deg from the Sun, gets sky and
+  bounce only: 15 346 lux. Sun 39.4 deg: beam 91 232, sky 15 216 (20.8 %), global 73 072; a Sun-facing vertical face 70 541 direct + 7 608 sky
+  + 3 940 bounce = 82 089 lux, a shaded one 11 548. Radiance L = albedo x E / pi against the render (cd/m^2): hardstand (albedo
+  0.195) 7 531 predicted / 7 509 rendered at noon, 4 536 / 4 433 at 39 deg; sunlit tower leg (0.16) at 39 deg 4 181 / 3 964 (aerial
+  perspective over 300 m, the steel map's grime and contrast: -5 %); leg face seen from the west at noon 782 / 746. So the
+  renderer reproduces the budget within 2-5 %; the tower's legs read 0.099 of the hardstand's radiance at noon (the sky and
+  bounce alone) and 0.89 of it on a Sun-facing face at 39 deg, 0.13 on a shaded one. A tower much darker than the ground at pad
+  noon is therefore the physics of vertical faces under a high Sun (and the 0.16 steel against the 0.20 ground), not a missing
+  light. Photo of a similar Sun: none dated (the extracted webcast frames carry no date or Sun elevation); f12_1860 (ground view, high
+  Sun from behind the camera): lattice median luminance 0.046 against the sand's 0.175 (ratio 0.26, sky seen through the lattice
+  included), consistent with a leg ratio between the two renders' 0.10 and 0.89 depending on the face's Sun angle; not a calibration.
+  Ground bounce: the radiance cube's ground is the global day texture (one texel ~ 6.7 km: 0.083 / 0.108 / 0.083 linear RGB at the
+  site), the imagery within 1.5 km averages 0.12-0.16 (rings 0-100 m 0.159, 100-250 0.143, 250-700 0.126, 700-1500 0.119 luminance;
+  the hardstand ground 0.195): the bounce a wall gets is ~30-40 % low (red more than green: the global texel is bluish with bay
+  and Gulf), a wall's total irradiance 6 % low on the Sun side at noon, 13-17 % on shaded faces. Left as it is (below a quarter of a
+  stop on lit faces; a local ground albedo in the cube needs an imagery read at each refresh, up to 9 JPEG tiles on the main thread, whose
+  cost was not measured): open point in terrain-rendering.md.
 
 ## Prototype evidence (task 5, `screenshots/pad-b/t5_*.png`, `tools/structures/measure/render_views.sh`)
 - Look pass: narrower decks (2.5 m inset), thinner chevrons (0.4 m), darker core; seen diagonally the tower now reads as
