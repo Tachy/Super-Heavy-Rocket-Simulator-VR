@@ -29,6 +29,7 @@ struct TerrainCheck {
 };
 struct TerrainGridFile {
     std::string product;
+    std::string kind = "height";  // "height" (DN x dn_scale_m = metres) or "albedo" (DN x dn_scale_m = relative albedo)
     std::string projection;  // "polar_stereographic_south" / "_north", "simple_cylindrical" or "geographic"
     double sphere_radius_m = 0.0;
     double dn_scale_m = 0.0;
@@ -64,5 +65,9 @@ struct TerrainGridFile {
 
 // Throws ConfigError (German, names tools/data_pipeline/fetch.py) when the file or its heights are missing.
 TerrainGridFile load_terrain_grid_file(const std::filesystem::path& toml_path);
+
+// Writes the TOML header and, next to it, the int16 grid "<toml stem>.i16" (the format load_terrain_grid_file reads).
+// Polar stereographic and simple cylindrical grids only; the checks become [[check]] tables.
+void write_terrain_grid_file(const TerrainGridFile& file, const std::filesystem::path& toml_path);
 
 }  // namespace starsim::config

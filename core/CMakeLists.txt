@@ -195,6 +195,7 @@ add_library(starsim_core STATIC
     src/environment/cloud_volume_bake.cpp
     src/environment/cache_file_io.cpp
     src/config/lunar_site_config.cpp
+    src/config/lunar_site_tile.cpp
     src/config/geoid_config.cpp
     src/config/atmosphere_optics_config.cpp
     src/config/earth_terrain_config.cpp
@@ -270,6 +271,10 @@ target_compile_definitions(atmosphere_tables PRIVATE
 add_executable(weather_snapshot apps/weather_snapshot.cpp)
 target_link_libraries(weather_snapshot PRIVATE starsim::core)
 target_compile_definitions(weather_snapshot PRIVATE STARSIM_CONFIG_DIR="${CMAKE_SOURCE_DIR}/config")
+
+# lunar_site_tile (lunar landing sites): plans / assembles the terrain and albedo tile around a landing site.
+add_executable(lunar_site_tile apps/lunar_site_tile.cpp)
+target_link_libraries(lunar_site_tile PRIVATE starsim::core)
 
 # refuelling_report (refuelling r6): how many tanker flights the lunar mission needs, from the command line.
 add_executable(refuelling_report apps/refuelling_report.cpp)

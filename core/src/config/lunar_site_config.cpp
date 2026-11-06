@@ -1,6 +1,8 @@
 #include "starsim/config/lunar_site_config.hpp"
 
+#include <cstdio>
 #include <fstream>
+#include <sstream>
 
 #include "starsim/config/data_missing.hpp"
 #include "starsim/math/constants.hpp"
@@ -51,6 +53,7 @@ TerrainGridFile load_terrain_grid_file(const std::filesystem::path& toml_path) {
     TerrainGridFile f;
     f.product = doc.text(g, "product");
     f.projection = doc.text(g, "projection");
+    f.kind = doc.text_or(g, "kind", "height");
     f.sphere_radius_m = doc.positive(g, "sphere_radius_m");
     f.dn_scale_m = doc.positive(g, "dn_scale_m");
     f.lines = static_cast<int>(doc.positive(g, "lines"));
@@ -99,6 +102,65 @@ TerrainGridFile load_terrain_grid_file(const std::filesystem::path& toml_path) {
         }
     }
     return f;
+}
+
+namespace {
+
+// A TOML float that round-trips (always carries a '.' or an exponent, so it is never read back as an integer).
+std::string toml_number(double v) {
+    char buffer[40];
+    std::snprintf(buffer, sizeof buffer, "%.17g", v);
+    std::string s = buffer;
+    if (s.find_first_of(".en") == std::string::npos) s += ".0";
+    return s;
+}
+
+}  // namespace
+
+void write_terrain_grid_file(const TerrainGridFile& f, const std::filesystem::path& toml_path) {
+    const bool polar = f.projection == "polar_stereographic_south" || f.projection == "polar_stereographic_north";
+    if (!polar && f.projection != "simple_cylindrical") {
+        throw ConfigError("write_terrain_grid_file: unsupported projection '" + f.projection + "'");
+    }
+    if (f.dn.size() != static_cast<size_t>(f.lines) * static_cast<size_t>(f.samples)) {
+        throw ConfigError("write_terrain_grid_file: grid size does not match lines x samples");
+    }
+    const auto heights_name = toml_path.stem().string() + ".i16";
+    std::ostringstream t;
+    t << "[grid]\n";
+    t << "product = \"" << f.product << "\"\n";
+    t << "kind = \"" << f.kind << "\"\n";
+    t << "projection = \"" << f.projection << "\"\n";
+    t << "sphere_radius_m = " << toml_number(f.sphere_radius_m) << "\n";
+    t << "dn_scale_m = " << toml_number(f.dn_scale_m) << "\n";
+    t << "heights = \"" << heights_name << "\"\n";
+    t << "lines = " << f.lines << "\n";
+    t << "samples = " << f.samples << "\n";
+    if (polar) {
+        t << "pole_line = " << toml_number(f.pole_line) << "\n";
+        t << "pole_sample = " << toml_number(f.pole_sample) << "\n";
+        t << "scale_m = " << toml_number(f.scale_m) << "\n";
+        t << "first_line = " << f.first_line << "\n";
+        t << "first_sample = " << f.first_sample << "\n";
+    } else {
+        t << "pixels_per_degree = " << toml_number(f.pixels_per_degree) << "\n";
+        t << "zero_line = " << toml_number(f.zero_line) << "\n";
+        t << "zero_sample = " << toml_number(f.zero_sample) << "\n";
+    }
+    for (const auto& c : f.checks) {
+        t << "\n[[check]]\n";
+        t << "latitude_deg = " << toml_number(c.latitude_rad / constants::deg_to_rad) << "\n";
+        t << "longitude_deg = " << toml_number(c.longitude_rad / constants::deg_to_rad) << "\n";
+        t << "height_m = " << toml_number(c.height_m) << "\n";
+    }
+    if (toml_path.has_parent_path()) std::filesystem::create_directories(toml_path.parent_path());
+    std::ofstream grid(toml_path.parent_path() / heights_name, std::ios::binary);
+    grid.write(reinterpret_cast<const char*>(f.dn.data()), static_cast<std::streamsize>(2 * f.dn.size()));
+    if (!grid) throw ConfigError("cannot write " + (toml_path.parent_path() / heights_name).string());
+    grid.close();
+    std::ofstream out(toml_path, std::ios::binary);
+    out << t.str();
+    if (!out) throw ConfigError("cannot write " + toml_path.string());
 }
 
 }  // namespace starsim::config

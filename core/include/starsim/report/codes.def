@@ -273,6 +273,7 @@ STARSIM_CODE(refuelling_return_not_finished, "refuelling.return_not_finished", "
 // lunar and data: the lunar mission chain's reasons, statuses and aborts; external data
 STARSIM_CODE(lunar_budget_short, "lunar.budget_short", "leg,missing")
 STARSIM_CODE(lunar_site_outside_tile, "lunar.site_outside_tile", "")
+STARSIM_CODE(lunar_site_no_product, "lunar.site_no_product", "latitude,longitude")
 STARSIM_CODE(lunar_no_touchdown_point, "lunar.no_touchdown_point", "slope,radius")
 STARSIM_CODE(lunar_no_touchdown_point_hazards, "lunar.no_touchdown_point_hazards", "slope,radius")
 STARSIM_CODE(lunar_no_doi, "lunar.no_doi", "")

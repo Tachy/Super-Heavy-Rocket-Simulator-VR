@@ -25,7 +25,21 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   differences over 10 m) through
   `ReferenceBody::set_terrain` / `surface_height_m` / `surface_normal_fixed`; `FlightSession::set_moon_terrain`,
   `set_lunar_landing_site` (`sim::load_lunar_terrain`, `sim::lunar_site`). Terrain and albedo products for landing
-  sites anywhere (plan 2026-11-06, task 1; data only, no code reads them yet): `config/lunar_terrain_products.toml`
+  sites anywhere (plan 2026-11-06, tasks 1 and 3): `config::load_lunar_terrain_products` reads them, `plan_site_tile`
+  picks the FIRST product (selection order) whose coverage holds the whole tile (polar: crop inside the file and its
+  corners above the product's latitude limit; cylindrical: crop inside the latitude range, several files and the 0/360
+  wrap allowed, tiles never mix products - an albedo tile across +-60 deg, equatorial against polar mosaic, is refused
+  with `lunar.site_no_product`; heights bridge the seam with the 100 m LDEM_45 product), returns the byte ranges and
+  `assemble_site_tile` decodes the bodies into a `TerrainGridFile` (`write_terrain_grid_file`; the CLI
+  `lunar_site_tile plan|assemble` wraps both). Height tiles: int16, `dn_scale_m` 0.5, 9 `[[check]]` points, geographic
+  grid kept (`simple_cylindrical` with `zero_line = ppd * lat(0,0)`, `zero_sample = -ppd * lon(0,0)`, pixel centres).
+  Albedo tiles: `kind = "albedo"`, int16 with `dn_scale_m` 1/16384, value = tile / its own 10 km box low-pass scaled to
+  a tile mean of 1 (no-data pixels 1.0). Range merging (`RangePolicy`): height = exactly the crop rows (gap 0), albedo =
+  rows joined across gaps up to 512 KiB in blocks of at most 24 MiB (~7 requests instead of ~1500 for a 150 km tile,
+  ~165 MB). Polar half size in pixels = round(half / scale) (no conformal factor: the tile is 1-7 % smaller on the ground
+  at 45-60 deg). The north polar line convention `line = pole_line + rho cos(lon) / s` was checked against LDEM_16 for
+  LDEM_80N_20M (rms 87 m vs 799-1538 m for the other sign choices), LDEM_60N_60M (104 m vs 1191-1825) and LDEM_45N_100M
+  (72 m vs 1340-1952); the WAC north mosaic is assumed to share it (not checkable against heights). Products file: `config/lunar_terrain_products.toml`
   describes each product (URL, layout, projection, scale; `[selection]` orders them) and
   `tools/data_pipeline/probe_lunar_products.py --verify-config` checks it against the PDS labels. Heights: LOLA polar
   20 m (80-90 deg, own `tile_half_size_m` 10 km), SLDEM2015 512 px/deg (+-60 deg, ~59 m, km values), LOLA polar 60 m
