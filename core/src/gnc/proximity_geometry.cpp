@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
+#include <utility>
 
 namespace starsim::gnc {
 
@@ -21,23 +22,28 @@ DockingApproach docking_approach(const Vec3& port_axis_lvlh) {
     if (u.x > dominant) return DockingApproach::VBar;
     if (-u.z > dominant) return DockingApproach::RBar;
     if (u.z > dominant) return DockingApproach::RBarBelow;
-    throw std::invalid_argument("Kein Anflugweg für diesen Port");
+    throw std::invalid_argument("docking_approach: no approach path for this port axis");
 }
 
 std::vector<ProximityWaypoint> proximity_path(DockingApproach approach, const ProximityParameters& p) {
     std::vector<ProximityWaypoint> path;
-    path.push_back({"Wegpunkt 0", WaypointFrame::LvlhFromCg, {0.0, 0.0, p.waypoint0_below_m}, p.waypoint0_hold_s, false});
+    path.push_back({false, 0, WaypointFrame::LvlhFromCg, {0.0, 0.0, p.waypoint0_below_m}, p.waypoint0_hold_s, false});
     if (approach == DockingApproach::RBar) {
         int k = 1;  // front point, then the arc towards the zenith; the zenith leg ends at Waypoint 1
         for (double a = 0.0; a < 0.5 * constants::pi - 0.5 * p.flyaround_step_rad; a += p.flyaround_step_rad, ++k) {
-            path.push_back({"Umflug " + std::to_string(k), WaypointFrame::LvlhFromCg,
+            path.push_back({true, k, WaypointFrame::LvlhFromCg,
                             {p.flyaround_radius_m * std::cos(a), 0.0, -p.flyaround_radius_m * std::sin(a)}, 0.0,
                             false});
         }
     }
-    path.push_back({"Wegpunkt 1", WaypointFrame::TargetPort, {p.waypoint1_range_m, 0.0, 0.0}, p.waypoint1_hold_s, true});
-    path.push_back({"Wegpunkt 2", WaypointFrame::TargetPort, {p.waypoint2_range_m, 0.0, 0.0}, p.waypoint2_hold_s, true});
+    path.push_back({false, 1, WaypointFrame::TargetPort, {p.waypoint1_range_m, 0.0, 0.0}, p.waypoint1_hold_s, true});
+    path.push_back({false, 2, WaypointFrame::TargetPort, {p.waypoint2_range_m, 0.0, 0.0}, p.waypoint2_hold_s, true});
     return path;
+}
+
+report::Report waypoint_report(const ProximityWaypoint& waypoint) {
+    return report::make(waypoint.flyaround ? report::Code::proximity_flyaround_name : report::Code::proximity_waypoint_name,
+                        {report::count("waypoint", waypoint.number)});
 }
 
 CorridorStatus corridor_status(const Vec3& position_port_m, double cg_range_m, const ProximityParameters& p) {
@@ -59,33 +65,29 @@ math::Quat docking_attitude_gcrf(const math::Mat3& chaser_port_axes_body, const 
 
 namespace {
 
-EnvelopeCheck violated(const char* what, double value, const char* unit) {
-    char text[96];
-    std::snprintf(text, sizeof text, "%s (%.3f %s)", what, value, unit);
-    return {false, text};
-}
+EnvelopeCheck violated(report::Code code, report::Param value) { return {false, report::make(code, {std::move(value)})}; }
 
 }  // namespace
 
 EnvelopeCheck capture_envelope_check(const RelativePortState& state, const CaptureEnvelope& envelope) {
     const double axial_mps = -state.velocity_mps.x;
-    if (axial_mps > envelope.axial_max_mps) return violated("axial zu schnell", axial_mps, "m/s");
-    if (axial_mps < envelope.axial_min_mps) return violated("axial zu langsam", axial_mps, "m/s");
+    if (axial_mps > envelope.axial_max_mps) return violated(report::Code::proximity_envelope_axial_too_fast, report::speed("speed", axial_mps));
+    if (axial_mps < envelope.axial_min_mps) return violated(report::Code::proximity_envelope_axial_too_slow, report::speed("speed", axial_mps));
     const double lateral_mps = std::hypot(state.velocity_mps.y, state.velocity_mps.z);
-    if (lateral_mps > envelope.lateral_max_mps) return violated("lateral zu schnell", lateral_mps, "m/s");
+    if (lateral_mps > envelope.lateral_max_mps) return violated(report::Code::proximity_envelope_lateral_too_fast, report::speed("speed", lateral_mps));
     const double offset_m = std::hypot(state.position_m.y, state.position_m.z);
-    if (offset_m > envelope.offset_max_m) return violated("Versatz zu groß", offset_m, "m");
+    if (offset_m > envelope.offset_max_m) return violated(report::Code::proximity_envelope_offset_too_large, report::length("offset", offset_m));
     if (state.misalignment_rad > envelope.angle_max_rad)
-        return violated("Winkel zu groß", state.misalignment_rad / constants::deg_to_rad, "°");
+        return violated(report::Code::proximity_envelope_angle_too_large, report::angle("angle", state.misalignment_rad));
     const math::Vec3& w = state.angular_rate_radps;  // target port frame: x = the docking axis (roll)
     const double rate_radps = std::hypot(w.y, w.z);
     if (rate_radps > envelope.rate_max_radps)
-        return violated("Drehrate zu groß", rate_radps / constants::deg_to_rad, "°/s");
+        return violated(report::Code::proximity_envelope_rate_too_large, report::angle("rate", rate_radps));  // rad/s
     if (std::abs(state.clocking_rad) > envelope.roll_max_rad)
-        return violated("Rollwinkel zu groß", std::abs(state.clocking_rad) / constants::deg_to_rad, "°");
+        return violated(report::Code::proximity_envelope_roll_too_large, report::angle("angle", std::abs(state.clocking_rad)));
     if (std::abs(w.x) > envelope.roll_rate_max_radps)
-        return violated("Rollrate zu groß", std::abs(w.x) / constants::deg_to_rad, "°/s");
-    return {true, ""};
+        return violated(report::Code::proximity_envelope_roll_rate_too_large, report::angle("rate", std::abs(w.x)));  // rad/s
+    return {true, report::make(report::Code::ok)};
 }
 
 CaptureEnvelope probe_drogue_capture_envelope() {

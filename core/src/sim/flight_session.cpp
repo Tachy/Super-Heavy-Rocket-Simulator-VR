@@ -755,12 +755,13 @@ void FlightSession::set_rendezvous_target(size_t target_index, const std::string
     if (target_index >= bodies_.size() || target_index == controlled_) {
         throw std::out_of_range("set_rendezvous_target: no such target body");
     }
-    vehicle::port_kinematics(*bodies_[controlled_].body, chaser_port);  // validates both ports (German error)
+    vehicle::port_kinematics(*bodies_[controlled_].body, chaser_port);  // validates both ports (throws for an unknown id)
     vehicle::port_kinematics(*bodies_[target_index].body, target_port);
     if (const auto problem =
             vehicle::port_mismatch(vehicle::port_config(bodies_[controlled_].body->vehicle(), chaser_port),
                                    vehicle::port_config(bodies_[target_index].body->vehicle(), target_port))) {
-        throw std::invalid_argument(*problem);
+        throw std::invalid_argument(std::string("set_rendezvous_target: ports cannot mate: ") +
+                                    std::string(report::id_of(problem->code)));
     }
     reset_proximity();  // a proximity flight is bound to its ports (start_proximity sets the target before the flight)
     reset_docking();
@@ -1189,7 +1190,7 @@ void FlightSession::report_gas_ingestion() {
 void FlightSession::ignite() {
     if (bodies_.empty()) return;
     if (docking_busy()) {
-        docking_status_ = "Zündung nicht möglich: angedockt";
+        docking_status_ = report::make(report::Code::docking_ignition_docked);
         return;
     }
     light_lowest_engines(bodies_[controlled_]);

@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include "proximity_test_support.hpp"
+#include "report_check.hpp"
 
 using namespace starsim;
 using math::Vec3;
@@ -32,7 +33,7 @@ TEST_CASE("IDA-2: Waypoint 0 to contact inside the envelope", "[iss][proximity]"
     std::printf("[validation] CW IDA-2: contact after %.1f min, %.1f kg, axial %.3f m/s, offset %.3f m, %s\n", t / 60.0,
                 kg0 - s.propellant_kg, -g.contact()->port.velocity_mps.x,
                 std::hypot(g.contact()->port.position_m.y, g.contact()->port.position_m.z),
-                g.contact()->envelope.reason.c_str());
+                report::id_of(g.contact()->envelope.reason.code).data());
     CHECK(g.contact()->envelope.inside);
     CHECK(-g.contact()->port.velocity_mps.x < 0.1);
     CHECK_FALSE(saw(g, ProximityPhase::Hold));
@@ -52,7 +53,7 @@ TEST_CASE("IDA-3: fly-around to the zenith axis, contact inside the envelope", "
     std::printf("[validation] CW IDA-3: contact after %.1f min, %.1f kg, axial %.3f m/s, offset %.3f m, %s\n", t / 60.0,
                 kg0 - s.propellant_kg, -g.contact()->port.velocity_mps.x,
                 std::hypot(g.contact()->port.position_m.y, g.contact()->port.position_m.z),
-                g.contact()->envelope.reason.c_str());
+                report::id_of(g.contact()->envelope.reason.code).data());
     CHECK(g.contact()->envelope.inside);
     CHECK(saw(g, ProximityPhase::Flyaround));
     CHECK_FALSE(saw(g, ProximityPhase::Abort));
@@ -126,7 +127,8 @@ TEST_CASE("Commanded hold, resume, abort and refusals", "[iss][proximity]") {
     CHECK_FALSE(g.retreat());
     proximity_test::run(g, s, 600.0);
     CHECK(g.phase() == ProximityPhase::Abort);
-    CHECK(g.status().find("Ausweichmanöver ausgeführt") != std::string::npos);
+    CHECK((g.status().code == report::Code::proximity_abort_breakout_done ||
+           g.status().code == report::Code::proximity_abort_breakout_done_unsafe));
     // the breakout leaves the sphere and stays out for a day (CW)
     double closest_after_exit = 1e9;
     bool out = false;
@@ -214,45 +216,46 @@ TEST_CASE("Resume after an abort is checked against the live state", "[iss][prox
     g.update(s.input());
     REQUIRE(g.phase() == ProximityPhase::Abort);
     CHECK_FALSE(g.resume());  // breakout still being flown
-    CHECK(g.refusal().find("Ausweichmanöver") != std::string::npos);
+    CHECK(test::refused(g.refusal(), report::Code::proximity_resume_not_possible, report::Code::proximity_cause_breakout_running));
     proximity_test::run(g, s, 600.0);
-    REQUIRE(g.status().find("ausgeführt") != std::string::npos);
+    REQUIRE((g.status().code == report::Code::proximity_abort_breakout_done ||
+             g.status().code == report::Code::proximity_abort_breakout_done_unsafe));
     // drifted far away without guidance updates (the session coasts after a breakout)
     s.cg = {{-6000.0, 0.0, 0.0}, {}};
     g.observe(s.input());
     CHECK_FALSE(g.resume());
-    CHECK(g.refusal().find("zu weit") != std::string::npos);
+    CHECK(test::refused(g.refusal(), report::Code::proximity_resume_not_possible, report::Code::proximity_cause_too_far_to_resume));
     // below the deorbit reserve: no resume (it would abort and fire a new breakout at once)
     s.cg = {{-1000.0, 0.0, 0.0}, {}};
     s.propellant_kg = p.deorbit_reserve_kg - 1.0;
     g.observe(s.input());
     CHECK_FALSE(g.resume());
-    CHECK(g.refusal().find("Treibstoffreserve") != std::string::npos);
+    CHECK(test::refused(g.refusal(), report::Code::proximity_resume_not_possible, report::Code::proximity_cause_propellant_reserve));
     s.propellant_kg = 2000.0;
     g.observe(s.input());
     CHECK(g.resume());
 }
 
-TEST_CASE("Refused commands give a German reason and leave the phase", "[iss][proximity]") {
+TEST_CASE("Refused commands give a reason report and leave the phase", "[iss][proximity]") {
     auto s = at_waypoint0(CwSim::ida2());
     gnc::ProximityGuidance g(gnc::DockingApproach::VBar, {});
     CHECK_FALSE(g.hold());
-    CHECK(g.refusal().find("nicht gestartet") != std::string::npos);
+    CHECK(test::refused(g.refusal(), report::Code::proximity_command_not_possible, report::Code::proximity_cause_not_started));
     g.update(s.input());
-    const std::string status = g.status();
+    const report::Report status = g.status();
     CHECK_FALSE(g.retreat());
-    CHECK(g.refusal().find("Rückzug nicht möglich") != std::string::npos);
+    CHECK(g.refusal().code == report::Code::proximity_retreat_not_possible);
     CHECK_FALSE(g.resume());
-    CHECK(g.refusal().find("Wiederaufnahme nicht möglich") != std::string::npos);
+    CHECK(g.refusal().code == report::Code::proximity_resume_not_possible);
     REQUIRE(g.abort());
     CHECK_FALSE(g.abort());
-    CHECK(g.refusal().find("Befehl") != std::string::npos);  // the abort is still pending
+    CHECK(g.refusal().code == report::Code::proximity_command_not_possible);  // the abort is still pending
     g.update(s.input());
     CHECK_FALSE(g.abort());
-    CHECK(g.refusal().find("Abbruch läuft") != std::string::npos);
+    CHECK(g.refusal().code == report::Code::proximity_abort_running);
     CHECK_FALSE(g.hold());
     CHECK(g.phase() == ProximityPhase::Abort);
-    CHECK(status.find("Wegpunkt 0") != std::string::npos);
+    CHECK(test::names_waypoint(status, 0));
 }
 
 TEST_CASE("A failed capture retreats to Waypoint 2 and waits for resume", "[iss][proximity][docking]") {
@@ -265,12 +268,13 @@ TEST_CASE("A failed capture retreats to Waypoint 2 and waits for resume", "[iss]
     proximity_test::run(g, s, 1800.0);
     REQUIRE(g.phase() == ProximityPhase::Contact);
     s.cg.velocity_mps = s.port_to_lvlh * Vec3{0.03, 0.0, 0.0};  // the ring bounced it back out
-    g.capture_failed(s.input(), "abgeprallt");
+    g.capture_failed(s.input(), report::make(report::Code::docking_fail_bounced));
     CHECK(g.phase() == ProximityPhase::Retreat);
-    CHECK(g.status() == "Rückzug: Fangen fehlgeschlagen (abgeprallt)");
+    CHECK(test::refused(g.status(), report::Code::proximity_capture_failed_retreat, report::Code::docking_fail_bounced));
     proximity_test::run(g, s, 900.0);
     CHECK(g.phase() == ProximityPhase::Waypoint);
-    CHECK(g.path()[g.waypoint()].name == "Wegpunkt 2");
+    CHECK_FALSE(g.path()[g.waypoint()].flyaround);
+    CHECK(g.path()[g.waypoint()].number == 2);
     CHECK(g.waiting_after_capture_failure());  // review r5: an autonomous mission may resume this one
     REQUIRE(g.resume());
     CHECK_FALSE(g.waiting_after_capture_failure());
@@ -302,7 +306,7 @@ TEST_CASE("A collision ends the guidance passively", "[iss][proximity][docking]"
     g.update(s.input());
     g.collided(s.epoch);
     CHECK(g.phase() == ProximityPhase::Contact);
-    CHECK(g.status() == "Kollision");
+    CHECK(g.status().code == report::Code::proximity_collision);
     CHECK(norm(g.update(s.input()).translation_fraction_port) == 0.0);
     CHECK_FALSE(g.resume());
 }

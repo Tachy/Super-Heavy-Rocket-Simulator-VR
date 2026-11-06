@@ -7,6 +7,7 @@
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/mat3.hpp"
 #include "starsim/math/vec3.hpp"
+#include "starsim/report/report.hpp"
 
 namespace starsim::vehicle {
 
@@ -23,12 +24,12 @@ struct StageTransform {
 // into the target's. Refuelling r1: two dorsal ports (axis +z, up +x) give parallel ships rolled 180 deg.
 StageTransform mated_stage_transform(const config::DockingPortConfig& chaser, const config::DockingPortConfig& target);
 
-// Why two ports cannot mate (German, shown to the user), or nullopt: the mechanisms must be equal, and a probe/drogue
+// Why two ports cannot mate (docking.ports_mismatch / docking.probe_drogue_roles), or nullopt: the mechanisms must be equal, and a probe/drogue
 // pair needs the probes on the chaser (soft_capture "active") and the drogues on the target ("passive").
-std::optional<std::string> port_mismatch(const config::DockingPortConfig& chaser,
-                                         const config::DockingPortConfig& target);
+std::optional<report::Report> port_mismatch(const config::DockingPortConfig& chaser,
+                                            const config::DockingPortConfig& target);
 
-// The port `port_id` on any stage of the vehicle. Throws std::invalid_argument (German) for an unknown id.
+// The port `port_id` on any stage of the vehicle. Throws std::invalid_argument for an unknown id.
 const config::DockingPortConfig& port_config(const Vehicle& vehicle, std::string_view port_id);
 
 }  // namespace starsim::vehicle

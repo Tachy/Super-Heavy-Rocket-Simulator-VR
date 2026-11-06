@@ -11,6 +11,7 @@
 #include "starsim/math/mat3.hpp"
 #include "starsim/math/vec3.hpp"
 #include "starsim/orbit/clohessy_wiltshire.hpp"
+#include "starsim/report/report.hpp"
 #include "starsim/time/epoch.hpp"
 
 namespace starsim::gnc {
@@ -20,7 +21,7 @@ namespace starsim::gnc {
 // speed monitors, commanded hold / retreat / abort (breakout) and resume. Pure guidance: it reads the relative
 // state and returns translation fractions in the target port frame; attitude is held by the caller.
 
-// German names (to_string): "Wegpunkt" (holding at path waypoint `waypoint()` - its name is the status), "Annäherung"
+// Phase names (id_of; texts in the tables, phase.proximity_phase.*): "Wegpunkt" (holding at path waypoint `waypoint()` - its name is the status), "Annäherung"
 // (CW transfer outside the sphere), "Umflug" (CW transfer to a fly-around point), "Anflug" (axial approach Waypoint 1
 // -> 2), "Endanflug" (Waypoint 2 -> contact), "Halt", "Rückzug", "Abbruch", "Kontakt".
 enum class ProximityPhase { Waypoint, Transfer, Flyaround, Approach, FinalApproach, Hold, Retreat, Abort, Contact };
@@ -42,7 +43,7 @@ struct ProximityOutput {
 struct ProximityEvent {
     time::Epoch epoch;
     ProximityPhase phase;
-    std::string status;  // German
+    report::Report status;
 };
 struct ProximityContact {
     time::Epoch epoch;
@@ -55,7 +56,7 @@ public:
     ProximityGuidance(DockingApproach approach, ProximityParameters parameters);
     ProximityOutput update(const ProximityInput& in);
 
-    // Commands (false, a German refusal() and no change when refused). Accepted commands take effect in the next update,
+    // Commands (false, a refusal() report and no change when refused). Accepted commands take effect in the next update,
     // which supplies the live state; further commands are refused until then.
     bool hold();     // keep the current relative position; refused in Abort / Contact / Hold
     bool retreat();  // back to the last waypoint reached; refused at/before Waypoint 0, in Abort / Contact / Retreat
@@ -65,9 +66,9 @@ public:
                      // the deorbit reserve); refused otherwise
 
     // Docking outcomes reported by the session (ISS i5). capture_failed: from Contact back along the axis to the last
-    // on-axis waypoint (Waypoint 2), where the guidance waits for resume() ("Rückzug: Fangen fehlgeschlagen (<reason>)").
-    // collided: the flight ends passively in Contact with the status "Kollision" (no command accepted).
-    void capture_failed(const ProximityInput& in, const std::string& reason);
+    // on-axis waypoint (Waypoint 2), where the guidance waits for resume() (proximity.capture_failed_retreat with the reason as its cause).
+    // collided: the flight ends passively in Contact with the status proximity.collision (no command accepted).
+    void capture_failed(const ProximityInput& in, const report::Report& reason);
     void collided(time::Epoch epoch);
     bool collision() const { return collided_; }
 
@@ -79,8 +80,8 @@ public:
     size_t waypoint() const { return target_; }  // index into path() of the waypoint flown to / held at
     const std::vector<ProximityWaypoint>& path() const { return path_; }
     const ProximityParameters& parameters() const { return p_; }
-    const std::string& status() const { return status_; }
-    const std::string& refusal() const { return refusal_; }  // German reason of the last refused command
+    const report::Report& status() const { return status_; }
+    const report::Report& refusal() const { return refusal_; }  // reason of the last refused command
     // Refreshes the live state the command checks use (resume's range / propellant) without flying: the session
     // calls it before a command, since after a breakout it coasts without updates.
     void observe(const ProximityInput& in);
@@ -90,18 +91,18 @@ public:
 private:
     enum class Request { None, Hold, Retreat, Abort, Resume };
 
-    void enter(ProximityPhase phase, std::string status, time::Epoch epoch);
+    void enter(ProximityPhase phase, report::Report status, time::Epoch epoch);
     math::Vec3 target_cg(const ProximityInput& in, size_t index) const;
     bool inside_sphere(const ProximityInput& in) const;
     double corridor_bound_m(double x_m) const;
     void start(const ProximityInput& in);
     void resolve_request(const ProximityInput& in);
     void start_segment(const ProximityInput& in);
-    bool plan_transfer(const ProximityInput& in, ProximityPhase phase, double nominal_s, std::string status);
+    bool plan_transfer(const ProximityInput& in, ProximityPhase phase, double nominal_s, report::Report status);
     void start_retreat(const ProximityInput& in, size_t index);
-    void begin_abort(std::string status, time::Epoch epoch);
+    void begin_abort(report::Report status, time::Epoch epoch);
     void arrive(const ProximityInput& in, bool waiting_for_go);
-    void auto_hold(const ProximityInput& in, std::string status);
+    void auto_hold(const ProximityInput& in, report::Report status);
     void transitions(const ProximityInput& in);
     void monitor(const ProximityInput& in);
     ProximityOutput fly(const ProximityInput& in);
@@ -118,10 +119,10 @@ private:
     Request request_ = Request::None;
     size_t retreat_index_ = 0;  // with Request::Retreat
     ProximityPhase interrupted_ = ProximityPhase::Waypoint;
-    std::string interrupted_status_;
+    report::Report interrupted_status_;
     time::Epoch last_epoch_, arrival_epoch_;
     double last_cg_range_m_ = 0.0, last_propellant_kg_ = 0.0;
-    bool refuse(std::string reason);
+    bool refuse(report::Report reason);
     bool command_open();  // started and no request pending; sets the refusal otherwise
     std::optional<time::Epoch> waypoint_since_;
     math::Vec3 last_transfer_velocity_lvlh_;
@@ -132,7 +133,7 @@ private:
     bool breakout_planned_ = false, breakout_done_ = false, breakout_safe_ = false;
     math::Vec3 abort_target_lvlh_;
     TranslationLoop loop_;
-    std::string status_, refusal_;
+    report::Report status_, refusal_;
     std::vector<ProximityEvent> events_;
     std::optional<ProximityContact> contact_;
 };

@@ -303,7 +303,7 @@ TEST_CASE("A Starship near the ISS is refused a proximity flight, not thrown out
     bool started = true;
     REQUIRE_NOTHROW(started = session.start_proximity("ida2"));
     CHECK_FALSE(started);
-    CHECK_THAT(session.proximity_status(), Catch::Matchers::ContainsSubstring("Andocksysteme passen nicht"));
+    CHECK(test::cause_is(session.proximity_status(), report::Code::docking_ports_mismatch));
 }
 
 TEST_CASE("Bad probe/drogue ports and transfer connectors are config errors", "[refuelling][config]") {

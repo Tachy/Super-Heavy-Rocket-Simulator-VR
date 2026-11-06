@@ -25,7 +25,7 @@ godot::Dictionary absent() {
 godot::Array warnings(const sim::FlightSession& session) {
     godot::Array a;
     a.append_array(report_array(session.rendezvous_warnings()));
-    for (const auto& w : session.proximity_warnings()) a.push_back(legacy_report(w));
+    a.append_array(report_array(session.proximity_warnings()));
     return a;
 }
 
@@ -117,7 +117,7 @@ godot::Dictionary build_docking_state(const sim::FlightSession& session) {
     d["proximity_phase"] = proximity ? qualified_id("proximity_phase", gnc::id_of(*proximity)) : godot::String();
     d["docking_phase"] = docking ? qualified_id("docking_phase", contact::id_of(*docking)) : godot::String();
     d["departure_phase"] = departure ? qualified_id("departure_phase", gnc::id_of(*departure)) : godot::String();
-    d["status"] = legacy_report(!session.docking_status().empty() ? session.docking_status() : session.proximity_status());
+    d["status"] = report_dict(!session.docking_status().ok() ? session.docking_status() : session.proximity_status());
     if (rel) {
         d["position_port_m"] = to_godot(rel->position_m);
         d["velocity_port_mps"] = to_godot(rel->velocity_mps);

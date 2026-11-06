@@ -46,7 +46,7 @@ TEST_CASE("Departure guidance: IDA-2 - undock burn, back-out, departure burn, AE
     CHECK(f.ae_s < 3600.0);   // Demo-1: 17 min
     CHECK(f.kg < 60.0);
     REQUIRE_FALSE(g.events().empty());
-    CHECK(g.events().front().status == "Abkoppelimpuls");
+    CHECK(g.events().front().status.code == report::Code::departure_undock_burn);
     REQUIRE(g.departure_burn());
     CHECK(g.departure_burn()->safe);
     if (std::getenv("STARSIM_VERBOSE")) {

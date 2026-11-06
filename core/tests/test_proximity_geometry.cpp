@@ -26,10 +26,12 @@ TEST_CASE("V-bar path: Waypoint 0, 1, 2", "[iss][proximity]") {
     const gnc::ProximityParameters p;
     const auto path = gnc::proximity_path(gnc::DockingApproach::VBar, p);
     REQUIRE(path.size() == 3);
-    CHECK(path[0].name == "Wegpunkt 0");
+    CHECK_FALSE(path[0].flyaround);
+    CHECK(path[0].number == 0);
     CHECK(path[0].frame == gnc::WaypointFrame::LvlhFromCg);
     CHECK(path[0].position_m.z == 400.0);
-    CHECK(path[1].name == "Wegpunkt 1");
+    CHECK_FALSE(path[1].flyaround);
+    CHECK(path[1].number == 1);
     CHECK(path[1].frame == gnc::WaypointFrame::TargetPort);
     CHECK(path[1].position_m.x == 220.0);
     CHECK(path[2].position_m.x == 20.0);
@@ -42,12 +44,14 @@ TEST_CASE("R-bar path flies around the front at 250 m", "[iss][proximity]") {
     const auto path = gnc::proximity_path(gnc::DockingApproach::RBar, p);
     // Waypoint 0, front (0 deg), 30 deg, 60 deg, Waypoint 1 (zenith axis), Waypoint 2
     REQUIRE(path.size() == 6);
-    CHECK(path[1].name == "Umflug 1");
+    CHECK(path[1].flyaround);
+    CHECK(path[1].number == 1);
     CHECK(path[1].position_m.x == Catch::Approx(250.0));
     CHECK(path[2].position_m.x == Catch::Approx(250.0 * std::cos(30 * deg)));
     CHECK(path[2].position_m.z == Catch::Approx(-250.0 * std::sin(30 * deg)));  // up = -z
     for (size_t k = 1; k <= 3; ++k) CHECK(norm(path[k].position_m) == Catch::Approx(250.0));
-    CHECK(path[4].name == "Wegpunkt 1");
+    CHECK_FALSE(path[4].flyaround);
+    CHECK(path[4].number == 1);
     CHECK(path[4].frame == gnc::WaypointFrame::TargetPort);
 }
 
@@ -82,7 +86,7 @@ TEST_CASE("Capture envelope", "[iss][proximity]") {
     auto fast = s;
     fast.velocity_mps.x = -0.12;
     CHECK_FALSE(gnc::capture_envelope_check(fast).inside);
-    CHECK(gnc::capture_envelope_check(fast).reason.find("axial") != std::string::npos);
+    CHECK(gnc::capture_envelope_check(fast).reason.code == report::Code::proximity_envelope_axial_too_fast);
     auto slow = s;
     slow.velocity_mps.x = -0.03;
     CHECK_FALSE(gnc::capture_envelope_check(slow).inside);
@@ -105,10 +109,10 @@ TEST_CASE("Capture envelope: IDSS roll misalignment and roll rate", "[iss][proxi
     CHECK(gnc::capture_envelope_check(s).inside);
     s.clocking_rad = 4.5 * constants::deg_to_rad;
     CHECK_FALSE(gnc::capture_envelope_check(s).inside);
-    CHECK(gnc::capture_envelope_check(s).reason.rfind("Rollwinkel zu groß", 0) == 0);
+    CHECK(gnc::capture_envelope_check(s).reason.code == report::Code::proximity_envelope_roll_too_large);
     s.clocking_rad = 0.0;
     s.angular_rate_radps = {0.25 * constants::deg_to_rad, 0.0, 0.0};  // roll rate about the docking axis
-    CHECK(gnc::capture_envelope_check(s).reason.rfind("Rollrate zu groß", 0) == 0);
+    CHECK(gnc::capture_envelope_check(s).reason.code == report::Code::proximity_envelope_roll_rate_too_large);
     s.angular_rate_radps = {0.0, 0.15 * constants::deg_to_rad, 0.0};  // pitch/yaw inside, roll 0
     CHECK(gnc::capture_envelope_check(s).inside);
 }

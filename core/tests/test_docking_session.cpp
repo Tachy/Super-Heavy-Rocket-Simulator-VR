@@ -79,11 +79,11 @@ TEST_CASE("Docking session: commands refused while docked", "[iss][docking]") {
     auto& s = d.session;
     REQUIRE(s.docked());
     CHECK_FALSE(s.start_proximity("ida2"));
-    CHECK(s.proximity_status() == "Anflug nicht möglich: angedockt");
+    CHECK(s.proximity_status().code == report::Code::proximity_refused_docked);
     CHECK_FALSE(s.plan_rendezvous({}));
     CHECK(s.rendezvous_status().code == report::Code::rendezvous_docked);
     CHECK_FALSE(s.plan_capsule_return());
-    CHECK(s.docking_status() == "Rückkehr nicht möglich: angedockt");
+    CHECK(s.docking_status().code == report::Code::docking_return_docked);
     s.stage();
     CHECK(s.body_count() == 2);
     s.ignite();
@@ -109,13 +109,13 @@ TEST_CASE("Docking session: a hull collision ends with Kollision and the impulse
     d.session.advance_to(d.t0 + 30.0, 100000);
     REQUIRE(d.session.collision_impulse_ns());
     CHECK(*d.session.collision_impulse_ns() > 0.0);
-    CHECK(d.session.docking_status() == "Kollision");
+    CHECK(d.session.docking_status().code == report::Code::docking_collision);
 }
 
 TEST_CASE("Docking session: a too fast contact overloads the mechanism and rebounds", "[iss][docking]") {
     auto d = docking_test::DragonAtPort::place("ida2", 0.30 + 0.40 + 0.05, 0.0, -0.25, 0.0);
     REQUIRE(d.fly_until(DockingPhase::Failed, 60.0));
-    CHECK(d.session.docking_status() == "Fangen fehlgeschlagen: Überlast");
+    CHECK(test::refused(d.session.docking_status(), report::Code::docking_capture_failed, report::Code::docking_fail_overload));
     d.session.advance_to(d.session.epoch() + 10.0, 100000);
     CHECK(d.session.relative_port_state()->velocity_mps.x > 0.0);  // moving out again
     CHECK_FALSE(d.session.docked());
@@ -126,7 +126,7 @@ TEST_CASE("Docking session: a time warp does not coast through the station", "[i
     auto d = docking_test::DragonAtPort::beside_modules(5.0, 0.05);
     d.session.advance_to(d.t0 + 600.0, 1000000);
     REQUIRE(d.session.collision_impulse_ns());
-    CHECK(d.session.docking_status() == "Kollision");
+    CHECK(d.session.docking_status().code == report::Code::docking_collision);
 }
 
 TEST_CASE("Undocking: hooks open, springs separate at 0.085 m/s, momentum conserved, departure completes",
@@ -136,7 +136,7 @@ TEST_CASE("Undocking: hooks open, springs separate at 0.085 m/s, momentum conser
     REQUIRE(s.docked());
     REQUIRE(s.undock());
     CHECK_FALSE(s.undock());
-    CHECK(s.docking_status() == "Abkoppeln nicht möglich: Abkoppeln läuft");
+    CHECK(test::refused(s.docking_status(), report::Code::docking_undock_not_possible, report::Code::docking_cause_undock_running));
     REQUIRE(d.fly_until(DockingPhase::Separated, 400.0));
     const auto& split = s.docking_separation_record();
     CHECK(split.relative_speed_mps == Catch::Approx(0.085).margin(0.003));
@@ -165,7 +165,7 @@ TEST_CASE("Undocking: hooks open, springs separate at 0.085 m/s, momentum conser
 TEST_CASE("Undocking: refused unless hard docked", "[iss][docking]") {
     auto d = docking_test::DragonAtPort::place("ida2", 0.30 + 0.40 + 0.5, 0.0, 0.0, 0.0);
     CHECK_FALSE(d.session.undock());
-    CHECK(d.session.docking_status() == "Abkoppeln nicht möglich: nicht fest angedockt");
+    CHECK(test::refused(d.session.docking_status(), report::Code::docking_undock_not_possible, report::Code::docking_cause_not_hard_docked));
 }
 
 // Final review i5 (fix pass).
@@ -203,7 +203,7 @@ TEST_CASE("Undocking: a hull contact during the departure ends the flight with K
     REQUIRE(docking_test::DragonAtPort::wait_for(s, d.t0, [&] { return s.collision_impulse_ns().has_value(); }, 60.0, 0.5));
     s.advance_to(s.epoch() + 30.0, 1000000);
     CHECK(s.autopilot().state == sim::AutopilotState::Off);
-    CHECK(s.docking_status() == "Kollision");
+    CHECK(s.docking_status().code == report::Code::docking_collision);
 }
 
 TEST_CASE("Docking session: a chaser parked beyond the truss tip is not coasted deep into it", "[iss][docking]") {

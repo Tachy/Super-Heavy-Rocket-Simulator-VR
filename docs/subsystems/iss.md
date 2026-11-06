@@ -275,7 +275,7 @@ Plan `docs/superpowers/archive/plans/2026-10-19-iss-i4-proximity.md`.
   hysteresis deadband (start above 0.02 m/s, stop below 0.005 m/s [E]; fraction = error / (authority x 1 s)); final
   approach a finer loop (start 0.005 m/s). Laws: axial speed schedule, lateral velocity = -offset x 0.1/s (max 0.03
   m/s), position hold velocity = -error / 60 s (max 0.05 m/s), retreat 0.10 m/s outward along the axis.
-- **State machine** (`gnc::ProximityGuidance`, German phases): "Wegpunkt" (hold, go/no-go 300 s each [E]), "Annäherung"
+- **State machine** (`gnc::ProximityGuidance`; status, refusal and warning texts are report codes `proximity.*`, `docking.*`, `departure.*` with German / English texts in `config/i18n`, quoted here in German; a waypoint name is a nested `proximity.waypoint_name` / `proximity.flyaround_name` report): "Wegpunkt" (hold, go/no-go 300 s each [E]), "Annäherung"
   (CW transfer), "Umflug", "Anflug" (axial approach to an on-axis waypoint), "Endanflug" (Waypoint 2 -> contact), "Halt",
   "Rückzug", "Abbruch", "Kontakt". Monitors: leaving the corridor -> "Halt: Korridor verlassen" (beyond 2x: retreat);
   closing faster than 1.5 x schedule + 0.02 m/s -> "Halt: zu schnell"; inside the sphere off the corridor -> "Abbruch:

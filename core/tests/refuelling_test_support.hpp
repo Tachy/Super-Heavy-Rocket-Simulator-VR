@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <string>
 
+#include "report_check.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/frames/body_orientation.hpp"
 #include "starsim/frames/lvlh.hpp"

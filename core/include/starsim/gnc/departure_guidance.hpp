@@ -7,6 +7,7 @@
 #include "starsim/gnc/proximity_guidance.hpp"
 #include "starsim/gnc/proximity_transfer.hpp"
 #include "starsim/gnc/translation_loop.hpp"
+#include "starsim/report/report.hpp"
 
 namespace starsim::gnc {
 
@@ -31,7 +32,7 @@ struct DepartureParameters {
 struct DepartureEvent {
     time::Epoch epoch;
     DeparturePhase phase;
-    std::string status;  // German
+    report::Report status;
 };
 
 class DepartureGuidance {
@@ -40,12 +41,12 @@ public:
     ProximityOutput update(const ProximityInput& in);
 
     DeparturePhase phase() const { return phase_; }
-    const std::string& status() const { return status_; }
+    const report::Report& status() const { return status_; }
     const std::vector<DepartureEvent>& events() const { return events_; }
     const std::optional<Breakout>& departure_burn() const { return burn_; }
 
 private:
-    void enter(DeparturePhase phase, std::string status, time::Epoch epoch);
+    void enter(DeparturePhase phase, report::Report status, time::Epoch epoch);
     math::Vec3 axial_velocity_port(const ProximityInput& in) const;  // undock speed out, lateral onto the axis
 
     DepartureParameters d_;
@@ -59,7 +60,7 @@ private:
     orbit::RelativeState burn_start_lvlh_;
     time::Epoch burn_epoch_;
     TranslationLoop loop_;
-    std::string status_;
+    report::Report status_;
     std::vector<DepartureEvent> events_;
 };
 

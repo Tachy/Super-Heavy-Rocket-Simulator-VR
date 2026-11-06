@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "report_check.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/orbital_attitude.hpp"
 #include "starsim/gnc/proximity_geometry.hpp"

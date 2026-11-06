@@ -16,6 +16,18 @@ math::Vec3 rotation_vector(const math::Mat3& r) {
     return (angle / (2.0 * std::sin(angle))) * v;
 }
 const math::Mat3 mated_axes = math::Mat3::from_columns({-1, 0, 0}, {0, -1, 0}, {0, 0, 1});
+
+report::Report not_possible(report::Code outer, report::Code cause) {
+    return report::with_cause(report::make(outer), report::make(cause));
+}
+
+report::Report docked_status(int hook_count) {
+    return report::make(report::Code::docking_docked, {report::count("hooks", hook_count)});
+}
+
+report::Report limit_warning(report::Code code, const DockingMechanismParameters& p) {
+    return report::make(code, {report::ref("limit", p.limit_ref)});
+}
 }  // namespace
 
 const char* id_of(DockingPhase phase) {  // i18n-ns: docking_phase
@@ -61,21 +73,24 @@ InterfaceContact DockingMechanism::contact(const DockingPose& pose, double exten
                            : docking_interface_contact(pose, extension_m, p_.interface);
 }
 
-void DockingMechanism::enter(DockingPhase phase, std::string status, double t_s) {
+void DockingMechanism::enter(DockingPhase phase, report::Report status, double t_s) {
     phase_ = phase;
     phase_since_s_ = t_s;
     status_ = status;
     events_.push_back({t_s, phase, std::move(status)});
 }
 
-void DockingMechanism::fail(std::string reason, double t_s) {
+void DockingMechanism::fail(report::Report reason, double t_s) {
     failure_ = reason;
     extension_m_ = full_extension_m();
-    enter(DockingPhase::Failed, "Fangen fehlgeschlagen: " + reason, t_s);
+    enter(DockingPhase::Failed, report::with_cause(report::make(report::Code::docking_capture_failed), reason), t_s);
 }
 
-void DockingMechanism::warn(const std::string& text) {
-    if (std::find(warnings_.begin(), warnings_.end(), text) == warnings_.end()) warnings_.emplace_back(text);
+void DockingMechanism::warn(report::Report warning) {
+    for (const auto& w : warnings_) {
+        if (report::same(w, warning)) return;
+    }
+    warnings_.push_back(std::move(warning));
 }
 
 void DockingMechanism::rearm() {
@@ -84,31 +99,31 @@ void DockingMechanism::rearm() {
     tips_only_ = true;
     static_over_s_ = 0.0;
     phase_ = DockingPhase::Ready;
-    status_ = "bereit";
+    status_ = report::make(report::Code::docking_ready);
 }
 
 bool DockingMechanism::start_docked(double t_s) {
     if (phase_ != DockingPhase::Ready) {
-        refusal_ = "Andocken nicht möglich: Mechanismus nicht bereit";
+        refusal_ = not_possible(report::Code::docking_dock_not_possible, report::Code::docking_cause_mechanism_not_ready);
         return false;
     }
     extension_m_ = 0.0;
     kb_ = p_.joint_bending_stiffness_nm_per_rad;  // no joint runs while docked; defined all the same
     kt_ = p_.joint_torsion_stiffness_nm_per_rad;
-    enter(DockingPhase::Docked, "angedockt: " + std::to_string(p_.hook_count) + " Haken geschlossen", t_s);
+    enter(DockingPhase::Docked, docked_status(p_.hook_count), t_s);
     return true;
 }
 
 bool DockingMechanism::undock(double t_s) {
     if (phase_ == DockingPhase::HooksOpening || phase_ == DockingPhase::Separated) {
-        refusal_ = "Abkoppeln nicht möglich: Abkoppeln läuft";
+        refusal_ = not_possible(report::Code::docking_undock_not_possible, report::Code::docking_cause_undock_running);
         return false;
     }
     if (phase_ != DockingPhase::Docked) {
-        refusal_ = "Abkoppeln nicht möglich: nicht fest angedockt";
+        refusal_ = not_possible(report::Code::docking_undock_not_possible, report::Code::docking_cause_not_hard_docked);
         return false;
     }
-    enter(DockingPhase::HooksOpening, "Haken öffnen", t_s);
+    enter(DockingPhase::HooksOpening, report::make(report::Code::docking_hooks_opening), t_s);
     return true;
 }
 
@@ -138,7 +153,7 @@ DockingWrench DockingMechanism::before_capture(double t, const DockingPose& pose
     if (phase_ == DockingPhase::Failed) return w;  // rebounding; rearm() starts a new approach
     if (c.any_contact) {
         last_contact_s_ = t;
-        if (phase_ == DockingPhase::Ready) enter(DockingPhase::Contact, "Erstkontakt", t);
+        if (phase_ == DockingPhase::Ready) enter(DockingPhase::Contact, report::make(report::Code::docking_first_contact), t);
         ring_touched_ = ring_touched_ || c.ring_contact;
         tips_only_ = tips_only_ && c.tip_strike;
         ring_blocked_ = ring_blocked_ || (c.ring_contact && !c.latch_ready);
@@ -152,11 +167,13 @@ DockingWrench DockingMechanism::before_capture(double t, const DockingPose& pose
         kt_ = wr > 0.0 ? inertia * wr * wr : p_.joint_torsion_stiffness_nm_per_rad;
         cb_ = 2.0 * p_.joint_damping_ratio * std::sqrt(kb_ * inertia);
         ct_ = 2.0 * p_.joint_damping_ratio * std::sqrt(kt_ * inertia);
-        enter(DockingPhase::SoftCapture, "Weichfang: Verriegelung eingerastet", t);
+        enter(DockingPhase::SoftCapture, report::make(report::Code::docking_soft_capture), t);
         return joint(pose);
     }
     if (t - last_contact_s_ > p_.bounce_confirm_s && c.gap_m > p_.bounce_gap_m) {
-        fail(tips_only_ ? "Versatz zu groß" : (ring_blocked_ ? "Winkel zu groß" : "abgeprallt"), t);
+        fail(report::make(tips_only_ ? report::Code::docking_fail_offset
+                                     : (ring_blocked_ ? report::Code::docking_fail_angle : report::Code::docking_fail_bounced)),
+             t);
     }
     return w;
 }
@@ -173,7 +190,7 @@ DockingWrench DockingMechanism::update(double t, const DockingPose& pose, double
             w = joint(pose);
             const bool settled = norm(pose.velocity_mps) < p_.settled_speed_mps &&
                                  norm(pose.angular_rate_radps) < p_.settled_rate_radps;
-            if (t - phase_since_s_ >= p_.attenuation_min_s && settled) enter(DockingPhase::Retraction, "Einzug", t);
+            if (t - phase_since_s_ >= p_.attenuation_min_s && settled) enter(DockingPhase::Retraction, report::make(report::Code::docking_retraction), t);
             break;
         }
         case DockingPhase::Retraction: {
@@ -182,9 +199,9 @@ DockingWrench DockingMechanism::update(double t, const DockingPose& pose, double
             const double angle = norm(rotation_vector(pose.chaser_axes * transpose(mated_axes)));
             if (extension_m_ == 0.0 && norm(pose.position_m) <= p_.guide_pin_tolerance_m &&
                 angle <= p_.guide_pin_angle_rad) {
-                enter(DockingPhase::HooksClosing, "Haken schließen", t);
+                enter(DockingPhase::HooksClosing, report::make(report::Code::docking_hooks_closing), t);
             } else if (t - phase_since_s_ > p_.retraction_timeout_s) {
-                fail("Einzug fehlgeschlagen", t);
+                fail(report::make(report::Code::docking_fail_retraction), t);
                 return before_capture(t, pose, m, inertia);
             }
             break;
@@ -192,14 +209,14 @@ DockingWrench DockingMechanism::update(double t, const DockingPose& pose, double
         case DockingPhase::HooksClosing:
             w = joint(pose);
             if (t - phase_since_s_ >= p_.hooks_close_s) {
-                enter(DockingPhase::Docked, "angedockt: " + std::to_string(p_.hook_count) + " Haken geschlossen", t);
+                enter(DockingPhase::Docked, docked_status(p_.hook_count), t);
                 return {};
             }
             break;
         case DockingPhase::Docked: return {};  // the session holds the chaser on the station
         case DockingPhase::HooksOpening:
             if (t - phase_since_s_ >= p_.hooks_open_s) {
-                enter(DockingPhase::Separated, "getrennt", t);
+                enter(DockingPhase::Separated, report::make(report::Code::docking_separated), t);
                 separation_pending_ = true;
             }
             return {};
@@ -222,12 +239,14 @@ void DockingMechanism::record_loads(const DockingWrench& w, double t, double dt)
     peaks_.shear_n = std::max(peaks_.shear_n, std::hypot(f.y, f.z));
     peaks_.bending_nm = std::max(peaks_.bending_nm, std::hypot(moment.y, moment.z));
     peaks_.torsion_nm = std::max(peaks_.torsion_nm, std::abs(moment.x));
-    if (peaks_.tension_n > p_.tension_limit_n) warn("Zuglast über " + p_.limit_name);
-    if (peaks_.shear_n > p_.shear_limit_n) warn("Querlast über " + p_.limit_name);
-    if (peaks_.bending_nm > p_.bending_limit_nm) warn("Biegemoment über " + p_.limit_name);
-    if (peaks_.torsion_nm > p_.torsion_limit_nm) warn("Torsionsmoment über " + p_.limit_name);
+    if (peaks_.tension_n > p_.tension_limit_n) warn(limit_warning(report::Code::docking_warn_tension, p_));
+    if (peaks_.shear_n > p_.shear_limit_n) warn(limit_warning(report::Code::docking_warn_shear, p_));
+    if (peaks_.bending_nm > p_.bending_limit_nm) warn(limit_warning(report::Code::docking_warn_bending, p_));
+    if (peaks_.torsion_nm > p_.torsion_limit_nm) warn(limit_warning(report::Code::docking_warn_torsion, p_));
     static_over_s_ = compression > p_.static_compression_limit_n ? static_over_s_ + dt : 0.0;
-    if (compression > p_.dynamic_compression_limit_n || static_over_s_ > p_.static_after_s) fail("Überlast", t);
+    if (compression > p_.dynamic_compression_limit_n || static_over_s_ > p_.static_after_s) {
+        fail(report::make(report::Code::docking_fail_overload), t);
+    }
 }
 
 }  // namespace starsim::contact

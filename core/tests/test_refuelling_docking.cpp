@@ -228,7 +228,7 @@ TEST_CASE("Tanker from Waypoint 0 to contact under the depot inside the probe/dr
     gnc::ProximityGuidance g(gnc::DockingApproach::RBarBelow, depot_parameters());
     const double t = proximity_test::run(g, s, 3.0 * 3600.0);
     REQUIRE(g.contact());
-    INFO(g.contact()->envelope.reason);
+    INFO(test::code_id(g.contact()->envelope.reason));
     CHECK(g.contact()->envelope.inside);
     CHECK(std::hypot(g.contact()->port.position_m.y, g.contact()->port.position_m.z) < 0.10);
     CHECK_FALSE(saw(g, gnc::ProximityPhase::Transfer));  // straight up the axis
@@ -245,7 +245,7 @@ TEST_CASE("A retreat below the depot stops at Waypoint 2 - the -x thrusters hold
     gnc::ProximityGuidance g(gnc::DockingApproach::RBarBelow, depot_parameters());
     proximity_test::run(g, s, 3.0 * 3600.0);
     REQUIRE(g.phase() == gnc::ProximityPhase::Contact);
-    g.capture_failed(s.input(), "Überlast");
+    g.capture_failed(s.input(), report::make(report::Code::docking_fail_overload));
     for (double t = 0.0; t < 1800.0 && g.phase() != gnc::ProximityPhase::Waypoint; t += 0.05) {
         s.step(g.update(s.input()).translation_fraction_port, 0.05);
     }
@@ -385,7 +385,7 @@ TEST_CASE("Probe/drogue mechanism: 0.10 m/s soft capture within the loads, retra
     auto m = depot_mechanism();
     CHECK(m.first_contact_m() == Catch::Approx(0.80));
     const double t = push_in(m, 0.10, 1500.0, [&] { return m.phase() == contact::DockingPhase::Docked; });
-    INFO(m.status());
+    INFO(test::code_id(m.status()));
     CHECK(m.phase() == contact::DockingPhase::Docked);
     CHECK(m.peaks().compression_n < m.parameters().dynamic_compression_limit_n);
     CHECK(m.peaks().compression_n > 10.0e3);
@@ -396,7 +396,7 @@ TEST_CASE("Probe/drogue mechanism: 0.25 m/s overloads", "[refuelling][docking]")
     auto m = depot_mechanism();
     push_in(m, 0.25, 60.0, [&] { return m.phase() == contact::DockingPhase::Failed; });
     CHECK(m.phase() == contact::DockingPhase::Failed);
-    CHECK(m.failure() == "Überlast");
+    CHECK(m.failure().code == report::Code::docking_fail_overload);
 }
 
 TEST_CASE("Hull sampling: the tanker's whole hull clears the mated depot by ~1 m, 1.5 m closer it collides",
@@ -466,7 +466,7 @@ TEST_CASE("Tanker from Waypoint 2 to hard capture at the depot", "[refuelling][d
     p.start_waypoint = 2;
     REQUIRE(f.session.start_proximity("transfer_dock", p));
     const double t = f.fly([&] { return f.session.docked(); }, 3600.0);
-    INFO(f.session.docking_status() << " / " << f.session.proximity_status());
+    INFO(test::code_id(f.session.docking_status()) << " / " << test::code_id(f.session.proximity_status()));
     REQUIRE(f.session.docked());
     CHECK(t < 40.0 * 60.0);
     const auto loads = *f.session.docking_loads();
@@ -489,7 +489,7 @@ TEST_CASE("Tanker at the depot: 0.4 m/s overloads and retreats to Waypoint 2", "
     REQUIRE(f.session.docking_phase() == contact::DockingPhase::Failed);
     f.fly([&] { return f.session.proximity_phase() == gnc::ProximityPhase::Waypoint; }, 1800.0);
     CHECK(f.session.proximity_phase() == gnc::ProximityPhase::Waypoint);
-    CHECK_THAT(f.session.proximity_status(), Catch::Matchers::ContainsSubstring("Wegpunkt 2"));
+    CHECK(test::names_waypoint(f.session.proximity_status(), 2));
 }
 
 TEST_CASE("Tanker undocks from the depot: springs, departure out of the ellipsoid", "[refuelling][docking][slow]") {
@@ -507,7 +507,7 @@ TEST_CASE("Tanker undocks from the depot: springs, departure out of the ellipsoi
     const double depot_kg = f.session.body(1).vehicle().mass_properties().mass_kg;
     CHECK(sep.relative_speed_mps ==
           Catch::Approx(std::sqrt(2.0 * 150.0 * (1.0 / chaser_kg + 1.0 / depot_kg))).epsilon(0.01));
-    CHECK(f.session.docking_status() != "Kollision");
+    CHECK(f.session.docking_status().code != report::Code::docking_collision);
 }
 
 namespace {
@@ -577,7 +577,7 @@ TEST_CASE("Proximity start refuses a tanker without propellant or without a thru
         bool started = true;
         REQUIRE_NOTHROW(started = f.session.start_proximity("transfer_dock", p));
         CHECK_FALSE(started);
-        CHECK(f.session.proximity_status() == "Kein Anflug: kein Treibstoff");
+        CHECK(test::refused(f.session.proximity_status(), report::Code::proximity_refused, report::Code::rendezvous_no_propellant));
         CHECK_FALSE(f.session.docking_phase());  // the target is cleared
     }
     {
@@ -588,6 +588,6 @@ TEST_CASE("Proximity start refuses a tanker without propellant or without a thru
                         thrusters.end());
         refuelling_test::TankerAtPort f({20.0, 0.0, 0.0}, {}, no_aft);
         CHECK_FALSE(f.session.start_proximity("transfer_dock", p));
-        CHECK_THAT(f.session.proximity_status(), Catch::Matchers::ContainsSubstring("keine Schubrichtung"));
+        CHECK(test::cause_is(f.session.proximity_status(), report::Code::proximity_no_thrust_direction));
     }
 }

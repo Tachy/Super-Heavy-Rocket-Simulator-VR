@@ -28,7 +28,7 @@ PortKinematics port_kinematics(const FlightBody& body, std::string_view port_id)
     // Vehicle keeps no vehicle id: name the stages searched
     std::string stages;
     for (const auto& stage : vehicle.stages()) stages += (stages.empty() ? "" : ", ") + stage.config.id;
-    throw std::invalid_argument("Unbekannter Andockport '" + std::string(port_id) + "' (Stufen: " + stages + ")");
+    throw std::invalid_argument("Unknown docking port '" + std::string(port_id) + "' (stages: " + stages + ")");
 }
 
 }  // namespace starsim::vehicle

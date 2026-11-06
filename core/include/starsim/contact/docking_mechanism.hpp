@@ -6,6 +6,7 @@
 
 #include "starsim/contact/docking_interface.hpp"
 #include "starsim/contact/probe_drogue_interface.hpp"
+#include "starsim/report/report.hpp"
 
 namespace starsim::contact {
 
@@ -13,7 +14,7 @@ namespace starsim::contact {
 // petals -> latches on full ring contact (soft capture) -> attenuation by a damped 6-DOF joint -> retraction ->
 // guide pins -> 12 hooks (hard capture). Undocking: hooks open -> separation springs. Passive port frame throughout.
 // Too fast a contact runs the joint out of its stroke into the end stop: above the IDSS dynamic compression limit the
-// mechanism releases the latches ("Überlast", spec correction 3).
+// mechanism releases the latches (docking.fail_overload, spec correction 3).
 // Refuelling r3: the same sequence with the four-probe interface (probe_drogue): the probes' stroke plays the ring's
 // extension; structural latches play the hooks.
 
@@ -54,7 +55,7 @@ struct DockingMechanismParameters {
     double static_compression_limit_n = 3500.0;   // held longer than static_after_s: Überlast
     double static_after_s = 0.1;
     double tension_limit_n = 3900.0, shear_limit_n = 3200.0, bending_limit_nm = 2800.0, torsion_limit_nm = 1500.0;
-    std::string limit_name = "IDSS-Grenze";  // in the load warnings
+    std::string limit_ref = "phase.docking_limit.idss";  // table key of the limit's name, in the load warnings
 };
 
 struct DockingWrench {
@@ -68,7 +69,7 @@ struct LoadPeaks {  // at the SCS mating plane centre (the passive ring face cen
 struct DockingEvent {
     double t_s = 0.0;
     DockingPhase phase = DockingPhase::Ready;
-    std::string status;  // German
+    report::Report status;
 };
 
 // Relative speed of the separation springs: v = sqrt(2 E / mu), mu the reduced mass.
@@ -94,12 +95,12 @@ public:
     void rearm();             // Failed -> Ready (a new approach); no-op otherwise
     bool hard_captured() const { return phase_ == DockingPhase::Docked; }
     DockingPhase phase() const { return phase_; }
-    const std::string& status() const { return status_; }
-    const std::string& failure() const { return failure_; }
-    const std::string& refusal() const { return refusal_; }
+    const report::Report& status() const { return status_; }
+    const report::Report& failure() const { return failure_; }  // docking.fail_*
+    const report::Report& refusal() const { return refusal_; }
     const LoadPeaks& peaks() const { return peaks_; }
     const std::vector<DockingEvent>& events() const { return events_; }
-    const std::vector<std::string>& warnings() const { return warnings_; }
+    const report::Reports& warnings() const { return warnings_; }
     double ring_extension_m() const { return extension_m_; }
     double full_extension_m() const;  // the ring / probes fully extended (before capture)
     double first_contact_m() const;   // port separation along the axis at the first touch (petal tips / mouths)
@@ -107,13 +108,13 @@ public:
     const DockingMechanismParameters& parameters() const { return p_; }
 
 private:
-    void enter(DockingPhase phase, std::string status, double t_s);
-    void fail(std::string reason, double t_s);
+    void enter(DockingPhase phase, report::Report status, double t_s);
+    void fail(report::Report reason, double t_s);
     InterfaceContact contact(const DockingPose& pose, double extension_m) const;
     DockingWrench joint(const DockingPose& pose) const;
     DockingWrench before_capture(double t_s, const DockingPose& pose, double mass_kg, double inertia_kg_m2);
     void record_loads(const DockingWrench& w, double t_s, double dt_s);
-    void warn(const std::string& text);
+    void warn(report::Report warning);
 
     DockingMechanismParameters p_;
     DockingPhase phase_ = DockingPhase::Ready;
@@ -124,9 +125,9 @@ private:
     double kb_ = 0.0, kt_ = 0.0;                       // bending / torsion stiffness of the joint
     bool separation_pending_ = false;
     LoadPeaks peaks_;
-    std::string status_ = "bereit", failure_, refusal_;
+    report::Report status_ = report::make(report::Code::docking_ready), failure_, refusal_;
     std::vector<DockingEvent> events_;
-    std::vector<std::string> warnings_;
+    report::Reports warnings_;
 };
 
 }  // namespace starsim::contact

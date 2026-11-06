@@ -10,6 +10,7 @@
 #include "starsim/math/mat3.hpp"
 #include "starsim/math/quat.hpp"
 #include "starsim/math/vec3.hpp"
+#include "starsim/report/report.hpp"
 
 namespace starsim::gnc {
 
@@ -21,12 +22,13 @@ namespace starsim::gnc {
 // a nadir port (the depot's drogues, approach straight up the R-bar from Waypoint 0; refuelling r3).
 enum class DockingApproach { VBar, RBar, RBarBelow };
 // From the target port axis in the station LVLH frame: dominant +x -> VBar, dominant -z -> RBar, dominant +z ->
-// RBarBelow; otherwise std::invalid_argument (German: "Kein Anflugweg für diesen Port").
+// RBarBelow; otherwise std::invalid_argument (the session reports proximity.no_approach_path).
 DockingApproach docking_approach(const math::Vec3& port_axis_lvlh);
 
 enum class WaypointFrame { LvlhFromCg, TargetPort };  // CG-relative in station LVLH / chaser port in target port frame
 struct ProximityWaypoint {
-    std::string name;  // German: "Wegpunkt 0", "Umflug 1", "Wegpunkt 1", "Wegpunkt 2"
+    bool flyaround = false;  // a fly-around point ("Umflug k"); otherwise "Wegpunkt k"
+    int number = 0;          // k: the fly-around arc index, or the waypoint number (0, 1, 2)
     WaypointFrame frame;
     math::Vec3 position_m;
     double hold_s = 0.0;   // go/no-go hold after arrival (0: fly on)
@@ -104,6 +106,8 @@ struct ProximityParameters {
 // Waypoint 0, then for VBar Waypoint 1 / 2; for RBar the fly-around (front point on V-bar at flyaround_radius_m,
 // arc points every flyaround_step_rad towards -z, last one short of the zenith), then Waypoint 1 / 2.
 std::vector<ProximityWaypoint> proximity_path(DockingApproach approach, const ProximityParameters& p);
+// The waypoint's name as a report (proximity.waypoint_name / proximity.flyaround_name).
+report::Report waypoint_report(const ProximityWaypoint& waypoint);
 
 enum class CorridorStatus { OutsideKos, Inside, Hold, Retreat };
 // `position_port_m`: chaser port in the target port frame; `cg_range_m`: CG to CG. Inside the sphere: the lateral
@@ -117,7 +121,7 @@ math::Quat docking_attitude_gcrf(const math::Mat3& chaser_port_axes_body, const 
 
 struct EnvelopeCheck {
     bool inside = false;
-    std::string reason;  // German, the first violated bound ("" when inside)
+    report::Report reason;  // the first violated bound (ok when inside)
 };
 EnvelopeCheck capture_envelope_check(const RelativePortState& state, const CaptureEnvelope& envelope = {});
 

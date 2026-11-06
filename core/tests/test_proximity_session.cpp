@@ -38,7 +38,8 @@ double fly(proximity_test::DragonNearIss& d, double limit_s, bool check_corridor
         if (s.proximity_contact()) break;
         const auto phase = s.proximity_phase();
         if (!phase || (*phase == gnc::ProximityPhase::Abort &&
-                       s.proximity_status().find("ausgeführt") != std::string::npos)) {
+                       (s.proximity_status().code == report::Code::proximity_abort_breakout_done ||
+                        s.proximity_status().code == report::Code::proximity_abort_breakout_done_unsafe))) {
             break;
         }
         if (check_corridor && *phase != gnc::ProximityPhase::Abort) {
@@ -56,7 +57,7 @@ double fly(proximity_test::DragonNearIss& d, double limit_s, bool check_corridor
 void print_events(const proximity_test::DragonNearIss& d) {
     for (const auto& e : *d.session.proximity_events()) {
         std::printf("[validation]   %6.1f min  %-10s %s\n", (e.epoch - d.t0) / 60.0, gnc::id_of(e.phase),
-                    e.status.c_str());
+                    test::code_id(e.status).c_str());
     }
 }
 
@@ -65,10 +66,9 @@ bool has_event(const proximity_test::DragonNearIss& d, gnc::ProximityPhase phase
     return std::any_of(events.begin(), events.end(), [&](const auto& e) { return e.phase == phase; });
 }
 
-bool has_status(const proximity_test::DragonNearIss& d, const std::string& text) {
+bool has_waypoint_status(const proximity_test::DragonNearIss& d, int number) {
     const auto& events = *d.session.proximity_events();
-    return std::any_of(events.begin(), events.end(),
-                       [&](const auto& e) { return e.status.find(text) != std::string::npos; });
+    return std::any_of(events.begin(), events.end(), [&](const auto& e) { return test::names_waypoint(e.status, number); });
 }
 
 void print_contact(const char* label, const gnc::ProximityContact& c, double kg) {
@@ -77,7 +77,7 @@ void print_contact(const char* label, const gnc::ProximityContact& c, double kg)
                 "deg/s, %.1f kg, %s\n",
                 label, -v.x, std::hypot(v.y, v.z), std::hypot(c.port.position_m.y, c.port.position_m.z),
                 c.port.misalignment_rad / deg, norm(c.port.angular_rate_radps) / deg, kg,
-                c.envelope.inside ? "inside" : c.envelope.reason.c_str());
+                c.envelope.inside ? "inside" : test::code_id(c.envelope.reason).c_str());
 }
 
 gnc::ProximityParameters at_waypoint2(const std::string& port, double hold_s) {
@@ -94,23 +94,25 @@ TEST_CASE("start_proximity refusals", "[iss][proximity][session]") {
     {  // no station
         proximity_test::DragonNearIss d(proximity_test::lvlh_from_cg({0, 0, 400}), /*with_station=*/false);
         CHECK_FALSE(d.session.start_proximity("ida2"));
-        CHECK(d.session.proximity_status().find("keine Station") != std::string::npos);
+        CHECK(test::refused(d.session.proximity_status(), report::Code::proximity_refused, report::Code::rendezvous_no_station));
     }
     {  // too far: 8 km behind
         proximity_test::DragonNearIss d(proximity_test::lvlh_from_cg({-8000, 0, 0}));
         CHECK_FALSE(d.session.start_proximity("ida2"));
-        CHECK(d.session.proximity_status().find("zu weit") != std::string::npos);
+        CHECK(test::refused(d.session.proximity_status(), report::Code::proximity_refused, report::Code::proximity_too_far_from_station));
     }
     {  // unknown port
         proximity_test::DragonNearIss d(proximity_test::lvlh_from_cg({0, 0, 400}));
         CHECK_FALSE(d.session.start_proximity("pma1"));
         CHECK_FALSE(d.session.proximity_active());
-        CHECK(d.session.proximity_status().find("pma1") != std::string::npos);
+        CHECK(test::refused(d.session.proximity_status(), report::Code::proximity_refused, report::Code::proximity_unknown_port));
+        REQUIRE(!d.session.proximity_status().causes.empty());
+        CHECK(d.session.proximity_status().causes.front().params.front().text == "pma1");
     }
     {  // inside the sphere without an on-axis start
         proximity_test::DragonNearIss d(proximity_test::lvlh_from_cg({0, 0, 150}));
         CHECK_FALSE(d.session.start_proximity("ida2"));
-        CHECK(d.session.proximity_status().find("Sicherheitszone") != std::string::npos);
+        CHECK(test::refused(d.session.proximity_status(), report::Code::proximity_refused, report::Code::proximity_cause_inside_keep_out));
     }
     {  // commands without a flight
         proximity_test::DragonNearIss d(proximity_test::lvlh_from_cg({0, 0, 400}));
@@ -118,7 +120,7 @@ TEST_CASE("start_proximity refusals", "[iss][proximity][session]") {
         CHECK_FALSE(d.session.proximity_resume());
         CHECK_FALSE(d.session.proximity_abort());
         CHECK_FALSE(d.session.proximity_retreat());
-        CHECK(d.session.proximity_status() == "Kein Anflug aktiv");
+        CHECK(d.session.proximity_status().code == report::Code::proximity_no_flight);
         CHECK_FALSE(d.session.proximity_phase());
         CHECK(d.session.proximity_events() == nullptr);
     }
@@ -245,14 +247,14 @@ TEST_CASE("A station reboost during the transfer is absorbed", "[iss][proximity]
     proximity_test::DragonNearIss d(proximity_test::lvlh_from_cg({-5.0, 0.0, 396.9}, {0.012, 0.0, -0.012}), true, true,
                                     {sim::StationImpulse{boost, 0.3, "Testanhebung"}});
     REQUIRE(d.session.start_proximity("ida2"));
-    for (const auto& w : d.session.proximity_warnings()) std::printf("[validation] %s\n", w.c_str());
+    for (const auto& w : d.session.proximity_warnings()) std::printf("[validation] %s\n", test::code_id(w).c_str());
     REQUIRE(d.session.proximity_warnings().size() == 1);
-    CHECK(d.session.proximity_warnings()[0].rfind("Achtung: Bahnanhebung der Station", 0) == 0);  // any station
+    CHECK(d.session.proximity_warnings()[0].code == report::Code::proximity_station_raise_warning);  // any station
     const double kg0 = d.session.body(0).vehicle().rcs_propellant_kg();
     fly(d, 3.0 * 3600.0);
     std::printf("[validation] station reboost 0.3 m/s during the transfer:\n");
     print_events(d);
-    CHECK(has_status(d, "Wegpunkt 1"));
+    CHECK(has_waypoint_status(d, 1));
     CHECK_FALSE(has_event(d, gnc::ProximityPhase::Abort));
     const auto c = d.session.proximity_contact();
     REQUIRE(c);
@@ -290,13 +292,14 @@ TEST_CASE("Abort from the final approach: breakout, passive drift outside the sp
     REQUIRE(s.proximity_abort());
     const double t_abort = std::round(s.epoch() - d.t0);
     fly(d, t_abort + 3600.0, false);
-    REQUIRE(s.proximity_status().find("Ausweichmanöver ausgeführt") != std::string::npos);
+    REQUIRE((s.proximity_status().code == report::Code::proximity_abort_breakout_done ||
+             s.proximity_status().code == report::Code::proximity_abort_breakout_done_unsafe));
     const Vec3 dv = s.relative_port_state()->velocity_mps - before.velocity_mps;
     std::printf("[validation] abort at x %.1f m: breakout done after %.0f s, dv %.3f m/s (port frame %.3f %.3f %.3f), "
                 "%s\n",
                 before.position_m.x, s.epoch() - d.t0 - t_abort, norm(dv), dv.x, dv.y, dv.z,
-                s.proximity_status().c_str());
-    CHECK(s.proximity_status().find("nicht passiv sicher") == std::string::npos);
+                test::code_id(s.proximity_status()).c_str());
+    CHECK(s.proximity_status().code != report::Code::proximity_abort_breakout_done_unsafe);
     // passive drift for 24 h (the session coasts: no attitude hold after the breakout)
     const auto cg_range = [&] { return norm(s.body(0).state().position_gcrf_m - s.body(1).state().position_gcrf_m); };
     bool left = cg_range() > p.keep_out_radius_m;
@@ -353,7 +356,7 @@ TEST_CASE("Session refusals carry the guidance's reason", "[iss][proximity][sess
     REQUIRE(s.start_proximity("ida2"));
     s.advance_to(d.t0 + 1.0, 1000000);
     CHECK_FALSE(s.proximity_retreat());
-    CHECK(s.proximity_status().find("Rückzug nicht möglich") != std::string::npos);
+    CHECK(s.proximity_status().code == report::Code::proximity_retreat_not_possible);
     CHECK(*s.proximity_phase() == gnc::ProximityPhase::Waypoint);
 }
 
@@ -365,13 +368,14 @@ TEST_CASE("Resume after a breakout uses the live range", "[iss][proximity][sessi
     s.advance_to(d.t0 + 1.0, 1000000);
     REQUIRE(s.proximity_abort());
     fly(d, 1800.0, false);
-    REQUIRE(s.proximity_status().find("ausgeführt") != std::string::npos);
+    REQUIRE((s.proximity_status().code == report::Code::proximity_abort_breakout_done ||
+             s.proximity_status().code == report::Code::proximity_abort_breakout_done_unsafe));
     s.advance_to(s.epoch() + 6.0 * 3600.0, 1000000);
     const double range = norm(s.body(0).state().position_gcrf_m - s.body(1).state().position_gcrf_m);
     std::printf("[validation] 6 h after the breakout from 4.8 km: CG range %.0f m\n", range);
     REQUIRE(range > 5000.0);
     CHECK_FALSE(s.proximity_resume());
-    CHECK(s.proximity_status().find("zu weit") != std::string::npos);
+    CHECK(test::refused(s.proximity_status(), report::Code::proximity_resume_not_possible, report::Code::proximity_cause_too_far_to_resume));
 }
 
 TEST_CASE("Changing the rendezvous target ends the proximity flight", "[iss][proximity][session]") {

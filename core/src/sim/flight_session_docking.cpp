@@ -152,10 +152,10 @@ void FlightSession::docking_after_tick() {
     const auto phase = m.phase();
     if (!docking_collision_reported_ && docking_->hull_contact()) {
         docking_collision_reported_ = true;
-        docking_status_ = "Kollision";
+        docking_status_ = report::make(report::Code::docking_collision);
         if (proximity_) {
             proximity_->collided(epoch_);
-            proximity_status_ = "Kollision";
+            proximity_status_ = report::make(report::Code::proximity_collision);
         }
         if (autopilot_.state == AutopilotState::Proximity || autopilot_.state == AutopilotState::Departure) {
             autopilot_.state = AutopilotState::Off;  // the flight ends (review i5: also the departure)
@@ -259,7 +259,7 @@ void FlightSession::merge_docked() {
     sync_docked();
     // the flight ends docked
     reset_proximity();
-    proximity_status_ = "angedockt";
+    proximity_status_ = report::make(report::Code::proximity_docked);
     if (autopilot_.state == AutopilotState::Proximity) autopilot_.state = AutopilotState::Off;
     attitude_mode_ = {};
     translation_port_ = {};
@@ -321,15 +321,18 @@ void FlightSession::detach_compound() {
 
 bool FlightSession::undock() {
     if (!docking_) {
-        docking_status_ = "Abkoppeln nicht möglich: nicht fest angedockt";
+        docking_status_ = report::with_cause(report::make(report::Code::docking_undock_not_possible),
+                                             report::make(report::Code::docking_cause_not_hard_docked));
         return false;
     }
     if (transfer_ && transfer_->active()) {
-        docking_status_ = "Abkoppeln nicht möglich: Treibstofftransfer läuft";
+        docking_status_ = report::with_cause(report::make(report::Code::docking_undock_not_possible),
+                                             report::make(report::Code::docking_cause_transfer_running));
         return false;
     }
     if (docked() && autopilot_.state != AutopilotState::Off && autopilot_.state != AutopilotState::Orbit) {
-        docking_status_ = "Abkoppeln nicht möglich: Autopilot aktiv";
+        docking_status_ = report::with_cause(report::make(report::Code::docking_undock_not_possible),
+                                             report::make(report::Code::docking_cause_autopilot_active));
         return false;
     }
     if (!docking_->undock(epoch_)) {
@@ -393,7 +396,7 @@ void FlightSession::run_departure(Flying& flying) {
         translation_port_ = {};
         return;
     }
-    if (docking_collision_reported_) {  // a hull contact ended the departure (status stays "Kollision")
+    if (docking_collision_reported_) {  // a hull contact ended the departure (status stays docking.collision)
         autopilot_.state = AutopilotState::Off;
         attitude_mode_ = {};
         translation_port_ = {};
@@ -406,7 +409,7 @@ void FlightSession::run_departure(Flying& flying) {
     if (docking_debug_) {  // STARSIM_DEBUG_DOCKING: the departure events with the relative state
         for (size_t i = events_before; i < departure_->events().size(); ++i) {
             std::printf("[docking] %8.1f s  %s  port x %.2f m, CG range %.1f m, %.1f kg\n", mission_time_s(),
-                        departure_->events()[i].status.c_str(), in.port.position_m.x, norm(in.cg_lvlh.position_m),
+                        report::id_of(departure_->events()[i].status.code).data(), in.port.position_m.x, norm(in.cg_lvlh.position_m),
                         in.propellant_kg);
         }
     }
@@ -450,7 +453,7 @@ void FlightSession::docking_diagnostics() {
     const auto& m = docking_->mechanism();
     const auto& events = m.events();
     for (; docking_debug_events_ < events.size(); ++docking_debug_events_) {
-        std::printf("[docking] %8.1f s  %s\n", mission_time_s(), events[docking_debug_events_].status.c_str());
+        std::printf("[docking] %8.1f s  %s\n", mission_time_s(), report::id_of(events[docking_debug_events_].status.code).data());
     }
     if (epoch_ < docking_debug_next_ || bodies_[controlled_].body->docked()) return;
     const auto p = docking_->pose(*bodies_[controlled_].body, *bodies_[*station_index_].body);

@@ -501,10 +501,10 @@ TEST_CASE("Transfer refusals and stop", "[refuelling][prop_transfer][docking]") 
         DockedPair f;
         REQUIRE(f.session.start_transfer(tanker_request()));
         CHECK_FALSE(f.session.start_transfer(tanker_request()));
-        CHECK(f.session.docking_status() == "Transfer läuft bereits");
+        CHECK(f.session.docking_status().code == report::Code::docking_transfer_running);
         CHECK(f.session.transfer_state().phase == sim::TransferPhase::Settling);  // the running transfer is kept
         CHECK_FALSE(f.session.undock());
-        CHECK(f.session.docking_status() == "Abkoppeln nicht möglich: Treibstofftransfer läuft");
+        CHECK(test::refused(f.session.docking_status(), report::Code::docking_undock_not_possible, report::Code::docking_cause_transfer_running));
         f.session.advance_to(f.session.epoch() + 400.0, 1000000);
         REQUIRE(f.session.transfer_state().phase == sim::TransferPhase::Flowing);
         f.session.stop_transfer();

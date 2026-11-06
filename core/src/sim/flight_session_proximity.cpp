@@ -27,11 +27,8 @@
 #include "starsim/orbit/clohessy_wiltshire.hpp"
 #include "starsim/vehicle/docking_port.hpp"
 #include "starsim/vehicle/port_mating.hpp"
-#include "flight_session_lunar_detail.hpp"
 
 namespace starsim::sim {
-
-using detail::german;
 
 namespace {
 
@@ -43,21 +40,29 @@ math::Mat3 port_axes_lvlh(const math::StateVector& station, const vehicle::PortK
 }  // namespace
 
 bool FlightSession::start_proximity(const std::string& station_port, gnc::ProximityParameters p) {
-    const auto refuse = [&](const std::string& reason) {
-        proximity_status_ = reason;
+    using C = report::Code;
+    const auto refuse_with = [&](report::Report cause) {
+        proximity_status_ = report::with_cause(report::make(C::proximity_refused), std::move(cause));
         return false;
     };
-    if (bodies_.empty() || !station_index_) return refuse("Kein Anflug: keine Station");
+    const auto refuse = [&](C cause) { return refuse_with(report::make(cause)); };
+    if (bodies_.empty() || !station_index_) return refuse(C::rendezvous_no_station);
     p = with_station_limits(std::move(p), station_limits());
-    if (docked()) return refuse("Anflug nicht möglich: angedockt");
-    if (docking_busy()) return refuse("Anflug nicht möglich: Andockvorgang läuft");
-    if (controlled_ == *station_index_) return refuse("Kein Anflug: die Station selbst wird gesteuert");
+    if (docked()) {
+        proximity_status_ = report::make(C::proximity_refused_docked);
+        return false;
+    }
+    if (docking_busy()) {
+        proximity_status_ = report::make(C::proximity_docking_busy);
+        return false;
+    }
+    if (controlled_ == *station_index_) return refuse(C::rendezvous_station_controlled);
     if (autopilot_.state != AutopilotState::Off && autopilot_.state != AutopilotState::Orbit) {
-        return refuse("Kein Anflug: Autopilot aktiv");
+        return refuse(C::rendezvous_autopilot_active);
     }
     if ((rendezvous_step_ != RendezvousStep::None && rendezvous_step_ != RendezvousStep::Waypoint0) ||
         lunar_step_ != LunarStep::None) {
-        return refuse("Kein Anflug: ein Flug läuft bereits");
+        return refuse(C::rendezvous_flight_running);
     }
     auto& chaser = *bodies_[controlled_].body;
     auto& vehicle = chaser.vehicle();
@@ -69,36 +74,36 @@ bool FlightSession::start_proximity(const std::string& station_port, gnc::Proxim
             break;
         }
     }
-    if (chaser_port.empty()) return refuse("Kein Anflug: kein Andockstutzen");
+    if (chaser_port.empty()) return refuse(C::proximity_no_docking_port);
     const auto& station = *bodies_[*station_index_].body;
     vehicle::PortKinematics target;
     try {
         target = vehicle::port_kinematics(station, station_port);
     } catch (const std::invalid_argument&) {
-        return refuse("Kein Anflug: unbekannter Port " + station_port);
+        return refuse_with(report::make(C::proximity_unknown_port, {report::data_name("port", station_port)}));
     }
     if (const auto problem = vehicle::port_mismatch(vehicle::port_config(vehicle, chaser_port),
                                                     vehicle::port_config(station.vehicle(), station_port))) {
-        return refuse("Kein Anflug: " + *problem);
+        return refuse_with(*problem);
     }
     const auto st = station_state();
     const math::Mat3 port_to_lvlh = port_axes_lvlh(st, target);
     gnc::DockingApproach approach;
     try {
         approach = gnc::docking_approach(port_to_lvlh * math::Vec3{1.0, 0.0, 0.0});
-    } catch (const std::invalid_argument& e) {
-        return refuse(std::string("Kein Anflug: ") + e.what());
+    } catch (const std::invalid_argument&) {
+        return refuse(C::proximity_no_approach_path);
     }
     const auto cg = orbit::lvlh_relative_state(st, controlled_state());
     const double range = norm(cg.position_m);
-    if (range > p.max_start_range_m) return refuse("Kein Anflug: zu weit von der Station");
+    if (range > p.max_start_range_m) return refuse(C::proximity_too_far_from_station);
     if (range < p.keep_out_radius_m) {
         // only an on-axis start inside the corridor (tests: Waypoint 2)
         const auto port = gnc::relative_port_state(vehicle::port_kinematics(chaser, chaser_port), target);
         const auto path = gnc::proximity_path(approach, p);
         if (p.start_waypoint >= path.size() || !path[p.start_waypoint].on_axis ||
             gnc::corridor_status(port.position_m, range, p) != gnc::CorridorStatus::Inside) {
-            return refuse("Kein Anflug: innerhalb der Sicherheitszone");
+            return refuse(C::proximity_cause_inside_keep_out);
         }
     }
     if (vehicle.has_nose_cone()) vehicle.set_nose_cone_open(true);
@@ -109,33 +114,34 @@ bool FlightSession::start_proximity(const std::string& station_port, gnc::Proxim
     proximity_warnings_.clear();
     for (const auto& impulse : station_impulses_) {
         if (impulse.epoch >= epoch_ && impulse.epoch <= epoch_ + proximity_warning_span_s) {
-            proximity_warnings_.push_back("Achtung: Bahnanhebung der Station um " + german(impulse.delta_v_mps, 2) +
-                                          " m/s während des Anflugs");
+            proximity_warnings_.push_back(
+                report::make(C::proximity_station_raise_warning, {report::speed("dv", impulse.delta_v_mps)}));
         }
     }
     if (!docking_) {  // an active and a passive port of the same mechanism
         clear_rendezvous_target();
-        return refuse("Kein Anflug: Andocksystem nicht kompatibel");
+        return refuse(C::proximity_docking_incompatible);
     }
     // the guidance holds, retreats and brakes along every port axis (refuelling r3: a ship without -x could not stop
     // its Coriolis drift below the depot) and aborts below its reserve - refuse such a start instead
-    static const char* const axis_names[6] = {"+x", "-x", "+y", "-y", "+z", "-z"};
+    static const char* const axis_ids[6] = {"plus_x", "minus_x", "plus_y", "minus_y", "plus_z", "minus_z"};
     for (int k = 0; k < 6; ++k) {
         if (!(proximity_authority_.mps2[static_cast<size_t>(k)] > 0.0)) {
             clear_rendezvous_target();
-            return refuse(std::string("Kein Anflug: keine Schubrichtung entlang ") + axis_names[k] + " des Ports");
+            return refuse_with(report::make(
+                C::proximity_no_thrust_direction, {report::ref("axis", std::string("phase.port_axis.") + axis_ids[k])}));
         }
     }
     report::Report why;
     const auto floors = rendezvous_floors(&why);  // the vehicle's own abort floor (planner plan Task 8)
     if (!floors) {
         clear_rendezvous_target();
-        return refuse("Kein Anflug: " + report::transitional_text(why));  // text until Task 6
+        return refuse_with(why);
     }
     p.deorbit_reserve_kg = floors->proximity_kg;
     if (!(vehicle.rcs_supply_kg() > p.deorbit_reserve_kg)) {
         clear_rendezvous_target();
-        return refuse("Kein Anflug: kein Treibstoff");
+        return refuse(C::rendezvous_no_propellant);
     }
     // i4 records "Kontakt" where the interface starts to mesh: IDSS petals, or probe heads at the drogue mouths
     p.contact_plane_m = docking_->mechanism().first_contact_m();
@@ -147,7 +153,7 @@ bool FlightSession::start_proximity(const std::string& station_port, gnc::Proxim
     proximity_debug_next_ = epoch_;
     autopilot_.state = AutopilotState::Proximity;
     attitude_mode_ = proximity_attitude_mode();
-    proximity_status_ = "Anflug gestartet";
+    proximity_status_ = report::make(C::proximity_started);
     return true;
 }
 
@@ -200,13 +206,13 @@ void FlightSession::run_proximity(Flying& flying) {
         autopilot_.state = AutopilotState::Off;
         return;
     }
-    const auto end = [&](const std::string& status) {
+    const auto end = [&](report::Report status) {
         reset_proximity();
         attitude_mode_ = {};
-        proximity_status_ = status;
+        proximity_status_ = std::move(status);
     };
-    if (!station_index_ || !rendezvous_) return end("Anflug abgebrochen: keine Station");
-    if (flying.body->impacted()) return end("Anflug abgebrochen: Fahrzeug verloren");
+    if (!station_index_ || !rendezvous_) return end(report::make(report::Code::proximity_ended_no_station));
+    if (flying.body->impacted()) return end(report::make(report::Code::proximity_ended_vehicle_lost));
     const auto in = proximity_input();
     const auto out = proximity_->update(in);
     proximity_status_ = proximity_->status();
@@ -227,7 +233,8 @@ void FlightSession::proximity_diagnostics(const gnc::ProximityInput& in, const g
     if (events.size() < proximity_debug_events_) proximity_debug_events_ = 0;  // a new flight
     for (; proximity_debug_events_ < events.size(); ++proximity_debug_events_) {
         const auto& e = events[proximity_debug_events_];
-        std::printf("[proximity] %8.1f s  %-10s %s\n", mission_time_s(), gnc::id_of(e.phase), e.status.c_str());
+        std::printf("[proximity] %8.1f s  %-10s %s\n", mission_time_s(), gnc::id_of(e.phase),
+                    report::id_of(e.status.code).data());
     }
     if (epoch_ < proximity_debug_next_) return;
     proximity_debug_next_ = epoch_ + 60.0;
@@ -266,7 +273,7 @@ std::optional<gnc::ProximityContact> FlightSession::proximity_contact() const {
 
 bool FlightSession::proximity_hold() {
     if (!proximity_) {
-        proximity_status_ = "Kein Anflug aktiv";
+        proximity_status_ = report::make(report::Code::proximity_no_flight);
         return false;
     }
     proximity_->observe(proximity_input());  // live state (after a breakout the session coasts without updates)
@@ -277,7 +284,7 @@ bool FlightSession::proximity_hold() {
 
 bool FlightSession::proximity_retreat() {
     if (!proximity_) {
-        proximity_status_ = "Kein Anflug aktiv";
+        proximity_status_ = report::make(report::Code::proximity_no_flight);
         return false;
     }
     proximity_->observe(proximity_input());  // live state (after a breakout the session coasts without updates)
@@ -288,7 +295,7 @@ bool FlightSession::proximity_retreat() {
 
 bool FlightSession::proximity_abort() {
     if (!proximity_) {
-        proximity_status_ = "Kein Anflug aktiv";
+        proximity_status_ = report::make(report::Code::proximity_no_flight);
         return false;
     }
     proximity_->observe(proximity_input());  // live state (after a breakout the session coasts without updates)
@@ -299,7 +306,7 @@ bool FlightSession::proximity_abort() {
 
 bool FlightSession::proximity_resume() {
     if (!proximity_) {
-        proximity_status_ = "Kein Anflug aktiv";
+        proximity_status_ = report::make(report::Code::proximity_no_flight);
         return false;
     }
     proximity_->observe(proximity_input());  // live state (after a breakout the session coasts without updates)

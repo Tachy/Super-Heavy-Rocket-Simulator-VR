@@ -955,7 +955,7 @@ public:
     // sphere within ProximityParameters::max_start_range_m) the controlled body flies the waypoint pattern to the
     // station port `station_port` on its RCS translation (gnc::ProximityGuidance), in the docking attitude, to contact.
     // Opens the nose cone; sets the rendezvous target (chaser port: the controlled vehicle's first docking port). False
-    // with a German proximity_status() when refused: no station, the station controlled, the autopilot busy (not Off /
+    // with a proximity_status() report when refused: no station, the station controlled, the autopilot busy (not Off /
     // Orbit), a rendezvous other than at Waypoint 0 or a lunar flight under way, no docking port on the vehicle, an
     // unknown or unsuitable station port, too far, or inside the sphere without start_waypoint on the axis. Ends with
     // the rendezvous target (clear_rendezvous_target and every path that clears it) and disengage_autopilot; at
@@ -967,13 +967,13 @@ public:
         return proximity_ && proximity_->waiting_after_capture_failure();
     }
     std::optional<gnc::ProximityPhase> proximity_phase() const;
-    const std::string& proximity_status() const { return proximity_status_; }
+    const report::Report& proximity_status() const { return proximity_status_; }
     const std::vector<gnc::ProximityEvent>* proximity_events() const;  // nullptr without a flight
     std::optional<gnc::ProximityContact> proximity_contact() const;
-    // German: station impulses (reboosts) within proximity_warning_span_s of the start.
-    const std::vector<std::string>& proximity_warnings() const { return proximity_warnings_; }
+    // Station impulses (reboosts) within proximity_warning_span_s of the start (proximity.station_raise_warning).
+    const report::Reports& proximity_warnings() const { return proximity_warnings_; }
     static constexpr double proximity_warning_span_s = 3.0 * 3600.0;  // [E] the span of a proximity flight
-    // Commands to the guidance: false (German status) without a flight or when the guidance refuses.
+    // Commands to the guidance: false (the refusal as status) without a flight or when the guidance refuses.
     bool proximity_hold();
     bool proximity_retreat();
     bool proximity_abort();
@@ -983,10 +983,10 @@ public:
     // port is active and the station port passive (sim::DockingSim: contact, soft capture, retraction, hooks). At hard
     // capture the pair merges: the station carries the summed mass and the momentum-weighted velocity, the chaser is
     // held on it (FlightBody::hold_docked) at the mated pose. A failed capture sends the proximity flight back to
-    // Waypoint 2; hull contact with the station is "Kollision" (the flight ends). While docked or capturing the
-    // controlled body takes no flight commands (German refusals).
+    // Waypoint 2; hull contact with the station is docking.collision (the flight ends). While docked or capturing the
+    // controlled body takes no flight commands (refusals in docking_status()).
     std::optional<contact::DockingPhase> docking_phase() const;
-    const std::string& docking_status() const { return docking_status_; }
+    const report::Report& docking_status() const { return docking_status_; }
     const std::vector<contact::DockingEvent>* docking_events() const;  // nullptr without a mechanism
     std::optional<contact::LoadPeaks> docking_loads() const;
     bool docked() const;
@@ -1006,7 +1006,7 @@ public:
     // Undocking (ISS i5): only when hard docked and the autopilot is Off / Orbit - hooks open (180 s), the separation
     // springs push the pair apart (momentum kept), then AutopilotState::Departure flies gnc::DepartureGuidance to the
     // exit of the approach ellipsoid; there the autopilot ends and the rendezvous target is cleared (plan_capsule_return
-    // can follow). False with a German docking_status() when refused.
+    // can follow). False with a docking_status() report when refused.
     bool undock();
     // When the docked pair is expected to separate (the Undocking event): hooks opening - their end; hard docked with
     // the ISS mission waiting for its undocking epoch - that epoch plus the hooks' opening time; otherwise nullopt.
@@ -1020,7 +1020,7 @@ public:
     // thrust, an impulse every request.step_s, gas from its main tanks). Masses and CGs follow (set_tank_mass), both
     // ships keep boiling off. False with a German transfer_state().status when refused: not docked, the autopilot
     // active, no coupled connectors or no transfer pressures on either ship, nothing to move; a second start while one
-    // runs is refused in docking_status() ("Transfer läuft bereits") and keeps the running state. Undocking is refused
+    // runs is refused in docking_status() (docking.transfer_running) and keeps the running state. Undocking is refused
     // while a transfer runs.
     bool start_transfer(const TransferRequest& request);
     void stop_transfer();
@@ -1718,8 +1718,8 @@ private:
     std::optional<gnc::ProximityGuidance> proximity_;
     std::string proximity_station_port_, proximity_chaser_port_;
     gnc::AxisAcceleration proximity_authority_;  // pure authority along the target port axes in the docking attitude
-    std::string proximity_status_;
-    std::vector<std::string> proximity_warnings_;
+    report::Report proximity_status_;
+    report::Reports proximity_warnings_;
     bool proximity_debug_ = false;  // STARSIM_DEBUG_PROXIMITY, read once at construction
     size_t proximity_debug_events_ = 0;
     time::Epoch proximity_debug_next_;
@@ -1731,7 +1731,7 @@ private:
     gnc::AttitudeMode proximity_attitude_mode() const;  // the docking attitude as an LVLH hold of the controlled body
     // Docking (flight_session_docking.cpp).
     std::optional<DockingSim> docking_;
-    std::string docking_status_;
+    report::Report docking_status_;
     std::optional<vehicle::CompoundMass> compound_mass_;
     MomentumRecord docking_merge_;
     math::Vec3 docked_position_station_m_;  // chaser CG in the station body frame while docked

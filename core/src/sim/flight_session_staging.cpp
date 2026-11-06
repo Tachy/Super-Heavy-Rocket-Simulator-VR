@@ -33,7 +33,7 @@ void FlightSession::stage() {
     if (bodies_.empty() || bodies_[controlled_].body->vehicle().stages().size() < 2) return;
     if (staging_) return;  // a sequence is under way: it separates once
     if (docking_busy()) {  // the stack is held by the docking mechanism (ISS i5)
-        docking_status_ = "Stufentrennung nicht möglich: angedockt";
+        docking_status_ = report::make(report::Code::docking_staging_docked);
         return;
     }
     auto& lower = bodies_[controlled_];

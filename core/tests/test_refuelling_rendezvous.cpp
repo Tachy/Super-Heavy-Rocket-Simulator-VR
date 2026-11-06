@@ -195,8 +195,8 @@ TEST_CASE("Tanker from its phasing orbit to hard capture at the depot", "[refuel
          t += 30.0) {
         f.session.advance_to(f.session.epoch() + 30.0);
     }
-    INFO(report::transitional_text(f.session.iss_mission_status()) << " | " << f.session.proximity_status() << " | "
-                                        << f.session.docking_status());
+    INFO(report::transitional_text(f.session.iss_mission_status()) << " | " << test::code_id(f.session.proximity_status()) << " | "
+                                        << test::code_id(f.session.docking_status()));
     REQUIRE(f.session.iss_mission_leg() == sim::IssMissionLeg::Docked);
     REQUIRE(f.session.docked());
     std::printf("[r3] tanker campaign: docked after %.1f h, peak compression %.1f kN\n", t / 3600.0,

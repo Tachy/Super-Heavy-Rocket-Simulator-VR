@@ -158,7 +158,7 @@ TEST_CASE("Docking campaign: the IDSS envelope grid captures and docks at both p
             auto d = at_first_touch(port, icc);
             const bool docked = d.fly_until(DockingPhase::Docked, 1200.0);
             const auto loads = *d.session.docking_loads();
-            INFO(port << " case " << k << ": " << d.session.docking_status());
+            INFO(port << " case " << k << ": " << test::code_id(d.session.docking_status()));
             CHECK(docked);
             CHECK(loads.compression_n < 6500.0);
             CHECK(loads.shear_n < 3200.0);
@@ -179,13 +179,13 @@ TEST_CASE("Docking campaign: failures outside the envelope - offset and angle", 
     {
         auto d = docking_test::DragonAtPort::place("ida2", 0.30 + 0.40 + 0.05, 0.45, -0.075, 0.0);
         REQUIRE(d.fly_until(DockingPhase::Failed, 60.0));
-        CHECK(d.session.docking_status() == "Fangen fehlgeschlagen: Versatz zu groß");
+        CHECK(test::refused(d.session.docking_status(), report::Code::docking_capture_failed, report::Code::docking_fail_offset));
     }
     {
         const math::Quat tilt = math::Quat::from_axis_angle({0.0, 1.0, 0.0}, 10.0 * deg);
         auto d = docking_test::DragonAtPort::place("ida2", 0.30 + 0.05, 0.0, -0.075, 0.0, tilt);
         REQUIRE(d.fly_until(DockingPhase::Failed, 60.0));
-        CHECK(d.session.docking_status() == "Fangen fehlgeschlagen: Winkel zu groß");
+        CHECK(test::refused(d.session.docking_status(), report::Code::docking_capture_failed, report::Code::docking_fail_angle));
     }
 }
 
@@ -203,10 +203,10 @@ TEST_CASE("Docking campaign: an overloading contact retreats to Waypoint 2, resu
     const auto port = vehicle::port_kinematics(s.body(1), "ida2");
     s.apply_velocity_error(0, column(port.axes_gcrf, 0) * (-0.20));
     REQUIRE(docking_test::DragonAtPort::wait_for(s, d.t0, [&] { return s.docking_phase() == DockingPhase::Failed; }, 60.0));
-    CHECK(s.docking_status() == "Fangen fehlgeschlagen: Überlast");
+    CHECK(test::refused(s.docking_status(), report::Code::docking_capture_failed, report::Code::docking_fail_overload));
     REQUIRE(docking_test::DragonAtPort::wait_for(
         s, d.t0, [&] { return s.proximity_phase() == gnc::ProximityPhase::Waypoint; }, 1800.0));
-    CHECK(s.proximity_status().find("Wegpunkt 2") != std::string::npos);
+    CHECK(test::names_waypoint(s.proximity_status(), 2));
     CHECK(s.docking_phase() == DockingPhase::Ready);  // re-armed
     REQUIRE(s.proximity_resume());
     REQUIRE(docking_test::DragonAtPort::wait_for(s, d.t0, [&] { return s.docked(); }, 3600.0));
@@ -240,7 +240,7 @@ TEST_CASE("Docking campaign: undock, departure and capsule return to splashdown"
     auto parameters = sim::capsule_return_parameters(mission);
     parameters.search_window_s = 7.0 * 86400.0;
     const bool planned = s.plan_capsule_return(parameters);
-    INFO((s.ship_return_plan() ? s.ship_return_plan()->reason : std::string("kein Plan")) << " / " << s.docking_status());
+    INFO((s.ship_return_plan() ? s.ship_return_plan()->reason : std::string("kein Plan")) << " / " << test::code_id(s.docking_status()));
     REQUIRE(planned);
     const double planned_h = (s.ship_return_plan()->node.epoch - s.epoch()) / 3600.0;
     const time::Epoch start = s.epoch();

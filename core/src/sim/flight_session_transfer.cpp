@@ -119,7 +119,7 @@ void FlightSession::stop_transfer() { end_transfer(); }
 
 bool FlightSession::start_transfer(const TransferRequest& request) {
     if (transfer_ && transfer_->active()) {
-        docking_status_ = "Transfer läuft bereits";
+        docking_status_ = report::make(report::Code::docking_transfer_running);
         return false;
     }
     if (!docked()) return refuse_transfer("Transfer nicht möglich: nicht angedockt");

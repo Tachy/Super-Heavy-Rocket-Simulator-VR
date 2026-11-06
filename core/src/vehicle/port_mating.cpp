@@ -22,15 +22,17 @@ StageTransform mated_stage_transform(const config::DockingPortConfig& chaser, co
     return {rotation, target.position_m - rotation * chaser.position_m};
 }
 
-std::optional<std::string> port_mismatch(const config::DockingPortConfig& chaser,
-                                         const config::DockingPortConfig& target) {
+std::optional<report::Report> port_mismatch(const config::DockingPortConfig& chaser,
+                                            const config::DockingPortConfig& target) {
     if (chaser.mechanism != target.mechanism) {
-        return "Andocksysteme passen nicht zusammen ('" + chaser.id + "' und '" + target.id + "')";
+        return report::make(report::Code::docking_ports_mismatch,
+                            {report::data_name("chaser", chaser.id), report::data_name("target", target.id)});
     }
     if (chaser.mechanism == config::DockingMechanism::ProbeDrogue &&
         (chaser.soft_capture != config::SoftCaptureMode::Active ||
          target.soft_capture != config::SoftCaptureMode::Passive)) {
-        return "Sonden gehören zum anfliegenden Schiff, Trichter zum Ziel ('" + chaser.id + "' -> '" + target.id + "')";
+        return report::make(report::Code::docking_probe_drogue_roles,
+                            {report::data_name("chaser", chaser.id), report::data_name("target", target.id)});
     }
     return std::nullopt;
 }
@@ -41,7 +43,7 @@ const config::DockingPortConfig& port_config(const Vehicle& vehicle, std::string
             if (port.id == port_id) return port;
         }
     }
-    throw std::invalid_argument("Unbekannter Andockport '" + std::string(port_id) + "'");
+    throw std::invalid_argument("Unknown docking port '" + std::string(port_id) + "'");
 }
 
 }  // namespace starsim::vehicle

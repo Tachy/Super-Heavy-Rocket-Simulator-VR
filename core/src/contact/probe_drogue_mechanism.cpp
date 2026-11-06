@@ -18,7 +18,7 @@ DockingMechanismParameters probe_drogue_mechanism(const config::DockingPortConfi
     m.shear_limit_n = 5.0e4;                 // [E]
     m.bending_limit_nm = 2.0e6;              // [E] probes +-8 m apart
     m.torsion_limit_nm = 2.0e6;              // [E]
-    m.limit_name = "Auslegungsgrenze";
+    m.limit_ref = "phase.docking_limit.design";
     return m;
 }
 

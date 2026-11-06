@@ -122,7 +122,7 @@ std::uint64_t FlightSim::post(const char* name, SessionCommand command) {
 
 std::uint64_t FlightSim::post_active(const char* name, SessionCommand command) {
     return post(name, [command = std::move(command)](sim::FlightSession& session) {
-        if (!session.active()) return Outcome{false, legacy_report("Kein aktiver Flug")};
+        if (!session.active()) return Outcome{false, report_dict(report::make(report::Code::command_no_active_flight))};
         return command(session);
     });
 }
@@ -131,7 +131,7 @@ std::uint64_t FlightSim::post_deferred_active(const char* name, std::function<Se
     return post_deferred(name, [command = std::move(command)](sim::FlightSession& session) -> SessionPoll {
         if (!session.active()) {
             return [](sim::FlightSession&) -> std::optional<Outcome> {
-                return Outcome{false, legacy_report("Kein aktiver Flug")};
+                return Outcome{false, report_dict(report::make(report::Code::command_no_active_flight))};
             };
         }
         return command(session);
@@ -398,7 +398,7 @@ int64_t FlightSim::set_moon_rocks(bool enabled) {
 int64_t FlightSim::abort_landing(int index) {
     return static_cast<int64_t>(post_active("abort_landing", [index](sim::FlightSession& session) {
         if (index < 0 || static_cast<size_t>(index) >= session.body_count()) {
-            return Outcome{false, legacy_report("Ungültiger Körperindex")};
+            return Outcome{false, report_dict(report::make(report::Code::command_invalid_body_index))};
         }
         return Outcome{session.abort_landing(static_cast<size_t>(index)), {}};
     }));
@@ -735,42 +735,42 @@ int64_t FlightSim::refuelling_campaign(const godot::Dictionary& params) {
 int64_t FlightSim::proximity_hold() {
     return static_cast<int64_t>(post_active("proximity_hold", [](sim::FlightSession& session) {
         const bool ok = session.proximity_hold();
-        return Outcome{ok, legacy_report(session.proximity_status())};
+        return Outcome{ok, report_dict(session.proximity_status())};
     }));
 }
 
 int64_t FlightSim::proximity_retreat() {
     return static_cast<int64_t>(post_active("proximity_retreat", [](sim::FlightSession& session) {
         const bool ok = session.proximity_retreat();
-        return Outcome{ok, legacy_report(session.proximity_status())};
+        return Outcome{ok, report_dict(session.proximity_status())};
     }));
 }
 
 int64_t FlightSim::proximity_abort() {
     return static_cast<int64_t>(post_active("proximity_abort", [](sim::FlightSession& session) {
         const bool ok = session.proximity_abort();
-        return Outcome{ok, legacy_report(session.proximity_status())};
+        return Outcome{ok, report_dict(session.proximity_status())};
     }));
 }
 
 int64_t FlightSim::proximity_resume() {
     return static_cast<int64_t>(post_active("proximity_resume", [](sim::FlightSession& session) {
         const bool ok = session.proximity_resume();
-        return Outcome{ok, legacy_report(session.proximity_status())};
+        return Outcome{ok, report_dict(session.proximity_status())};
     }));
 }
 
 int64_t FlightSim::undock() {
     return static_cast<int64_t>(post_active("undock", [](sim::FlightSession& session) {
         const bool ok = session.undock();
-        return Outcome{ok, legacy_report(session.docking_status())};
+        return Outcome{ok, report_dict(session.docking_status())};
     }));
 }
 
 int64_t FlightSim::settle(bool enabled) {
     return static_cast<int64_t>(post_active("settle", [enabled](sim::FlightSession& session) {
         const bool ok = session.settle(enabled);
-        return Outcome{ok, legacy_report(std::string(ok ? "" : "Settling nicht möglich: angedockt oder im Anflug"))};
+        return Outcome{ok, report_dict(report::make(ok ? report::Code::ok : report::Code::command_settle_not_possible))};
     }));
 }
 

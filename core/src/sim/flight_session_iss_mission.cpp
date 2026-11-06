@@ -139,7 +139,7 @@ void FlightSession::iss_start_transfer() {
     }
     if (!request) return iss_end(report::legacy(reason));
     if (!start_transfer(*request)) {
-        return iss_end(report::legacy(transfer_ && transfer_->active() ? docking_status_ : transfer_state().status));
+        return iss_end(transfer_ && transfer_->active() ? docking_status_ : report::legacy(transfer_state().status));
     }
     iss_enter(IssMissionLeg::Transfer, leg_report(IssMissionLeg::Transfer));
 }
@@ -243,12 +243,12 @@ void FlightSession::run_iss_mission() {
         case IssMissionLeg::Rendezvous:
             iss_status_ = leg_status(iss_leg_, rendezvous_status_);
             break;
-        case IssMissionLeg::Proximity: iss_status_ = leg_status(iss_leg_, report::legacy(proximity_status_)); break;
-        case IssMissionLeg::Docking: iss_status_ = leg_status(iss_leg_, report::legacy(docking_status_)); break;
+        case IssMissionLeg::Proximity: iss_status_ = leg_status(iss_leg_, proximity_status_); break;
+        case IssMissionLeg::Docking: iss_status_ = leg_status(iss_leg_, docking_status_); break;
         case IssMissionLeg::Transfer:
             iss_status_ = leg_status(iss_leg_, report::legacy(transfer_state().status));
             break;
-        case IssMissionLeg::Departure: iss_status_ = leg_status(iss_leg_, report::legacy(docking_status_)); break;
+        case IssMissionLeg::Departure: iss_status_ = leg_status(iss_leg_, docking_status_); break;
         default: break;
     }
     // Refuelling f3: an unsettled in-orbit ignition lost the engines - whatever leg flew it, the mission ends.
@@ -289,9 +289,9 @@ void FlightSession::run_iss_mission() {
             } else if (rendezvous_step_ == RendezvousStep::None) {
                 iss_end(rendezvous_status_);
             } else if (start_proximity(q.station_port, q.proximity)) {
-                iss_enter(IssMissionLeg::Proximity, leg_status(IssMissionLeg::Proximity, report::legacy(proximity_status_)));
+                iss_enter(IssMissionLeg::Proximity, leg_status(IssMissionLeg::Proximity, proximity_status_));
             } else {
-                iss_end(report::legacy(proximity_status_));
+                iss_end(proximity_status_);
             }
             return;
         case IssMissionLeg::Proximity:
@@ -307,7 +307,7 @@ void FlightSession::run_iss_mission() {
                     iss_enter(IssMissionLeg::Proximity,
                               report::make(report::Code::iss_proximity_retry, {report::count("retry", iss_capture_retries_)}));
                 } else {
-                    iss_end(report::legacy(proximity_status_));
+                    iss_end(proximity_status_);
                 }
                 return;
             }
@@ -320,9 +320,9 @@ void FlightSession::run_iss_mission() {
                           completed(report::Code::iss_reason_docked,
                                     {report::ref("port", "place.port." + q.station_port)}));
             } else if (docking_busy()) {
-                iss_enter(IssMissionLeg::Docking, leg_status(IssMissionLeg::Docking, report::legacy(docking_status_)));
+                iss_enter(IssMissionLeg::Docking, leg_status(IssMissionLeg::Docking, docking_status_));
             } else {  // a failed capture: the proximity flight retreats to Waypoint 2 and waits for resume
-                iss_enter(IssMissionLeg::Proximity, leg_status(IssMissionLeg::Proximity, report::legacy(proximity_status_)));
+                iss_enter(IssMissionLeg::Proximity, leg_status(IssMissionLeg::Proximity, proximity_status_));
             }
             return;
         case IssMissionLeg::Docked:
@@ -334,18 +334,18 @@ void FlightSession::run_iss_mission() {
             } else if (transfer_state().phase == TransferPhase::Stopped) {
                 iss_end(report::legacy(transfer_state().status));
             } else if (undock()) {
-                iss_enter(IssMissionLeg::Departure, leg_status(IssMissionLeg::Departure, report::legacy(docking_status_)));
+                iss_enter(IssMissionLeg::Departure, leg_status(IssMissionLeg::Departure, docking_status_));
             } else {
-                iss_end(report::legacy(docking_status_));
+                iss_end(docking_status_);
             }
             return;
         case IssMissionLeg::WaitUndock:
             if (!docked()) {  // the hooks are opening already: the pilot undocked early
-                iss_enter(IssMissionLeg::Departure, leg_status(IssMissionLeg::Departure, report::legacy(docking_status_)));
+                iss_enter(IssMissionLeg::Departure, leg_status(IssMissionLeg::Departure, docking_status_));
             } else if (undock()) {
-                iss_enter(IssMissionLeg::Departure, leg_status(IssMissionLeg::Departure, report::legacy(docking_status_)));
+                iss_enter(IssMissionLeg::Departure, leg_status(IssMissionLeg::Departure, docking_status_));
             } else {
-                iss_end(report::legacy(docking_status_));
+                iss_end(docking_status_);
             }
             return;
         case IssMissionLeg::Departure: {

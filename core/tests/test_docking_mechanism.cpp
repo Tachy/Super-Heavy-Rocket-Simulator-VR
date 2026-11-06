@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "report_check.hpp"
 #include "starsim/contact/docking_mechanism.hpp"
 #include "starsim/math/constants.hpp"
 #include "webcast_report.hpp"
@@ -98,7 +99,7 @@ TEST_CASE("Docking mechanism: every corner of the IDSS envelope captures within 
                     auto r = approach(axial, offset, angle, lateral);
                     r.fly(60.0);
                     INFO("axial " << axial << " offset " << offset << " angle " << angle << " lateral " << lateral << " -> "
-                         << r.m.failure());
+                         << report::id_of(r.m.failure().code));
                     CHECK(r.m.phase() == contact::DockingPhase::SoftCapture);
                     CHECK(r.m.peaks().compression_n < 6500.0);
                     CHECK(r.m.peaks().shear_n < 3200.0);
@@ -118,7 +119,7 @@ TEST_CASE("Docking mechanism: too fast overloads, the latches release, the chase
     auto r = approach(0.25, 0.0);
     r.fly(60.0);
     CHECK(r.m.phase() == contact::DockingPhase::Failed);
-    CHECK(r.m.failure() == "Überlast");
+    CHECK(r.m.failure().code == report::Code::docking_fail_overload);
     CHECK(r.c.v.x > 0.0);  // moving out again
 }
 
@@ -126,7 +127,7 @@ TEST_CASE("Docking mechanism: an offset beyond the petals' capture radius bounce
     auto r = approach(0.075, 0.45);
     r.fly(60.0);
     CHECK(r.m.phase() == contact::DockingPhase::Failed);
-    CHECK(r.m.failure() == "Versatz zu groß");
+    CHECK(r.m.failure().code == report::Code::docking_fail_offset);
     CHECK(r.c.v.x > 0.0);
 }
 
@@ -138,7 +139,7 @@ TEST_CASE("Docking mechanism: inside the capture radius a large offset is pushed
     auto r = approach(0.075, 0.30);
     r.fly(60.0);
     CHECK(r.m.phase() == contact::DockingPhase::Failed);
-    CHECK(r.m.failure() == "abgeprallt");
+    CHECK(r.m.failure().code == report::Code::docking_fail_bounced);
     CHECK(r.c.v.x > 0.0);
 }
 
@@ -153,10 +154,10 @@ TEST_CASE("Docking mechanism: IDSS envelope corner with outward lateral speed (r
     for (double lean_deg : {30.0, 45.0}) {
         auto r = approach(0.05, 0.10, 0.0, 0.04, lean_deg * deg);
         r.fly(60.0);
-        INFO("lean " << lean_deg << " -> " << r.m.failure());
+        INFO("lean " << lean_deg << " -> " << report::id_of(r.m.failure().code));
         const bool captured = r.m.phase() != contact::DockingPhase::Failed;
         rows.push_back({"captured at 0.05 m/s axial, 0.10 m offset, +0.04 m/s lateral, petal lean " + std::to_string(static_cast<int>(lean_deg)) +
-                            " deg (1 = captured; failure: '" + std::string(r.m.failure()) + "')",
+                            " deg (1 = captured; failure: '" + std::string(report::id_of(r.m.failure().code)) + "')",
                         captured ? 1.0 : 0.0, 1.0, 0.0, "IDSS initial-condition envelope", "ring platform damping [E], petal lean, petal geometry"});
     }
     test::webcast_report("docking_idss_envelope_corner", rows);
@@ -194,7 +195,7 @@ TEST_CASE("Docking mechanism: undock refused before hard capture", "[iss][dockin
     r.fly(20.0);
     REQUIRE(r.m.phase() == contact::DockingPhase::SoftCapture);
     CHECK_FALSE(r.m.undock(r.t));
-    CHECK(r.m.refusal() == "Abkoppeln nicht möglich: nicht fest angedockt");
+    CHECK(test::refused(r.m.refusal(), report::Code::docking_undock_not_possible, report::Code::docking_cause_not_hard_docked));
 }
 
 TEST_CASE("Docking mechanism: separation speed from the IDSS spring energy", "[iss][docking]") {
@@ -212,7 +213,7 @@ TEST_CASE("Docking mechanism: start_docked enters Docked from Ready only", "[doc
     CHECK(m.hard_captured());
     CHECK(m.ring_extension_m() == 0.0);  // retracted, as after a capture
     CHECK_FALSE(m.start_docked(6.0));
-    CHECK_FALSE(m.refusal().empty());
+    CHECK_FALSE(m.refusal().ok());
     CHECK(m.undock(10.0));  // the docked state undocks as after a capture
     CHECK(m.phase() == contact::DockingPhase::HooksOpening);
 }
@@ -258,7 +259,7 @@ TEST_CASE("Docking mechanism scan: largest captured offset by speed and lean, bo
         vx_exit = r.c.v.x;
         std::printf("[scan] 0.30 m @0.075 lean %.0f: %s, min x %.3f (start %.3f, travel %.3f), max |y| %.3f, crossed axis %d at x %.3f, "
                     "exit vx %+.3f, peak deflection %.3f m (spring work %.1f J), chaser KE at start %.1f J\n", lean_deg,
-                    r.m.failure().c_str(), min_x, x0, x0 - min_x, max_abs_y, crossed, y_at_cross, vx_exit, peak_defl,
+                    report::id_of(r.m.failure().code).data(), min_x, x0, x0 - min_x, max_abs_y, crossed, y_at_cross, vx_exit, peak_defl,
                     peak_defl_energy_j, 0.5 * 12000.0 * 0.075 * 0.075);
     }
     for (double lean_deg : {30.0, 45.0}) {
@@ -271,7 +272,7 @@ TEST_CASE("Docking mechanism scan: largest captured offset by speed and lean, bo
                 if (!latched && r.m.phase() == contact::DockingPhase::SoftCapture) { latched = true; pl = r.c.p; vl = r.c.v; }
             }
             std::printf("[scan] corner 0.05 m/s 0.10 m lateral %+.2f lean %.0f: %s, latch y %.3f vy %+.4f, shear %.0f N\n", lat,
-                        lean_deg, latched ? "captured" : r.m.failure().c_str(), pl.y, vl.y, r.m.peaks().shear_n);
+                        lean_deg, latched ? "captured" : report::id_of(r.m.failure().code).data(), pl.y, vl.y, r.m.peaks().shear_n);
         }
     }
     for (double lean_deg : {30.0, 45.0}) {
