@@ -119,21 +119,48 @@ Trim trim(vehicle::FlightBody& body) {
 
 }  // namespace
 
+// The cases come from the vehicle's own flight envelope, not from fixed angles. Hypersonic (65 km, 6500 m/s, Mach ~21):
+// the alpha schedule (ship_entry_alpha.csv, ~54 deg there) and 6 deg above it ([E]: an off-schedule excursion the
+// hypersonic controller can see; the former 60 deg case). The earlier 70 deg point at Mach 21 was a stale premise: the
+// guidance never commands it (steering about the schedule, terminal_alpha_authority_deg, acts only in the terminal phase
+// below Mach 5), and since the mesh centre-of-pressure table (47904b61) and the 177 t mass / CG (357c3b67) the forward
+// pair needs 79.7 deg to hold it. Terminal phase (Mach 4.5, 40 km): between the corridor points 45 km / 2500 m/s and
+// 35 km / 900 m/s of the residue-limit case below, at the schedule plus the steering authority from config.
+// Low and slow: 5 km, 128 m/s, 75 deg.
 TEST_CASE("The ship trims belly first with control margin on its flaps", "[entry][flap][trim]") {
     World world;
+    const auto cfg = config::load_vehicle(config_dir, "starship_block3");
+    const auto& ship = cfg.stages.back();
+    REQUIRE(ship.entry.has_value());
+    const auto schedule = gnc::load_alpha_schedule(config_dir, ship.aero.entry_alpha_table);
+    const double authority_rad = ship.entry->terminal_alpha_authority_rad;
+    constexpr double excursion_rad = 6.0 * deg;  // [E]
+    const auto at_mach = [&](double height_m, double mach) {
+        return std::pair{mach * world.atmosphere.at(height_m).speed_of_sound_mps, schedule.at(mach)};
+    };
     struct Case { double height_m, speed_mps, alpha_deg; };
-    const Case cases[] = {{65000.0, 6500.0, 55.0}, {65000.0, 6500.0, 60.0}, {65000.0, 6500.0, 70.0},
-                          {5000.0, 128.0, 75.0}};
+    std::vector<Case> cases;
+    {
+        const double mach = 6500.0 / world.atmosphere.at(65000.0).speed_of_sound_mps;
+        const double nominal = schedule.at(mach);
+        cases.push_back({65000.0, 6500.0, nominal / deg});
+        cases.push_back({65000.0, 6500.0, (nominal + excursion_rad) / deg});
+    }
+    {
+        const auto [speed, nominal] = at_mach(40000.0, 4.5);
+        cases.push_back({40000.0, speed, (nominal + authority_rad) / deg});
+    }
+    cases.push_back({5000.0, 128.0, 75.0});
     for (const auto& c : cases) {
         auto body = entry_ship(c.height_m, c.speed_mps, c.alpha_deg * deg, world);
         const Trim t = trim(*body);
         if (std::getenv("STARSIM_VERBOSE")) {
-            std::cout << "alpha " << c.alpha_deg << " h " << c.height_m << ": flaps [deg]";
+            std::cout << "alpha " << c.alpha_deg << " h " << c.height_m << " v " << c.speed_mps << ": flaps [deg]";
             for (double d : t.deflection_rad) std::cout << " " << d / deg;
             std::cout << "  rcs " << t.remainder_fraction.x << " " << t.remainder_fraction.y << " "
                       << t.remainder_fraction.z << "\n";
         }
-        CAPTURE(c.alpha_deg, c.height_m);
+        CAPTURE(c.alpha_deg, c.height_m, c.speed_mps);
         CHECK(norm(t.remainder_fraction) < 0.01);  // trimmed by the flaps alone
         for (double d : t.deflection_rad) {
             CHECK(d >= 15.0 * deg);
