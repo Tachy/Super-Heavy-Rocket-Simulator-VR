@@ -231,7 +231,8 @@ on top of that relief.
   1.0 m [E] (drawn pad, user-approved 2026-11-04).
 - Session: `sim::shared_moon_surface(config_dir, data_dir, options)` caches the composed surface per (directories,
   options) and its parts (LOLA via `shared_lunar_terrain`, one `LunarSurfaceDetail`, one `LunarRocks` with the
-  Diviner map, loaded only with rocks on). `FlightSession::set_moon_terrain(DetailedLunarTerrain)` keeps
+  Diviner map, loaded only with rocks on). The overload with a `LunarSiteConfig` does the same on the terrain of that
+  active site (global + its tile) and caches per site; the Diviner map is shared by all sites. `FlightSession::set_moon_terrain(DetailedLunarTerrain)` keeps
   `moon_terrain()` = LOLA (telemetry `altitude_terrain_m`, planners, game queries) and uses
   `moon_surface()` for the ground and the legs: the given surface when its options match the session's flags, else a
   rebuild from its parts; `set_moon_surface_detail` / `set_moon_rocks` re-apply at once and rebuild a lunar landing

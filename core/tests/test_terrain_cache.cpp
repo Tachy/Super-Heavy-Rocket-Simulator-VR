@@ -7,10 +7,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "starsim/config/data_missing.hpp"
+#include "starsim/config/lunar_site_config.hpp"
 #include "starsim/config/moon_surface_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/rock_abundance_map.hpp"
 #include "starsim/sim/earth_terrain_loader.hpp"
+#include "starsim/sim/lunar_site.hpp"
+#include "starsim/math/constants.hpp"
 #include "starsim/sim/terrain_cache.hpp"
 #include "test_support.hpp"
 
@@ -44,6 +48,32 @@ TEST_CASE("cache rethrows a missing file", "[terrain_cache]") {
     CHECK_THROWS_AS(sim::shared_lunar_terrain(STARSIM_CONFIG_DIR, dir), config::ConfigError);
     CHECK_THROWS_AS(sim::shared_lunar_terrain(STARSIM_CONFIG_DIR, dir), config::ConfigError);
     std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("two sites give two terrains, the cache keeps both alive while held", "[sim][lunar][terrain][data]") {
+    const std::filesystem::path data_dir = STARSIM_DATA_DIR;
+    const auto a11 = config::load_lunar_site(STARSIM_CONFIG_DIR, "apollo_11");
+    const auto a15 = config::load_lunar_site(STARSIM_CONFIG_DIR, "apollo_15");
+    if (!sim::lunar_site_tiles_present(STARSIM_CONFIG_DIR, data_dir, a11) ||
+        !sim::lunar_site_tiles_present(STARSIM_CONFIG_DIR, data_dir, a15)) {
+        SKIP("Apollo 11 / 15 tiles not installed");
+    }
+    const auto t11 = sim::shared_lunar_terrain(STARSIM_CONFIG_DIR, data_dir, a11);
+    const auto t15 = sim::shared_lunar_terrain(STARSIM_CONFIG_DIR, data_dir, a15);
+    CHECK(t11.get() != t15.get());
+    CHECK(sim::shared_lunar_terrain(STARSIM_CONFIG_DIR, data_dir, a11).get() == t11.get());
+    CHECK(sim::shared_lunar_terrain(STARSIM_CONFIG_DIR, data_dir, a15).get() == t15.get());
+    // Each terrain carries its own tile only.
+    CHECK(t11->finest_resolution_within_m(a11.latitude_rad, a11.longitude_rad, 100.0) <= 61.0);
+    CHECK(t11->finest_resolution_within_m(a15.latitude_rad, a15.longitude_rad, 100.0) > 400.0);
+    CHECK(t15->finest_resolution_within_m(a15.latitude_rad, a15.longitude_rad, 100.0) <= 61.0);
+    CHECK(t15->finest_resolution_within_m(a11.latitude_rad, a11.longitude_rad, 100.0) > 400.0);
+    // The global-only terrain is a third instance.
+    CHECK(sim::shared_lunar_terrain(STARSIM_CONFIG_DIR, data_dir).get() != t11.get());
+    // A site without a tile throws and caches nothing.
+    const auto none = config::lunar_site_at(STARSIM_CONFIG_DIR, 10.37 * constants::deg_to_rad, -45.13 * constants::deg_to_rad);
+    CHECK_THROWS_AS(sim::shared_lunar_terrain(STARSIM_CONFIG_DIR, data_dir, none), config::DataMissing);
+    CHECK_THROWS_AS(sim::shared_lunar_terrain(STARSIM_CONFIG_DIR, data_dir, none), config::DataMissing);
 }
 
 TEST_CASE("The composed Moon surface is shared per options and built from shared parts",

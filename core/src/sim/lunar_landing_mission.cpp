@@ -36,7 +36,7 @@ struct PlacedSite {
 PlacedSite load_site(const config::LunarLandingMission& m, const std::filesystem::path& config_dir) {
     const auto site = config::load_lunar_site(config_dir, m.site_id);
     PlacedSite placed;
-    placed.surface = shared_moon_surface(config_dir, config_dir.parent_path() / "data", {true, true});
+    placed.surface = shared_moon_surface(config_dir, config_dir.parent_path() / "data", {true, true}, site);
     placed.terrain = placed.surface->lola_shared();
     placed.site = lunar_site(site, *placed.terrain);
     return placed;

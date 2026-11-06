@@ -37,7 +37,7 @@ struct Fixture {
     sim::LunarSite site;
 
     Fixture() {
-        const auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);
+        const auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"));
         session.set_moon_terrain(terrain);
         site = sim::lunar_site(config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"), *terrain);
         session.set_lunar_landing_site(site);

@@ -404,8 +404,8 @@ TEST_CASE("The asynchronous touchdown search gives the synchronous point", "[moo
 
 TEST_CASE("Detail off selects the same point as before", "[moon_surface][lunar][mission][terrain][data]") {
     const auto site = config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2");
-    const auto lola = sim::shared_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);
-    const auto off = sim::shared_moon_surface(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, {false, false});
+    const auto lola = sim::shared_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"));
+    const auto off = sim::shared_moon_surface(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, {false, false}, config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"));
     const auto h = mission::touchdown_hazard_limits(hls_stage());
     const mission::LunarDescentParameters p;
     for (const double az : {0.0, 180.0 * deg}) {
@@ -430,7 +430,7 @@ TEST_CASE("The IM-2 site with full detail has a safe point within the search rad
     const std::filesystem::path data = STARSIM_DATA_DIR;
     if (!std::filesystem::exists(data / "terrain" / "diviner_rock_abundance.i16")) SKIP("Diviner data not installed");
     const auto site = config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2");
-    const auto surface = sim::shared_moon_surface(STARSIM_CONFIG_DIR, data, {true, true});
+    const auto surface = sim::shared_moon_surface(STARSIM_CONFIG_DIR, data, {true, true}, config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"));
     const auto h = mission::touchdown_hazard_limits(hls_stage());
     mission::LunarDescentParameters p;
     if (const char* t = std::getenv("STARSIM_TOUCHDOWN_THREADS")) p.touchdown_search_threads = std::atoi(t);  // profiling
@@ -466,7 +466,7 @@ TEST_CASE("The IM-2 site with full detail has a safe point within the search rad
 TEST_CASE("Worst-case time of a refused site at IM-2", "[.touchdown_worst]") {
     const std::filesystem::path data = STARSIM_DATA_DIR;
     const auto site = config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2");
-    const auto surface = sim::shared_moon_surface(STARSIM_CONFIG_DIR, data, {true, true});
+    const auto surface = sim::shared_moon_surface(STARSIM_CONFIG_DIR, data, {true, true}, config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"));
     mission::LunarDescentParameters p;
     if (const char* r = std::getenv("STARSIM_TOUCHDOWN_RADIUS_M")) p.touchdown_search_radius_m = std::atof(r);  // profiling
     if (const char* t = std::getenv("STARSIM_TOUCHDOWN_THREADS")) p.touchdown_search_threads = std::atoi(t);  // profiling

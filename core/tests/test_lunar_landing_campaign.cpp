@@ -63,7 +63,7 @@ struct Fixture {
     std::shared_ptr<const environment::DetailedLunarTerrain> surface;
     sim::LunarSite site;
     Fixture() {
-        surface = sim::shared_moon_surface(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, {true, true});
+        surface = sim::shared_moon_surface(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, {true, true}, config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"));
         session.set_moon_terrain(surface);
         site = sim::lunar_site(config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"), surface->lola());
         session.set_lunar_landing_site(site);

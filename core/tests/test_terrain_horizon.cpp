@@ -101,7 +101,8 @@ std::shared_ptr<const environment::LunarTerrain> lunar_terrain_or_skip() {
     if (!std::filesystem::exists(std::filesystem::path(STARSIM_DATA_DIR) / "terrain" / "ldem_64.i16")) {
         SKIP("data/terrain missing (tools/data_pipeline/fetch.py)");
     }
-    return sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);
+    return sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR,
+                                   config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"));
 }
 
 constexpr HorizonMarch leaf_march{10.0, 10.0};

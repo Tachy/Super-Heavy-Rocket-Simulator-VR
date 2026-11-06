@@ -32,7 +32,7 @@ struct Fixture {
     environment::PointMassGravity gravity{ephemeris, earth};
     time::Epoch t0 = spice::SpiceTimeConverter().from_utc({2026, 11, 6, 0, 0, 0.0});
     std::shared_ptr<const environment::LunarTerrain> terrain =
-        sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);   // as test_hls_landing.cpp loads it
+        sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"));   // as test_hls_landing.cpp loads it
 
     // Circular polar 100 km LLO (Earth-centred GCRF state) whose plane contains the site at t0 + `align_s`.
     math::StateVector llo(double align_s) {

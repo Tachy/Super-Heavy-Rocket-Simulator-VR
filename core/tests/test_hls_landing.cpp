@@ -213,7 +213,7 @@ TEST_CASE("HLS drop tests at the real landing masses (260 t and 340 t)", "[hls][
 
 TEST_CASE("An HLS lands on the LOLA terrain at the flattest spot near the site", "[hls][legs][lunar][terrain][data]") {
     Fixture fx;
-    const auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);
+    const auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"));
     fx.session.set_moon_terrain(terrain);
     const auto site = sim::lunar_site(config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"), *terrain);
     fx.session.set_lunar_landing_site(site);
@@ -253,7 +253,7 @@ TEST_CASE("An HLS lands with its disc footpads on the procedural surface", "[hls
     const std::filesystem::path data = STARSIM_DATA_DIR;
     if (!std::filesystem::exists(data / "terrain" / "diviner_rock_abundance.i16")) SKIP("Diviner data not installed");
     Fixture fx;
-    const auto composed = sim::shared_moon_surface(STARSIM_CONFIG_DIR, data, {true, true});
+    const auto composed = sim::shared_moon_surface(STARSIM_CONFIG_DIR, data, {true, true}, config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"));
     fx.session.set_moon_terrain(composed);
     CHECK(fx.session.moon_surface() == composed.get());
     CHECK(fx.session.moon_terrain() == &composed->lola());
@@ -293,7 +293,7 @@ TEST_CASE("An HLS lands with its disc footpads on the procedural surface", "[hls
 
 TEST_CASE("Replacing the Moon terrain drops a lunar landing site built on the old one", "[hls][legs][lunar][terrain][data]") {
     Fixture fx;
-    auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);
+    auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"));
     const std::weak_ptr<const environment::LunarTerrain> watch = terrain;
     fx.session.set_moon_terrain(terrain);
     fx.session.set_lunar_landing_site(
@@ -310,7 +310,7 @@ TEST_CASE("Replacing the Moon terrain drops a lunar landing site built on the ol
 
 TEST_CASE("telemetry altitude over the lunar terrain", "[lunar_telemetry][terrain][data]") {
     Fixture fx;
-    const auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);
+    const auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"));
     fx.session.set_moon_terrain(terrain);
     const auto site = sim::lunar_site(config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"), *terrain);
     fx.session.set_lunar_landing_site(site);

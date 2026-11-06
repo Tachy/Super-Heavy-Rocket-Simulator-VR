@@ -20,9 +20,15 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   `lunar_terrain_products.toml` via `plan_site_tile`, `LunarSiteConfig::height_tile_key`). `fetch.py lola_ldem_64` fetches the
   global LOLA `LDEM_64` (473 m) whole into `data/terrain/`; `fetch.py lunar_sites` runs the core CLI `lunar_site_tile`
   for every site (height + albedo; an albedo refusal is not fatal, the global albedo is used) into
-  `data/terrain/sites/<cache key>.{toml,i16}`; `sim::load_lunar_terrain` reads the global grid and the height tile of
-  every preset site by its key (polar and simple-cylindrical tiles; a missing tile is `data.lunar_terrain_missing`;
-  albedo tiles are not read yet). `environment::LunarTerrain` (tiles behind
+  `data/terrain/sites/<cache key>.{toml,i16}`; `sim::load_lunar_terrain(config, data, site)` reads the global grid and the
+  height tile of the ACTIVE site by its key (polar and simple-cylindrical tiles; a missing tile is
+  `data.lunar_site_tile_missing(latitude, longitude)`, a missing global grid `data.lunar_terrain_missing`; the
+  overload without a site gives the global grid alone, for orbit-only sessions; `lunar_site_tiles_present` checks
+  both files; albedo tiles are not read in the core). A site is a place: `config::lunar_site_at(config_dir, lat, lon)`
+  builds one from free coordinates (id `site_<lat>_<lon>` at 0.01 deg; tile size and key resolve from the products
+  like a preset's: polar 20 m products 10 km), `load_lunar_site(id)` keeps the preset ids. `shared_lunar_terrain` /
+  `shared_moon_surface` take the site too and cache per (directories, tile key): two sites, two terrains, alive while
+  held (detail and rocks are per site, the Diviner map is shared). `environment::LunarTerrain` (tiles behind
   `environment::LunarTile` in `lunar_tile.hpp`: `make_polar_tile(tile, north)` - south projection as LOLA's, north per the PDS label
   `line = pole_line + rho cos(lon) / scale` - and `make_cylindrical_tile` (simple cylindrical, pixel (0, 0) centred at
   the given lat / lon, longitude wraps over 0/360, edge distance by the finer metric); a tile
@@ -30,7 +36,7 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   `finest_resolution_m` the grid spacings, for the procedural detail of `moon-surface.md`; normals by central
   differences over 10 m) through
   `ReferenceBody::set_terrain` / `surface_height_m` / `surface_normal_fixed`; `FlightSession::set_moon_terrain`,
-  `set_lunar_landing_site` (`sim::load_lunar_terrain`, `sim::lunar_site`). Terrain and albedo products for landing
+  `set_lunar_landing_site` (`sim::load_lunar_terrain` with the site, `sim::lunar_site`; the `lunar_landing` mission loads its own site's tile). Terrain and albedo products for landing
   sites anywhere (plan 2026-11-06, tasks 1 and 3): `config::load_lunar_terrain_products` reads them, `plan_site_tile`
   picks the FIRST product (selection order) whose coverage holds the whole tile (polar: crop inside the file and its
   corners above the product's latitude limit; cylindrical: crop inside the latitude range, several files and the 0/360

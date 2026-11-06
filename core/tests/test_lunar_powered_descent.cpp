@@ -40,7 +40,7 @@ struct Fixture {
     double azimuth = 0.0;
 
     Fixture() {
-        terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);  // as test_hls_landing.cpp
+        terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"));  // as test_hls_landing.cpp
         session.set_moon_terrain(terrain);
         const auto site = sim::lunar_site(config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"), *terrain);
         session.set_lunar_landing_site(site);

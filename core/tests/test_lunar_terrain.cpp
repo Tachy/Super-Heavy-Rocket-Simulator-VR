@@ -158,7 +158,7 @@ TEST_CASE("LOLA data: the site tile matches the pipeline's raw-grid check points
     const std::filesystem::path data = STARSIM_DATA_DIR;
     const auto site_config = config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2");
     const auto file = config::load_terrain_grid_file(data / "terrain" / "sites" / (site_config.height_tile_key + ".toml"));
-    const auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, data);
+    const auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, data, site_config);
     REQUIRE(file.checks.size() == 9);
     for (const auto& c : file.checks) {
         CHECK(terrain->height_m(c.latitude_rad, c.longitude_rad) == Catch::Approx(c.height_m).margin(1e-6));
@@ -178,27 +178,58 @@ TEST_CASE("Missing terrain data is a report code", "[terrain]") {
     }
 }
 
-TEST_CASE("A tile that no longer matches lunar_sites.toml is refused", "[terrain][data]") {
-    const auto dir = std::filesystem::temp_directory_path() / "starsim_stale_tile_config";
-    std::filesystem::create_directories(dir);
-    std::ifstream in(std::filesystem::path(STARSIM_CONFIG_DIR) / "lunar_sites.toml");
-    std::stringstream text;
-    text << in.rdbuf();
-    std::string s = text.str();
-    const auto at = s.find("latitude_deg = -84.7906");
-    REQUIRE(at != std::string::npos);
-    s.replace(at, 23, "latitude_deg = -84.6906");  // moved 3 km: the downloaded tile is stale
-    std::ofstream(dir / "lunar_sites.toml") << s;
-    std::filesystem::copy_file(std::filesystem::path(STARSIM_CONFIG_DIR) / "lunar_terrain_products.toml",
-                               dir / "lunar_terrain_products.toml", std::filesystem::copy_options::overwrite_existing);
+TEST_CASE("A site moved after its tile was downloaded finds no tile", "[terrain][data]") {
+    // The cache key names the position: a site moved 3 km has another key and the old tile is never reused.
+    const auto moved = config::lunar_site_at(STARSIM_CONFIG_DIR, -84.6906 * deg, 29.1957 * deg);
+    CHECK(moved.height_tile_key != config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2").height_tile_key);
     try {
-        sim::load_lunar_terrain(dir, STARSIM_DATA_DIR);
+        sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, moved);
         FAIL("expected an error");
-    } catch (const std::runtime_error& e) {
-        CHECK(std::string(e.what()).find("tools/data_pipeline/fetch.py") != std::string::npos);
-        CHECK(std::string(e.what()).find("mons_mouton_im2") != std::string::npos);
+    } catch (const config::DataMissing& e) {
+        CHECK(e.report().code == report::Code::data_lunar_site_tile_missing);
     }
-    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("terrain for Apollo 11 uses its 60 m tile", "[sim][lunar][terrain][data]") {
+    const auto site = config::load_lunar_site(STARSIM_CONFIG_DIR, "apollo_11");
+    if (!sim::lunar_site_tiles_present(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, site)) SKIP("Apollo 11 tile not installed");
+    const auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, site);
+    const double fine = terrain->finest_resolution_within_m(site.latitude_rad, site.longitude_rad, 100.0);
+    CHECK(fine <= 61.0);
+    CHECK(fine > 55.0);
+    // Without the site the global grid alone: ~473 m.
+    const auto global_only = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);
+    CHECK(global_only->finest_resolution_within_m(site.latitude_rad, site.longitude_rad, 100.0) > 400.0);
+    // Another site's tile is not in this terrain: Apollo 15's neighbourhood is the global grid.
+    const auto a15 = config::load_lunar_site(STARSIM_CONFIG_DIR, "apollo_15");
+    CHECK(terrain->finest_resolution_within_m(a15.latitude_rad, a15.longitude_rad, 100.0) > 400.0);
+}
+
+TEST_CASE("free coordinates resolve like presets and get a coordinate id", "[sim][lunar][terrain][config]") {
+    const auto preset = config::load_lunar_site(STARSIM_CONFIG_DIR, "apollo_11");
+    const auto free = config::lunar_site_at(STARSIM_CONFIG_DIR, preset.latitude_rad, preset.longitude_rad);
+    CHECK(free.id == "site_0.67_23.47");
+    CHECK(free.height_tile_key == preset.height_tile_key);
+    CHECK(free.tile_half_size_m == preset.tile_half_size_m);
+    const auto polar = config::lunar_site_at(STARSIM_CONFIG_DIR, -84.7906 * deg, 29.1957 * deg);
+    CHECK(polar.id == "site_-84.79_29.20");
+    CHECK(polar.tile_half_size_m == 10000.0);  // R1: the polar 20 m products use 10 km
+    CHECK(config::lunar_site_at(STARSIM_CONFIG_DIR, -0.001 * deg, 0.0).id == "site_0.00_0.00");
+}
+
+TEST_CASE("free coordinates without a cached tile raise data.lunar_site_tile_missing", "[sim][lunar][terrain][data]") {
+    if (!std::filesystem::exists(std::filesystem::path(STARSIM_DATA_DIR) / "terrain" / "ldem_64.toml")) {
+        SKIP("LDEM_64 not installed");
+    }
+    const auto site = config::lunar_site_at(STARSIM_CONFIG_DIR, 10.37 * deg, -45.13 * deg);  // no tile downloaded here
+    REQUIRE(!sim::lunar_site_tiles_present(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, site));
+    try {
+        sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, site);
+        FAIL("expected an error");
+    } catch (const config::DataMissing& e) {
+        CHECK(e.report().code == report::Code::data_lunar_site_tile_missing);
+        CHECK(e.report().params.size() == 2);
+    }
 }
 
 namespace {

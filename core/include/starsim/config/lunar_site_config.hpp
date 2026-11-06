@@ -21,6 +21,15 @@ struct LunarSiteConfig {
 // Base name (in data/terrain) of the global lunar height grid: `[global] grid` of lunar_sites.toml ("ldem_64").
 std::string load_lunar_global_grid_name(const std::filesystem::path& config_dir);
 
+// A site is a place, not a list entry: any latitude / longitude (MOON_ME), id "site_<lat>_<lon>" at 0.01 deg
+// ("site_-84.79_29.20"). Tile size and key resolve from the products exactly as for the presets (the product that holds
+// the whole tile: polar 20 m products 10 km, ...). Throws report::Refusal lunar.site_no_product when none does.
+// The products overload skips re-reading the config (config/lunar_site_tile.hpp).
+struct LunarTerrainProduct;
+LunarSiteConfig lunar_site_at(const std::filesystem::path& config_dir, double latitude_rad, double longitude_rad);
+LunarSiteConfig lunar_site_at(const std::vector<LunarTerrainProduct>& products, double latitude_rad,
+                              double longitude_rad);
+
 LunarSiteConfig load_lunar_site(const std::filesystem::path& config_dir, std::string_view id);
 std::vector<LunarSiteConfig> load_lunar_sites(const std::filesystem::path& config_dir);
 

@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <fstream>
 #include <sstream>
+#include <utility>
 
 #include "starsim/config/data_missing.hpp"
 #include "starsim/config/lunar_site_tile.hpp"
@@ -14,17 +15,31 @@ namespace starsim::config {
 
 namespace {
 
-LunarSiteConfig parse_site(const detail::Document& doc, const toml::table& t,
-                           const std::vector<LunarTerrainProduct>& products) {
+// The height tile's product, size and cache key come from the products description (Refusal lunar.site_no_product
+// when no product holds the whole tile; never for a preset).
+LunarSiteConfig resolve_site(const std::vector<LunarTerrainProduct>& products, std::string id, double latitude_rad,
+                             double longitude_rad) {
     LunarSiteConfig s;
-    s.id = doc.text(t, "id");
-    s.latitude_rad = doc.number(t, "latitude_deg") * constants::deg_to_rad;
-    s.longitude_rad = doc.number(t, "longitude_deg") * constants::deg_to_rad;
-    // The height tile's product, size and cache key come from the products description (no refusal for a preset).
-    const auto request = plan_site_tile(products, "height", s.latitude_rad, s.longitude_rad);
+    s.id = std::move(id);
+    s.latitude_rad = latitude_rad;
+    s.longitude_rad = longitude_rad;
+    const auto request = plan_site_tile(products, "height", latitude_rad, longitude_rad);
     s.tile_half_size_m = request.half_size_m;
     s.height_tile_key = request.cache_key;
     return s;
+}
+
+LunarSiteConfig parse_site(const detail::Document& doc, const toml::table& t,
+                           const std::vector<LunarTerrainProduct>& products) {
+    return resolve_site(products, doc.text(t, "id"), doc.number(t, "latitude_deg") * constants::deg_to_rad,
+                        doc.number(t, "longitude_deg") * constants::deg_to_rad);
+}
+
+// "%.2f" of a value rounded to 0.01 deg, without a "-0.00".
+std::string hundredths(double deg) {
+    char text[32];
+    std::snprintf(text, sizeof text, "%.2f", deg);
+    return std::string(text) == "-0.00" ? "0.00" : text;
 }
 
 [[noreturn]] void missing(const std::filesystem::path& path) {
@@ -42,6 +57,18 @@ std::vector<LunarSiteConfig> load_lunar_sites(const std::filesystem::path& confi
         for (const auto& node : *list) sites.push_back(parse_site(doc, *node.as_table(), products));
     }
     return sites;
+}
+
+LunarSiteConfig lunar_site_at(const std::vector<LunarTerrainProduct>& products, double latitude_rad,
+                              double longitude_rad) {
+    return resolve_site(products,
+                        "site_" + hundredths(latitude_rad * constants::rad_to_deg) + "_" +
+                            hundredths(longitude_rad * constants::rad_to_deg),
+                        latitude_rad, longitude_rad);
+}
+
+LunarSiteConfig lunar_site_at(const std::filesystem::path& config_dir, double latitude_rad, double longitude_rad) {
+    return lunar_site_at(load_lunar_terrain_products(config_dir), latitude_rad, longitude_rad);
 }
 
 std::string load_lunar_global_grid_name(const std::filesystem::path& config_dir) {
