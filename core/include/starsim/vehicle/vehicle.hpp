@@ -195,16 +195,15 @@ public:
     explicit Vehicle(const config::VehicleConfig& config, const std::filesystem::path& config_dir);
 
     const std::string& id() const { return id_; }
-    // The configured display name of the whole vehicle; empty for a part split off by separate() (both parts are named
-    // by their stages then).
+    // The table key of the whole vehicle's display name; empty for a part split off by separate() (both parts are named
+    // by their stages then, see shown_name_key()).
     const std::string& display_name_key() const { return display_name_key_; }
     // The configuration this vehicle was built from (all its configured stages, also after separate()): the engine
     // and propellant data the planners derive capabilities from (gnc::vehicle_capability); stage data per part is
     // stages()[i].config.
     const config::VehicleConfig& source_config() const { return *source_config_; }
-    // The name shown for this body (webcast overlay): the vehicle's display name; for a part, the display name of its
-    // lowest stage with main (non-auxiliary) engines, else of its topmost stage that has one (capsule + trunk: the
-    // capsule); empty when no stage is named.
+    // The name key shown for this body (webcast overlay): the vehicle's key, else the lowest main-engine stage's, else
+    // the topmost stage's (capsule + trunk: the capsule). Every stage has a name key.
     std::string shown_name_key() const;  // the table key of the shown name
     const std::vector<Stage>& stages() const { return stages_; }
     std::vector<Stage>& stages() { return stages_; }

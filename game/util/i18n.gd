@@ -241,6 +241,8 @@ static func _utc(unix_s: float, with_time: bool) -> String:
 
 
 static func _clock(seconds: float) -> String:
+	if absf(seconds) > 1.0e9:  # far-future sentinels (1e9 s, 1e30 s) would wrap the integer
+		return DASH
 	var total := int(floorf(absf(seconds)))
 	var prefix := "-" if seconds < 0.0 and total > 0 else ""
 	var hours := floori(total / 3600.0)

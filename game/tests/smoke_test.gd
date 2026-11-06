@@ -10,6 +10,8 @@ var _failures := 0
 
 
 func _initialize() -> void:
+	var _events: I18nEvents = I18n.events  # the first access runs the static initialisers: before the path is set
+	I18n.settings_path = "user://smoke_test_%d.cfg" % OS.get_process_id()  # never depend on the player's language
 	_check(OS.has_feature("double"), "engine is a double-precision build")
 
 	var core := StarsimCore.new()
@@ -100,7 +102,8 @@ func _initialize() -> void:
 	_check(_check_iss(config_dir, tdb) == true, "ISS mission checks ran to the end")
 	_check(_check_refuelling(config_dir, tdb) == true, "refuelling checks ran to the end")
 
-	print("SMOKE TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(I18n.settings_path))
+	print("SMOKE TEST ","PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
 
 

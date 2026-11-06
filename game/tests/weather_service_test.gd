@@ -74,6 +74,8 @@ class FakeFetcher:
 
 
 func _initialize() -> void:
+	var _events: I18nEvents = I18n.events  # the first access runs the static initialisers: before the path is set
+	I18n.settings_path = "user://weather_service_i18n_%d.cfg" % OS.get_process_id()  # never the real setting
 	var kernel_dir := Paths.data_dir().path_join("spice")
 	_check(_core.open(kernel_dir), "SPICE kernels open")
 	_test_settings()

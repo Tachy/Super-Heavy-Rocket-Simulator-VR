@@ -6,6 +6,8 @@ var _failures := 0
 
 
 func _initialize() -> void:
+	var _events: I18nEvents = I18n.events  # the first access runs the static initialisers: before the path is set
+	I18n.settings_path = "user://mission_catalogue_test_%d.cfg" % OS.get_process_id()  # never the real setting
 	var catalogue := MissionCatalogue.load_from(Paths.config_dir())
 	var place_ids := _ids(catalogue.places())
 	for id in ["starbase_pad2", "ccsfs_slc40", "earth_orbit", "iss_docked", "lunar_orbit"]:

@@ -358,7 +358,8 @@ func _set_start_status(key: String, report: Dictionary, refused := false) -> voi
 func _render_start_status() -> void:
 	if not _start_refusal.is_empty():
 		var reason := I18n.report_text(_start_refusal)
-		_start_status.text = I18n.text("ui.time_panel.start_refused", {"reason": reason}) if reason != "" 				else I18n.text("ui.time_panel.start_refused_unknown")
+		_start_status.text = I18n.text("ui.time_panel.start_refused", {"reason": reason}) if reason != "" \
+				else I18n.text("ui.time_panel.start_refused_unknown")
 	else:
 		_start_status.text = I18n.text(_start_key) if _start_key != "" else ""
 

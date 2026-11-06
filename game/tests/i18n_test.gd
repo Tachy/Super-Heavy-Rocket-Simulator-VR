@@ -71,6 +71,7 @@ func _initialize() -> void:
 	_check(I18n.format_value(3725.0, "time", "clock") == "1:02:05", "clock 1:02:05")
 	_check(I18n.format_value(90061.0, "time", "clock") == "25:01:01", "clock beyond 24 h")
 	_check(I18n.format_value(65.0, "time", "clock") == "01:05", "clock below 1 h")
+	_check(I18n.format_value(1.0e30, "time", "clock") == "–", "clock of a far-future sentinel is the dash")
 	_check(I18n.format_value(NAN, "number") == "–" and I18n.format_value(INF, "length") == "–", "NaN and inf: dash")
 	_check(I18n.format_value(-0.0, "number", "n1") == "0,0", "negative zero: %s" % I18n.format_value(-0.0, "number", "n1"))
 	_check(I18n.format_value(3.0, "count") == "3", "count")

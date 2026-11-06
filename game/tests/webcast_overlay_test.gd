@@ -6,6 +6,8 @@ var _failures := 0
 
 
 func _initialize() -> void:
+	var _events: I18nEvents = I18n.events  # the first access runs the static initialisers: before the path is set
+	I18n.settings_path = "user://webcast_overlay_test_%d.cfg" % OS.get_process_id()  # never the real setting
 	_test_clock()
 	_test_numbers()
 	_test_fade()
