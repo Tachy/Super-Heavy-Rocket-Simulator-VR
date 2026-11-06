@@ -22,6 +22,8 @@ crew_escape/<id>.toml   ejection seats of a crewed ship return (referenced by mi
   - `[E]` engineering estimate (no public data); calibrate against flight telemetry
   - `[D]` derived from other values in the file (the comment shows how)
 - `[[stage]] payload_station_m`, `fairing_station_m` (optional): where those masses sit, from the stage's base; left out: 0.75 of the stage's length [E].
+- All user-visible texts (report texts, UI, names) live in `config/i18n/de.toml` / `en.toml` (both languages, same keys
+  and placeholders; checked by `python tools/i18n_check.py`); how to add a text or a code: `docs/subsystems/i18n.md`.
 - Display names live in the text tables `config/i18n/de.toml` / `en.toml`, not in the config files (no `name` /
   `display_name` / `label` keys; an old file that still has them loads, they are ignored; no trademarks in the texts).
   Table keys: `vehicle.<id>.name`, `vehicle.<id>.display_name`, `vehicle.<id>.stage.<stage>.display_name` (every stage

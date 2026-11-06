@@ -1,9 +1,9 @@
-# German texts of the game (default language). Sections are text groups, keys are dotted: [report] legacy = ... is the
-# key report.legacy. TomlLite subset: one-line strings, no escapes, no double quote inside a value.
+# German texts of the game (default language). Sections are text groups, keys are dotted: [report] internal_error = ... is the
+# key report.internal_error. TomlLite subset: one-line strings, no escapes, no double quote inside a value.
 # Placeholders {name} or {name:spec}; see game/util/i18n.gd. Every key exists in en.toml too.
 
 [report]
-legacy = "{text}"
+internal_error = "Interner Fehler"
 command.internal_error = "Interner Fehler im Befehl"
 iss.leg = "{leg}"
 iss.leg_status = "{leg}: {cause}"

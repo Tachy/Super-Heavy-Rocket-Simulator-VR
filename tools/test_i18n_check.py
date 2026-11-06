@@ -161,3 +161,13 @@ def test_raw_toml_escapes_and_multiline_fail():
     assert c.check_raw_toml('a = "ok" # "x\\n"\nb = \'C:\\p\'\n', "de") == []
     assert len(c.check_raw_toml('a = "l\\n"\n', "de")) == 1
     assert c.check_raw_toml('a = """\nx"""\n', "de")
+
+
+def test_literals_directory_skips_test_files(tmp_path):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "fixture.gd").write_text('var a := "Flügel"\n', encoding="utf-8")
+    (tmp_path / "test_x.gd").write_text('var a := "Flügel"\n', encoding="utf-8")
+    (tmp_path / "real.gd").write_text('var a := "Flügel"\n', encoding="utf-8")
+    shown = [f.name for f in c._literal_files([str(tmp_path)])]
+    assert shown == ["real.gd"]
+    assert len(c.check_literals([str(tmp_path)])) == 1

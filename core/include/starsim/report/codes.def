@@ -4,7 +4,7 @@
 
 // general
 STARSIM_CODE(ok, "ok", "")
-STARSIM_CODE(legacy, "legacy", "text")
+STARSIM_CODE(internal_error, "internal_error", "")
 
 // command
 STARSIM_CODE(command_internal_error, "command.internal_error", "")

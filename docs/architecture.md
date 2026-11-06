@@ -76,9 +76,20 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25 (the per-session context is kept s
   core) and `environment/cloud_*` (optics, fractal noise, GPU texel forms, Monte Carlo transfer table, light on the
   ground); `build/core/weather_snapshot.exe` builds the shipped analog (`tools/data_pipeline/fetch.py weather_analog`).
   Details: `docs/subsystems/weather-clouds.md`, `weather-service.md`.
+  `report` (bottom module, no dependencies): `report::Report` = a code from `codes.def` + SI parameters (angle, mass,
+  length, speed, time, count, number, utc, ref, data_name) + nested causes; `Refusal` carries one through exceptions;
+  every refusal, status, reason and outcome in the core is a report, never text. Bindings (`bindings/src/report_dict.*`)
+  hand it to GDScript as `{code, params, kinds, causes}`; command results and snapshots carry reports, the bindings
+  compose no text. Details: `docs/subsystems/i18n.md`.
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 
 ## Game (Godot) structure
+- `game/util/i18n.gd` (`I18n`, static, no autoload) and `i18n_events.gd`: the language service. Texts from
+  `config/i18n/de.toml` / `en.toml` (key -> text with `{name:spec}` placeholders), `I18n.report_text` resolves a
+  bindings report (nested causes), `I18n.format_value` formats SI values per kind and locale, the language is
+  `[ui] language` in `user://settings.cfg`, a live switch emits `I18n.events.language_changed` and displays redraw.
+  Every user-visible string in `game/` goes through it (`python tools/i18n_check.py literals` guards this).
+  Details: `docs/subsystems/i18n.md`.
 - `game/world/`: `world.gd` (per-frame orchestration), `celestial_body.gd` (floating origin + scaled space:
   bodies beyond 1.5e7 m are drawn closer and smaller with exact angular size), `orbit_camera.gd`
   (camera always at the render origin, true position in float64 GCRF), `frames.gd` (GCRF -> render axes:

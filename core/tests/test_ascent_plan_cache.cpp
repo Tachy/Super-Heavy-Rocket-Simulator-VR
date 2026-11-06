@@ -54,7 +54,7 @@ sim::AscentProfile sample_profile() {
                                         {report::angle("tilt", 0.1234567890123), report::angle("tilt_limit", 0.07),
                                          report::speed("heave", 1.25), report::speed("heave_limit", 1.0),
                                          report::length("hs", 6.0), report::time("tp", 10.0)}),
-                           report::make(report::Code::legacy, {report::legacy_text("text", "Ziel erreicht \xC3\xA4 mit\nZeilenumbruch")})));
+                           report::make(report::Code::ascent_profile_not_plannable, {report::data_name("text", "Ziel erreicht \xC3\xA4 mit\nZeilenumbruch")})));
     p.kick_angle_rad = 0.2617993877991494;
     p.upper_propellant_at_seco_kg = 123456.789;
     p.trial_flights = 11;

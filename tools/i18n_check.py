@@ -307,7 +307,9 @@ def _literal_files(paths):
         for p in paths:
             p = Path(p)
             if p.is_dir():
-                files += [f for f in sorted(p.rglob("*")) if f.is_file()]
+                # a directory is scanned like the default scope: test files and fixtures are skipped
+                files += [f for f in sorted(p.rglob("*"))
+                          if f.is_file() and not _is_test_file(f.relative_to(p))]
             else:
                 files.append(p)
     else:

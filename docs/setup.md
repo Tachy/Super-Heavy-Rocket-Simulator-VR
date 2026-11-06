@@ -114,6 +114,11 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   (exception: the write-once plan cache `build/plan_cache`, Task 5 of the 2026-10-23 follow-ups: content-addressed,
   files renamed into place, wiped on every test relink, active only through `STARSIM_PLAN_CACHE_DIR` set by the test
   CMake; a test that asserts trial flights calls `sim::disable_plan_cache()`).
+- Text tables and report codes (cheap, run after changing `codes.def`, `config/i18n/` or any user-visible string):
+  `python tools/i18n_check.py` (codes, tables, phases, literals; or a subset: `codes tables phases`, `literals <paths>`)
+  and `python -m pytest tools/test_i18n_check.py -q`; the game side is `game/tests/i18n_test.gd` (part of
+  `tools/run_godot_tests.ps1`, or `godot --headless --path game --script res://tests/i18n_test.gd`). Core cases: `-Fast
+  -TestFilter "[report]"`. Details: `docs/subsystems/i18n.md`.
 - Headless Godot tests (run after changes in `game/`): `powershell -ExecutionPolicy Bypass -File tools/run_godot_tests.ps1`
   runs every `game/tests/*_test.gd` with `--headless`, time and exit code per script in `build/godot_tests.log`, exit 1 if any
   fails. Scripts needing the generated models (`docking_mechanism_test`, `tower_view_test`, `vehicle_view_test`) are skipped

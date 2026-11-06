@@ -14,6 +14,7 @@ Not an arcade game: physical correctness has top priority.
 | Why something is as it is, superseded numbers, earlier approaches | `docs/history/<slug>.md` |
 | Views and controls of the finished game (German, living document) | `docs/ansichten.md` |
 | Vehicle data provenance ([S]/[E]/[D]) | `config/README.md` |
+| Report codes from the core, text tables DE/EN, `I18n`, the checks, how to add a code or text | `docs/subsystems/i18n.md` |
 | Active specs / plans; finished ones | `docs/superpowers/specs`, `plans`; `docs/superpowers/archive/` |
 
 Read the subsystem file before changing a subsystem and update it with the change (current state only; move what

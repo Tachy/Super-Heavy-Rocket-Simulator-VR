@@ -26,5 +26,6 @@ Older code comments refer to sections of this file by their former titles; the t
 | Vehicle detail models (Super Heavy / Starship hull, flaps, grid fins, engines; prototype) | `subsystems/vehicle-models.md` | - |
 | Aero derivation (ascent and booster descent drag from the built models, cross-check) | `subsystems/aero-derivation.md` | - |
 | Moon procedural near-ground surface (craters, regolith roughness, rocks, Hapke) | `subsystems/moon-surface.md` | `history/moon-surface.md` |
+| Language and report codes (core codes, text tables, `I18n`, checks) | `subsystems/i18n.md` | - |
 
 New subsystems get their own `docs/subsystems/<slug>.md`.

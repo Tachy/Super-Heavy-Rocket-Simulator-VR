@@ -1,6 +1,7 @@
 // Private helpers shared by the lunar FlightSession files (flight_session_lunar*.cpp). Not part of the public API.
 #pragma once
 
+#include <cstdio>
 #include <exception>
 #include <optional>
 #include <string>
@@ -31,11 +32,12 @@ inline report::Param step_ref(const char* name, LunarStep step) {
     return report::ref(name, std::string("phase.lunar_step.") + id_of(step));
 }
 
-// The report an exception stands for: a refusal's own report, else its English developer message as a legacy text (Task 16 decides its code).
+// The report an exception stands for: a refusal's own report, else the generic internal-error code (the English developer message goes to stderr, never into the shown text).
 inline report::Report exception_report(const std::exception& e) {
     if (const auto* refusal = dynamic_cast<const report::Refusal*>(&e)) return refusal->report();
     if (const auto* missing = dynamic_cast<const config::DataMissing*>(&e)) return missing->report();
-    return report::legacy(e.what());
+    std::fprintf(stderr, "internal error: %s\n", e.what());
+    return report::make(report::Code::internal_error);
 }
 
 }  // namespace starsim::sim::detail

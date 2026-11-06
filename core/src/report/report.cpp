@@ -57,9 +57,6 @@ Param number(const char* name, double value) { return make_param(name, Kind::num
 Param ref(const char* name, std::string key) {
     return make_param(name, Kind::ref, 0.0, std::move(key));
 }
-Param legacy_text(const char* name, std::string text) {
-    return make_param(name, Kind::legacy_text, 0.0, std::move(text));
-}
 
 Param utc(const char* name, double unix_s) { return make_param(name, Kind::utc, unix_s); }
 Param data_name(const char* name, std::string id) {
@@ -92,17 +89,13 @@ const char* id_of(Kind kind) {
         case Kind::count: return "count";
         case Kind::number: return "number";
         case Kind::ref: return "ref";
-        case Kind::legacy_text: return "legacy_text";
         case Kind::utc: return "utc";
         case Kind::data_name: return "data_name";
     }
     return "number";
 }
 
-Report legacy(std::string text) { return make(Code::legacy, {legacy_text("text", std::move(text))}); }
-
 std::string describe(const Report& report) {
-    if (report.code == Code::legacy && !report.params.empty()) return report.params.front().text;
     std::string out(id_of(report.code));
     if (report.params.empty() && report.causes.empty()) return out;
     out += '(';
@@ -112,7 +105,7 @@ std::string describe(const Report& report) {
         first = false;
         out += p.name;
         out += '=';
-        out += (p.kind == Kind::ref || p.kind == Kind::legacy_text || p.kind == Kind::data_name) ? p.text : std::to_string(p.value_si);
+        out += (p.kind == Kind::ref || p.kind == Kind::data_name) ? p.text : std::to_string(p.value_si);
     }
     for (const Report& c : report.causes) {
         if (!first) out += ", ";

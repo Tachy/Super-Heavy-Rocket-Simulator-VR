@@ -261,7 +261,8 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
             single(tanker_mission, tanker_ascent, ve_tanker, tanker_window);
             single(hls_mission, hls_ascent, ve_hls, hls_window);
         } catch (const std::invalid_argument& e) {  // a mission config without the reference orbit (developer message, English)
-            report.result.reason = report::legacy(e.what());  // a mission config text (developer message, English; code decided by Task 16)
+            std::fprintf(stderr, "internal error: %s\n", e.what());  // developer message, English
+            report.result.reason = report::make(report::Code::internal_error);
             return report;
         }
     }

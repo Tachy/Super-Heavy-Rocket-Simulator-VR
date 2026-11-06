@@ -326,7 +326,7 @@ MissionStart start_lunar_return_mission(FlightSession& session, const std::files
     } catch (const report::Refusal& e) {  // no LLO of the mission's inclination through the asymptote
         b.reason = e.report();
     } catch (const std::exception& e) {  // a planner failure (e.g. Kepler domain): refused, not thrown
-        b.reason = report::with_cause(report::make(report::Code::lunar_return_not_plannable), report::legacy(e.what()));
+        b.reason = report::with_cause(report::make(report::Code::lunar_return_not_plannable), detail::exception_report(e));
     }
     if (budget) *budget = b;
     if (!b.closes) return refuse(b.reason);

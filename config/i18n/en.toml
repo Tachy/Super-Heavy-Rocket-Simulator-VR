@@ -1,7 +1,7 @@
 # English texts of the game. Same keys as de.toml; a missing key falls back to the German text.
 
 [report]
-legacy = "{text}"
+internal_error = "Internal error"
 command.internal_error = "Internal error in command"
 iss.leg = "{leg}"
 iss.leg_status = "{leg}: {cause}"

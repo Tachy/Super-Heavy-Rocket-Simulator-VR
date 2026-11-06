@@ -174,6 +174,10 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   als Standard): aus = keine Wolken, die Szene wie vor dem Wetter (Pixel für Pixel), und kein Download. Die Wolken
   sind echte Volumen, überall auf der Erde sichtbar: von unten am Startplatz, beim Aufstieg hindurch (innen ein
   helles Grau, oben ein Wolkenmeer), aus dem Orbit als Decke mit Schatten und aus der Mondrichtung als Erde mit Wolken.
+- **Sprache** im Zeit-Panel [umgesetzt 2026-11-06]: Auswahlfeld "Sprache" mit Deutsch / English (gemerkt in den
+  Einstellungen, Standard Deutsch). Der Wechsel wirkt sofort, ohne Neustart: HUD, Ereignisse, Panels, Meldungen,
+  Ladebildschirm, Wizard und die Namen der Fahrzeuge, Missionen und Orte erscheinen in der gewählten Sprache; die
+  Texte stehen in `config/i18n/`. Das Auswahlfeld ist vorläufig, das spätere Startmenü bindet an dieselbe Einstellung.
 - **Schalter "Mondschatten nah"** im Zeit-Panel (Kontrollkästchen unter "Wetter", gemerkt in den Einstellungen, an als
   Standard) [umgesetzt 2026-11-05]: die Schattenkarte der Sonne in Bodennähe auf dem Mond (150 m bis 4 km um das Auge):
   Steine, Gelände, Lander und Strukturen werfen echte Schatten mit dem Halbschatten der Sonnenscheibe. Aus = nur die

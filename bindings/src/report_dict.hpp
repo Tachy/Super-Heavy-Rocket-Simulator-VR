@@ -19,6 +19,5 @@ godot::Array report_array(const report::Reports& reports);
 godot::String qualified_id(const char* ns, const char* id);
 
 // Transitional (removed with the last conversion task): a core string that is not a report yet; empty -> ok.
-godot::Dictionary legacy_report(const std::string& text);
 
 }  // namespace starsim::bindings

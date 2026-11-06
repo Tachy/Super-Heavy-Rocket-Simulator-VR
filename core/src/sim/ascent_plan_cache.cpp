@@ -195,7 +195,7 @@ std::string encode_report(const report::Report& r) {
 std::optional<report::Kind> kind_from_id(const std::string& id) {
     for (const auto kind : {report::Kind::angle, report::Kind::mass, report::Kind::length, report::Kind::speed,
                             report::Kind::time, report::Kind::count, report::Kind::number, report::Kind::ref,
-                            report::Kind::legacy_text, report::Kind::utc, report::Kind::data_name}) {
+                            report::Kind::utc, report::Kind::data_name}) {
         if (id == report::id_of(kind)) return kind;
     }
     return std::nullopt;

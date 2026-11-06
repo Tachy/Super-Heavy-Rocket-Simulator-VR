@@ -18,7 +18,7 @@ func _initialize() -> void:
 	_check(I18n.saved_language() == "de", "no settings file: German")
 	_check(I18n.language() == "de", "the default language is German")
 	_check(I18n.text("ui.language.label") == "Sprache", "real table, de: ui.language.label")
-	_check(I18n.has_key("report.legacy") and I18n.has_key("report.command.internal_error"), "first report keys exist")
+	_check(I18n.has_key("report.internal_error") and I18n.has_key("report.command.internal_error"), "first report keys exist")
 	# real phase table (de): the ids the bindings send resolve to today's German words, not to their keys
 	for pair: Array in [["autopilot_state.off", "aus"], ["autopilot_state.upper_stage", "Oberstufe"],
 			["landing_outcome.flying", "fliegt"], ["docking_phase.soft_capture", "Weichfang"],
@@ -39,7 +39,7 @@ func _initialize() -> void:
 		"report.t.steep": "zu steil: {slope:deg1} (Grenze {limit})",
 		"report.t.outer": "außen: {cause}",
 		"report.t.ref": "Phase {what}",
-		"report.legacy": "{text}",
+		"report.internal_error": "Interner Fehler",
 		"report.t.oem": "OEM vom {date:date}, {date}: {maneuvers}",
 		"phase.t.coast": "Freiflug",
 		"only.de": "nur",
@@ -48,7 +48,7 @@ func _initialize() -> void:
 		"report.t.steep": "too steep: {slope:deg1} (limit {limit})",
 		"report.t.outer": "outer: {cause}",
 		"report.t.ref": "phase {what}",
-		"report.legacy": "{text}",
+		"report.internal_error": "Internal error",
 		"phase.t.coast": "coast",
 	}
 	I18n.use_tables(de, en)
@@ -62,8 +62,8 @@ func _initialize() -> void:
 	_check(I18n.report_text(ref) == "Phase Freiflug", "ref parameter resolves: %s" % I18n.report_text(ref))
 	var outer := {"code": "t.outer", "params": {}, "kinds": {}, "causes": [steep]}
 	_check(I18n.report_text(outer) == "außen: zu steil: 8,3° (Grenze 8,0°)", "cause renders nested: %s" % I18n.report_text(outer))
-	var legacy := {"code": "legacy", "params": {"text": "Altlast"}, "kinds": {"text": "legacy_text"}, "causes": []}
-	_check(I18n.report_text(legacy) == "Altlast", "legacy report is its text")
+	var internal := {"code": "internal_error", "params": {}, "kinds": {}, "causes": []}
+	_check(I18n.report_text(internal) == "Interner Fehler", "internal_error report text")
 	_check(I18n.phase_text("t.coast") == "Freiflug" and I18n.phase_text("") == "", "phase text")
 
 	_check(I18n.format_value(12345.0, "mass") == "12,3 t", "mass default: %s" % I18n.format_value(12345.0, "mass"))

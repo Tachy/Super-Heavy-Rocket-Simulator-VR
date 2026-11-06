@@ -16,9 +16,9 @@ TEST_CASE("A default report is ok", "[report]") {
 }
 
 TEST_CASE("Parameters carry kind and SI value", "[report]") {
-    auto r = report::make(report::Code::legacy, {report::legacy_text("text", "x")});
+    auto r = report::make(report::Code::internal_error, {report::data_name("text", "x")});
     CHECK_FALSE(r.ok());
-    CHECK(r.params[0].kind == report::Kind::legacy_text);
+    CHECK(r.params[0].kind == report::Kind::data_name);
     CHECK(r.params[0].text == "x");
     CHECK(report::angle("slope", 0.1449).value_si == 0.1449);
     CHECK(report::angle("slope", 0.1449).kind == report::Kind::angle);
@@ -35,7 +35,7 @@ TEST_CASE("utc and data_name parameters", "[report]") {
     CHECK(n.kind == report::Kind::data_name);
     CHECK(n.text == "ISS_REBOOST_1");
     CHECK(std::string(report::id_of(n.kind)) == "data_name");
-    CHECK(report::describe(report::make(report::Code::legacy, {n})) == "ISS_REBOOST_1");
+    CHECK(report::describe(report::make(report::Code::internal_error, {n})) == "internal_error(name=ISS_REBOOST_1)");
 }
 
 TEST_CASE("UtcDateTime unix_seconds matches known dates", "[report][time]") {
@@ -73,17 +73,17 @@ TEST_CASE("code_from_id inverts id_of", "[report]") {
 
 TEST_CASE("Refusal carries its report", "[report]") {
     try {
-        throw report::Refusal(report::make(report::Code::legacy, {report::legacy_text("text", "x")}));
+        throw report::Refusal(report::make(report::Code::internal_error));
     } catch (const report::Refusal& e) {
-        CHECK(e.report().code == report::Code::legacy);
-        CHECK(std::string(e.what()) == "legacy");
+        CHECK(e.report().code == report::Code::internal_error);
+        CHECK(std::string(e.what()) == "internal_error");
         return;
     }
     FAIL("not thrown");
 }
 
 TEST_CASE("with_cause nests a report", "[report]") {
-    auto r = report::with_cause(report::make(report::Code::legacy),
+    auto r = report::with_cause(report::make(report::Code::internal_error),
                                 report::make(report::Code::command_internal_error));
     REQUIRE(r.causes.size() == 1);
     CHECK(r.causes[0].code == report::Code::command_internal_error);
