@@ -514,7 +514,11 @@ TEST_CASE("Shipped model: rock shape and reflectance ratio", "[moon_surface][unr
     CHECK(m.rock_reflectance_ratio > cfg.rocks.albedo_to_regolith - 0.05);
     REQUIRE(m.rock_lit_gain.size() == static_cast<size_t>(UnresolvedShadingModel::lit_gain_samples));
     REQUIRE(m.rock_shadow.size() == static_cast<size_t>(UnresolvedShadingModel::lit_gain_samples));
-    const auto tables = environment::template_rock_light_tables(cfg.rocks.burial_fraction_mean, cfg.rocks.burial_fraction_sd);
+    // The model's tables: the rock's Hapke law per face (Task 13).
+    config::HapkeParameters rock_law = cfg.hapke;
+    rock_law.w = std::min(cfg.hapke.w * cfg.rocks.albedo_to_regolith, 0.999);
+    const auto tables =
+        environment::template_rock_light_tables(cfg.rocks.burial_fraction_mean, cfg.rocks.burial_fraction_sd, &rock_law);
     CHECK(std::abs(environment::rock_lit_gain_table(m, 20.0 * deg) - tables.gain[10]) < 1e-12);
     CHECK(std::abs(environment::rock_shadow_table(m, 20.0 * deg) - tables.shadow[10]) < 1e-12);
     // The generated angular rocks against the half-spheroid of the same eta (printed for the docs, R1).
@@ -792,7 +796,7 @@ TEST_CASE("Rock view tables' file cache: bit-identical round trip, the key guard
     }
     std::printf("  rock view tables: version %llu, checksum %llu\n",
                 static_cast<unsigned long long>(environment::rock_view_cache_version), static_cast<unsigned long long>(sum));
-    constexpr std::uint64_t pinned_version = 2, pinned_checksum = 5551542726429447617ULL;  // update together
+    constexpr std::uint64_t pinned_version = 3, pinned_checksum = 3411372721922603568ULL;  // update together
     CHECK(environment::rock_view_cache_version == pinned_version);
     CHECK(sum == pinned_checksum);
 }

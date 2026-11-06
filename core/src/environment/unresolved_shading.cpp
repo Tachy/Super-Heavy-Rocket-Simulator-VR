@@ -303,7 +303,7 @@ UnresolvedShadingModel make_unresolved_shading_model(const LunarSurfaceDetail& d
         // G(e) and sigma(e) of the generated angular rocks (Task 11 fix C, R1; the half-spheroid laws rock_lit_gain /
         // rock_shadow_per_cover stay as the reference shapes of the tests).
         const RockLightTables tables =
-            template_rock_light_tables(cfg.rocks.burial_fraction_mean, cfg.rocks.burial_fraction_sd);
+            template_rock_light_tables(cfg.rocks.burial_fraction_mean, cfg.rocks.burial_fraction_sd, &rock);
         m.rock_lit_gain = tables.gain;
         m.rock_shadow = tables.shadow;
         // Oblique views (Task 12): the ground the rocks hide from the eye and their seen sides.
@@ -311,7 +311,7 @@ UnresolvedShadingModel make_unresolved_shading_model(const LunarSurfaceDetail& d
         const RockViewModel view =
             template_rock_view_tables(cfg.rocks.burial_fraction_mean, cfg.rocks.burial_fraction_sd,
                                       cache_dir.empty() ? std::filesystem::path{} : cache_dir / rock_view_cache_name,
-                                      &cache_status);
+                                      &cache_status, &rock);
         m.rock_view_cache_status = static_cast<int>(cache_status);
         m.rock_view_excess = view.excess;
         m.rock_view_gain_ratio = view.gain_ratio;
@@ -478,7 +478,74 @@ double rock_shadow_table(const UnresolvedShadingModel& m, double elevation_rad) 
     return m.rock_shadow[static_cast<size_t>(k)] * (1.0 - f) + m.rock_shadow[static_cast<size_t>(k) + 1] * f;
 }
 
-RockLightTables rock_light_tables(const std::vector<RockColumn>& columns, double cell) {
+namespace {
+
+// The reflectance law of a rock face in the gain / flux tables (Task 13): Lommel-Seeliger mu0 / (mu0 + mu) (law null:
+// the half-spheroid references of the tests) or the rock's Hapke I/F (the renderer's moon_rock_reflectance: the rock's
+// single-scattering albedo, the globe's theta_bar), tabulated in (mu0, mu, g) and read trilinearly (the tables call it
+// ~1e9 times). A face's gain is its law over the flat face's under the same light and eye.
+struct FaceLaw {
+    static constexpr int n_mu = 97, n_g = 91;  // [D] steps 1/96 in mu0 and mu, 2 deg in g: within ~0.3 % of the law
+    bool hapke = false;
+    std::vector<double> table;
+    double operator()(double mu0, double mu, double g) const {
+        if (mu0 <= 0.0 || mu <= 0.0) return 0.0;
+        if (!hapke) return mu0 / (mu0 + mu);
+        const double x = std::clamp(mu0, 0.0, 1.0) * (n_mu - 1), y = std::clamp(mu, 0.0, 1.0) * (n_mu - 1);
+        const double z = std::clamp(g / pi, 0.0, 1.0) * (n_g - 1);
+        const int i = std::min(static_cast<int>(x), n_mu - 2), j = std::min(static_cast<int>(y), n_mu - 2),
+                  k = std::min(static_cast<int>(z), n_g - 2);
+        const double fx = x - i, fy = y - j, fz = z - k;
+        const auto at = [this](int a, int b, int c) {
+            return table[(static_cast<size_t>(a) * n_mu + static_cast<size_t>(b)) * n_g + static_cast<size_t>(c)];
+        };
+        double r = 0.0;
+        for (int da = 0; da < 2; ++da) {
+            for (int db = 0; db < 2; ++db) {
+                for (int dc = 0; dc < 2; ++dc) {
+                    r += (da ? fx : 1.0 - fx) * (db ? fy : 1.0 - fy) * (dc ? fz : 1.0 - fz) * at(i + da, j + db, k + dc);
+                }
+            }
+        }
+        return r;
+    }
+};
+
+std::vector<double> law_key(const config::HapkeParameters& p) {
+    return {p.w, p.b, p.c, p.bs0, p.hs, p.bc0, p.hc, p.theta_bar_rad, p.porosity_k};
+}
+
+const FaceLaw& face_law(const config::HapkeParameters* p) {
+    static const FaceLaw lommel_seeliger;
+    if (p == nullptr) return lommel_seeliger;
+    static std::mutex mutex;
+    static std::map<std::vector<double>, FaceLaw> laws;
+    const std::lock_guard<std::mutex> lock(mutex);
+    const std::vector<double> key = law_key(*p);
+    if (const auto it = laws.find(key); it != laws.end()) return it->second;
+    FaceLaw law;
+    law.hapke = true;
+    law.table.resize(static_cast<size_t>(FaceLaw::n_mu) * FaceLaw::n_mu * FaceLaw::n_g);
+    for (int i = 0; i < FaceLaw::n_mu; ++i) {
+        for (int j = 0; j < FaceLaw::n_mu; ++j) {
+            for (int k = 0; k < FaceLaw::n_g; ++k) {
+                const double mu0 = static_cast<double>(i) / (FaceLaw::n_mu - 1);
+                const double mu = static_cast<double>(j) / (FaceLaw::n_mu - 1);
+                const double g = pi * k / (FaceLaw::n_g - 1);
+                law.table[(static_cast<size_t>(i) * FaceLaw::n_mu + static_cast<size_t>(j)) * FaceLaw::n_g +
+                          static_cast<size_t>(k)] =
+                    mu0 > 0.0 && mu > 0.0 ? hapke_reflectance(*p, mu0, mu, g, p->theta_bar_rad) : 0.0;
+            }
+        }
+    }
+    return laws.emplace(key, std::move(law)).first->second;
+}
+
+}  // namespace
+
+RockLightTables rock_light_tables(const std::vector<RockColumn>& columns, double cell,
+                                  const config::HapkeParameters* law_parameters) {
+    const FaceLaw& law = face_law(law_parameters);
     constexpr int n = UnresolvedShadingModel::lit_gain_samples;
     RockLightTables out;
     out.gain.assign(n, 0.0);
@@ -519,7 +586,7 @@ RockLightTables rock_light_tables(const std::vector<RockColumn>& columns, double
                 double& start = shadow_start[bin * n + ku];
                 start = std::min(start, s - c.height * cot[ku]);
                 const double mu0 = nh * ce[ku] + nz * se[ku];
-                if (mu0 > 0.0) out.gain[ku] += mu0 / (mu0 + nz);
+                if (mu0 > 0.0) out.gain[ku] += law(mu0, nz, 0.5 * pi - std::asin(se[ku]));
             }
         }
         for (int b = 0; b < bins; ++b) {
@@ -533,7 +600,8 @@ RockLightTables rock_light_tables(const std::vector<RockColumn>& columns, double
     }
     for (int k = 0; k < n; ++k) {
         const auto ku = static_cast<size_t>(k);
-        out.gain[ku] /= static_cast<double>(columns.size()) * rock_light_azimuths * (se[ku] / (se[ku] + 1.0));
+        out.gain[ku] /= static_cast<double>(columns.size()) * rock_light_azimuths *
+                        law(se[ku], 1.0, 0.5 * pi - std::asin(se[ku]));
         out.shadow[ku] /= plan_area * rock_light_azimuths;
     }
     // Mean |grad h| of the top per plan area (each column's facet slope; steep rim columns clamped at [D] n_z 1e-3).
@@ -675,11 +743,17 @@ double rock_mesh_shadow(const TemplateMesh& mesh, double cut, double elevation_r
     return plan > 0.0 ? areas[0] / plan - 1.0 : 0.0;
 }
 
-RockLightTables template_rock_light_tables(double burial_mean, double burial_sd) {
+RockLightTables template_rock_light_tables(double burial_mean, double burial_sd,
+                                           const config::HapkeParameters* law) {
     static std::mutex mutex;
-    static std::map<std::pair<double, double>, RockLightTables> cache;
+    static std::map<std::vector<double>, RockLightTables> cache;
     const std::lock_guard<std::mutex> lock(mutex);
-    if (const auto it = cache.find({burial_mean, burial_sd}); it != cache.end()) return it->second;
+    std::vector<double> light_key{burial_mean, burial_sd};
+    if (law != nullptr) {
+        const std::vector<double> k = law_key(*law);
+        light_key.insert(light_key.end(), k.begin(), k.end());
+    }
+    if (const auto it = cache.find(light_key); it != cache.end()) return it->second;
     constexpr int n = UnresolvedShadingModel::lit_gain_samples;
     constexpr int grid = 64;  // [D] columns per side: half-spheroid G within 0.7 %, sigma 1.1 % of (1 + sigma) (test)
     constexpr int burial_nodes = 9;  // [D] N in [-4, 4] step 1, Gaussian weights (the clamp is in the nodes)
@@ -744,7 +818,7 @@ RockLightTables template_rock_light_tables(double burial_mean, double burial_sd)
             for (const Top& t : tops[static_cast<size_t>(id)]) {
                 if (t.z > cut) columns.push_back({t.x, t.y, t.z - cut, t.normal});
             }
-            const RockLightTables one = rock_light_tables(columns, cell);
+            const RockLightTables one = rock_light_tables(columns, cell, law);
             const std::vector<double>& shadow =
                 region_shadow[static_cast<size_t>(id) * burial_nodes + static_cast<size_t>(q)];
             for (int k = 0; k < n; ++k) {
@@ -760,7 +834,7 @@ RockLightTables template_rock_light_tables(double burial_mean, double burial_sd)
         out.shadow[static_cast<size_t>(k)] /= weights;
     }
     out.mean_tan /= weights;
-    cache.emplace(std::make_pair(burial_mean, burial_sd), out);
+    cache.emplace(light_key, out);
     return out;
 }
 
@@ -1038,7 +1112,8 @@ void visible_areas(const std::vector<ExposedPolygon>& polys, double ev, double p
 
 }  // namespace
 
-RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut) {
+RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut, const config::HapkeParameters* law_parameters) {
+    const FaceLaw& law = face_law(law_parameters);
     using M = UnresolvedShadingModel;
     RockViewTables out;
     out.excess.assign(view_table_size, 0.0);
@@ -1100,15 +1175,18 @@ RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut) {
                     out.hidden[i] += hidden;
                     // Seen radiance: Lommel-Seeliger per visible face area over the flat ground's, per plan area (the
                     // image of a plan area A seen at elevation ev covers A sin ev).
+                    // The phase angle between the light (elevation e, azimuth psi) and the eye.
+                    const double cos_phase = ce * cev * std::cos(phi - psi) + se * sev;
+                    const double phase = std::acos(std::clamp(cos_phase, -1.0, 1.0));
                     double num = 0.0;
                     for (size_t f = 0; f < polys.size(); ++f) {
                         if (!(seen_areas[f] > 0.0)) continue;
                         const math::Vec3& nrm = polys[f].normal;
                         const double mu = math::dot(nrm, v);
                         const double mu0 = ce * (nrm.x * std::cos(psi) + nrm.y * std::sin(psi)) + se * nrm.z;
-                        if (mu0 > 0.0 && mu > 0.0) num += seen_areas[f] * mu0 / (mu0 + mu);
+                        if (mu0 > 0.0 && mu > 0.0) num += seen_areas[f] * law(mu0, mu, phase);
                     }
-                    const double flat = se / (se + sev);
+                    const double flat = law(se, sev, phase);
                     out.flux[i] += num / flat / (plan * sev);
                 }
             }
@@ -1200,11 +1278,12 @@ bool write_rock_view_cache(const std::filesystem::path& file, std::uint64_t key,
 
 namespace {
 
-RockViewModel compute_template_rock_view_tables(double burial_mean, double burial_sd);
+RockViewModel compute_template_rock_view_tables(double burial_mean, double burial_sd,
+                                                const config::HapkeParameters* law);
 
 }  // namespace
 
-std::uint64_t rock_view_cache_key(double burial_mean, double burial_sd) {
+std::uint64_t rock_view_cache_key(double burial_mean, double burial_sd, const config::HapkeParameters* law) {
     using M = UnresolvedShadingModel;
     Fnv f;
     f.value(rock_view_cache_version);
@@ -1218,6 +1297,9 @@ std::uint64_t rock_view_cache_key(double burial_mean, double burial_sd) {
     f.value(burial_mean);
     f.value(burial_sd);
     f.value(LunarRocks::max_burial_fraction);
+    if (law != nullptr) {
+        for (const double v : law_key(*law)) f.value(v);
+    }
     const RockTemplates& templates = RockTemplates::instance();
     for (int id = 0; id < RockTemplates::count; ++id) {
         const TemplateMesh& mesh = templates.mesh(id, rock_view_lod);
@@ -1234,30 +1316,36 @@ std::uint64_t rock_view_cache_key(double burial_mean, double burial_sd) {
 }
 
 RockViewModel template_rock_view_tables(double burial_mean, double burial_sd, const std::filesystem::path& cache_file,
-                                        RockViewCacheStatus* status) {
+                                        RockViewCacheStatus* status, const config::HapkeParameters* law) {
     static std::mutex mutex;
-    static std::map<std::pair<double, double>, RockViewModel> cache;
+    static std::map<std::vector<double>, RockViewModel> cache;
     const std::lock_guard<std::mutex> lock(mutex);
     if (status != nullptr) *status = RockViewCacheStatus::none;
-    if (const auto it = cache.find({burial_mean, burial_sd}); it != cache.end()) return it->second;
+    std::vector<double> view_key{burial_mean, burial_sd};
+    if (law != nullptr) {
+        const std::vector<double> k = law_key(*law);
+        view_key.insert(view_key.end(), k.begin(), k.end());
+    }
+    if (const auto it = cache.find(view_key); it != cache.end()) return it->second;
     RockViewModel out;
-    const std::uint64_t key = cache_file.empty() ? 0 : rock_view_cache_key(burial_mean, burial_sd);
+    const std::uint64_t key = cache_file.empty() ? 0 : rock_view_cache_key(burial_mean, burial_sd, law);
     if (!cache_file.empty() && read_rock_view_cache(cache_file, key, out)) {
         if (status != nullptr) *status = RockViewCacheStatus::read;
     } else {
-        out = compute_template_rock_view_tables(burial_mean, burial_sd);
+        out = compute_template_rock_view_tables(burial_mean, burial_sd, law);
         if (!cache_file.empty()) {
             const bool written = write_rock_view_cache(cache_file, key, out);
             if (status != nullptr) *status = written ? RockViewCacheStatus::written : RockViewCacheStatus::write_failed;
         }
     }
-    cache.emplace(std::make_pair(burial_mean, burial_sd), out);
+    cache.emplace(view_key, out);
     return out;
 }
 
 namespace {
 
-RockViewModel compute_template_rock_view_tables(double burial_mean, double burial_sd) {
+RockViewModel compute_template_rock_view_tables(double burial_mean, double burial_sd,
+                                                const config::HapkeParameters* law) {
     using M = UnresolvedShadingModel;
     constexpr int burial_nodes = rock_view_burial_nodes;
     constexpr int lod = rock_view_lod;
@@ -1280,7 +1368,7 @@ RockViewModel compute_template_rock_view_tables(double burial_mean, double buria
                 const double weight = std::exp(-0.5 * z * z);
                 const double f = std::clamp(burial_mean + burial_sd * z, 0.0, LunarRocks::max_burial_fraction);
                 const double cut = templates.bottom_z(id) + f * (templates.top_z(id) - templates.bottom_z(id));
-                const RockViewTables one = rock_view_tables(templates.mesh(id, lod), cut);
+                const RockViewTables one = rock_view_tables(templates.mesh(id, lod), cut, law);
                 for (size_t i = 0; i < view_table_size; ++i) {
                     s.excess[i] += weight * one.excess[i];
                     s.flux[i] += weight * one.flux[i];

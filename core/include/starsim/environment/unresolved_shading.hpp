@@ -171,11 +171,16 @@ struct RockLightTables {
     double mean_tan = 0.0;  // mean |grad h| of the exposed top per plan area (the rocks' share of Hapke's mean slope)
 };
 inline constexpr int rock_light_azimuths = 8;  // [D] the rocks' yaw is uniform; 8 azimuths: < 1 % against 32
-RockLightTables rock_light_tables(const std::vector<RockColumn>& columns, double cell);
+// law: the rock face's reflectance (Task 13: the rock's Hapke law, as moon_rock.gdshader draws it - single-scattering
+// albedo rocks.albedo_to_regolith x w, the globe's theta_bar; a face's gain is its I/F over the flat face's under the
+// same light and eye); null: Lommel-Seeliger (the half-spheroid references above).
+RockLightTables rock_light_tables(const std::vector<RockColumn>& columns, double cell,
+                                  const config::HapkeParameters* law = nullptr);
 // The same averaged over the generator's rocks: the 32 angular templates (RockTemplates) at the burial law
 // (clamp(mean + sd N, 0, LunarRocks::max_burial_fraction), Gauss quadrature in N), each rock's plan area equal (the
 // generator scales each template to the area-equivalent D). Cached per (mean, sd); thread-safe.
-RockLightTables template_rock_light_tables(double burial_mean, double burial_sd);
+RockLightTables template_rock_light_tables(double burial_mean, double burial_sd,
+                                           const config::HapkeParameters* law = nullptr);
 
 // View-dependent terms of one convex rock (Task 12): its exposed part (above the ground cut z = cut of the template
 // mesh's convex hull) seen from view elevation e_v with the light at elevation e_l and the light-view azimuth difference
@@ -193,7 +198,7 @@ struct RockViewTables {
     std::vector<double> flux_nadir;
 };
 inline constexpr int rock_view_yaws = 2;  // [D] yaws per rock (the 32 templates' own orientations are random)
-RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut);
+RockViewTables rock_view_tables(const TemplateMesh& mesh, double cut, const config::HapkeParameters* law = nullptr);
 // The ground region a mesh's exposed part (above z = cut) hides from a direction (elevation, horizontal azimuth toward
 // the light / eye), the plan view included, per plan-view area minus 1 (the cast shadow per cover sigma for a light;
 // Task 13): lines along the azimuth, each the interval from the farthest pushed point to the plan view's near end.
@@ -212,14 +217,15 @@ enum class RockViewCacheStatus { none, read, written, write_failed };
 // the tables are used either way). The tables are deterministic, so the cached ones are the computed ones bit for bit.
 RockViewModel template_rock_view_tables(double burial_mean, double burial_sd,
                                         const std::filesystem::path& cache_file = {},
-                                        RockViewCacheStatus* status = nullptr);
+                                        RockViewCacheStatus* status = nullptr,
+                                        const config::HapkeParameters* law = nullptr);
 // The tables' algorithm version, part of the cache key: bump it whenever the tables' computation changes (the key's
 // other inputs - grids, burial law, template meshes - change it by themselves). The test "Rock view tables' file
 // cache" pins a checksum of the shipped tables per version, so a change that forgets the bump fails there.
-inline constexpr std::uint64_t rock_view_cache_version = 2;  // 2: Task 13 line regions, z-buffer seen faces, plan hulls
+inline constexpr std::uint64_t rock_view_cache_version = 3;  // 3: Task 13 line regions, z-buffer seen faces, plan hulls, Hapke faces
 // The file cache's key: FNV-1a over rock_view_cache_version, the grid sizes, the burial law and the templates' LOD-2
 // meshes (vertices and indices) the tables are built from.
-std::uint64_t rock_view_cache_key(double burial_mean, double burial_sd);
+std::uint64_t rock_view_cache_key(double burial_mean, double burial_sd, const config::HapkeParameters* law = nullptr);
 // The cache file's name in a cache directory.
 inline constexpr const char* rock_view_cache_name = "rock_view_tables.bin";
 // The cache file's read (false: missing, another key or a broken file; out untouched) and write (a unique temporary

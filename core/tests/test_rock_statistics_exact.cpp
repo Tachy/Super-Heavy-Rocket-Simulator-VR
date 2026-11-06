@@ -18,6 +18,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "starsim/config/moon_surface_config.hpp"
+#include "starsim/environment/hapke.hpp"
 #include "starsim/environment/lunar_rocks.hpp"
 #include "starsim/environment/rock_templates.hpp"
 #include "starsim/environment/unresolved_shading.hpp"
@@ -110,6 +111,9 @@ struct Raster {
     }
 };
 
+// The rock's Hapke law (the renderer's: rock w, the globe's theta_bar) for the Hapke flux variant; null: none.
+const config::HapkeParameters* rock_hapke = nullptr;
+
 struct Exact {
     double hidden = 0.0;      // |P_v| / A - 1
     double excess = 0.0;      // |P_v \ P_l| / A
@@ -171,7 +175,11 @@ Exact exact_terms(const TemplateMesh& mesh, double cut, double e_l, double e_v, 
         std::vector<double> depth(static_cast<size_t>(n) * static_cast<size_t>(n), -1e30);
         std::vector<double> value(static_cast<size_t>(n) * static_cast<size_t>(n), 0.0);
         const double se = std::sin(e_l), sev = std::sin(ev);
-        const double flat = se / (se + sev);
+        const double cos_g = math::dot(sun, v);
+        const double phase = std::acos(std::clamp(cos_g, -1.0, 1.0));
+        const bool hapke = vertex_normals && rock_hapke != nullptr;  // the variant: Hapke per face over the flat rock
+        const double flat = hapke ? environment::hapke_reflectance(*rock_hapke, se, sev, phase, rock_hapke->theta_bar_rad)
+                                  : se / (se + sev);
         for (size_t f = 0; f < polys.size(); ++f) {
             const std::vector<Vec3>& poly = polys[f];
             for (size_t k = 1; k + 1 < poly.size(); ++k) {
@@ -205,12 +213,15 @@ Exact exact_terms(const TemplateMesh& mesh, double cut, double e_l, double e_v, 
                         if (z <= depth[idx]) continue;
                         depth[idx] = z;
                         Vec3 shade = nrm;
-                        if (vertex_normals) {
+                        if (vertex_normals && !hapke) {
                             const Vec3 s = vn[0] * w0 + vn[1] * w1 + vn[2] * w2;  // approximate (see above)
                             shade = math::normalized(s);
                         }
                         const double mu0 = math::dot(shade, sun), mu = std::max(math::dot(shade, v), 1e-6);
-                        value[idx] = mu0 > 0.0 ? mu0 / (mu0 + mu) : 0.0;
+                        value[idx] = mu0 > 0.0 ? (hapke ? environment::hapke_reflectance(*rock_hapke, mu0, mu, phase,
+                                                                                         rock_hapke->theta_bar_rad)
+                                                        : mu0 / (mu0 + mu))
+                                               : 0.0;
                     }
                 }
             }
@@ -235,8 +246,11 @@ TEST_CASE("Rock statistics against the exact drawn templates (diagnostic)", "[mo
     const RockTemplates& templates = RockTemplates::instance();
     auto cfg = config::load_moon_surface_config(std::filesystem::path(STARSIM_CONFIG_DIR) / "moon_surface.toml");
     const double mean = cfg.rocks.burial_fraction_mean, sd = cfg.rocks.burial_fraction_sd;
-    const auto lt = environment::template_rock_light_tables(mean, sd);
-    const auto vt = environment::template_rock_view_tables(mean, sd);
+    config::HapkeParameters rock_law = cfg.hapke;
+    rock_law.w = std::min(cfg.hapke.w * cfg.rocks.albedo_to_regolith, 0.999);
+    rock_hapke = &rock_law;
+    const auto lt = environment::template_rock_light_tables(mean, sd, &rock_law);
+    const auto vt = environment::template_rock_view_tables(mean, sd, {}, nullptr, &rock_law);
     struct Geo {
         double el, ev, dphi;
     };
@@ -273,7 +287,7 @@ TEST_CASE("Rock statistics against the exact drawn templates (diagnostic)", "[mo
             const double sigma_v = kv >= M::view_elevation_samples - 1 ? 0.0 : lt.shadow[static_cast<size_t>(kv)];
             const double table_flux = (1.0 + sigma_v) * lt.gain[static_cast<size_t>(kl)] * vt.gain_ratio[idx];
             std::printf("LOD %d e_l %4.1f e_v %4.1f dphi %4.1f | 1+hidden exact %.4f table %.4f | excess exact %.4f table %.4f"
-                        " | shadow exact %.4f table %.4f | rock flux exact %.4f (vertex n %.4f) table %.4f | nadir flux exact"
+                        " | shadow exact %.4f table %.4f | rock flux exact %.4f (Hapke %.4f) table %.4f | nadir flux exact"
                         " %.4f columns G %.4f\n",
                         lod, g.el / deg, g.ev / deg, g.dphi / deg, 1.0 + ex.hidden / w_sum, 1.0 + sigma_v,
                         ex.excess / w_sum, vt.excess[idx], ex.shadow / w_sum, lt.shadow[static_cast<size_t>(kl)],
