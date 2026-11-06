@@ -105,6 +105,8 @@ Type: filesandordirs; Name: "{app}\data\terrain\earth"
 Type: filesandordirs; Name: "{app}\data\imagery"
 Type: files; Name: "{app}\data\terrain\diviner_rock_abundance.toml"
 Type: files; Name: "{app}\data\terrain\diviner_rock_abundance.i16"
+Type: files; Name: "{app}data	errainldem_64.toml"
+Type: files; Name: "{app}data	errainldem_64.i16"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Components: main; Flags: ignoreversion recursesubdirs
