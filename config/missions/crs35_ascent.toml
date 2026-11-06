@@ -9,8 +9,6 @@
 # by test_mission_start_places)
 start_place = "ccsfs_slc40"
 start_vehicle = "falcon9_block5"
-name = "Validierung: CRS-35"
-display_name = "Frachtflug zur Raumstation (Nachflug)"  # shown in the webcast overlay (no trademarks)
 vehicle = "falcon9_block5"
 site = "ccsfs_slc40"            # [S:flights.toml] SLC-40, return to LZ-40
 liftoff_utc = "2026-10-13T10:33:00"  # [S:flights.toml] CRS-35 (landed at LZ-40, RTLS): lifts off at this date

@@ -75,7 +75,7 @@ func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 9
 	var id := sim.launch_from_site(vehicle_id, site["id"], heading_deg, tdb_s, countdown_s, target)
 	launch_site_id = ""
 	_pending_launch = {"id": id, "site_id": site["id"], "text": "%s auf %s" % [
-			vehicle_name if vehicle_name != "" else vehicle_id, site["name"]]}
+			vehicle_name if vehicle_name != "" else vehicle_id, I18n.text("site.%s.name" % site["id"])]}
 	if id <= 0:
 		last_event = "Start fehlgeschlagen"
 	else:
@@ -127,8 +127,8 @@ func _on_command_finished(id: int, command: String, ok: bool, report: Dictionary
 			_pending_mission = {}
 			launch_site_id = sim.mission_site_id() if sim.is_active() else ""
 			if ok:
-				var name := sim.mission_display_name()
-				last_event = "Mission: %s" % (name if name != "" else mission_id)
+				var name_key := sim.mission_display_name()
+				last_event = "Mission: %s" % (I18n.text(name_key) if name_key != "" else mission_id)
 			else:
 				last_event = _refusal_event(report)
 				_clock_resync = true  # the refused start may have placed a vehicle at its own epoch

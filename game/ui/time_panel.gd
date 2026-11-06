@@ -73,7 +73,7 @@ func _ready() -> void:
 		_focus.add_item(option[0])
 	for site in world.sites:
 		# A site with a [site.viewpoint] is seen from there (World._viewpoint_site), else from its pad.
-		_focus.add_item("%s (%s)" % [site["name"], "Aussicht" if site.has("viewpoint") else "Boden"])
+		_focus.add_item("%s (%s)" % [I18n.text("site.%s.name" % site["id"]), "Aussicht" if site.has("viewpoint") else "Boden"])
 	_focus.item_selected.connect(_on_focus_selected)
 	box.add_child(_focus)
 	_axes_button = _button("Achsen einrichten", func() -> void: _wizard.open())
@@ -170,7 +170,7 @@ func _process_unprofiled(_delta: float) -> void:
 	for site in world.sites:
 		var fraction: float = world.core.solar_eclipse_fraction(site["latitude_deg"], site["longitude_deg"], site["height_m"], t)
 		if fraction > 0.0:
-			lines.append("Sonnenbedeckung %s: %.1f %%" % [site["name"], fraction * 100.0])
+			lines.append("Sonnenbedeckung %s: %.1f %%" % [I18n.text("site.%s.name" % site["id"]), fraction * 100.0])
 	if world.flight.sim.is_active():
 		var sea := sea_state_line(world.flight.sim.landing_zone())
 		if sea != "":

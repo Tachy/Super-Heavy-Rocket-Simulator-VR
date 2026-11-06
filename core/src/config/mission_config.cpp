@@ -155,10 +155,10 @@ bool mission_plans_on_pad(const std::filesystem::path& config_dir, std::string_v
     }
 }
 
-std::string mission_display_name(const std::filesystem::path& config_dir, std::string_view mission_id) {
+std::string mission_display_name_key(const std::filesystem::path& config_dir, std::string_view mission_id) {
     const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
     const auto* mission = doc.root["mission"].as_table();
-    return mission ? doc.text_or(*mission, "display_name") : std::string();
+    return mission ? "mission." + std::string(mission_id) + ".display_name" : std::string();
 }
 
 std::optional<environment::SeaStateConfig> mission_sea_state(const std::filesystem::path& config_dir,
@@ -176,7 +176,6 @@ ShipReturnMission load_ship_return_mission(const std::filesystem::path& config_d
     if (!mission || !orbit || !deorbit) doc.fail("missing [mission], [orbit] or [deorbit]");
     ShipReturnMission m;
     m.id = std::string(mission_id);
-    m.name = doc.text(*mission, "name");
     m.vehicle_id = doc.text(*mission, "vehicle");
     m.stage_id = doc.text(*mission, "stage");
     m.site_id = doc.text(*mission, "site");
@@ -205,7 +204,6 @@ CapsuleReturnMission load_capsule_return_mission(const std::filesystem::path& co
     if (!mission || !orbit || !deorbit) doc.fail("missing [mission], [orbit] or [deorbit]");
     CapsuleReturnMission m;
     m.id = std::string(mission_id);
-    m.name = doc.text(*mission, "name");
     m.vehicle_id = doc.text(*mission, "vehicle");
     m.zone_id = doc.text(*mission, "zone");
     const auto epoch = time::UtcDateTime::parse_iso(doc.text(*orbit, "epoch_utc"));
@@ -237,7 +235,6 @@ LunarLandingMission load_lunar_landing_mission(const std::filesystem::path& conf
     const auto& lunar_orbit = doc.table(doc.root, "lunar_orbit");
     LunarLandingMission m;
     m.id = std::string(mission_id);
-    m.name = doc.text(mission, "name");
     m.vehicle_id = doc.text(mission, "vehicle");
     m.site_id = doc.text(mission, "site");
     const auto epoch = time::UtcDateTime::parse_iso(doc.text(orbit, "epoch_utc"));
@@ -299,7 +296,6 @@ LunarReturnMission load_lunar_return_mission(const std::filesystem::path& config
     const auto& budget = doc.table(doc.root, "budget");
     LunarReturnMission m;
     m.id = std::string(mission_id);
-    m.name = doc.text(mission, "name");
     m.vehicle_id = doc.text(mission, "vehicle");
     m.stage_id = doc.text(mission, "stage");
     m.site_id = doc.text(mission, "site");
@@ -371,7 +367,6 @@ AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::
     }
     AscentMission m;
     m.id = std::string(mission_id);
-    m.name = doc.text(*mission, "name");
     m.vehicle_id = doc.text(*mission, "vehicle");
     m.site_id = doc.text(*mission, "site");
     m.heading_rad = doc.number(*mission, "heading_deg") * deg;
@@ -415,7 +410,6 @@ IssRendezvousMission load_iss_rendezvous_mission(const std::filesystem::path& co
     if (!mission || !start || !phasing) doc.fail("missing [mission], [start] or [phasing]");
     IssRendezvousMission m;
     m.id = std::string(mission_id);
-    m.name = doc.text(*mission, "name");
     m.vehicle_id = doc.text(*mission, "vehicle");
     iss_common(doc, *mission, m.station_id, m.port, m.iss_orbit);
     m.epoch_utc = utc(doc, *start, "epoch_utc");
@@ -436,7 +430,6 @@ IssLaunchMission load_iss_launch_mission(const std::filesystem::path& config_dir
     if (!mission || !window || !phasing) doc.fail("missing [mission], [launch_window] or [phasing]");
     IssLaunchMission m;
     m.id = std::string(mission_id);
-    m.name = doc.text(*mission, "name");
     m.ascent_id = doc.text(*mission, "ascent");
     iss_common(doc, *mission, m.station_id, m.port, m.iss_orbit);
     m.earliest_utc = utc(doc, *window, "earliest_utc");
@@ -456,7 +449,6 @@ IssDepartureMission load_iss_departure_mission(const std::filesystem::path& conf
     if (!mission || !start) doc.fail("missing [mission] or [start]");
     IssDepartureMission m;
     m.id = std::string(mission_id);
-    m.name = doc.text(*mission, "name");
     m.vehicle_id = doc.text(*mission, "vehicle");
     iss_common(doc, *mission, m.station_id, m.port, m.iss_orbit);
     m.return_id = doc.text(*mission, "return");
@@ -477,7 +469,6 @@ DepotLaunchMission load_depot_launch_mission(const std::filesystem::path& config
     if (!mission || !start) doc.fail("missing [mission] or [start]");
     DepotLaunchMission m;
     m.id = std::string(mission_id);
-    m.name = doc.text(*mission, "name");
     m.ascent_id = doc.text(*mission, "ascent");
     m.epoch_utc = utc(doc, *start, "epoch_utc");
     return m;
@@ -494,7 +485,6 @@ RefuellingCampaignFlownMission load_refuelling_campaign_flown_mission(const std:
     const auto& comparison = doc.table(doc.root, "comparison");
     RefuellingCampaignFlownMission m;
     m.id = std::string(mission_id);
-    m.name = doc.text(mission, "name");
     const auto start = doc.text(depot, "start");
     if (start != "launch" && start != "placed") doc.fail("[depot] start must be \"launch\" or \"placed\"");
     m.depot_placed = start == "placed";
@@ -534,7 +524,6 @@ RefuellingFlightMission load_refuelling_flight_mission(const std::filesystem::pa
     const auto* window = doc.root["launch_window"].as_table();
     const auto* phasing = doc.root["phasing"].as_table();
     if (!depot || !start || !window || !phasing) doc.fail("missing [depot], [start], [launch_window] or [phasing]");
-    m.name = doc.text(*mission, "name");
     m.ascent_id = doc.text(*mission, "ascent");
     if (mission->contains("port")) {  // r5 minor: it was parsed and never used
         doc.fail("[mission] port is not used: the chaser docks with its first docking port ([depot] port names the "

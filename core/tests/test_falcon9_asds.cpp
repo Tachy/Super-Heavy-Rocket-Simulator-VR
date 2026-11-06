@@ -85,7 +85,6 @@ sim::LegTouchdown run_drop(sim::FlightSession& session) {
 
 TEST_CASE("The drone ship's deck loads and becomes a landing zone", "[config][falcon9][asds]") {
     const auto c = config::load_drone_ship(STARSIM_CONFIG_DIR, "asds_atlantic");
-    CHECK(c.name == "Drohnenschiff");
     CHECK(c.deck_length_m == 91.0);
     CHECK(c.deck_width_m == 52.0);
     CHECK(c.freeboard_m == 3.0);

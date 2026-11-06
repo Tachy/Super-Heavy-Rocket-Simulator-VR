@@ -12,16 +12,13 @@ faa_ea_2024 = "https://www.faa.gov/media/87636 (FAA Revised Draft EA, Nov 2024, 
 
 [vehicle]
 id = "starship_block3"
-name = "Starship V3 (Super Heavy Block 3 / Ship Block 3)"
-display_name = "Heavy Launcher Mk3"
 propellant = "methalox"
 stages_bottom_to_top = ["booster", "ship"]
 
 # ---------------------------------------------------------------- booster
 [[stage]]
 id = "booster"
-name = "Super Heavy Block 3"
-display_name = "Booster Mk3"  # [D] display name of the part flying alone, no trademark
+# [D] display name of the part flying alone, no trademark (the text: config/i18n, vehicle.starship_block3.stage.booster.display_name)
 length_m = 72.3                          # [S:wiki_sh]
 diameter_m = 9.0                         # [S:wiki_sh]
 dry_mass_kg = 210000.0                   # [D] +-40 t: flights 12-14 telemetry - stack mass balance (gauge + acceleration, minus
@@ -171,8 +168,7 @@ directions = ["tangential_plus", "tangential_minus", "inward"]
 # ---------------------------------------------------------------- ship
 [[stage]]
 id = "ship"
-name = "Starship Block 3"
-display_name = "Raumschiff Mk3"  # [D] display name of the part flying alone, no trademark
+# [D] display name of the part flying alone, no trademark (the text: config/i18n, vehicle.starship_block3.stage.ship.display_name)
 length_m = 52.1                          # [D] stack 124.4 m [S:wiki_starship] - booster 72.3 m
 diameter_m = 9.0
 dry_mass_kg = 177000.0                   # [D] +-20 t: flights 12-14 webcast telemetry, rocket equation ignition -> cutoff

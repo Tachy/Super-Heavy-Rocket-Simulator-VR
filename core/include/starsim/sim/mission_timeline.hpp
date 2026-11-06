@@ -40,7 +40,7 @@ struct MissionEvent {
     MissionEventKind kind = MissionEventKind::Liftoff;
     time::Epoch epoch;
     uint32_t body_serial = 0;  // 0: mission-wide
-    std::string body_name;     // German display name of the body at the event (upper stage name)
+    std::string body_name_key;  // table key of the body's shown name at the event (upper stage / vehicle name)
     bool predicted = false;
 };
 

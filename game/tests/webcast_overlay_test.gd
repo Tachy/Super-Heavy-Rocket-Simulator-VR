@@ -151,7 +151,7 @@ func _test_values() -> void:
 		_check(GaugeConfig.shared().gauges.has(id), "transfer gauge %s has a spec" % id)
 	for id in GaugeConfig.shared().gauges:
 		var spec: Dictionary = GaugeConfig.shared().gauges[id]
-		_check(spec.has("label") and spec.has("unit") and float(spec["full_scale"]) > 0.0, "gauge spec %s" % id)
+		_check(I18n.has_key("gauge.%s.label" % id) and spec.has("unit") and float(spec["full_scale"]) > 0.0, "gauge spec %s" % id)
 	var p := {"propellant_kg": 250.0, "propellant_capacity_kg": 1000.0}
 	_check(absf(WebcastOverlay.gauge_value("propellant", p, docking) - 25.0) < 1e-12, "propellant in % of the full load")
 	_check(WebcastOverlay.gauge_value("propellant", {}, docking) == 0.0, "no load: 0 %")

@@ -9,7 +9,6 @@ namespace starsim::config {
 // A capsule's recovery area at sea (config/splashdown_zones.toml).
 struct SplashdownZoneConfig {
     std::string id;
-    std::string name;  // German (UI)
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;
     double radius_m = 0.0;

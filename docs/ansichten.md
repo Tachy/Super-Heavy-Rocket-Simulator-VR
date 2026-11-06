@@ -408,8 +408,8 @@ ganze Start bis zur Welt dauert am Desktop etwa 4 s (vorher rund 24 s).
 - Belegung der VR-Freiheitsgrade 5 und 6 (Vorschlag in Abschnitt 3).
 - Rückwärtsbewegung mit dem TWCS: Wippe oder Hebel mit künstlicher Mitte?
 - Cockpit Starship-Stil: Wie viele Fenster, wo sitzen die drei Plätze relativ zu den Fenstern?
-- UI-Sprache: heute deutsch; die Anzeigenamen der Fahrzeuge und Stufen bleiben vorerst englisch (`display_name` in
-  der Config, keine Markennamen). Die Sprachen legt der Nutzer später fest.
+- UI-Sprache: Deutsch (Standard) und Englisch, umschaltbar; die Anzeigenamen der Fahrzeuge, Stufen, Missionen und Orte
+  stehen in den Texttabellen `config/i18n/` (keine Markennamen), nicht mehr in den Config-Dateien.
 - Fahrzeugmodell beim Wiedereintritt: Hitzeschild und Klappen sichtbar, ggf. Anstell-/Rollwinkel-Anzeigen [Entschieden, Folgeplan].
 - Sollen die zwei Crewmitglieder auch Aufgaben übernehmen (z. B. Checklisten), oder nur Ansagen?
 

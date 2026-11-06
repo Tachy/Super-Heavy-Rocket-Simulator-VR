@@ -113,7 +113,6 @@ godot::Dictionary build_lunar_site(const sim::FlightSession& session) {
     if (!site) return d;
     const double lat = site->config.latitude_rad, lon = site->config.longitude_rad;
     d["id"] = german(site->config.id);
-    d["name"] = german(site->config.name);
     d["name_key"] = german("lunar_site." + site->config.id + ".name");  // the table key of the shown name
     d["latitude_deg"] = lat * constants::rad_to_deg;
     d["longitude_deg"] = lon * constants::rad_to_deg;

@@ -176,12 +176,13 @@ EngineConfig load_engine(const std::filesystem::path& config_dir, const std::str
 }
 
 // [[stage.docking_port]] entries of a stage table (also the additions to a reused stage, see load_stage_from).
-void append_docking_ports(const Document& doc, const toml::table& t, StageConfig& s) {
+void append_docking_ports(const Document& doc, const toml::table& t, StageConfig& s, const std::string& vehicle_id) {
     if (auto ports = t["docking_port"].as_array()) {
         for (const auto& node : *ports) {
             const auto& p = *node.as_table();
-            DockingPortConfig port{doc.text(p, "id"), doc.text(p, "name"), vec3(doc, p, "position_m"),
-                                   vec3(doc, p, "axis"), vec3(doc, p, "up")};
+            DockingPortConfig port{doc.text(p, "id"), std::string(), vec3(doc, p, "position_m"), vec3(doc, p, "axis"),
+                                   vec3(doc, p, "up")};
+            port.name_key = "vehicle." + vehicle_id + ".port." + port.id + ".name";
             if (std::abs(norm(port.axis) - 1.0) > 1e-9 || std::abs(norm(port.up) - 1.0) > 1e-9 ||
                 std::abs(dot(port.axis, port.up)) > 1e-9) {
                 doc.fail("stage.docking_port '" + port.id + "': axis and up must be perpendicular unit vectors");
@@ -299,11 +300,10 @@ StagingConfig load_staging(const Document& doc, const toml::table& t, const Stag
     return c;
 }
 
-StageConfig load_stage(const Document& doc, const toml::table& t) {
+StageConfig load_stage(const Document& doc, const toml::table& t, const std::string& vehicle_id) {
     StageConfig s;
     s.id = doc.text(t, "id");
-    s.name = doc.text(t, "name");
-    s.display_name = doc.text_or(t, "display_name");
+    s.name_key = "vehicle." + vehicle_id + ".stage." + s.id + ".display_name";  // the shown name lives in config/i18n
     s.length_m = doc.number(t, "length_m");
     s.diameter_m = doc.number(t, "diameter_m");
     s.hull_top_diameter_m = t["hull_top_diameter_m"].value_or(0.0);
@@ -482,7 +482,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             }
         }
     }
-    append_docking_ports(doc, t, s);
+    append_docking_ports(doc, t, s, vehicle_id);
     if (auto prims = t["collision"].as_array()) {
         for (const auto& node : *prims) {
             const auto& p = *node.as_table();
@@ -1016,7 +1016,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
 // the dry mass, dry CG, display name and the source's tanks' loads / stations changed; any other key would silently
 // diverge from the source and is an error.
 StageConfig load_stage_from(const std::filesystem::path& config_dir, const Document& doc, const toml::table& t,
-                            const std::string& propellant_id) {
+                            const std::string& propellant_id, const std::string& vehicle_id) {
     constexpr int max_from_depth = 4;  // a longer chain is a cycle
     thread_local int depth = 0;
     if (depth >= max_from_depth) doc.fail("stage.from: chain too long (a cycle?)");
@@ -1072,8 +1072,8 @@ StageConfig load_stage_from(const std::filesystem::path& config_dir, const Docum
             if (tank->contains("base_station_m")) k->base_station_m = doc.number(*tank, "base_station_m");
         }
     }
-    s.display_name = doc.text_or(t, "display_name", s.display_name);  // a variant's own name (the tanker's ship)
-    append_docking_ports(doc, t, s);
+    s.name_key = "vehicle." + vehicle_id + ".stage." + s.id + ".display_name";  // the variant's own shown name
+    append_docking_ports(doc, t, s, vehicle_id);
     append_transfer_connectors(doc, t, s);
     read_propellant_transfer(doc, t, s);
     if (auto pods = t["rcs_pod"].as_array()) {
@@ -1100,16 +1100,16 @@ VehicleConfig load_vehicle(const std::filesystem::path& config_dir, std::string_
 
     VehicleConfig v;
     v.id = doc.text(vehicle, "id");
-    v.name = doc.text(vehicle, "name");
-    v.display_name = doc.text_or(vehicle, "display_name", v.name);
+    v.name_key = "vehicle." + v.id + ".name";  // shown names live in config/i18n; old files' name / display_name are ignored
+    v.display_name_key = "vehicle." + v.id + ".display_name";
     v.propellant = load_propellant(config_dir, doc.text(vehicle, "propellant"));
 
     std::map<std::string, StageConfig> stages_by_id;
     if (auto stages = doc.root["stage"].as_array()) {
         for (const auto& node : *stages) {
             const auto& table = *node.as_table();
-            auto stage = table.contains("from") ? load_stage_from(config_dir, doc, table, v.propellant.id)
-                                                : load_stage(doc, table);
+            auto stage = table.contains("from") ? load_stage_from(config_dir, doc, table, v.propellant.id, v.id)
+                                                : load_stage(doc, table, v.id);
             const std::string id = stage.id;
             if (!stages_by_id.emplace(id, std::move(stage)).second) {
                 doc.fail("stage '" + id + "' defined twice");
@@ -1174,7 +1174,6 @@ VehicleConfig stack_payload(VehicleConfig launcher, const VehicleConfig& payload
     for (const auto& [id, engine] : payload.engines) launcher.engines.emplace(id, engine);
     launcher.named_stage_count = launcher.stages.size();  // the launcher's display name names the whole stack
     launcher.id += "+" + payload.id;
-    launcher.name += " / " + payload.name;
     return launcher;
 }
 

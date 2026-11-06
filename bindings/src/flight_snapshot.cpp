@@ -27,7 +27,7 @@ godot::Array body_stages(const sim::FlightSession& session, size_t index) {
     for (const auto& stage : session.body(index).vehicle().stages()) {
         godot::Dictionary d;
         d["vehicle_id"] = vehicle_id;
-        d["name"] = godot::String(stage.config.name.c_str());
+        d["name_key"] = godot::String(stage.config.name_key.c_str());  // table key of the stage's shown name
         d["id"] = godot::String(stage.config.id.c_str());
         d["base_station_m"] = stage.base_station_m;
         d["length_m"] = stage.config.length_m;
@@ -372,7 +372,6 @@ godot::Dictionary splashdown_zone(const sim::FlightSession& session) {
     const double lat = z.latitude_rad, lon = z.longitude_rad;
     d["present"] = true;
     d["id"] = godot::String::utf8(z.id.c_str());
-    d["name"] = godot::String::utf8(z.name.c_str());
     d["name_key"] = godot::String::utf8(("zone." + z.id + ".name").c_str());  // the table key of the shown name
     d["latitude_deg"] = lat * constants::rad_to_deg;
     d["longitude_deg"] = lon * constants::rad_to_deg;
@@ -439,7 +438,7 @@ FlightSnapshot::Body build_body(const sim::FlightSession& session, size_t index)
     b.attitude_gcrf = godot::Quaternion(q.x, q.y, q.z, q.w);
     b.cg_station_m = body.vehicle().mass_properties().cg_station_m;
     b.serial = session.body_serial(index);
-    b.display_name = godot::String::utf8(body.vehicle().shown_name().c_str());
+    b.display_name_key = godot::String::utf8(body.vehicle().shown_name_key().c_str());
     b.stages = body_stages(session, index);
     b.engines = body_engines(session, index);
     b.flaps = body_flaps(session, index);
@@ -500,7 +499,7 @@ std::shared_ptr<const FlightSnapshot> build_snapshot(const sim::FlightSession& s
                                                      SnapshotContext& context, const FlightSnapshot* previous) {
     auto s = std::make_shared<FlightSnapshot>();
     s->site_id = context.site_id;
-    s->mission_display_name = context.mission_display_name;
+    s->mission_display_name_key = context.mission_display_name_key;
     s->mission_start_tdb_s = context.mission_start_tdb_s;
     s->epoch_tdb_s = epoch.tdb_seconds_past_j2000();
     s->landing_zone = landing_zone(session);

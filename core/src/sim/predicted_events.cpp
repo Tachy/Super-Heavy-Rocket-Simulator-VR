@@ -208,7 +208,7 @@ void add_upper_ignition(const FlightSession& s, Collector& c, size_t index, time
         const auto& stages = s.body(index).vehicle().stages();
         if (stages.size() < 2) return;
         e.body_serial = s.next_body_serial();
-        e.body_name = stages[1].config.name;
+        e.body_name_key = stages[1].config.name_key;
     }
     e.epoch = epoch;
     e.predicted = true;

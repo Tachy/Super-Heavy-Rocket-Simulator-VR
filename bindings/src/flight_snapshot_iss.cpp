@@ -51,7 +51,7 @@ godot::Dictionary build_iss_state(const sim::FlightSession& session) {
             const auto k = vehicle::port_kinematics(body, p.id);
             godot::Dictionary port;
             port["id"] = german(p.id);
-            port["name"] = german(p.name);
+            port["name_key"] = german(p.name_key);
             port["position_gcrf_m"] = to_godot(k.position_gcrf_m);
             port["axis_gcrf"] = to_godot(axis_column(k.axes_gcrf, 0));
             port["up_gcrf"] = to_godot(axis_column(k.axes_gcrf, 2));

@@ -51,7 +51,7 @@ func _init() -> void:
 		if id == "engines":  # drawn by the engine gauge
 			continue
 		var gauge := RoundGauge.new()
-		gauge.label = specs[id]["label"]
+		I18n.bind_text(gauge, &"label", "gauge.%s.label" % id)
 		gauge.unit = specs[id]["unit"]
 		gauge.signed = specs[id].get("signed", false)
 		add_child(gauge)
@@ -89,9 +89,9 @@ func _process_unprofiled(delta: float) -> void:
 	top_bar.show_utc(TopBar.format_utc(world.core.tdb_s_to_utc(now)))
 	top_bar.show_local_time(LocalTime.shared().camera_line(world.core, world.camera.position_gcrf_m, now))
 	top_bar.show_weather(world.weather.status_text())
-	var mission := sim.mission_display_name() if active else ""
+	var mission := _text_of(sim.mission_display_name()) if active else ""
 	if mission == "" and active:  # no mission name configured: the viewed (else the controlled) vehicle's
-		mission = sim.body_display_name(index if index >= 0 else sim.controlled_index())
+		mission = _text_of(sim.body_display_name(index if index >= 0 else sim.controlled_index()))
 	if sim.autopilot_status().get("planning", false):  # also a mission start planned before its vehicle is placed
 		mission = FlightController.PLANNING_EVENT  # the countdown holds while the onboard computer plans
 	show_clock(timeline, now, mission)
@@ -108,7 +108,7 @@ func _process_unprofiled(delta: float) -> void:
 	var docking: Dictionary = sim.docking_state() if index == sim.controlled_index() else {}
 	var body := {"engines": engines, "stages": stages, "docking": docking}
 	var selection := GaugeRules.select(telemetry, body, _rule_state, Time.get_ticks_msec() / 1000.0)
-	show_gauges(selection, telemetry, engines, stages, docking, sim.body_display_name(index))
+	show_gauges(selection, telemetry, engines, stages, docking, _text_of(sim.body_display_name(index)))
 
 
 ## Mission clock from the timeline's T-0 (none without one) and the mission name under the arc's apex.
@@ -116,6 +116,11 @@ func show_clock(timeline: Dictionary, now: float, mission: String) -> void:
 	var t0 = timeline.get("t0_tdb_s")
 	mission_clock.show_values(MissionClock.format_mission_clock(now - float(t0)) if t0 != null else "", mission)
 	timeline_arc.keep_out = mission_clock.occupied_rect()  # same position (the apex): arc labels stay off the clock
+
+
+## The text of a table key from the simulation ("" stays "").
+static func _text_of(key: String) -> String:
+	return I18n.text(key) if key != "" else ""
 
 
 ## Shows exactly the selected gauges ({"left": ids, "right": ids}) of a body, and its name under them.

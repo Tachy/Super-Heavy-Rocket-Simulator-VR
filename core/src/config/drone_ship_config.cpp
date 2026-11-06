@@ -16,7 +16,6 @@ constexpr double deg = constants::deg_to_rad;
 DroneShipConfig read_ship(const detail::Document& doc, const toml::table& t) {
     DroneShipConfig s;
     s.id = doc.text(t, "id");
-    s.name = doc.text(t, "name");
     s.deck_length_m = doc.positive(t, "deck_length_m");
     s.deck_width_m = doc.positive(t, "deck_width_m");
     s.freeboard_m = doc.positive(t, "freeboard_m");

@@ -6,8 +6,6 @@
 # by test_mission_start_places)
 start_place = "starbase_pad2"
 start_vehicle = "starship_hls_launch"
-name = "HLS in den Phasenorbit"
-display_name = "Mondlander in den Phasenorbit" # shown in the webcast overlay (no trademarks)
 vehicle = "starship_hls_launch"
 site = "starbase_pad2"
 heading_deg = 90.0

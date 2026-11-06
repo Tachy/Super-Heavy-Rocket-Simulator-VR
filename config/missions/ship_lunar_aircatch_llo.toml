@@ -7,8 +7,6 @@
 # by test_mission_start_places)
 start_place = "lunar_orbit"
 start_vehicle = "starship_block3"
-name = "Rückkehr vom Mond (LLO, Aircatch)"
-display_name = "Rückkehr vom Mond (LLO, Aircatch)" # shown in the webcast overlay (no trademarks)
 kind = "lunar_return"            # FlightSim.start_mission dispatches on it
 vehicle = "starship_block3"
 stage = "ship"

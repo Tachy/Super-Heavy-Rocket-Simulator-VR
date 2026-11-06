@@ -24,8 +24,9 @@ MissionKind mission_kind(const std::filesystem::path& config_dir, std::string_vi
 // Whether starting the mission plans its ascent on the pad (sim::engage_planned_ascent): kinds Ascent, IssLaunch,
 // DepotLaunch; TankerFlight / HlsRefuel with [start] mode = "pad"; RefuellingCampaignFlown with [depot] start = "launch".
 bool mission_plans_on_pad(const std::filesystem::path& config_dir, std::string_view mission_id);
-// [mission] display_name (German, no trademarks: the webcast overlay); empty when the file has none.
-std::string mission_display_name(const std::filesystem::path& config_dir, std::string_view mission_id);
+// Table key of the mission's shown display name ("mission.<id>.display_name", config/i18n; the webcast overlay);
+// empty when the file has no [mission] table (a target file).
+std::string mission_display_name_key(const std::filesystem::path& config_dir, std::string_view mission_id);
 // [sea_state] of any mission (sea state and deck motion, Task 4): the sea at its drone ship's station; none: calm.
 // Keys: significant_wave_height_m (>= 0) and peak_period_s (> 0), both required; heading_deg (the direction the waves
 // travel towards, clockwise from north; default 0) and seed (>= 0; default 1). Every mission start sets it on the
@@ -44,7 +45,6 @@ struct ShipReturnDeorbit {
 // Ship return from orbit (config/missions/<id>.toml): the scenario's start orbit and the deorbit planning settings.
 struct ShipReturnMission {
     std::string id;
-    std::string name;
     std::string vehicle_id;
     std::string stage_id;  // the ship's stage (stages below it are left out)
     std::string site_id;
@@ -65,7 +65,6 @@ ShipReturnMission load_ship_return_mission(const std::filesystem::path& config_d
 // planning settings (FlightSession::plan_capsule_return).
 struct CapsuleReturnMission {
     std::string id;
-    std::string name;
     std::string vehicle_id;
     std::string zone_id;  // config/splashdown_zones.toml
     time::UtcDateTime epoch_utc;
@@ -88,7 +87,6 @@ CapsuleReturnMission load_capsule_return_mission(const std::filesystem::path& co
 // transfer settings and the lunar orbit (LLO or NRHO) the flight inserts into.
 struct LunarLandingMission {
     std::string id;
-    std::string name;
     std::string vehicle_id;
     std::string site_id;  // config/lunar_sites.toml (l4 lands there)
     time::UtcDateTime epoch_utc;  // start in the parking orbit
@@ -174,7 +172,6 @@ struct MissionPayload {
 // (sim::plan_launch); the loader refuses [pitch_program], kick_deg, booster_throttle, landing_zone and [drone_ship].
 struct AscentMission {
     std::string id;
-    std::string name;
     std::string vehicle_id;
     std::string site_id;
     double heading_rad = 0.0;     // body +y on the pad
@@ -213,7 +210,6 @@ struct IssLaunchWindowConfig {
 // Falcon 9 + Crew Dragon from the pad to the ISS: the launch window, the ascent mission `ascent_id`, then the docking.
 struct IssLaunchMission {
     std::string id;
-    std::string name;
     std::string ascent_id;  // an ascent mission with the Dragon as payload
     std::string station_id;
     std::string port;
@@ -228,7 +224,6 @@ struct IssLaunchMission {
 // or (phase_rad) a start that far behind the ISS at epoch_utc.
 struct IssRendezvousMission {
     std::string id;
-    std::string name;
     std::string vehicle_id;
     std::string station_id;
     std::string port;
@@ -244,7 +239,6 @@ struct IssRendezvousMission {
 // Crew Dragon docked at the ISS: undocking timed to a return pass, departure, the capsule return `return_id`.
 struct IssDepartureMission {
     std::string id;
-    std::string name;
     std::string vehicle_id;
     std::string station_id;
     std::string port;

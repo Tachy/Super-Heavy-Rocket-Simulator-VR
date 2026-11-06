@@ -66,7 +66,7 @@ public:
     double mission_start_tdb_s() const;
     // Launch site id of the current flight (launch_from_site or the mission), "" before the first.
     godot::String mission_site_id() const;
-    // [mission] display_name of the started mission (German, no trademarks), "" for a free launch or none configured.
+    // Table key ("mission.<id>.display_name") of the started mission's display name; "" for a free launch or none.
     godot::String mission_display_name() const;
     // Landing zone of a returning first stage: {present}; present: {origin_itrf_m (its surface: the deck top for a drone
     // ship), east, north, up (ITRF unit vectors), latitude_deg, longitude_deg, pad_radius_m, has_deck}; with a deck also
@@ -151,7 +151,7 @@ public:
     godot::Array body_stages(int index) const;
     // Stable identity of a body (survives reindexing when bodies separate or are removed), 0 for an invalid index.
     int64_t body_serial(int index) const;
-    // Name shown for a body (vehicle::Vehicle::shown_name: display names only, no trademarks), "" for an invalid index.
+    // Table key of the name shown for a body (vehicle::Vehicle::shown_name_key), "" for an invalid index.
     godot::String body_display_name(int index) const;
     // [{position_m (body, relative to the bottom), firing, throttle, spool, vacuum, auxiliary (launch escape or landing
     // thrusters: not main propulsion), stage (index into body_stages)}]
@@ -273,7 +273,7 @@ public:
     godot::Dictionary crew_escape_state() const;
     // Mission log: {t0_tdb_s (null: none yet), clock_s (snapshot epoch - T-0, negative = T-; null: none), events:
     // [{kind (snake_case id: "liftoff", "max_q", "meco", ...), label (German), tdb_s, body_serial (0: mission-wide),
-    // body_name, predicted}]} recorded and predicted events sorted by tdb_s.
+    // body_name_key, predicted}]} recorded and predicted events sorted by tdb_s.
     godot::Dictionary mission_timeline() const;
     // Makes the current flight crewed with config/crew_escape/<id>.toml (empty id: uncrewed). Set it after the ship is
     // placed or the mission started (a new placement makes the flight uncrewed). Not ok for an unknown id.

@@ -44,13 +44,13 @@ const std::string& event_name(const vehicle::Vehicle& v, MissionEventKind kind) 
         case MissionEventKind::Ignition:
         case MissionEventKind::Cutoff:
         case MissionEventKind::Boostback:
-        case MissionEventKind::LandingBurn: return stages.front().config.name;
+        case MissionEventKind::LandingBurn: return stages.front().config.name_key;
         case MissionEventKind::EngineStart:
         case MissionEventKind::Liftoff:
         case MissionEventKind::MaxQ:
-            if (stages.size() >= 2 && !v.display_name().empty()) return v.display_name();
-            return stages.front().config.name;
-        default: return stages.back().config.name;
+            if (stages.size() >= 2 && !v.display_name_key().empty()) return v.display_name_key();
+            return stages.front().config.name_key;
+        default: return stages.back().config.name_key;
     }
 }
 

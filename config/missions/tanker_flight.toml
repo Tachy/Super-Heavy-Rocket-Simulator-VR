@@ -6,8 +6,6 @@
 # by test_mission_start_places)
 start_place = "starbase_pad2"
 start_vehicle = "starship_tanker"
-name = "Tankerflug zum Depot"
-display_name = "Tankerflug zum Depot"   # shown in the webcast overlay (no trademarks)
 kind = "tanker_flight"
 ascent = "tanker_ascent"
 return = "ship_return_starbase"   # its [deorbit] block (entry interface, entry angle, bank)

@@ -5,8 +5,6 @@
 # by test_mission_start_places)
 start_place = "earth_orbit"
 start_vehicle = "starship_hls_launch"
-name = "HLS: Betankung ab Phasenorbit und Mondmission"
-display_name = "Mondlander: Betankung ab Phasenorbit und Mondmission" # shown in the webcast overlay (no trademarks)
 kind = "hls_refuel"
 ascent = "hls_ascent"             # vehicle, site and phasing orbit
 

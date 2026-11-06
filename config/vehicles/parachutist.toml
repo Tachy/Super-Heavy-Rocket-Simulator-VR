@@ -7,14 +7,11 @@ ap3456 = "RAF AP3456 part 2 sect 3 ch 3 (scottbouch.com/rtfm): aeroconical ~6 m/
 
 [vehicle]
 id = "parachutist"
-name = "Fallschirmspringer"
-display_name = "Crewmitglied"
 propellant = "mmh_nto"                   # required by the loader; nothing is modelled
 stages_bottom_to_top = ["crew_member"]
 
 [[stage]]
 id = "crew_member"
-name = "Crewmitglied am Fallschirm"
 length_m = 1.8                           # [E]
 diameter_m = 0.5                         # [E]
 dry_mass_kg = 100.0                      # [E] occupant with suit and survival kit (as ejection_seat.toml)

@@ -7,8 +7,6 @@
 # by test_mission_start_places)
 start_place = "starbase_pad2"
 start_vehicle = "starship_tanker"
-name = "Tanker in den Phasenorbit"
-display_name = "Tanker in den Phasenorbit" # shown in the webcast overlay (no trademarks)
 vehicle = "starship_tanker"
 site = "starbase_pad2"
 heading_deg = 90.0

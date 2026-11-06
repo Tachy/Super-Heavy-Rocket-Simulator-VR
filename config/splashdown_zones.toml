@@ -6,7 +6,6 @@ nasa_2025 = "NASA: Crew-10 (2025-08-09) and Ax-4 (2025-07-15) splashed down off 
 
 [[zone]]
 id = "pacific_san_diego"
-name = "Pazifik vor San Diego"
 latitude_deg = 32.60                     # [E] ~50 km off the coast, in the area of the 2025 returns [S:nasa_2025]
 longitude_deg = -117.80                  # [E]
 radius_m = 2000.0                        # user 2026-10-14 (spec d3 had 10 km [E])

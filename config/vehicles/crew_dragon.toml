@@ -11,15 +11,12 @@ splashdown_speed = "Crew-7 coverage (Spectrum News 2024-03-11): ~16 mph at splas
 
 [vehicle]
 id = "crew_dragon"
-name = "Crew Dragon"
-display_name = "Crew Capsule"
 propellant = "mmh_nto"
 stages_bottom_to_top = ["trunk", "capsule"]
 
 [[stage]]
 id = "trunk"
-name = "Crew Dragon trunk"
-display_name = "Trunk"  # [D] display name of the part flying alone, no trademark
+# [D] display name of the part flying alone, no trademark (the text: config/i18n, vehicle.crew_dragon.stage.trunk.display_name)
 length_m = 3.25                          # [D] 8.1 m with the trunk [S:wiki_dragon2] minus the 4.85 m capsule (M2 3.234 from the shield apex to the trunk base)
 diameter_m = 3.7                         # [E] on the 3.66 m second stage
 dry_mass_kg = 1500.0                     # [E] solar arrays and radiators included, not modelled separately
@@ -27,8 +24,7 @@ dry_cg_station_m = 1.6                   # [E]
 
 [[stage]]
 id = "capsule"
-name = "Crew Dragon capsule"
-display_name = "Crew Capsule"  # [D] display name of the part flying alone, no trademark
+# [D] display name of the part flying alone, no trademark (the text: config/i18n, vehicle.crew_dragon.stage.capsule.display_name)
 length_m = 4.85                          # [E] shield apex to nose tip, measured: KUBAHA M2 and M1 4.85, Forest Katsch M4 4.92 at 4.0 m diameter, drawing D_Dragon_2_DM_2_03 4.83 (its scale bar); total 8.08 m fits the published 8.1 [S:wiki_dragon2]. Was 4.5 (cited) with a misread "M2 4.44": the port top without the nose (task-5-report "Task 5c")
 diameter_m = 4.0                         # [S:wiki_dragon2]
 hull_top_diameter_m = 1.8                # [E] sidewall tapering from the 4 m base (station hull contact, ISS i5)
@@ -146,7 +142,6 @@ deploy_height_m = 1800.0                 # [S:nasa_demo2] ~6,000 ft (Crew-1: ~6,
 # Stage frame (x station from the capsule bottom); clocking reference: body -z [E].
 [[stage.docking_port]]
 id = "idss"
-name = "Dragon-Andocksystem"
 position_m = [4.22, 0.0, 0.0]            # [E] the HCS mating plane, the top of the drawn flange (detail neck_m, tested). M2 neck top 4.22, its port cone top 4.44 = 4.22 + the IDD petal 0.2; D_Iss072e096331 at 143 px/m (4.0 m wide): white lip ends 4.24 above the shield apex (+-0.15), against the IDA; drawing D_Dragon_2_DM_2_03 4.07-4.18. Was 4.0, the recess. task-6-report
 axis = [1.0, 0.0, 0.0]                   # forward, along the capsule axis
 up = [0.0, 0.0, -1.0]                    # [E] clocking reference

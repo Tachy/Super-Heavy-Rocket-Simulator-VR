@@ -12,7 +12,7 @@ godot::Dictionary event_dictionary(const sim::MissionEvent& e) {
     d["kind"] = godot::String::utf8(sim::id_of(e.kind));
     d["tdb_s"] = e.epoch.tdb_seconds_past_j2000();
     d["body_serial"] = static_cast<int64_t>(e.body_serial);
-    d["body_name"] = godot::String::utf8(e.body_name.c_str());
+    d["body_name_key"] = godot::String::utf8(e.body_name_key.c_str());
     d["predicted"] = e.predicted;
     return d;
 }

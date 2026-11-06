@@ -241,7 +241,7 @@ void print_events(const sim::MissionTimeline& t) {
     if (!std::getenv("STARSIM_VERBOSE")) return;
     for (const auto& e : t.recorded()) {
         std::printf("  [timeline] %.2f %-16s body %u %s\n", e.epoch.tdb_seconds_past_j2000(), sim::id_of(e.kind),
-                    e.body_serial, e.body_name.c_str());
+                    e.body_serial, e.body_name_key.c_str());
     }
 }
 }  // namespace
@@ -308,10 +308,10 @@ TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO",
     CHECK(std::abs(max_q->epoch - q_peak_epoch) <= 0.2);  // the observer's 0.1 s sampling
     CHECK(meco->body_serial != seco->body_serial);
     // the part that acts: the stack at the pad, the booster at MECO and separation, the ship at SECO
-    CHECK(liftoff->body_name == "Heavy Launcher Mk3");
-    CHECK(meco->body_name == "Super Heavy Block 3");
-    CHECK(find_event(t, K::StageSeparation)->body_name == "Super Heavy Block 3");
-    CHECK(seco->body_name == "Starship Block 3");
+    CHECK(liftoff->body_name_key == "vehicle.starship_block3.display_name");
+    CHECK(meco->body_name_key == "vehicle.starship_block3.stage.booster.display_name");
+    CHECK(find_event(t, K::StageSeparation)->body_name_key == "vehicle.starship_block3.stage.booster.display_name");
+    CHECK(seco->body_name_key == "vehicle.starship_block3.stage.ship.display_name");
     REQUIRE(seco_command);
     CHECK(std::abs(seco->epoch - *seco_command) <= sim::FlightSession::tick_s);  // the command, not the tail-off end
     CHECK(find_event(t, K::EntryInterface) == nullptr);  // the 200 km orbit: no entry
@@ -731,7 +731,7 @@ TEST_CASE("Falcon 9 records MECO at the command, once, without the tail-off's cu
     CHECK(meco->epoch <= separation->epoch);
     CHECK(meco < separation);  // listed first
     CHECK(thrust_after_command_n > 0.0);
-    CHECK(meco->body_name == "Falcon 9 Block 5 first stage");
+    CHECK(meco->body_name_key == "vehicle.falcon9_block5.stage.first_stage.display_name");
     if (std::getenv("STARSIM_VERBOSE") && meco_at_30) {
         std::printf("  [prediction] MECO at T+30 s: error %+.2f s\n", *meco_at_30 - meco->epoch);
     }
@@ -1072,7 +1072,7 @@ TEST_CASE("A planned burn on cold gas records its ignition and cutoff", "[timeli
     const auto* predicted = find_predicted(session.timeline(), MissionEventKind::Ignition);
     REQUIRE(predicted);
     const auto predicted_ignition = predicted->epoch;
-    CHECK(predicted->body_name == "Crew Dragon capsule");  // the thrusters' part, not the trunk below it
+    CHECK(predicted->body_name_key == "vehicle.crew_dragon.stage.capsule.display_name");  // the thrusters' part, not the trunk below it
     while (session.autopilot().state == sim::AutopilotState::Burn && session.epoch() - t0 < 1800.0) {
         session.advance_to(session.epoch() + 10.0, 100000);
     }
@@ -1085,7 +1085,7 @@ TEST_CASE("A planned burn on cold gas records its ignition and cutoff", "[timeli
     const auto* ignition = find_event(t, MissionEventKind::Ignition);
     REQUIRE(ignition);
     CHECK(std::abs(ignition->epoch - predicted_ignition) < 1.0);
-    CHECK(ignition->body_name == "Crew Dragon capsule");
+    CHECK(ignition->body_name_key == "vehicle.crew_dragon.stage.capsule.display_name");
     CHECK(node.epoch - ignition->epoch >= 0.0);
     CHECK(find_predicted(t, MissionEventKind::Ignition) == nullptr);
 }
@@ -1106,7 +1106,7 @@ TEST_CASE("A capsule return predicts the capsule's entry interface, not the trun
     REQUIRE(entry);
     const auto predicted_serial = entry->body_serial;
     CHECK(predicted_serial != stack);  // the stack's serial stays with the trunk at the jettison
-    CHECK(entry->body_name == "Crew Dragon capsule");
+    CHECK(entry->body_name_key == "vehicle.crew_dragon.stage.capsule.display_name");
     // to the jettison: big steps to the burn, then on
     while (session.body_count() < 2 && session.epoch() - start < 3.0 * 86400.0) {
         double step = 10.0;
@@ -1194,7 +1194,7 @@ TEST_CASE("Mission event probe", "[.][probe][timeline_probe][ascent_planner]") {
     }
     for (const auto& e : session.timeline().recorded()) {
         std::printf("  [probe] T%+10.1f %-16s body %u %s\n", e.epoch - start, sim::id_of(e.kind), e.body_serial,
-                    e.body_name.c_str());
+                    e.body_name_key.c_str());
         if (const auto it = predictions.find({e.kind, e.body_serial}); it != predictions.end()) {
             print_prediction(sim::id_of(e.kind), it->second, recorded_of(session.timeline(), e.kind, e.body_serial));
         }
@@ -1273,7 +1273,7 @@ TEST_CASE("Return prediction probe", "[.][probe][timeline_probe]") {
     session.advance_to(session.epoch() + 1.0, 1000);
     for (const auto& e : t.recorded()) {
         std::printf("  [probe] T%+10.1f %-16s body %u %s\n", e.epoch - start, sim::id_of(e.kind), e.body_serial,
-                    e.body_name.c_str());
+                    e.body_name_key.c_str());
         if (const auto it = predictions.find({e.kind, e.body_serial}); it != predictions.end()) {
             print_prediction(sim::id_of(e.kind), it->second, &e);
         }

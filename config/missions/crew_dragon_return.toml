@@ -8,8 +8,6 @@
 # by test_mission_start_places)
 start_place = "earth_orbit"
 start_vehicle = "crew_dragon"
-name = "Crew-Dragon-Rückkehr"
-display_name = "Rückkehr der Crew-Kapsel" # shown in the webcast overlay (no trademarks)
 kind = "capsule_return"         # FlightSim.start_mission dispatches on it (absent: "ascent")
 vehicle = "crew_dragon"
 zone = "pacific_san_diego"

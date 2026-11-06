@@ -13,7 +13,6 @@ SplashdownZoneConfig load_splashdown_zone(const std::filesystem::path& config_di
             if (doc.text(t, "id") != zone_id) continue;
             SplashdownZoneConfig z;
             z.id = std::string(zone_id);
-            z.name = doc.text(t, "name");
             z.latitude_rad = doc.number(t, "latitude_deg") * constants::deg_to_rad;
             z.longitude_rad = doc.number(t, "longitude_deg") * constants::deg_to_rad;
             z.radius_m = doc.positive(t, "radius_m");

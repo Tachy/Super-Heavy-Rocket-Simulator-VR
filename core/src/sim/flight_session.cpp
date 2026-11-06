@@ -1263,7 +1263,7 @@ void FlightSession::record_event(MissionEventKind kind, size_t index) {
 
 MissionEvent FlightSession::burn_event(MissionEventKind kind) const {
     auto e = mission_event(*this, controlled_, kind);
-    if (burn_on_rcs()) e.body_name = bodies_[controlled_].body->vehicle().stages().back().config.name;
+    if (burn_on_rcs()) e.body_name_key = bodies_[controlled_].body->vehicle().stages().back().config.name_key;
     return e;
 }
 

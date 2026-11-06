@@ -13,7 +13,6 @@ using Catch::Matchers::WithinAbs;
 
 TEST_CASE("Launch sites load with their catch tower", "[config]") {
     const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_pad2");
-    CHECK(site.name == "Starbase Pad 2");
     CHECK_THAT(site.latitude_rad, WithinAbs(25.99677 * constants::deg_to_rad, 1e-12));  // measured Pad B ring centre
     CHECK_THAT(site.longitude_rad, WithinAbs(-97.15804 * constants::deg_to_rad, 1e-12));
     REQUIRE(site.tower.has_value());

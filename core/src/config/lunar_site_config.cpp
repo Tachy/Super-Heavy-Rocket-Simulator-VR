@@ -14,7 +14,6 @@ namespace {
 LunarSiteConfig parse_site(const detail::Document& doc, const toml::table& t) {
     LunarSiteConfig s;
     s.id = doc.text(t, "id");
-    s.name = doc.text(t, "name");
     s.product = doc.text(t, "product");
     s.latitude_rad = doc.number(t, "latitude_deg") * constants::deg_to_rad;
     s.longitude_rad = doc.number(t, "longitude_deg") * constants::deg_to_rad;

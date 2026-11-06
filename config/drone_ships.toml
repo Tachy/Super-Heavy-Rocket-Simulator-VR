@@ -47,7 +47,6 @@
 
 [[drone_ship]]
 id = "asds_atlantic"
-name = "Drohnenschiff"
 basin = "atlantic"
 deck_length_m = 91.0        # [S:wiki_asds] ~300 ft
 deck_width_m = 52.0         # [S:wiki_asds] ~170 ft (with the wing extensions)
@@ -74,7 +73,6 @@ area_max_longitude_deg = -40.0
 
 [[drone_ship]]
 id = "asds_atlantic_2"
-name = "Drohnenschiff"
 basin = "atlantic"
 deck_length_m = 91.0        # [S:wiki_asds] ~300 ft
 deck_width_m = 52.0         # [S:wiki_asds] ~170 ft (with the wing extensions)
@@ -101,7 +99,6 @@ area_max_longitude_deg = -40.0
 
 [[drone_ship]]
 id = "asds_pacific"
-name = "Drohnenschiff"
 basin = "pacific"
 deck_length_m = 91.0        # [S:wiki_asds] ~300 ft
 deck_width_m = 52.0         # [S:wiki_asds] ~170 ft (with the wing extensions)

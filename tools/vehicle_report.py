@@ -130,7 +130,7 @@ def report(vehicle_id: str, payload_kg: float) -> int:
     stages[order[-1]]["payload_mass_kg"] = payload_kg
     warnings: list[str] = []
 
-    print(f"=== {vehicle['vehicle']['name']}  (payload {payload_kg / 1000:.1f} t)\n")
+    print(f"=== {vehicle['vehicle'].get('name', vehicle['vehicle']['id'])}  (payload {payload_kg / 1000:.1f} t)\n")
     total_dv = 0.0
     for index, stage_id in enumerate(order):
         stage = stages[stage_id]
@@ -145,7 +145,7 @@ def report(vehicle_id: str, payload_kg: float) -> int:
         landing = [(g, e) for g, e in all_groups if g.get("landing_only", False)]
         if propellant <= 0.0 or not groups:
             # No main propulsion (e.g. Crew Dragon's capsule and trunk): masses, supplies and abort-only engines only.
-            print(f"--- {stage['name']}")
+            print(f"--- {stage.get('name', stage.get('id', '?'))}")
             print(f"  dry {dry / 1e3:9.1f} t (incl. RCS supplies)   no main propellant")
             for tank in stage.get("tank", []):
                 print(f"  tank {tank['id']:<10} {tank['mass_kg'] / 1e3:8.3f} t  ({tank['contents']})")
@@ -165,7 +165,7 @@ def report(vehicle_id: str, payload_kg: float) -> int:
         total_dv += dv
 
         area = math.pi * (stage["diameter_m"] / 2.0) ** 2
-        print(f"--- {stage['name']}")
+        print(f"--- {stage.get('name', stage.get('id', '?'))}")
         print(f"  dry {dry / 1e3:9.1f} t   propellant {propellant / 1e3:9.1f} t   "
               f"wet {(dry + propellant) / 1e3:9.1f} t   mass fraction {propellant / (dry + propellant):.3f}")
         for tank in stage.get("tank", []):

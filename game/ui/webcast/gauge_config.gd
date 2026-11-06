@@ -66,7 +66,7 @@ func _add_gauge(id: String, spec: Dictionary) -> void:
 	if not condition in GaugeRules.CONDITIONS:
 		_error("gauge '%s': unknown condition '%s'" % [id, condition])
 		return
-	for key in ["label", "unit", "full_scale", "decimals"]:
+	for key in ["unit", "full_scale", "decimals"]:  # the label is the text gauge.<id>.label
 		if not spec.has(key):
 			_error("gauge '%s': missing '%s'" % [id, key])
 			return

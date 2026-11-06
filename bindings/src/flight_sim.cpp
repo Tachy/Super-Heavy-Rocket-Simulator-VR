@@ -265,7 +265,7 @@ int64_t FlightSim::launch_from_site(const godot::String& vehicle_id, const godot
         }
         session.reset_timeline();  // a fresh mission log; the clamped vehicle starts on the pad
         context_.site_id = site_id;
-        context_.mission_display_name = godot::String();
+        context_.mission_display_name_key = godot::String();
         context_.mission_start_tdb_s = tdb_s;
         if (!target) return Outcome{true, {}};
         session.set_booster_return(true);  // the booster flies back and is caught or lands after staging
@@ -315,7 +315,7 @@ int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s, 
 
 FlightSim::Outcome FlightSim::mission_started(const sim::MissionStart& s, const std::string& id) {
     context_.site_id = godot::String::utf8(s.site_id.c_str());
-    context_.mission_display_name = godot::String::utf8(config::mission_display_name(config_dir_, id).c_str());
+    context_.mission_display_name_key = godot::String::utf8(config::mission_display_name_key(config_dir_, id).c_str());
     context_.mission_start_tdb_s = s.epoch.tdb_seconds_past_j2000();
     context_.mission_warnings = godot::Array();
     for (const auto& w : s.warnings) context_.mission_warnings.push_back(report_dict(w));
@@ -336,7 +336,7 @@ int64_t FlightSim::launch_from_pad(const godot::String& vehicle_id, double latit
         session.launch_from_pad(vehicle, {latitude_deg * deg, longitude_deg * deg, height_m}, heading_deg * deg,
                                 epoch(tdb_s));
         session.reset_timeline();  // a fresh mission log, as launch_from_site
-        context_.mission_display_name = godot::String();
+        context_.mission_display_name_key = godot::String();
         context_.mission_start_tdb_s = tdb_s;
         return Outcome{true, {}};
     }));
@@ -344,7 +344,7 @@ int64_t FlightSim::launch_from_pad(const godot::String& vehicle_id, double latit
 
 double FlightSim::mission_start_tdb_s() const { return snapshot()->mission_start_tdb_s; }
 godot::String FlightSim::mission_site_id() const { return snapshot()->site_id; }
-godot::String FlightSim::mission_display_name() const { return snapshot()->mission_display_name; }
+godot::String FlightSim::mission_display_name() const { return snapshot()->mission_display_name_key; }
 godot::Dictionary FlightSim::landing_zone() const { return snapshot()->landing_zone; }
 godot::Dictionary FlightSim::tower_state() const { return snapshot()->tower_state; }
 godot::Dictionary FlightSim::splashdown_zone() const { return snapshot()->splashdown_zone; }
@@ -678,7 +678,7 @@ godot::Dictionary FlightSim::crew_escape_state() const { return snapshot()->crew
 godot::Dictionary FlightSim::mission_timeline() const { return snapshot()->mission_timeline; }
 godot::String FlightSim::body_display_name(int index) const {
     const auto snap = snapshot();
-    return index >= 0 && static_cast<size_t>(index) < snap->bodies.size() ? snap->bodies[index].display_name
+    return index >= 0 && static_cast<size_t>(index) < snap->bodies.size() ? snap->bodies[index].display_name_key
                                                                          : godot::String();
 }
 

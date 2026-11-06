@@ -11,8 +11,6 @@ wiki_starship = "https://en.wikipedia.org/wiki/SpaceX_Starship (retrieved 2026-1
 
 [vehicle]
 id = "starship_depot"
-name = "Starship Depot (Super Heavy Block 3 / Depot)"
-display_name = "Depot Mk3"
 propellant = "methalox"
 stages_bottom_to_top = ["booster", "depot"]
 
@@ -21,8 +19,7 @@ from = "starship_block3:booster"
 
 [[stage]]
 id = "depot"
-name = "Starship Depot"
-display_name = "Depot Mk3"  # [D] display name of the part flying alone, no trademark
+# [D] display name of the part flying alone, no trademark (the text: config/i18n, vehicle.starship_depot.stage.depot.display_name)
 length_m = 52.1                          # [D] as the Block 3 ship
 diameter_m = 9.0
 dry_mass_kg = 158500.0                   # [E] Block 3 ship 177 t [D] - heat shield 10.5 t - four flaps 10 t [E] - catch pins
@@ -148,7 +145,6 @@ ullage_resistance_m2k_w = 100.0          # [E] dry wall: ullage gas conduction, 
 # the tanker's / HLS's probes - interface plane 0.5 m off the dorsal hull, symmetric in y.
 [[stage.docking_port]]
 id = "transfer_dock"
-name = "Transfer-Andockstelle (Rücken)"
 mechanism = "probe_drogue"
 position_m = [20.0, 0.0, 5.0]            # [E] centre of the four drogue mouths
 axis = [0.0, 0.0, 1.0]                   # dorsal normal (belly at -z)

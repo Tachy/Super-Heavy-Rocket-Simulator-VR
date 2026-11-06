@@ -52,11 +52,10 @@ gauges = ["speed_inertial", "altitude", "apoapsis", "periapsis"]
 [situation.default]
 gauges = ["speed_surface", "altitude", "vertical_speed", "speed_inertial"]
 
-# Gauge specs: label (German), unit, full scale of the arc, log_min > 0 = logarithmic arc from log_min to full scale,
+# Gauge specs (the label of gauge <id> is the text gauge.<id>.label in config/i18n): unit, full scale of the arc, log_min > 0 = logarithmic arc from log_min to full scale,
 # maximum decimals (fewer for large values), signed = the arc fills left/right from the top.
 [gauge.engines]
 # The engine gauge draws itself: label, unit and scale are unused.
-label = "Triebwerke"
 unit = ""
 full_scale = 1.0
 decimals = 0
@@ -64,28 +63,24 @@ condition = "has_engines"
 
 [gauge.propellant]
 # All main-engine propellant of the body, main + header tanks.
-label = "Treibstoff"
 unit = "%"
 full_scale = 100.0
 decimals = 0
 condition = "has_propellant"
 
 [gauge.speed_surface]
-label = "Geschwindigkeit"
 unit = "km/h"
 full_scale = 30000.0
 decimals = 0
 condition = "always"
 
 [gauge.speed_inertial]
-label = "Inertial"
 unit = "km/h"
 full_scale = 40000.0
 decimals = 0
 condition = "always"
 
 [gauge.altitude]
-label = "Höhe"
 unit = "km"
 full_scale = 400000.0
 log_min = 0.1
@@ -93,7 +88,6 @@ decimals = 1
 condition = "always"
 
 [gauge.vertical_speed]
-label = "Vertikal"
 unit = "m/s"
 full_scale = 2000.0
 decimals = 1
@@ -101,7 +95,6 @@ signed = true
 condition = "low_altitude"
 
 [gauge.apoapsis]
-label = "Apoapsis"
 unit = "km"
 full_scale = 400000.0
 log_min = 10.0
@@ -109,7 +102,6 @@ decimals = 0
 condition = "in_orbit"
 
 [gauge.periapsis]
-label = "Periapsis"
 unit = "km"
 full_scale = 400000.0
 log_min = 10.0
@@ -117,7 +109,6 @@ decimals = 0
 condition = "in_orbit"
 
 [gauge.distance_earth]
-label = "Erdabstand"
 unit = "km"
 full_scale = 500000.0
 log_min = 1000.0
@@ -125,7 +116,6 @@ decimals = 0
 condition = "always"
 
 [gauge.distance_moon]
-label = "Mondabstand"
 unit = "km"
 full_scale = 500000.0
 log_min = 1000.0
@@ -133,21 +123,18 @@ decimals = 0
 condition = "has_moon"
 
 [gauge.speed_earth]
-label = "v Erde"
 unit = "km/h"
 full_scale = 40000.0
 decimals = 0
 condition = "always"
 
 [gauge.speed_moon]
-label = "v Mond"
 unit = "km/h"
 full_scale = 40000.0
 decimals = 0
 condition = "has_moon"
 
 [gauge.range]
-label = "Abstand"
 unit = "m"
 full_scale = 1.0e6
 log_min = 0.1
@@ -155,7 +142,6 @@ decimals = 1
 condition = "docking"
 
 [gauge.closing_rate]
-label = "Annäherung"
 unit = "m/s"
 full_scale = 1.0
 decimals = 2
@@ -163,35 +149,30 @@ signed = true
 condition = "docking"
 
 [gauge.g_load]
-label = "Beschleunigung"
 unit = "g"
 full_scale = 6.0
 decimals = 2
 condition = "powered_or_aero"
 
 [gauge.dynamic_pressure]
-label = "Staudruck"
 unit = "kPa"
 full_scale = 40.0
 decimals = 1
 condition = "aero"
 
 [gauge.mach]
-label = "Mach"
 unit = ""
 full_scale = 30.0
 decimals = 2
 condition = "continuum_aero"
 
 [gauge.heat_flux]
-label = "Wärmestrom"
 unit = "kW/m²"
 full_scale = 2000.0
 decimals = 0
 condition = "heating"
 
 [gauge.heat_load]
-label = "Wärmelast"
 unit = "MJ/m²"
 full_scale = 1000.0
 decimals = 1

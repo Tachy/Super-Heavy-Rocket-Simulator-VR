@@ -917,7 +917,7 @@ func _check_plumes(snapshot: Dictionary, view: VehicleView, models: Dictionary) 
 
 # ------------------------------------------------------------------------------------------------ snapshot from config
 
-## [{id, name, base_station_m, length_m, diameter_m, nose_length_m, vehicle_id, config piece}] bottom to top.
+## [{id, name_key, base_station_m, length_m, diameter_m, nose_length_m, vehicle_id, config piece}] bottom to top.
 func _config_stages() -> Array:
 	var stages: Array = []
 	var base := 0.0
@@ -925,7 +925,7 @@ func _config_stages() -> Array:
 		var stage: Dictionary = stage_piece["stage"][0]
 		stages.append({"id": stage["id"], "base_station_m": base, "length_m": stage["length_m"],
 				"diameter_m": stage["diameter_m"], "nose_length_m": stage["aero"].get("nose_length_m", 0.0),
-				"vehicle_id": VEHICLE, "name": stage["name"]})
+				"vehicle_id": VEHICLE, "name_key": "vehicle.%s.stage.%s.display_name" % [VEHICLE, stage["id"]]})
 		base += stage["length_m"]
 	return stages
 

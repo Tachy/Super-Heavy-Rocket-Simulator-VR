@@ -12,7 +12,6 @@ namespace starsim::config {
 // around it into data/terrain/<id>.toml.
 struct LunarSiteConfig {
     std::string id;
-    std::string name;     // German (UI)
     std::string product;  // LOLA product the tile is cropped from
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;

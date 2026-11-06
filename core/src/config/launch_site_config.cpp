@@ -52,7 +52,6 @@ SeaConfig load_sea(const Document& doc, const toml::table& t) {
 LaunchSiteConfig load_site(const Document& doc, const toml::table& t) {
     LaunchSiteConfig s;
     s.id = doc.text(t, "id");
-    s.name = doc.text(t, "name");
     s.latitude_rad = doc.number(t, "latitude_deg") * constants::deg_to_rad;
     s.longitude_rad = doc.number(t, "longitude_deg") * constants::deg_to_rad;
     s.height_m = doc.number(t, "height_m");

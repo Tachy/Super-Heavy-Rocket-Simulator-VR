@@ -9,14 +9,11 @@ nasa_ida = "NASA, International Docking Adapter (IDA-2 on Harmony forward 2016, 
 
 [vehicle]
 id = "iss"
-name = "ISS"
-display_name = "Raumstation"
 propellant = "mmh_nto"                   # required by the loader; the station carries no modelled propellant
 stages_bottom_to_top = ["station"]
 
 [[stage]]
 id = "station"
-name = "International Space Station"
 length_m = 51.87                         # [D] aft end of Zvezda to the IDA-2 face (measured, iss.md); NASA's 73 m is the solar array length, 67 m the pressurised length incl. visiting vehicles
 diameter_m = 4.2                         # [E] module diameter (knudsen length only; drag and SRP use fixed areas)
 dry_mass_kg = 460320.0                   # [S:oem]
@@ -47,7 +44,6 @@ reference_utc = "2026-10-14T12:00:00"    # the fixture's first row
 # Ports: position in the stage frame (x station, y starboard, z nadir), outward docking axis, clocking reference.
 [[stage.docking_port]]
 id = "ida2"
-name = "IDA-2 (Harmony vorn)"
 position_m = [51.87, 0.0, 0.72]          # [D] model D (iss.md, Model D measurement): IDA-2 mating face on Harmony forward; the ring axis is 0.72 m nadir of the Harmony axis; was [E] [73.0, 0.0, 0.0]
 axis = [1.0, 0.0, 0.0]                   # +XVV: V-bar approach
 up = [0.0, -0.866025403784, -0.5]             # [D] for the class, [E] for the member: model D's petals at 60 / 180 / 300 deg (from port towards zenith) leave up in {nadir, this, +-120} (measured); which member is read from photos only (+-30 deg): D_Crew_Dragon_Endeavour puts Dragon's nose on the upper side, so the hinge (it carries a petal; D_Iss065e002827 does not resolve the petals) stands 30 deg from zenith towards starboard; 30 deg towards port is not excluded by the photos. Was [E] zenith
@@ -55,7 +51,6 @@ soft_capture = "passive"                 # [S: IDSS IDD E 3.2.2.2] the IDA ring 
 
 [[stage.docking_port]]
 id = "ida3"
-name = "IDA-3 (Harmony oben)"
 position_m = [47.45, 0.0, -5.0]          # [D] model D: IDA-3 mating face on Harmony zenith (z -5.03 measured), ring axis 0.72 m forward of the Harmony axis; was [E] [66.0, 0.0, -5.0]
 axis = [0.0, 0.0, -1.0]                  # zenith: R-bar approach
 up = [-0.5, -0.866025403784, 0.0]             # [D] for the class, [E] for the member: the same IDA turned by 180 deg against IDA-2 in the two old port frames (model D, measured: azimuth correlation peak at 180); the photos (D_Iss072e096331, D_Iss072e144451: nose to starboard) cannot separate 60 deg from starboard towards aft from towards forward, aft comes from model D's same-part relation alone. Was [E] forward

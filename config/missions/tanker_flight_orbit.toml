@@ -5,8 +5,6 @@
 # by test_mission_start_places)
 start_place = "earth_orbit"
 start_vehicle = "starship_tanker"
-name = "Tankerflug ab Phasenorbit"
-display_name = "Tankerflug ab Phasenorbit" # shown in the webcast overlay (no trademarks)
 kind = "tanker_flight"
 ascent = "tanker_ascent"          # vehicle, site and phasing orbit
 return = "ship_return_starbase"

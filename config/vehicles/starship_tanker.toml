@@ -8,8 +8,6 @@ spacex_v3 = "SpaceX Starship V3 update, May 2026, via https://www.teslarati.com/
 
 [vehicle]
 id = "starship_tanker"
-name = "Starship Tanker (Super Heavy Block 3 / Ship Block 3)"
-display_name = "Tanker Mk3"
 propellant = "methalox"
 stages_bottom_to_top = ["booster", "ship"]
 
@@ -18,7 +16,7 @@ from = "starship_block3:booster"
 
 [[stage]]
 from = "starship_block3:ship"
-display_name = "Tanker Mk3"  # [D] display name of the part flying alone, no trademark
+# [D] display name of the part flying alone, no trademark (the text: config/i18n, vehicle.starship_tanker.stage.ship.display_name)
 # [E] placeholder until the real tanker is known (user 2026-10-20): a tanker ship without cargo doors, dispenser and
 # interior (heat shield, flaps and header tanks stay), its main tanks stretched into the cargo bay (user 2026-11-03:
 # SpaceX intends larger tanks there; no published dimensions). Bottom-up from Block 3's 177 t [D] (flights 12-14):
@@ -53,7 +51,6 @@ base_station_m = 23.697
 # rolled 180 deg, 10 m between the centrelines. The layout is symmetric in y so the rolled ship meets it.
 [[stage.docking_port]]
 id = "transfer_dock"
-name = "Transfer-Andockstelle (Rücken)"
 mechanism = "probe_drogue"
 position_m = [20.0, 0.0, 5.0]            # [E] centre of the four probes, in the interface plane
 axis = [0.0, 0.0, 1.0]                   # dorsal normal

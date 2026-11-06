@@ -46,7 +46,6 @@ struct SeaConfig {
 
 struct LaunchSiteConfig {
     std::string id;
-    std::string name;
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;
     double height_m = 0.0;  // ground (pad) height above WGS84

@@ -3,8 +3,6 @@
 
 [vehicle]
 id = "starship_hls_launch"
-name = "Super Heavy Block 3 / Starship HLS"
-display_name = "Lunar Lander Mk3 (Start)"
 propellant = "methalox"
 stages_bottom_to_top = ["booster", "hls"]
 

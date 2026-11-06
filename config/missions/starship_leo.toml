@@ -7,8 +7,6 @@
 # by test_mission_start_places)
 start_place = "starbase_pad2"
 start_vehicle = "starship_block3"
-name = "Starship in einen niedrigen Erdorbit"
-display_name = "Testflug in den Erdorbit" # shown in the webcast overlay (no trademarks)
 vehicle = "starship_block3"
 site = "starbase_pad2"
 heading_deg = 90.0              # body +y on the pad

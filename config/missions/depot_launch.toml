@@ -5,8 +5,6 @@
 # by test_mission_start_places)
 start_place = "starbase_pad2"
 start_vehicle = "starship_depot"
-name = "Depotstart"
-display_name = "Depotstart"             # shown in the webcast overlay (no trademarks)
 kind = "depot_launch"
 ascent = "depot_ascent"
 

@@ -9,14 +9,11 @@ aces_modes = "DTIC ADA133628, Douglas ACES II Revision C (modes over the 0-600 K
 
 [vehicle]
 id = "ejection_seat"
-name = "Schleudersitz"
-display_name = "Schleudersitz"
 propellant = "mmh_nto"                   # required by the loader; the seat carries no modelled propellant
 stages_bottom_to_top = ["seat"]
 
 [[stage]]
 id = "seat"
-name = "Schleudersitz mit Insasse"
 length_m = 1.5                           # [E] seat back with head box, occupant seated
 diameter_m = 0.8                         # [E]
 dry_mass_kg = 170.0                      # [E] seat ~70 kg + occupant with suit and survival kit ~100 kg

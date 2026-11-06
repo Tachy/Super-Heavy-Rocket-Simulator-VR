@@ -6,7 +6,6 @@ im2 = "https://en.wikipedia.org/wiki/Mons_Mouton (retrieved 2026-10-15): IM-2 At
 
 [[site]]
 id = "mons_mouton_im2"
-name = "Mons Mouton (IM-2)"
 latitude_deg = -84.7906               # [S:im2] in the Mons Mouton region (Artemis III candidates [S:artemis_2024])
 longitude_deg = 29.1957               # [S:im2] east
 tile_half_size_m = 10000.0            # [E] 20 x 20 km tile

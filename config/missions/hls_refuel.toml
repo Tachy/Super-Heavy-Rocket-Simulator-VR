@@ -5,8 +5,6 @@
 # by test_mission_start_places)
 start_place = "starbase_pad2"
 start_vehicle = "starship_hls_launch"
-name = "HLS: Betankung am Depot und Mondmission"
-display_name = "Mondlander: Betankung am Depot und Mondmission" # shown in the webcast overlay (no trademarks)
 kind = "hls_refuel"
 ascent = "hls_ascent"
 

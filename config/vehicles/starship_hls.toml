@@ -9,15 +9,12 @@ wiki_starship = "https://en.wikipedia.org/wiki/SpaceX_Starship (retrieved 2026-1
 
 [vehicle]
 id = "starship_hls"
-name = "Starship HLS"
-display_name = "Lunar Lander Mk3"
 propellant = "methalox"
 stages_bottom_to_top = ["hls"]
 
 [[stage]]
 id = "hls"
-name = "Starship HLS"
-display_name = "Lunar Lander Mk3"  # [D] display name of the part flying alone, no trademark
+# [D] display name of the part flying alone, no trademark (the text: config/i18n, vehicle.starship_hls.stage.hls.display_name)
 length_m = 52.1                          # [D] as the Block 3 ship
 diameter_m = 9.0
 dry_mass_kg = 120000.0                   # [E] user 2026-10-14: SpaceX publishes none; ~100-120 t Musk's older target,
@@ -188,7 +185,6 @@ rendezvous_reserve_kg = { proximity = 600.0, phasing = 5600.0 }
 # stations are Block 3's (3.5 / 20 m), so the connectors sit on the main tanks. Leg clearance at the depot: r3.
 [[stage.docking_port]]
 id = "transfer_dock"
-name = "Transfer-Andockstelle (Rücken)"
 mechanism = "probe_drogue"
 position_m = [20.0, 0.0, 5.0]            # [E] centre of the four probes, in the interface plane
 axis = [0.0, 0.0, 1.0]                   # dorsal normal

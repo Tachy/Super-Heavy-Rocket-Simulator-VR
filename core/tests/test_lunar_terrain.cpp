@@ -162,7 +162,7 @@ TEST_CASE("LOLA data: the site tile matches the pipeline's raw-grid check points
         CHECK(terrain->height_m(c.latitude_rad, c.longitude_rad) == Catch::Approx(c.height_m).margin(1e-6));
     }
     const auto site = sim::lunar_site(config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"), *terrain);
-    std::printf("[terrain] %s: %.1f m above the 1737.4 km sphere\n", site.config.name.c_str(), site.height_m);
+    std::printf("[terrain] %s: %.1f m above the 1737.4 km sphere\n", site.config.id.c_str(), site.height_m);
     CHECK(site.height_m > 4000.0);  // Mons Mouton region: 5,000-6,000 m [S: NASA 2024]
     CHECK(site.height_m < 7000.0);
 }

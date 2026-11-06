@@ -149,7 +149,7 @@ enum class DockingMechanism { Idss, ProbeDrogue };
 
 struct DockingPortConfig {
     std::string id;
-    std::string name;
+    std::string name_key;  // table key of the shown name ("vehicle.<vehicle>.port.<port>.name")
     math::Vec3 position_m;
     math::Vec3 axis;
     math::Vec3 up;
@@ -435,8 +435,7 @@ struct ThermalConfig {
 
 struct StageConfig {
     std::string id;
-    std::string name;
-    std::string display_name;  // shown for a part flying alone (no trademarks); empty: none (optional key)
+    std::string name_key;  // table key of the stage's shown name when it flies alone ("vehicle.<vehicle>.stage.<stage>.display_name")
     double length_m = 0.0;
     double diameter_m = 0.0;
     double hull_top_diameter_m = 0.0;  // optional: the hull tapers linearly to this at the top (0: = diameter_m)
@@ -528,8 +527,8 @@ struct StageConfig {
 
 struct VehicleConfig {
     std::string id;
-    std::string name;
-    std::string display_name;
+    std::string name_key;          // "vehicle.<id>.name" (config/i18n)
+    std::string display_name_key;  // "vehicle.<id>.display_name"
     // Stages the display name belongs to (all loaded, or the stack of stack_payload); a vehicle built from fewer (a
     // ship placed alone) is named by its stages instead (vehicle::Vehicle::shown_name). 0: no check.
     size_t named_stage_count = 0;

@@ -176,7 +176,7 @@ def fetch_site_tile(site: dict, source: dict, out_dir: Path) -> None:
         c_lat, c_lon = polar_south_lat_lon(cl, cs, pole_line, pole_sample, scale)
         checks.append((math.degrees(c_lat), math.degrees(c_lon),
                        dn_scale * bilinear(tile, cl - first_line, cs - first_sample)))
-    text = (f"# LOLA {source['id']} tile around {site['name']} - written by tools/data_pipeline/lunar_tile.py\n"
+    text = (f"# LOLA {source['id']} tile around {site['id']} - written by tools/data_pipeline/lunar_tile.py\n"
             "[grid]\n"
             f'product = "{site["product"]}"\n'
             'projection = "polar_stereographic_south"\n'

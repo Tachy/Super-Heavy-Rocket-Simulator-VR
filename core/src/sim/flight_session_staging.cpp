@@ -70,7 +70,7 @@ void FlightSession::stage() {
     }
     auto ignition = mission_event(*this, controlled_, MissionEventKind::Ignition);
     ignition.body_serial = next_serial_;
-    ignition.body_name = stages[1].config.name;
+    ignition.body_name_key = stages[1].config.name_key;
     timeline_.record(std::move(ignition));
     staging_->upper_ignition_epoch = epoch_;
 }

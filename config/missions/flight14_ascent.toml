@@ -10,8 +10,6 @@
 # by test_mission_start_places)
 start_place = "starbase_pad2"
 start_vehicle = "starship_block3"
-name = "Validierung: Testflug 14"
-display_name = "Testflug 14 (Nachflug)"  # shown in the webcast overlay (no trademarks)
 vehicle = "starship_block3"
 site = "starbase_pad2"          # [S:flights.toml] Starbase; OLP-1 [E] (flight 14's pad not recorded)
 liftoff_utc = "2026-09-28T12:48:59"  # [S:flights.toml] flight 14: lifts off at this date

@@ -68,7 +68,7 @@ bool Stage::has_header_tanks() const {
 Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::path& config_dir)
     : id_(config.id),
       // the vehicle's name only while all its named stages are there (not for a ship placed without its booster)
-      display_name_(config.named_stage_count == 0 || config.stages.size() == config.named_stage_count ? config.display_name
+      display_name_key_(config.named_stage_count == 0 || config.stages.size() == config.named_stage_count ? config.display_name_key
                                                                                                      : std::string()),
       config_dir_(config_dir),
       source_config_(std::make_shared<const config::VehicleConfig>(config)) {
@@ -401,15 +401,15 @@ double Vehicle::propellant_capacity_kg() const {
     return total;
 }
 
-std::string Vehicle::shown_name() const {
-    if (!display_name_.empty()) return display_name_;
+std::string Vehicle::shown_name_key() const {
+    if (!display_name_key_.empty()) return display_name_key_;
     for (const auto& s : stages_) {
         const bool main_engines = std::any_of(s.engines.begin(), s.engines.end(),
                                               [](const Engine& e) { return !e.auxiliary(); });
-        if (main_engines && !s.config.display_name.empty()) return s.config.display_name;
+        if (main_engines && !s.config.name_key.empty()) return s.config.name_key;
     }
     for (auto it = stages_.rbegin(); it != stages_.rend(); ++it) {
-        if (!it->config.display_name.empty()) return it->config.display_name;
+        if (!it->config.name_key.empty()) return it->config.name_key;
     }
     return {};
 }
@@ -908,7 +908,7 @@ double Vehicle::max_splashdown_speed_mps() const {
 std::unique_ptr<Vehicle> Vehicle::copy_upper(size_t index) const {
     auto copy = std::unique_ptr<Vehicle>(new Vehicle());
     copy->id_ = id_;
-    copy->display_name_ = display_name_;
+    copy->display_name_key_ = display_name_key_;
     copy->config_dir_ = config_dir_;
     copy->source_config_ = source_config_;
     copy->stages_ = stages_;
@@ -948,7 +948,7 @@ std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
     upper->aero_ = std::make_unique<aero::SlenderBodyAero>(aero_->geometry(), aero_->drag_curve());
     upper->rebuild_aero();
     id_ += "/" + stages_.back().config.id;
-    display_name_.clear();  // a part now
+    display_name_key_.clear();  // a part now
     rebuild_aero();
     stop_rcs();
     upper->stop_rcs();

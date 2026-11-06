@@ -4,8 +4,6 @@
 # into the tower's arms. In the game the ship starts from the orbit it is in (key R); [orbit] is the scenario start.
 
 [mission]
-name = "Rückkehr nach Starbase (bemannt)"
-display_name = "Rückkehr zum Startturm (bemannt)" # shown in the webcast overlay (no trademarks)
 kind = "ship_return"            # FlightSim.start_mission dispatches on it (absent: "ascent")
 vehicle = "starship_block3"
 stage = "ship"

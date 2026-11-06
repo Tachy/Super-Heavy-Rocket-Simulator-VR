@@ -454,7 +454,7 @@ func _viewpoint_site(site: Dictionary) -> Dictionary:
 	var lon: float = viewpoint["longitude_deg"]
 	var samples: Dictionary = core.surface_samples("earth", PackedFloat64Array([lat]), PackedFloat64Array([lon]))
 	var surface_m: float = samples["height_m"][0] if bool(samples["present"]) else float(site["height_m"])
-	return {"id": site["id"], "name": viewpoint["name"], "latitude_deg": lat, "longitude_deg": lon, "height_m": surface_m,
+	return {"id": site["id"], "name": I18n.text("site.%s.viewpoint.name" % site["id"]), "latitude_deg": lat, "longitude_deg": lon, "height_m": surface_m,
 			"eye_height_m": float(viewpoint["eye_height_m"])}
 
 

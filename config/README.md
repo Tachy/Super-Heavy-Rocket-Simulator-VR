@@ -22,11 +22,14 @@ crew_escape/<id>.toml   ejection seats of a crewed ship return (referenced by mi
   - `[E]` engineering estimate (no public data); calibrate against flight telemetry
   - `[D]` derived from other values in the file (the comment shows how)
 - `[[stage]] payload_station_m`, `fairing_station_m` (optional): where those masses sit, from the stage's base; left out: 0.75 of the stage's length [E].
-- Display names (shown in the game, English for now - the UI language is decided later, no trademarks; the `name` fields keep the real names and are never shown
-  in the webcast overlay): `[vehicle] display_name` for the whole vehicle; `[[stage]] display_name` (optional) for a
-  stage that flies as a separate body (booster, ship, capsule, trunk). A part split off at staging is shown by its
-  lowest stage with main engines, else its topmost named stage (`vehicle::Vehicle::shown_name`).
-  `[mission] display_name` (optional) names the mission under the overlay's mission clock.
+- Display names live in the text tables `config/i18n/de.toml` / `en.toml`, not in the config files (no `name` /
+  `display_name` / `label` keys; an old file that still has them loads, they are ignored; no trademarks in the texts).
+  Table keys: `vehicle.<id>.name`, `vehicle.<id>.display_name`, `vehicle.<id>.stage.<stage>.display_name` (every stage
+  of the vehicle, also a reused one; the name of a stage that flies as a separate body), `vehicle.<id>.port.<port>.name`,
+  `mission.<id>.name` / `mission.<id>.display_name` (every file with a `[mission]` table; the display name is shown under
+  the overlay's mission clock), `site.<id>.name`, `site.<id>.viewpoint.name`, `place.<id>.name`, `lunar_site.<id>.name`,
+  `zone.<id>.name`, `drone_ship.<id>.name`, `gauge.<id>.label`. A part split off at staging is shown by its lowest
+  stage with main engines, else its topmost stage (`vehicle::Vehicle::shown_name_key`, which returns the key).
   Start declarations (mission selection panel): `[mission] start_place` (a pad id of `launch_sites.toml` or an id of
   `start_places.toml`: `earth_orbit`, `iss_docked`, `lunar_orbit`) and `start_vehicle` (a `vehicles/` file id) on every
   selectable mission; missions flown only as a follow-on (ship returns, `leo_ascent`) have neither. `[[site]] vehicles =
@@ -207,7 +210,7 @@ flow separation (vacuum engines).
   depot is added without its booster).
 - `[stage.station.reference_orbit]`: the synthetic orbit without any OEM - `altitude_km` (a minus the equatorial
   radius), `inclination_deg`, `raan_deg` (both in the true equator frame of date), `reference_utc`.
-- `[[stage.docking_port]]`: `id`, `name` (shown; English for now), `position_m` (stage frame: x station from the stage bottom,
+- `[[stage.docking_port]]`: `id` (its shown name: `vehicle.<id>.port.<port>.name`), `position_m` (stage frame: x station from the stage bottom,
   y/z body axes), `axis` (outward unit vector), `up` (clocking reference perpendicular to it), optional
   `behind_nose_cone` (default false: the port is covered while the vehicle's nose cone is closed - Crew Dragon `idss`),
   optional `soft_capture = "active" | "passive"` (default passive; IDSS: the active side extends its soft-capture ring,
@@ -240,7 +243,7 @@ flow separation (vacuum engines).
   (the Starship tanker and the depot's Super Heavy are Block 3's). Only `[[stage.docking_port]]`,
   `[[stage.transfer_connector]]`, `[[stage.rcs_pod]]` (r3: same keys as `[[stage.rcs.pod]]`; the source stage needs
   `[stage.rcs]`) and `[stage.propellant_transfer]` (r4) may be added, `dry_mass_kg`, `dry_cg_station_m` and
-  `display_name` overridden, and `[[stage.tank]]` entries resize a source tank by `id` (only `mass_kg`, the full load,
+  (its shown name is the key under the listing vehicle), and `[[stage.tank]]` entries resize a source tank by `id` (only `mass_kg`, the full load,
   and `base_station_m`; planner plan Task 4b: the tanker's stretched main tanks); any other key, or a tank the source
   does not have, is an error (it would silently diverge from the source).
   The propellant must be the vehicle's. `tools/vehicle_report.py` follows `from`.
@@ -253,13 +256,13 @@ flow separation (vacuum engines).
 - With an OEM, mass, drag area and C_D come from its header instead of the config.
 
 ## Lunar landing sites (`lunar_sites.toml`)
-- `[[site]]`: `id`, `name`, `latitude_deg` / `longitude_deg` (MOON_ME, the frame of the LOLA maps), `tile_half_size_m`
+- `[[site]]`: `id`, `latitude_deg` / `longitude_deg` (MOON_ME, the frame of the LOLA maps), `tile_half_size_m`
   (half the side of the terrain tile), `product` (LOLA product the tile is cropped from: `"LDEM_80S_20M"`).
   `python tools/data_pipeline/fetch.py` writes the tile to `data/terrain/<id>.toml` / `.i16` (and the global grid
   `ldem_16`); `sim::load_lunar_terrain` reads them.
 
 ## Launch sites (`launch_sites.toml`)
-- `[[site]]`: `id`, `name`, `latitude_deg`, `longitude_deg`, `height_m` (ground above the WGS84 ellipsoid, [D]:
+- `[[site]]`: `id`, `latitude_deg`, `longitude_deg`, `height_m` (ground above the WGS84 ellipsoid, [D]:
   the median of the 1 m local terrain grid within `plateau_radius_m`, written by
   `python tools/data_pipeline/site_heights.py --write`; rerun it after a terrain or radius change and re-measure the
   reference flights - `refuelling/reference_flights.toml` digests this file), `kind`
@@ -267,7 +270,7 @@ flow separation (vacuum engines).
   site's plateau in the Earth terrain: flat at `height_m` within `plateau_radius_m`, a linear apron of
   `plateau_apron_m` into the terrain beyond it, never water (`sim::load_earth_terrain`).
 - `[site.viewpoint]` (optional, game only): the time panel's ground view "<site> (Aussicht)" stands here instead of
-  on the pad: `name` (German display name), `latitude_deg`, `longitude_deg`, `eye_height_m` (above the terrain at the
+  on the pad: `latitude_deg`, `longitude_deg`, `eye_height_m` (above the terrain at the
   viewpoint: roof or deck height + ~1.7 m eye); the view starts aimed at the pad (`World._aim_ground_camera_at`).
   Launches and physics keep the pad coordinates; the core ignores this table.
 - `[site.sea]` (optional): straight shoreline perpendicular to `direction_deg`, `shoreline_distance_m` from the pad
@@ -282,11 +285,11 @@ flow separation (vacuum engines).
   `arm_closed_gap_m / 2 + arm_width_m / 2` from the catch axis.
 
 ## Splashdown zones (`splashdown_zones.toml`)
-- `[[zone]]`: `id`, `name` (shown; English for now), `latitude_deg`, `longitude_deg`, `radius_m`. A capsule's entry guidance aims its
+- `[[zone]]`: `id`, `latitude_deg`, `longitude_deg`, `radius_m`. A capsule's entry guidance aims its
   drogue gate over the centre at sea level (`FlightSession::set_splashdown_zone`).
 
 ## Drone ships (`drone_ships.toml`)
-- `[[drone_ship]]`: `id`, `name` (generic display name), `deck_length_m`, `deck_width_m`, `freeboard_m` (deck above the
+- `[[drone_ship]]`: `id`, `deck_length_m`, `deck_width_m`, `freeboard_m` (deck above the
   sea), `basin` (`"atlantic"` / `"pacific"`), `home_port_latitude_deg` / `home_port_longitude_deg`, and the service area
   `area_min_latitude_deg`, `area_max_latitude_deg`, `area_min_longitude_deg`, `area_max_longitude_deg` (a lat / lon box;
   min < max, so an area cannot cross the antimeridian). Where it waits is set by the mission.
@@ -302,7 +305,7 @@ flow separation (vacuum engines).
   chosen.
 
 ## Webcast gauges (`ui/webcast_gauges.toml`)
-- Which round gauges the webcast overlay shows, their order, labels, units, full scales and look, plus `[rules]`
+- Which round gauges the webcast overlay shows, their order, units, full scales and look (the labels are the texts `gauge.<id>.label`), plus `[rules]`
   (`hide_delay_s`, `max_per_side`) and `[thresholds]` for the named conditions. Situations are chosen in code
   (`game/ui/webcast/gauge_rules.gd`); read by `gauge_config.gd`. Errors in the file are collected, bad entries dropped.
 

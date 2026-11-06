@@ -11,15 +11,12 @@ tl_crew13 = "https://spacelaunchschedule.com/launch/falcon-9-block-5-crew-13 (Sp
 
 [vehicle]
 id = "falcon9_block5"
-name = "Falcon 9 Block 5"
-display_name = "Medium Launcher"
 propellant = "kerolox"
 stages_bottom_to_top = ["first_stage", "second_stage"]
 
 [[stage]]
 id = "first_stage"
-name = "Falcon 9 Block 5 first stage"
-display_name = "Medium Launcher Stufe 1"  # [D] display name of the part flying alone, no trademark
+# [D] display name of the part flying alone, no trademark (the text: config/i18n, vehicle.falcon9_block5.stage.first_stage.display_name)
 length_m = 47.7                          # [S:wiki_f9] with the interstage (156.5 ft), from the outer Merlins' exit plane
                                          # (station 0) to the interstage top; 41.2 m is the stage WITHOUT its ~6.5 m
                                          # interstage (tanks and engine bay end there). A reference model's 48.4 m is its
@@ -259,8 +256,7 @@ directions = ["tangential_plus", "tangential_minus", "inward", "inward"]  # [S:e
 
 [[stage]]
 id = "second_stage"
-name = "Falcon 9 Block 5 second stage"
-display_name = "Medium Launcher Stufe 2"  # [D] display name of the part flying alone, no trademark
+# [D] display name of the part flying alone, no trademark (the text: config/i18n, vehicle.falcon9_block5.stage.second_stage.display_name)
 length_m = 9.8                           # [D] the hull above its base, the interstage top, up to the trunk's base: at the hull's 3.66 m
                                          # scale D_SpaceX_Crew_9_Preflight 587 px / 220 px = 9.77 m, F_NHQ202210010026 758 / 281 px = 9.87 m
                                          # (+-0.2 m, tools/structures/measure/stack_bands.py). Not the 9.2 m of 70 m - 13.1 m - 47.7 m

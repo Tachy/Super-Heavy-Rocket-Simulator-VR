@@ -37,7 +37,6 @@ TEST_CASE("The drone ship list is loaded in file order", "[config][drone_ship]")
     CHECK(ships[0].basin == "atlantic");
     CHECK(ships[2].id == "asds_pacific");
     CHECK(ships[2].basin == "pacific");
-    for (const auto& s : ships) CHECK(s.name == "Drohnenschiff");
 }
 
 TEST_CASE("The drone ship for a point is the one whose service area holds it", "[config][drone_ship]") {

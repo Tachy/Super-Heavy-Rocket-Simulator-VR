@@ -5,8 +5,6 @@
 # by test_mission_start_places)
 start_place = "earth_orbit"
 start_vehicle = "starship_depot"
-name = "Betankungskampagne (geflogen, Depot platziert)"
-display_name = "Betankungskampagne (Depot platziert)" # shown in the webcast overlay (no trademarks)
 kind = "refuelling_campaign_flown"
 
 [depot]

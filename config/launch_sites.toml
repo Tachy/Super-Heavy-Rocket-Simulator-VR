@@ -9,7 +9,6 @@
 
 [[site]]
 id = "starbase_pad2"
-name = "Starbase Pad 2"
 vehicles = ["starship_block3", "starship_depot", "starship_tanker", "starship_hls_launch"]  # start choices of the mission panel
 latitude_deg = 25.99677     # [E] centre of the measured Pad B ring (user 2026-10-31); was 25.99686, -97.15394 (OLP-1 imagery)
 longitude_deg = -97.15804
@@ -47,7 +46,6 @@ direction_deg = 90.0          # [D] towards the sea (Gulf of Mexico), clockwise 
 shoreline_distance_m = 765.0  # [D] pad centre -> first water along that direction, 3DEP 1 m grid (starbase_local): the nearest shore of bearings 60-130; was 500 from the old position
 
 [site.viewpoint]              # ground view of the time panel ("(Aussicht)"); all values may be refined by hand later
-name = "Kontrollzentrum Starbase"
 latitude_deg = 25.98530       # [E] low confidence: the former launch control in the STARGATE building on the
 longitude_deg = -97.18725     # production site (Wikipedia "STARGATE" 25.9854 N 97.1872 W; Everyday Astronaut "How to
                               # visit Starbase": "acts as their launch control"), its roof centre taken from the NAIP 2022
@@ -58,7 +56,6 @@ eye_height_m = 11.7           # [E] two-storey office roof ~10 m (no published h
 
 [[site]]
 id = "ksc_lc39a"
-name = "KSC LC-39A"
 vehicles = ["starship_block3", "starship_depot", "starship_tanker", "starship_hls_launch", "falcon9_block5"]  # Falcon 9: the planner flies it with the drone ship (no landing zone here)
 latitude_deg = 28.60822     # [E] from public satellite imagery
 longitude_deg = -80.60410
@@ -96,7 +93,6 @@ direction_deg = 90.0          # [E] towards the Atlantic, clockwise from north (
 shoreline_distance_m = 1300.0 # [E] pad centre -> shoreline along that direction (verify against imagery)
 
 [site.viewpoint]              # ground view of the time panel ("(Aussicht)"); values may be refined by hand later
-name = "LCC-Dach (KSC)"
 latitude_deg = 28.58550       # [E] roof of the Launch Control Center (SE of the VAB) from the NAIP 2021 tiles, the
 longitude_deg = -80.64920     # east half facing the pads; Wikipedia gives 28.58528 N 80.64972 W (its west edge). ~5.1 km
                               # WSW of the pad
@@ -104,7 +100,6 @@ eye_height_m = 25.2           # [E] roof 23.5 m [S] (NASA KSC "Launch Control Ce
 
 [[site]]
 id = "ccsfs_slc40"
-name = "CCSFS SLC-40"
 vehicles = ["falcon9_block5"]  # no catch tower: no Starship stack
 latitude_deg = 28.56194     # [S] Wikipedia "Cape Canaveral Space Launch Complex 40": 28°33'43"N 80°34'38"W
 longitude_deg = -80.57722
@@ -119,7 +114,6 @@ direction_deg = 90.0        # [E] towards the Atlantic (verify against imagery)
 shoreline_distance_m = 1000.0  # [E] pad -> shoreline (verify against imagery)
 
 [site.viewpoint]            # ground view of the time panel ("(Aussicht)"); values may be refined by hand later
-name = "Banana Creek (LC-39 Gantry)"
 latitude_deg = 28.59552     # [E] LC-39 Observation Gantry on Banana Creek (KSC launch viewing): OpenStreetMap
 longitude_deg = -80.61789   # (28.5955175, -80.6178890); ~5.5 km NW of the pad, matches KSC's "3.4 miles from SLC-40" [S]
                             # (kennedyspacecenter.com "Launch Viewing Locations"). User choice 2026-10-25 over the
@@ -128,7 +122,6 @@ eye_height_m = 18.0         # [E] upper viewing deck of the gantry, ~16 m, not s
 
 [[site]]
 id = "ccsfs_lz40"
-name = "Landezone LZ-40"
 kind = "landing_zone"       # Falcon first stages land here (first landing Crew-12, 2026-02-13)
 latitude_deg = 28.56194     # [E] east of the SLC-40 pad inside the complex (FAA EA 2025: "a single LZ east of SLC-40");
 longitude_deg = -80.57370   # [E] ~340 m east of the pad (verify against imagery)
@@ -142,7 +135,6 @@ direction_deg = 90.0        # [E]
 shoreline_distance_m = 650.0  # [E] (verify against imagery)
 
 [site.viewpoint]            # the same Banana Creek viewpoint as SLC-40 (see there), looking at LZ-40
-name = "Banana Creek (LC-39 Gantry)"
 latitude_deg = 28.59552     # [E] OpenStreetMap; ~5.7 km NW of the landing zone
 longitude_deg = -80.61789
 eye_height_m = 18.0         # [E] see SLC-40

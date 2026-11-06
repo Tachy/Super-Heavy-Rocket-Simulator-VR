@@ -132,7 +132,7 @@ TEST_CASE("Hot staging: the ship lights while joined and separates at thrust; th
     REQUIRE(separation);
     REQUIRE(ignition);
     CHECK(ignition->epoch == meco->epoch);  // the ship lights in the MECO's tick, joined
-    CHECK(ignition->body_name == "Starship Block 3");
+    CHECK(ignition->body_name_key == "vehicle.starship_block3.stage.ship.display_name");
     // separated as soon as the ship's engines are at thrust: after their start-up, at most one tick later
     double startup_s = 0.0;
     for (const auto& e : session.body(ship).vehicle().stages().front().engines) {

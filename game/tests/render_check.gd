@@ -1215,7 +1215,7 @@ func _print_lunar_placement(world: World) -> void:
 	var horizontal_m := site_fixed.normalized().cross(cg_fixed.normalized()).length() * site_fixed.length()
 	print("render_check: lunar CG at %.5f, %.5f: %.2f m above the drawn surface (session altitude_terrain_m %.2f), "
 			% [ll.x, ll.y, cg_fixed.length() - World.MOON_RADIUS_M - surface_m, sim.telemetry(index)["altitude_terrain_m"]]
-			+ "%.1f m from the site %s" % [horizontal_m, site["name"]])
+			+ "%.1f m from the site %s" % [horizontal_m, I18n.text("site.%s.name" % site["id"])])
 
 
 # Ground view at --lat / --lon on the Earth or (--body=moon) the Moon; --height defaults to the core's surface there
