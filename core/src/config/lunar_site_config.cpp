@@ -1,6 +1,8 @@
 #include "starsim/config/lunar_site_config.hpp"
 
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <utility>
@@ -35,11 +37,21 @@ LunarSiteConfig parse_site(const detail::Document& doc, const toml::table& t,
                         doc.number(t, "longitude_deg") * constants::deg_to_rad);
 }
 
-// "%.2f" of a value rounded to 0.01 deg, without a "-0.00".
-std::string hundredths(double deg) {
+// Integer hundredths of a degree (the same rounding as the tile cache key).
+long long to_hundredths(double deg) { return std::llround(deg * 100.0); }
+
+// Signed integer hundredths as "[-]D.DD"; an integer has no "-0.00".
+std::string format_hundredths(long long h) {
     char text[32];
-    std::snprintf(text, sizeof text, "%.2f", deg);
-    return std::string(text) == "-0.00" ? "0.00" : text;
+    std::snprintf(text, sizeof text, "%s%lld.%02lld", h < 0 ? "-" : "", std::llabs(h) / 100, std::llabs(h) % 100);
+    return text;
+}
+
+// Longitude: wrapped into [-18000, 18000) hundredths (east positive), so one place has one id.
+long long wrap_longitude_hundredths(long long h) {
+    constexpr long long full = 36000;
+    const long long m = ((h + full / 2) % full + full) % full;
+    return m - full / 2;
 }
 
 [[noreturn]] void missing(const std::filesystem::path& path) {
@@ -62,8 +74,8 @@ std::vector<LunarSiteConfig> load_lunar_sites(const std::filesystem::path& confi
 LunarSiteConfig lunar_site_at(const std::vector<LunarTerrainProduct>& products, double latitude_rad,
                               double longitude_rad) {
     return resolve_site(products,
-                        "site_" + hundredths(latitude_rad * constants::rad_to_deg) + "_" +
-                            hundredths(longitude_rad * constants::rad_to_deg),
+                        "site_" + format_hundredths(to_hundredths(latitude_rad * constants::rad_to_deg)) + "_" +
+                            format_hundredths(wrap_longitude_hundredths(to_hundredths(longitude_rad * constants::rad_to_deg))),
                         latitude_rad, longitude_rad);
 }
 

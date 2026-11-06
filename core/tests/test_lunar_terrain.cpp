@@ -217,6 +217,17 @@ TEST_CASE("free coordinates resolve like presets and get a coordinate id", "[sim
     CHECK(config::lunar_site_at(STARSIM_CONFIG_DIR, -0.001 * deg, 0.0).id == "site_0.00_0.00");
 }
 
+TEST_CASE("free coordinate ids wrap the longitude into [-180, 180) hundredths", "[sim][lunar][terrain][config]") {
+    const auto id = [](double lat_deg, double lon_deg) {
+        return config::lunar_site_at(STARSIM_CONFIG_DIR, lat_deg * deg, lon_deg * deg).id;
+    };
+    CHECK(id(-30.0, -170.0) == "site_-30.00_-170.00");
+    CHECK(id(-30.0, 190.0) == id(-30.0, -170.0));
+    CHECK(id(10.0, 359.999) == "site_10.00_0.00");
+    CHECK(id(10.0, -0.001) == "site_10.00_0.00");
+    CHECK(id(-0.001, 180.0) == "site_0.00_-180.00");
+}
+
 TEST_CASE("free coordinates without a cached tile raise data.lunar_site_tile_missing", "[sim][lunar][terrain][data]") {
     if (!std::filesystem::exists(std::filesystem::path(STARSIM_DATA_DIR) / "terrain" / "ldem_64.toml")) {
         SKIP("LDEM_64 not installed");
