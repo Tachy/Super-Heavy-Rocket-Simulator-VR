@@ -266,6 +266,18 @@ on top of that relief.
   bit": serial against 3 and 22 threads, each on a fresh memo, point 60 m off / refused). `check_hazards` is pure;
   the contact cache copies node values under its lock, computes missing nodes outside it and keeps rock cells alive by
   `shared_ptr`, the crater memos are per thread - no shared mutable state outside the locks.
+- Asynchronous search (follow-up U-7, 2026-11-06): `mission::select_touchdown_point_async(shared surface, lat, lon,
+  azimuths, footprint, p, limits)` (`mission/touchdown_search.hpp`) runs the search for each azimuth in turn on a
+  `std::async` thread and gives the first point - the synchronous point bit for bit. It holds the surface by
+  `shared_ptr` and copies its parameters; it touches only the surface (no CSPICE, no session); the future's destructor
+  waits for it. The mission start uses it: `sim::begin_lunar_landing_mission` places the HLS, starts the search over
+  both polar approach directions and returns a `sim::DeferredMissionStart` (status `"Landeplatz wird geprüft"`,
+  `poll` / `wait`; `sim::start_mission_deferred` dispatches, `start_mission` = deferred + wait); LOLA only (detail
+  off) is decided at once. `FlightSim.start_mission` posts it as a deferred command that holds the session
+  (`SessionRunner::post_deferred(..., hold_session = true)`: no advance, no pilot input until the outcome) and puts
+  the status into `autopilot_status()["mission_start_status"]` until the outcome; `flight_controller.gd` shows it as
+  the event line. The refuelling continuation (`continue_lunar_landing_mission`, a leg inside the flight) and the
+  descent planner in the LLO stay synchronous (the memo makes them cheap after the start's check).
 - Limits from the vehicle config (`mission::touchdown_hazard_limits(StageConfig)`, [D]): `foot_pad_radius_m` (HLS
   1.0 m); `max_foot_step_m` = `stroke_m` (0.6 m) - a conservative bound on the hanging feet and on the tilt to a
   third foot, not crush absorption: statically no core crushes (4.5 MN per leg against ~0.5 MN lunar weight, 6-9 mm
@@ -781,6 +793,11 @@ on top of that relief.
 - `core/include/starsim/mission/lunar_descent.hpp`, `core/src/mission/lunar_touchdown.cpp`: `TouchdownHazardLimits`,
   `touchdown_hazard_limits`, `touchdown_rest_planes`, the hazard memo, the hazard-checking `select_touchdown_point` overload, `TouchdownPoint::max_foot_step_m` /
   `min_bell_clearance_m`; `LunarDescentPlanner::plan` overload on the composed surface.
+- U-7: `core/include/starsim/mission/touchdown_search.hpp` (`select_touchdown_point_async`);
+  `sim::DeferredMissionStart` / `start_mission_deferred` (`sim/mission_start.hpp`), `begin_lunar_landing_mission`,
+  `touchdown_check_status` (`sim/lunar_landing_mission.hpp`); `SessionRunner::post_deferred(..., hold_session)`;
+  `FlightSession::moon_surface_shared()`; bindings `FlightSim::post_deferred` / `mission_started`,
+  `SnapshotContext::mission_start_status`; `game/vehicle/flight_controller.gd` `_show_mission_start_status`.
 - Task 11: `LunarRocks::rocks_in_region` (`max_region_descent` 10), `rock_statistical_cover`, the
   `earth_elevation_rad` and `geometry_shadows_statistical` arguments of `unresolved_light_factors`
   (`environment/unresolved_shading`); bindings `StarsimCore.moon_rocks_in_node`,
@@ -978,6 +995,13 @@ on top of that relief.
   between the samples; detail off gives the LOLA point bit for bit at IM-2 (both approach directions); IM-2 with full
   detail: the target moves 28.3 m (slope, step and clearance with the Task 17 templates: "Latest full runs" below),
   111-179 ms cold, 0.2 ms for the second approach direction (memo). Hidden `[.touchdown_worst]`: the refused-site times above.
+  The asynchronous search (U-7) gives the synchronous point bit for bit (the rock case, 60 m off) and refuses the
+  refused site (bell clearance -1 m), each on a fresh memo; a null surface throws.
+- `[sim][lunar][mission]` (`test_lunar_landing_mission.cpp`, U-7): the deferred `hls_lunar_llo` start is pending with
+  status "Landeplatz wird geprüft", the HLS already placed, and its poll gives the synchronous start (same refusal /
+  plan, epoch, lunar step, TLI delta-v). `[session_runner]`: a holding deferred command keeps the session's epoch
+  (no chunk, input waiting) until its poll is done, then the session reaches its target. Smoke test: the
+  `hls_lunar_llo` start shows the status in `autopilot_status()` while it runs and clears it with the outcome.
 - `[contact][legs]` (`test_landing_legs.cpp`): stick-slip friction - an upright HLS (translation only) on a 9 deg plane
   in lunar gravity does not creep (< 1 mm in 20 s; the regularised law crept 0.52 m at 2.6 cm/s); on 35 deg (above
   the 31 deg friction angle) it slides at g (sin - mu cos) within 10 %.
@@ -1385,25 +1409,33 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   i7-13700K, 22 threads: 15.8 s when every candidate fails at its first roll (serial 168.9 s), 29.5 s worst case
   (every candidate through the full roll sweep and the base check; serial 250-290 s), 0.1-0.2 s for the next call
   from the memo. Per check the threads take ~2x the serial time (hyper-threads and E-cores), so the speed-up is
-  ~10x. Synchronous at the mission start; no budget cap (a cap could refuse a site whose safe spot lies farther out).
-  The worst case is over the 20 s target: `docs/known-issues.md`.
+  ~10x. No budget cap (a cap could refuse a site whose safe spot lies farther out). Since follow-up U-7 the mission
+  start runs it on a background thread (game responsive, status line "Landeplatz wird geprüft"; "Asynchronous
+  search" above), so the worst case is a wait with a status, no longer a stall; the time itself is unchanged.
 - No terminal re-targeting: after a dispersion the descent flies to the planned point; a live re-selection would call
   the same `select_touchdown_point` on the live state (spec: re-plan from flight data) - not built.
 - The roll at touchdown is free, so every roll must be safe (conservative); a roll-controlled touchdown could pick the
   roll that clears the rocks.
 - Lunar landing campaign on the composed surface (`[lunar_campaign][slow]`): 20 / 21 within the 1 m gate since the Task 12
-  head; seed 14 (spot 307 / 667 m, slope 8.0 deg, the steepest of the campaign) lands 1.52 m off although its first
-  contact is 0.02 m off at 0.002 m/s lateral (Task 13: `STARSIM_LUNAR_CASE=14`, 10 s): the same post-contact footprint
-  motion as seeds 5 / 17 below, growing with the slope (0.89-0.91 m at 5.1-5.3 deg, 1.52 m at 8.0 deg). Not a clear
-  defect without a trace of the foot slip; kept red and known (known-issues). The guidance releases its RCS attitude
-  hold at the first contact and the leg friction is Coulomb stick-slip (`contact::leg_contact`; history: the two-foot
-  stance before Task 5 fix round 1).
-  The 0.89 / 0.91 m of seeds 5 / 17 (slopes 5.1 / 5.3 deg) arise after the first contact, not in the guidance: at
-  first contact the footprint centre is 0.02 m off (lateral 0.009 / 0.006 m/s; `LunarTouchdown::first_contact_offset_m`,
-  printed by the campaign). Trace of seed 5 (200 Hz): the offset stays <= 0.1 m while the hull tips onto the downhill
-  feet up to ~5 deg (2.3 s), grows to 0.89 m while it overshoots to 7.8 deg and swings back (2.3-7.4 s), then stays
-  constant while the hull rocks 3.2-5.7 deg for ~15 s. Mechanism (foot slip during the tip vs. leg stroke) not traced:
-  open point.
+  head; seed 14 (spot 307 / 667 m, slope 8.0 deg - the planner's slope limit, the steepest of the campaign) lands
+  1.52 m off although its first contact is 0.02 m off at 0.002 m/s lateral. Every seed's first contact is 0.02-0.03 m
+  off; the settled offsets (2026-11-06 run) are 0.03-0.29 m (1-7), 0.03-0.68 m + 1.52 m (8-14), 0.16-0.85 m (15-21),
+  loosely growing with the slope (seeds 16 / 19: 0.85 m at 3.9 / 6.7 deg, seed 4: 0.09 m at 5.8 deg).
+  Mechanism (follow-up U-8, traced 2026-11-06 on seed 14 with per-tick foot, slip and footprint logs; diagnostics not
+  kept): not foot slip. Engines and RCS go off at the first leg contact (standing decision), which is a single uphill
+  foot; the hull pivots freely about it through the slope angle (CG 17.8 m above the pads, footprint 12 m), lands on
+  the downhill side with ~1.1 m/s at the CG and, as a rocking block does, keeps rotating over the new support
+  (about 45 % of the energy kept; Housner's planar estimate for this geometry 34 %). It overshoots to 13.6 deg on a
+  single downhill foot, and while balanced on that one sticking foot it swings round it like a spherical pendulum
+  (the pivot is 12 m off the hull axis, so gravity's torque has a component about the axis; roll inertia 2.4e6 vs
+  7.4e7 kg m^2): in 4.3 s on one foot with no slip at all the footprint centre moves 1.17 m. Foot slip (Coulomb limit
+  exceeded during impacts) adds ~0.2 m over the whole settle; friction is not the lever.
+  Probes (not kept, seed 14 / 17 / 5): landing thrusters at minimum thrust until three feet touch 1.11 / 0.47 / 0.27 m
+  (constant thrust only scales gravity: the rocking geometry is unchanged); an RCS roll-rate damper 1.35 / 0.49 /
+  0.16 m; crush force 1.0 MN 1.39 / 0.41 / 0.14 m; a commanded touchdown roll 0.50 m (a leg pointing downhill) or
+  1.93 m (an edge downhill) for seed 14 alone - terrain-dependent, no rule. Baseline 1.52 / 0.63 / 0.18 m. Open:
+  a user decision (follow-up U-8 report: gate at the first contact plus a settle bound, a controlled settling law
+  with the landing thrusters, or a slope limit from the settle physics).
 - Two Moon surfaces in one tick: the body's own ground contact (`FlightBody::resolve_ground_contact` via
   `ReferenceBody`) uses the full-detail point surface (relief at every point, rocks >= 1 cm, exact `rock_top`, normal
   over +-1 m, ~13 / ~50 us), the legs and base ring the contact surface (8 cm lattice, rocks >= 5 cm, interpolated

@@ -1,8 +1,12 @@
 #include "starsim/sim/lunar_landing_mission.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <future>
 #include <memory>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 #include "starsim/config/lunar_site_config.hpp"
 #include "starsim/gnc/lunar_ascent_guidance.hpp"
@@ -10,6 +14,7 @@
 #include "starsim/mission/lunar_descent.hpp"
 #include "starsim/mission/lunar_transfer.hpp"
 #include "starsim/mission/nrho_reference.hpp"
+#include "starsim/mission/touchdown_search.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/lunar_site.hpp"
 #include "starsim/sim/terrain_cache.hpp"
@@ -59,10 +64,9 @@ PlacedSite place(FlightSession& session, const config::LunarLandingMission& m, c
     return placed;
 }
 
-// The mission from the controlled body as it is (after the placement, or the refuelled HLS): touchdown point,
-// outbound plan, budget, legs.
-MissionStart plan_from_live_state(FlightSession& session, const config::LunarLandingMission& m, time::Epoch epoch,
-                                  const PlacedSite& placed) {
+// After the touchdown check (`reachable`: a point was found): outbound plan, budget, legs.
+MissionStart plan_after_touchdown_check(FlightSession& session, const config::LunarLandingMission& m, time::Epoch epoch,
+                                        bool reachable) {
     MissionStart s;
     s.kind = config::MissionKind::LunarLanding;
     s.epoch = epoch;
@@ -74,22 +78,6 @@ MissionStart plan_from_live_state(FlightSession& session, const config::LunarLan
     };
     const auto setup = lunar_landing_setup(m);
     const auto& v = session.body(session.controlled_index()).vehicle();
-    // A touchdown point within the slope limit for the approach of a polar pass (either direction).
-    const auto& stage = v.stages().front().config;
-    const double footprint_m = stage.landing_legs.footprint_radius_m;
-    // On the session's composed surface (its fidelity flags) with the hazard check, as the descent planner selects.
-    const auto* surface = dynamic_cast<const environment::DetailedLunarTerrain*>(session.moon_surface());
-    const bool hazards = surface && surface->detail_on() && stage.landing_legs.foot_pad_radius_m > 0.0;
-    bool reachable = false;
-    for (const double azimuth : {0.0, constants::pi}) {
-        const double lat = placed.site.config.latitude_rad, lon = placed.site.config.longitude_rad;
-        reachable = reachable ||
-                    (hazards ? mission::select_touchdown_point(*surface, lat, lon, azimuth, footprint_m, setup.descent,
-                                                               mission::touchdown_hazard_limits(stage))
-                             : mission::select_touchdown_point(*placed.terrain, lat, lon, azimuth, footprint_m,
-                                                               setup.descent))
-                        .has_value();
-    }
     if (!reachable) return refuse("Mission nicht durchführbar: kein Landepunkt innerhalb der Hangneigungsgrenze");
     const auto outbound = lunar_outbound_parameters(m, session.gravity(), session.ephemeris(), epoch);
     if (!session.plan_lunar_outbound(outbound)) return refuse(session.lunar_status());
@@ -107,6 +95,48 @@ MissionStart plan_from_live_state(FlightSession& session, const config::LunarLan
     session.set_lunar_mission(std::move(sequence));
     s.return_planned = true;
     return s;
+}
+
+// The mission from the controlled body as it is (after the placement, or the refuelled HLS): a touchdown point within
+// the slope limit for the approach of a polar pass (either direction), then plan_after_touchdown_check. On the session's
+// composed surface (its fidelity flags) with the hazard check, as the descent planner selects - that search runs on a
+// background thread (a refused site checks every candidate: up to ~30 s); LOLA alone (milliseconds) is decided at once.
+DeferredMissionStart plan_from_live_state(FlightSession& session, const config::LunarLandingMission& m,
+                                          time::Epoch epoch, const PlacedSite& placed) {
+    const auto setup = lunar_landing_setup(m);
+    const auto& stage = session.body(session.controlled_index()).vehicle().stages().front().config;
+    const double footprint_m = stage.landing_legs.footprint_radius_m;
+    const double lat = placed.site.config.latitude_rad, lon = placed.site.config.longitude_rad;
+    const std::vector<double> azimuths{0.0, constants::pi};
+    auto surface = std::dynamic_pointer_cast<const environment::DetailedLunarTerrain>(session.moon_surface_shared());
+    const bool hazards = surface && surface->detail_on() && stage.landing_legs.foot_pad_radius_m > 0.0;
+    if (!hazards) {
+        bool reachable = false;
+        for (const double azimuth : azimuths) {
+            reachable = reachable || mission::select_touchdown_point(*placed.terrain, lat, lon, azimuth, footprint_m,
+                                                                     setup.descent)
+                                         .has_value();
+        }
+        return {plan_after_touchdown_check(session, m, epoch, reachable)};
+    }
+    auto search = std::make_shared<std::shared_future<std::optional<mission::TouchdownPoint>>>(
+        mission::select_touchdown_point_async(std::move(surface), lat, lon, azimuths, footprint_m, setup.descent,
+                                              mission::touchdown_hazard_limits(stage))
+            .share());
+    DeferredMissionStart d;
+    d.status = touchdown_check_status;
+    d.poll = [search, m, epoch](FlightSession& f) -> std::optional<MissionStart> {
+        if (search->wait_for(std::chrono::seconds(0)) != std::future_status::ready) return std::nullopt;
+        return plan_after_touchdown_check(f, m, epoch, search->get().has_value());
+    };
+    d.wait = [search, m, epoch](FlightSession& f) {
+        return plan_after_touchdown_check(f, m, epoch, search->get().has_value());
+    };
+    return d;
+}
+
+MissionStart decided_now(FlightSession& session, DeferredMissionStart start) {
+    return start.done ? std::move(*start.done) : start.wait(session);
 }
 
 }  // namespace
@@ -171,9 +201,9 @@ mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& m,
                                  legs);
 }
 
-MissionStart start_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,
-                                         const config::LunarLandingMission& m, time::Epoch epoch,
-                                         const config::VehicleConfig* vehicle) {
+DeferredMissionStart begin_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,
+                                                 const config::LunarLandingMission& m, time::Epoch epoch,
+                                                 const config::VehicleConfig* vehicle) {
     PlacedSite placed;
     try {
         placed = place(session, m, config_dir, epoch, vehicle);
@@ -183,9 +213,15 @@ MissionStart start_lunar_landing_mission(FlightSession& session, const std::file
         s.kind = config::MissionKind::LunarLanding;
         s.epoch = epoch;
         s.refusal = e.what();
-        return s;
+        return {s};
     }
     return plan_from_live_state(session, m, epoch, placed);
+}
+
+MissionStart start_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,
+                                         const config::LunarLandingMission& m, time::Epoch epoch,
+                                         const config::VehicleConfig* vehicle) {
+    return decided_now(session, begin_lunar_landing_mission(session, config_dir, m, epoch, vehicle));
 }
 
 std::optional<math::StateVector> lunar_parking_state(const FlightSession& session, const config::LunarLandingMission& m,
@@ -220,7 +256,8 @@ MissionStart continue_lunar_landing_mission(FlightSession& session, const std::f
         return refuse(e.what());
     }
     set_site(session, placed);
-    return plan_from_live_state(session, m, epoch, placed);
+    // A mission leg inside the flight (refuelling: the HLS after the depot): decided here, on the session's thread.
+    return decided_now(session, plan_from_live_state(session, m, epoch, placed));
 }
 
 mission::LunarOutboundParameters lunar_outbound_parameters(const config::LunarLandingMission& m,

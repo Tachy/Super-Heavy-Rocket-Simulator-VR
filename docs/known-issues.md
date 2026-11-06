@@ -272,14 +272,16 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - Refused landing site at mission start: the touchdown search checks every candidate of the 1 km search (IM-2:
   7,449) before it refuses. Parallel ring-wise search (i7-13700K, 22 threads): 15.8 s when every candidate fails at
   its first roll, 29.5 s worst case (every candidate through all rolls and the base check) - over the 20 s target
-  (serial: 169 s / 250-290 s). Synchronous; no cap by ruling (a cap could refuse a site that has a safe point). Only
-  IM-2 ships (136 ms, it finds a point 28.3 m off). Further options: an asynchronous check with a status line
-  ("Landeplatz wird geprüft"), or a cheaper roll sweep.
-- Lunar campaign seeds 5 / 17 land 0.89 / 0.91 m off (gate 1 m) although the first contact is 0.02 m off: the
-  footprint moves while the hull tips onto the downhill feet and overshoots (5.1-5.3 deg slopes;
-  `docs/subsystems/moon-surface.md`). Cause (foot slip during the tip vs. leg stroke) not traced. Seed 14 (8.0 deg, the
-  campaign's steepest spot) exceeds the gate the same way: 1.52 m with 0.02 m at first contact - the 8-14 campaign case
-  is red since the Task 12 head (Task 13: diagnosed as this post-contact slide, kept red and known, not a fitted fix).
+  (serial: 169 s / 250-290 s). No cap by ruling (a cap could refuse a site that has a safe point). Since follow-up
+  U-7 (2026-11-06) it runs on a background thread at the mission start (game responsive, status line "Landeplatz wird
+  geprüft"); the wait itself is unchanged. The refuelling continuation (`continue_lunar_landing_mission`, inside
+  the flight) still checks synchronously on the simulation thread. Only IM-2 ships (136 ms, a point 28.3 m off).
+- Lunar campaign seed 14 (8.0 deg, the planner's slope limit) lands 1.52 m off (gate 1 m) with 0.02 m at first
+  contact - the 8-14 campaign case is red since the Task 12 head; seeds 16 / 19 settle 0.85 m off. Traced in follow-up
+  U-8 (2026-11-06, `docs/subsystems/moon-surface.md` open points): not foot slip but rigid-body rocking after the
+  engines-off first contact on one uphill foot - the hull pivots through the slope, overshoots onto a single downhill
+  foot and swings round that sticking foot (1.17 m of the 1.52 m with no slip). No physics defect found; kept red
+  pending a user decision (gate definition, a controlled settling law, or the slope limit), not a fitted fix.
 
 ## Moon procedural surface plan, Task 16: Sun shadows on the Earth (2026-11-05)
 - The Earth's near-field shadow map covers 500 m-4 km of view depth around the eye (terrain-rendering.md "Near-field Sun

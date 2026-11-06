@@ -51,6 +51,17 @@ MissionStart start_lunar_landing_mission(FlightSession& session, const std::file
                                          const config::LunarLandingMission& mission, time::Epoch epoch,
                                          const config::VehicleConfig* vehicle = nullptr);
 
+// Status (UI, German) of a lunar landing start while its touchdown search runs.
+inline constexpr const char* touchdown_check_status = "Landeplatz wird geprüft";
+
+// start_lunar_landing_mission with the touchdown search on a background thread (follow-up U-7; on the composed surface
+// with the hazard check - LOLA alone is decided at once): the vehicle is placed and the search started, then the
+// DeferredMissionStart's poll (or wait) plans the rest from the search's result - the same start as the synchronous
+// call. Status touchdown_check_status. A failed placement is decided at once.
+DeferredMissionStart begin_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,
+                                                 const config::LunarLandingMission& mission, time::Epoch epoch,
+                                                 const config::VehicleConfig* vehicle = nullptr);
+
 // The mission's circular parking state at `epoch` (GCRF) for `inclination_rad`: the plane through the Moon at arrival
 // (epoch + flight_time_s), as the placement uses it; std::nullopt when the Moon's declination exceeds the inclination.
 std::optional<math::StateVector> lunar_parking_state(const FlightSession& session, const config::LunarLandingMission& mission,

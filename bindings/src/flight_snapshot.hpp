@@ -44,6 +44,10 @@ struct SnapshotContext {
     // clamped stack, start_mission of a pad launch - also before the session holds a flight): autopilot_status()
     // ["planning"] while the command runs (ascent trajectory and staging, Task 5; final review item 2).
     bool planning = false;
+    // A mission start whose work runs on a background thread (follow-up U-7: the lunar landing's touchdown search):
+    // its German status ("Landeplatz wird geprüft") in autopilot_status()["mission_start_status"] until the outcome;
+    // "" otherwise.
+    godot::String mission_start_status;
 };
 
 // Everything the main thread reads, built on the simulation thread after every command and chunk (immutable once

@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 #include <catch2/catch_approx.hpp>
@@ -24,6 +25,7 @@
 #include "starsim/environment/lunar_terrain.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/mission/lunar_descent.hpp"
+#include "starsim/mission/touchdown_search.hpp"
 #include "starsim/sim/terrain_cache.hpp"
 
 using namespace starsim;
@@ -348,6 +350,56 @@ TEST_CASE("The parallel touchdown search picks the serial point bit for bit", "[
                   std::bit_cast<std::uint64_t>(serial->min_bell_clearance_m));
         }
     }
+}
+
+// Follow-up U-7: the search on a background thread gives the synchronous point bit for bit (each run on a fresh memo,
+// so both really check the candidates), the first azimuth's point when it has one, and std::nullopt for a refused site.
+TEST_CASE("The asynchronous touchdown search gives the synchronous point", "[moon_surface][lunar][mission]") {
+    const auto s = flat_surface();
+    const auto base = mission::touchdown_hazard_limits(hls_stage());
+    const auto rocks = s->rocks().rocks_near(direction(site_lat, site_lon), 400.0, 1.0);
+    REQUIRE_FALSE(rocks.empty());
+    const auto proud = [](const environment::Rock& r) { return r.axes_m.z - r.burial_m; };
+    const auto rock = *std::max_element(rocks.begin(), rocks.end(),
+                                        [&](const auto& a, const auto& b) { return proud(a) < proud(b); });
+    const double target_lat = std::asin(rock.base_unit.z);
+    const double target_lon = std::atan2(rock.base_unit.y, rock.base_unit.x) + footprint_m / (R * std::cos(target_lat));
+    const auto fresh_memo = [&](const mission::TouchdownHazardLimits& h) {
+        auto other = h;
+        other.base_radius_m += 1e-3;  // another memo context: the next search checks every candidate again
+        mission::LunarDescentParameters tiny;
+        tiny.touchdown_search_radius_m = 0.0;
+        (void)mission::select_touchdown_point(*s, target_lat, target_lon, 0.0, footprint_m, tiny, other);
+    };
+    for (const bool refused : {false, true}) {
+        auto h = base;
+        if (refused) h.bell_clearance_m = -1.0;  // every candidate fails after its full roll sweep
+        mission::LunarDescentParameters p;
+        p.touchdown_search_radius_m = refused ? 100.0 : 200.0;
+        fresh_memo(h);
+        auto future = mission::select_touchdown_point_async(s, target_lat, target_lon, {0.0, 180.0 * deg}, footprint_m,
+                                                            p, h);
+        const auto async = future.get();
+        fresh_memo(h);
+        const auto sync = mission::select_touchdown_point(*s, target_lat, target_lon, 0.0, footprint_m, p, h);
+        CAPTURE(refused);
+        std::printf("[touchdown_hazards] asynchronous search (%s): %s\n", refused ? "refused site" : "rock",
+                    async ? "found" : "refused");
+        REQUIRE(async.has_value() == sync.has_value());
+        CHECK(async.has_value() == !refused);
+        if (!sync) continue;
+        CHECK(std::bit_cast<std::uint64_t>(async->latitude_rad) == std::bit_cast<std::uint64_t>(sync->latitude_rad));
+        CHECK(std::bit_cast<std::uint64_t>(async->longitude_rad) == std::bit_cast<std::uint64_t>(sync->longitude_rad));
+        CHECK(std::bit_cast<std::uint64_t>(async->height_m) == std::bit_cast<std::uint64_t>(sync->height_m));
+        CHECK(std::bit_cast<std::uint64_t>(async->slope_rad) == std::bit_cast<std::uint64_t>(sync->slope_rad));
+        CHECK(async->offset_m == sync->offset_m);
+        CHECK(std::bit_cast<std::uint64_t>(async->max_foot_step_m) == std::bit_cast<std::uint64_t>(sync->max_foot_step_m));
+        CHECK(std::bit_cast<std::uint64_t>(async->min_bell_clearance_m) ==
+              std::bit_cast<std::uint64_t>(sync->min_bell_clearance_m));
+    }
+    CHECK_THROWS_AS(mission::select_touchdown_point_async(nullptr, target_lat, target_lon, {0.0}, footprint_m,
+                                                          mission::LunarDescentParameters{}, base),
+                    std::invalid_argument);
 }
 
 TEST_CASE("Detail off selects the same point as before", "[moon_surface][lunar][mission][terrain][data]") {

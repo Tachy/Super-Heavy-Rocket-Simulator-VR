@@ -50,12 +50,12 @@ std::uint64_t SessionRunner::post(Command command) {
     });
 }
 
-std::uint64_t SessionRunner::post_deferred(DeferredCommand command) {
+std::uint64_t SessionRunner::post_deferred(DeferredCommand command, bool hold_session) {
     std::uint64_t id = 0;
     {
         std::lock_guard lock(mutex_);
         id = next_id_++;
-        queue_.emplace_back(id, std::move(command));
+        queue_.push_back({id, std::move(command), hold_session});
         results_[id] = Result{};
         while (results_.size() > max_kept_results) results_.erase(results_.begin());
     }
@@ -64,6 +64,7 @@ std::uint64_t SessionRunner::post_deferred(DeferredCommand command) {
 }
 
 bool SessionRunner::chunk_due_locked() const {
+    if (deferred_ && deferred_holds_) return false;  // the running command holds the session
     return latest_ || (active_ && !stalled_ && !target_reached_locked());
 }
 
@@ -104,7 +105,7 @@ void SessionRunner::run() {
 }
 
 void SessionRunner::run_command(std::unique_lock<std::mutex>& lock) {
-    auto [id, command] = std::move(queue_.front());
+    auto [id, command, hold_session] = std::move(queue_.front());
     queue_.pop_front();
     running_id_ = id;
     stalled_ = false;  // a command may have changed what made the advance throw
@@ -127,6 +128,7 @@ void SessionRunner::run_command(std::unique_lock<std::mutex>& lock) {
     if (observer_error) set_error_locked(*observer_error);
     if (poll) {
         deferred_.emplace(id, std::move(poll));  // running_id_ stays: the command goes on
+        deferred_holds_ = hold_session;
         return;
     }
     finish_locked(id, r);
@@ -154,6 +156,7 @@ void SessionRunner::poll_deferred(std::unique_lock<std::mutex>& lock) {
     lock.lock();
     if (!done) return;
     deferred_.reset();
+    deferred_holds_ = false;
     active_ = active;
     reached_ = now;
     if (observer_error) set_error_locked(*observer_error);

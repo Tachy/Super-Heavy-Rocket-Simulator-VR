@@ -45,7 +45,9 @@ public:
     // counts on. An empty poll: done at once (a plain command). A poll's exception ends it like the command's.
     using Poll = std::function<bool(FlightSession&)>;
     using DeferredCommand = std::function<Poll(FlightSession&)>;
-    std::uint64_t post_deferred(DeferredCommand command);
+    // hold_session (follow-up U-7: a mission start whose touchdown search runs on a background thread): while its poll
+    // runs the session does not advance and the pilot input waits - the command owns the session until it is done.
+    std::uint64_t post_deferred(DeferredCommand command, bool hold_session = false);
     // Overwrites the single "latest" slot (pilot input): run once before the next chunk; older values are dropped.
     void set_latest(Command command);
     // The session advances towards `target` whenever no command waits. A new target replaces the old one, also an
@@ -84,8 +86,14 @@ private:
     Observer observer_;
     mutable std::mutex mutex_;
     mutable std::condition_variable wake_, idle_cv_;
-    std::deque<std::pair<std::uint64_t, DeferredCommand>> queue_;
+    struct Queued {
+        std::uint64_t id;
+        DeferredCommand command;
+        bool hold_session;
+    };
+    std::deque<Queued> queue_;
     std::optional<std::pair<std::uint64_t, Poll>> deferred_;  // the running deferred command (running_id_ is its id)
+    bool deferred_holds_ = false;  // the running deferred command holds the session (no chunks)
     std::optional<Command> latest_;
     std::optional<time::Epoch> target_;
     time::Epoch reached_;

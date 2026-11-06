@@ -85,6 +85,40 @@ TEST_CASE("runner flies on while a deferred command plans, later commands wait",
     CHECK(order == std::vector<int>{1, 2, 3});
 }
 
+// Follow-up U-7: a deferred command that holds the session (a mission start whose touchdown search runs on a background
+// thread) keeps the session where it stands while its poll runs, input included; afterwards the session goes on.
+TEST_CASE("runner holds the session while a holding deferred command runs", "[session_runner]") {
+    RunnerFixture f;
+    f.runner.post([](sim::FlightSession& s) { s.launch_from_pad("starship_block3", starbase, 0.0, t0); });
+    REQUIRE(f.runner.wait_idle(30.0));
+    std::atomic<bool> searched = false;
+    std::atomic<int> polls = 0;
+    std::atomic<double> epoch_at_poll_s = 0.0;
+    const auto start = f.runner.post_deferred(
+        [&](sim::FlightSession&) -> sim::SessionRunner::Poll {
+            return [&](sim::FlightSession& s) {
+                ++polls;
+                epoch_at_poll_s = s.epoch().tdb_seconds_past_j2000();
+                return searched.load();
+            };
+        },
+        true);
+    const double before = f.last_epoch_s;
+    f.runner.set_target(t0 + 2.0);
+    f.runner.set_latest([](sim::FlightSession&) {});
+    std::this_thread::sleep_for(300ms);
+    CHECK_FALSE(f.runner.result(start).done);
+    CHECK(polls > 1);
+    CHECK(f.last_epoch_s == before);  // held: no chunk, no observer call with a later epoch
+    CHECK(epoch_at_poll_s == before);
+    CHECK_FALSE(f.runner.idle());
+    searched = true;
+    REQUIRE(f.runner.wait_idle(30.0));
+    CHECK(f.runner.result(start).done);
+    CHECK(f.last_epoch_s > before);  // released: the session reached its target
+    CHECK(f.last_epoch_s > (t0 + 2.0 - sim::FlightSession::tick_s).tdb_seconds_past_j2000());
+}
+
 TEST_CASE("runner commands keep their order and report exceptions", "[session_runner]") {
     RunnerFixture f;
     std::vector<int> order;

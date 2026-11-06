@@ -521,12 +521,14 @@ std::shared_ptr<const FlightSnapshot> build_snapshot(const sim::FlightSession& s
     s->moon_terrain = session.moon_terrain_shared();
     // a mission start plans its launch before the session holds the vehicle: the flag also without a flight
     s->autopilot_status["planning"] = context.planning;
+    s->autopilot_status["mission_start_status"] = context.mission_start_status;
     if (!s->active) return s;
     s->mission_time_s = session.mission_time_s();
     s->controlled_index = static_cast<int>(session.controlled_index());
     for (size_t i = 0; i < session.body_count(); ++i) s->bodies.push_back(build_body(session, i));
     s->autopilot_status = autopilot_status(session);
     s->autopilot_status["planning"] = context.planning;
+    s->autopilot_status["mission_start_status"] = context.mission_start_status;
     if (const auto* guidance = session.ascent_guidance()) {
         const math::Vec3 n = guidance->target_plane_normal_gcrf();
         s->has_target_orbit = true;

@@ -263,7 +263,9 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
     beginnt immer zu ihrer eigenen Epoche.
   - Solange der Start läuft (bis knapp eine Minute), steht die Weltuhr still, "Starten" ist gesperrt und darunter
     steht **"Start wird geplant ..."**; das letzte Ereignis zeigt bei Starts von der Rampe "Startvorbereitung: Bahn
-    wird berechnet", sonst "Mission wird gestartet". Eine Ablehnung steht dort als **"Start abgelehnt: <Grund>"**,
+    wird berechnet", sonst "Mission wird gestartet". Bei einer Mondlandung zeigt es, solange der Landeplatz auf der
+    detaillierten Oberfläche geprüft wird (im Hintergrund; ein abgelehnter Platz braucht bis ~30 s), **"Landeplatz
+    wird geprüft"**; das Spiel bleibt dabei bedienbar. Eine Ablehnung steht dort als **"Start abgelehnt: <Grund>"**,
     und der Knopf ist wieder frei; hat der abgelehnte Start schon ein Fahrzeug gesetzt (z. B. eine Mondlandung, deren
     Planung scheitert), geht die Weltuhr zu dessen Epoche.
   `render_check` startet Missionen über `--mission=` direkt (ohne Countdown; `--wait_on_pad` lässt sie auf der Rampe

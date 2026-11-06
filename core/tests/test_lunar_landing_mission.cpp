@@ -1,9 +1,12 @@
 // Mission config lunar_landing: loading, placement in the parking orbit through the Moon's plane, start_mission
 // dispatch, and refusal without a plane.
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
+#include <thread>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -63,6 +66,42 @@ TEST_CASE("start_mission plans the HLS outbound flight", "[sim][lunar][mission]"
     // circular 200 km parking orbit
     const auto& s = session.body(session.controlled_index()).state();
     CHECK_THAT(norm(s.position_gcrf_m) - constants::wgs84_semi_major_axis_m, WithinAbs(200e3, 1.0));
+}
+
+// Follow-up U-7: the start with the touchdown search on a background thread reports its status while the search runs
+// and then gives the synchronous start (the same plan, the same epoch).
+TEST_CASE("The deferred lunar landing start gives the synchronous start", "[sim][lunar][mission]") {
+    test::spice_session();
+    spice::SpiceEphemeris ephemeris;
+    const auto earth = spice::SpiceOrientation::earth();
+    const auto moon = spice::SpiceOrientation::moon_mean_earth();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession deferred_session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon};
+    auto pending = sim::start_mission_deferred(deferred_session, STARSIM_CONFIG_DIR, "hls_lunar_llo", {}, time);
+    REQUIRE_FALSE(pending.done);  // the composed surface with the hazard check: the search runs on its thread
+    CHECK(pending.status == "Landeplatz wird geprüft");
+    REQUIRE(pending.poll);
+    REQUIRE(pending.wait);
+    CHECK(deferred_session.active());  // placed before the search
+    std::optional<sim::MissionStart> deferred;
+    int polls = 0;
+    for (; !deferred && polls < 60000; ++polls) {  // <= 10 min
+        deferred = pending.poll(deferred_session);
+        if (!deferred) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    REQUIRE(deferred);
+    std::printf("[lunar_mission] deferred start: %d polls\n", polls);
+    sim::FlightSession sync_session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon};
+    const auto sync = sim::start_mission(sync_session, STARSIM_CONFIG_DIR, "hls_lunar_llo", {}, time);
+    CAPTURE(deferred->refusal, sync.refusal);
+    CHECK(deferred->return_planned == sync.return_planned);
+    CHECK(deferred->refusal == sync.refusal);
+    CHECK(deferred->epoch.tdb_seconds_past_j2000() == sync.epoch.tdb_seconds_past_j2000());
+    CHECK(deferred_session.lunar_step() == sync_session.lunar_step());
+    REQUIRE(deferred_session.lunar_outbound_plan());
+    REQUIRE(sync_session.lunar_outbound_plan());
+    CHECK(norm(deferred_session.lunar_outbound_plan()->tli.delta_v_gcrf_mps) ==
+          norm(sync_session.lunar_outbound_plan()->tli.delta_v_gcrf_mps));
 }
 
 TEST_CASE("A parking orbit below the Moon's declination is refused", "[sim][lunar][mission]") {

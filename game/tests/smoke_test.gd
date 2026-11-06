@@ -737,7 +737,17 @@ func _check_lunar(config_dir: String, tdb: float) -> bool:
 	var land := FlightSim.new()
 	land.setup(config_dir)
 	var lid: int = land.start_mission("hls_lunar_llo", tdb)
+	# follow-up U-7: the touchdown search runs on a background thread; the snapshot carries its status meanwhile
+	var touchdown_status_seen := false
+	var status_wait := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - status_wait < 120000 and not land.result(lid).get("done", false):
+		if land.autopilot_status().get("mission_start_status", "") == "Landeplatz wird geprüft":
+			touchdown_status_seen = true
+		OS.delay_msec(5)
 	_check(land.wait_idle(120.0) and land.result(lid).get("ok", false), "lunar landing mission starts")
+	_check(touchdown_status_seen, "lunar landing start: \"Landeplatz wird geprüft\" while the touchdown search runs")
+	_check(land.autopilot_status().get("mission_start_status", "x") == "",
+			"lunar landing start: the status is cleared with the outcome")
 	var site: Dictionary = land.lunar_site()
 	_check(site.get("present", false), "landing site present")
 	var ground: Dictionary = land.moon_terrain(site["latitude_deg"], site["longitude_deg"])

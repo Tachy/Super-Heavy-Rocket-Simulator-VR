@@ -161,6 +161,16 @@ func _dispersion_warning() -> String:
 	return " - Achtung: %s" % plan.get("dispersion_note", "nicht gegen alle Streuungen robust")
 
 
+## While a mission start runs: the work the core reports for it (a lunar landing's touchdown search on a background
+## thread: "Landeplatz wird geprüft") becomes the status line until the outcome replaces it (_on_command_finished).
+func _show_mission_start_status() -> void:
+	if _pending_mission.is_empty():
+		return  # the outcome came in this frame
+	var status: String = sim.autopilot_status().get("mission_start_status", "")
+	if status != "":
+		last_event = status
+
+
 ## A mission start posted and not yet finished (the world clock holds meanwhile).
 func mission_pending() -> bool:
 	return not _pending_mission.is_empty()
@@ -186,6 +196,7 @@ func start_pending() -> bool:
 func advance(tdb_s: float, delta: float) -> float:
 	if not _pending_mission.is_empty():
 		sim.advance_to(MISSION_HOLD_TDB_S)  # emits command_finished
+		_show_mission_start_status()
 		return tdb_s
 	if not sim.is_active():
 		_clock_resync = false  # nothing placed: the clock stays

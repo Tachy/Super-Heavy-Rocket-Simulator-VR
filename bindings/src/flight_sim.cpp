@@ -123,6 +123,18 @@ std::uint64_t FlightSim::post_active(const char* name, SessionCommand command) {
 }
 
 std::uint64_t FlightSim::post_deferred_active(const char* name, std::function<SessionPoll(sim::FlightSession&)> command) {
+    return post_deferred(name, [command = std::move(command)](sim::FlightSession& session) -> SessionPoll {
+        if (!session.active()) {
+            return [](sim::FlightSession&) -> std::optional<Outcome> {
+                return Outcome{false, godot::String::utf8("Kein aktiver Flug")};
+            };
+        }
+        return command(session);
+    });
+}
+
+std::uint64_t FlightSim::post_deferred(const char* name, std::function<SessionPoll(sim::FlightSession&)> command,
+                                       bool hold_session) {
     if (!runner_) {
         godot::UtilityFunctions::push_error(godot::String("FlightSim.") + name + ": call setup() first");
         return 0;
@@ -130,10 +142,6 @@ std::uint64_t FlightSim::post_deferred_active(const char* name, std::function<Se
     auto outcome = std::make_shared<Outcome>();
     const auto id = runner_->post_deferred(
         [command = std::move(command), outcome](sim::FlightSession& session) -> sim::SessionRunner::Poll {
-            if (!session.active()) {
-                *outcome = Outcome{false, godot::String::utf8("Kein aktiver Flug")};
-                return {};
-            }
             auto poll = command(session);
             if (auto now = poll(session)) {  // decided at once
                 *outcome = std::move(*now);
@@ -145,7 +153,8 @@ std::uint64_t FlightSim::post_deferred_active(const char* name, std::function<Se
                 *outcome = std::move(*later);
                 return true;
             };
-        });
+        },
+        hold_session);
     commands_[id] = {godot::String(name), outcome};
     while (commands_.size() > max_kept_commands) commands_.erase(commands_.begin());
     return id;
@@ -242,8 +251,10 @@ int64_t FlightSim::launch_from_site(const godot::String& vehicle_id, const godot
 
 int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s, bool wait_on_pad, double countdown_s) {
     const std::string id = mission_id.utf8().get_data();
-    return static_cast<int64_t>(post("start_mission", [this, id, tdb_s, wait_on_pad,
-                                                       countdown_s](sim::FlightSession& session) {
+    // Follow-up U-7: a lunar landing's touchdown search (up to ~30 s for a refused site) runs on a background thread;
+    // the command holds the session meanwhile and the snapshot carries its status ("Landeplatz wird geprüft").
+    return static_cast<int64_t>(post_deferred("start_mission", [this, id, tdb_s, wait_on_pad,
+                                                                countdown_s](sim::FlightSession& session) -> SessionPoll {
         sim::StartOptions options;
         options.wait_on_pad = wait_on_pad;
         options.countdown_s = countdown_s;
@@ -254,24 +265,46 @@ int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s, 
             planning.emplace(context_.planning);
             observe(session, session.epoch());
         }
-        const auto s = sim::start_mission(session, config_dir_, id, epoch(tdb_s), time_, options);
+        context_.mission_start_status = godot::String();
+        auto start = sim::start_mission_deferred(session, config_dir_, id, epoch(tdb_s), time_, options);
         planning.reset();
-        context_.site_id = godot::String::utf8(s.site_id.c_str());
-        context_.mission_display_name = godot::String::utf8(config::mission_display_name(config_dir_, id).c_str());
-        context_.mission_start_tdb_s = s.epoch.tdb_seconds_past_j2000();
-        context_.mission_warnings = godot::Array();
-        std::string joined;
-        for (const auto& w : s.warnings) {
-            context_.mission_warnings.push_back(godot::String::utf8(w.c_str()));
-            joined += (joined.empty() ? "" : "; ") + w;
+        if (start.done) {
+            return [outcome = mission_started(*start.done, id)](sim::FlightSession&) -> std::optional<Outcome> {
+                return outcome;
+            };
         }
-        const bool from_window = s.launch_window && s.launch_window->feasible;
-        context_.iss_liftoff_tdb_s = from_window ? s.launch_window->liftoff.tdb_seconds_past_j2000() : 0.0;
-        context_.iss_separation_tdb_s = from_window ? s.launch_window->separation.tdb_seconds_past_j2000() : 0.0;
-        context_.iss_plane_bias_deg = from_window ? s.launch_window->plane_bias_rad * constants::rad_to_deg : 0.0;
-        if (!s.refusal.empty()) return Outcome{false, godot::String::utf8(s.refusal.c_str())};
-        return Outcome{true, godot::String::utf8(joined.c_str())};
-    }));
+        context_.mission_start_status = godot::String::utf8(start.status.c_str());  // the snapshot after this call
+        return [this, id, poll = std::move(start.poll)](sim::FlightSession& s) -> std::optional<Outcome> {
+            std::optional<sim::MissionStart> later;
+            try {
+                later = poll(s);
+            } catch (...) {
+                context_.mission_start_status = godot::String();
+                throw;
+            }
+            if (!later) return std::nullopt;
+            context_.mission_start_status = godot::String();
+            return mission_started(*later, id);
+        };
+    }, true));
+}
+
+FlightSim::Outcome FlightSim::mission_started(const sim::MissionStart& s, const std::string& id) {
+    context_.site_id = godot::String::utf8(s.site_id.c_str());
+    context_.mission_display_name = godot::String::utf8(config::mission_display_name(config_dir_, id).c_str());
+    context_.mission_start_tdb_s = s.epoch.tdb_seconds_past_j2000();
+    context_.mission_warnings = godot::Array();
+    std::string joined;
+    for (const auto& w : s.warnings) {
+        context_.mission_warnings.push_back(godot::String::utf8(w.c_str()));
+        joined += (joined.empty() ? "" : "; ") + w;
+    }
+    const bool from_window = s.launch_window && s.launch_window->feasible;
+    context_.iss_liftoff_tdb_s = from_window ? s.launch_window->liftoff.tdb_seconds_past_j2000() : 0.0;
+    context_.iss_separation_tdb_s = from_window ? s.launch_window->separation.tdb_seconds_past_j2000() : 0.0;
+    context_.iss_plane_bias_deg = from_window ? s.launch_window->plane_bias_rad * constants::rad_to_deg : 0.0;
+    if (!s.refusal.empty()) return Outcome{false, godot::String::utf8(s.refusal.c_str())};
+    return Outcome{true, godot::String::utf8(joined.c_str())};
 }
 
 int64_t FlightSim::launch_from_pad(const godot::String& vehicle_id, double latitude_deg, double longitude_deg,

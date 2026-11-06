@@ -129,7 +129,9 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25 (the per-session context is kept s
 - Flight: `game/vehicle/flight_controller.gd` (input, pilot actions) drives the C++ `FlightSim`
   (`sim::FlightSession`, 200 Hz); `FlightSim` runs `sim::SessionRunner` (own thread), getters read a snapshot,
   commands return ids (`result(id)`, signal `command_finished`; a deferred command - key R in real-time play - keeps
-  planning on a background thread while the session flies on, `SessionRunner::post_deferred`); lunar missions included (`lunar_state`, `lunar_site`,
+  planning on a background thread while the session flies on, `SessionRunner::post_deferred`; `start_mission` of a lunar
+  landing runs its touchdown search on a background thread with the session held, status in
+  `autopilot_status()["mission_start_status"]`); lunar missions included (`lunar_state`, `lunar_site`,
   `moon_terrain`), ISS missions too (`iss_state`, `rendezvous_plan`, `docking_state`, `station_geometry`,
   `iss_mission`, commands `proximity_*`, `undock`). `vehicle_view.gd` draws stages and plumes; `ui/flight_hud.gd` shows telemetry.
   The world clock waits for the flight sim when its snapshot trails by more than one frame step (`delta * warp`) plus

@@ -794,6 +794,8 @@ public:
     bool moon_rocks() const { return moon_surface_options_.rocks; }
     // The surface the physics uses at the Moon (the composed one per the flags, else the LOLA terrain; nullptr: sphere).
     const environment::Terrain* moon_surface() const { return moon_surface_.get(); }
+    // The same surface, shared (a background search keeps it alive: mission::select_touchdown_point_async).
+    std::shared_ptr<const environment::Terrain> moon_surface_shared() const { return moon_surface_; }
     // Leg landings at a lunar site on its terrain (set_moon_terrain first), tracking bodies within the site's tile.
     void set_lunar_landing_site(const LunarSite& site);
     // The lunar landing site the legs land on (nullptr: none - also after set_moon_terrain or set_landing_surface) and

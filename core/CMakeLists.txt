@@ -141,6 +141,7 @@ add_library(starsim_core STATIC
     src/mission/lunar_descent.cpp
     src/mission/lunar_orbit_transfer.cpp
     src/mission/lunar_touchdown.cpp
+    src/mission/touchdown_search.cpp
     src/mission/lunar_outbound.cpp
     src/mission/earth_return.cpp
     src/mission/lunar_transfer.cpp

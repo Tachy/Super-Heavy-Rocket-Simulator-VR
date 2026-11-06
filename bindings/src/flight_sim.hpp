@@ -18,6 +18,7 @@
 
 #include "flight_snapshot.hpp"
 #include "starsim/sim/flight_session.hpp"
+#include "starsim/sim/mission_start.hpp"
 #include "starsim/sim/session_runner.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 
@@ -309,6 +310,12 @@ private:
     // gives the outcome once it is there (none: still planning; the session flies on). Needs an active flight.
     using SessionPoll = std::function<std::optional<Outcome>(sim::FlightSession&)>;
     std::uint64_t post_deferred_active(const char* name, std::function<SessionPoll(sim::FlightSession&)> command);
+    // The same without the active-flight check; hold_session: the session does not advance until the outcome
+    // (sim::SessionRunner::post_deferred) - a mission start whose touchdown search runs on a background thread.
+    std::uint64_t post_deferred(const char* name, std::function<SessionPoll(sim::FlightSession&)> command,
+                                bool hold_session = false);
+    // worker: start_mission's outcome - the snapshot context of the started (or refused) mission `id` set from `s`
+    Outcome mission_started(const sim::MissionStart& s, const std::string& id);
     void observe(const sim::FlightSession& session, time::Epoch epoch);  // worker: builds and publishes the snapshot
     // worker: the ascent autopilot engaged as the onboard computer does (sim::engage_pad_ascent(session, target));
     // on a clamped stack the planning flag is published first (the snapshot on the pad while the plan runs)

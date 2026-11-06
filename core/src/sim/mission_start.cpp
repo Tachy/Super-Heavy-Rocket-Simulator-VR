@@ -1,6 +1,7 @@
 #include "starsim/sim/mission_start.hpp"
 
 #include <stdexcept>
+#include <utility>
 
 #include "starsim/sim/ascent_mission.hpp"
 #include "starsim/sim/capsule_return_mission.hpp"
@@ -12,8 +13,26 @@
 
 namespace starsim::sim {
 
+namespace {
+
+// A decided start: one that succeeds (no refusal) begins the mission's own log - its setup (placing, docking in place)
+// is no event; a refused start keeps the flight's log.
+MissionStart decided(FlightSession& session, MissionStart s) {
+    if (s.refusal.empty()) session.reset_timeline();
+    return s;
+}
+
+}  // namespace
+
 MissionStart start_mission(FlightSession& session, const std::filesystem::path& config_dir, std::string_view mission_id,
                            time::Epoch requested, const time::TimeScaleConverter& time, const StartOptions& options) {
+    auto start = start_mission_deferred(session, config_dir, mission_id, requested, time, options);
+    return start.done ? std::move(*start.done) : start.wait(session);
+}
+
+DeferredMissionStart start_mission_deferred(FlightSession& session, const std::filesystem::path& config_dir,
+                                            std::string_view mission_id, time::Epoch requested,
+                                            const time::TimeScaleConverter& time, const StartOptions& options) {
     session.set_supervisor(nullptr);  // refuelling f2: a new mission ends a campaign
     MissionStart s;
     s.kind = config::mission_kind(config_dir, mission_id);
@@ -53,8 +72,17 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
         }
         case config::MissionKind::LunarLanding: {
             const auto m = config::load_lunar_landing_mission(config_dir, mission_id);
-            s = start_lunar_landing_mission(session, config_dir, m, time.from_utc(m.epoch_utc));
-            break;
+            auto pending = begin_lunar_landing_mission(session, config_dir, m, time.from_utc(m.epoch_utc));
+            if (pending.done) return {decided(session, std::move(*pending.done))};
+            DeferredMissionStart d;
+            d.status = pending.status;
+            d.poll = [poll = std::move(pending.poll)](FlightSession& f) -> std::optional<MissionStart> {
+                auto later = poll(f);
+                if (!later) return std::nullopt;
+                return decided(f, std::move(*later));
+            };
+            d.wait = [wait = std::move(pending.wait)](FlightSession& f) { return decided(f, wait(f)); };
+            return d;
         }
         case config::MissionKind::LunarReturn: {
             const auto m = config::load_lunar_return_mission(config_dir, mission_id);
@@ -94,9 +122,7 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
                                         "' is a ship return: it is flown from orbit with plan_ship_return (key R), "
                                         "not started");
     }
-    // the mission's own log: its setup (placing, docking in place) is no event; a refused start keeps the flight's log
-    if (s.refusal.empty()) session.reset_timeline();
-    return s;
+    return {decided(session, std::move(s))};
 }
 
 }  // namespace starsim::sim
