@@ -66,17 +66,17 @@ bool entry_terminal_handover(const EntryGuidanceParameters& parameters, double h
 }
 
 Vec3 entry_terminal_steering_step(const Vec3& steering, double j11, double j12, double j21, double j22, const Vec3& z0,
-                                  double max_step) {
+                                  double max_step, double min_fraction) {
     const double a11 = j11 * j11 + j21 * j21, a12 = j11 * j12 + j21 * j22, a22 = j12 * j12 + j22 * j22;
     const double lambda = levenberg_marquardt_damping * (a11 + a22);
     const double b1 = -(j11 * z0.x + j21 * z0.y), b2 = -(j12 * z0.x + j22 * z0.y);
     const double det = (a11 + lambda) * (a22 + lambda) - a12 * a12;
-    if (!(det > 0.0)) return steering;
+    if (!(det > 0.0)) return EntryPredictorModel::steering_above_floor(steering, steering, min_fraction);
     Vec3 step{((a22 + lambda) * b1 - a12 * b2) / det, ((a11 + lambda) * b2 - a12 * b1) / det, 0.0};
     if (norm(step) > max_step) step = step * (max_step / norm(step));
     Vec3 p = steering + step;
     if (norm(p) > 1.0) p = p / norm(p);
-    return p;
+    return EntryPredictorModel::steering_above_floor(p, steering, min_fraction);
 }
 
 const char* id_of(EntryPhase phase) {  // i18n-ns: entry_phase
@@ -93,7 +93,8 @@ EntryGuidance::EntryGuidance(const vehicle::FlightBody& ship, const AlphaSchedul
                              EntryGuidanceParameters parameters,
                              std::shared_ptr<const aero::RadiativeHeatingTable> radiative)
     : target_(target), parameters_(parameters) {
-    model_.aero = EntryAeroTable(ship.vehicle(), schedule);
+    // the cap of the terminal steering's least-lift end walked only up to the Mach it starts at
+    model_.aero = EntryAeroTable(ship.vehicle(), schedule, parameters_.terminal_phase ? parameters_.terminal_mach : 0.0);
     model_.radiative = std::move(radiative);
     configure_model(ship);
     lateral_.bank_magnitude_rad = parameters_.initial_bank_rad;
@@ -553,7 +554,11 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const vehicle::Fli
         (terminal_prediction_age_s_ >= parameters_.terminal_cycle_s || !terminal_predicted_)) {
         terminal_prediction_age_s_ = 0.0;
         terminal_predicted_ = true;
-        Vec3 p = terminal_steering_;
+        // Free steering (not in the nose sector): never below the floor (EntryPredictorModel::steering_min_fraction: the
+        // lift jump at the origin), along its own direction, the one flown when it has none (steering_above_floor).
+        const bool free_steering = !(terminal_basis_frozen_ && norm(target_.nose_direction_itrf) > 0.0) && !nose_turning_;
+        const double min_fraction = free_steering ? model_.steering_min_fraction(mach) : 0.0;
+        Vec3 p = EntryPredictorModel::steering_above_floor(terminal_steering_, terminal_lift_direction_, min_fraction);
         if (terminal_aim_ && !given_up_ && terminal_gate_velocity_itrf_) {  // re-aim from the live state
             const Vec3& gate_v = *terminal_gate_velocity_itrf_;
             const double gate_height = gate_trigger_height_m(parameters_, -dot(gate_v, up));
@@ -601,7 +606,8 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const vehicle::Fli
                 p = Vec3{r * std::cos(h + t), r * std::sin(h + t), 0.0};
             }
         } else if (!nose_turning_) {
-            p = entry_terminal_steering_step(p, j11, j12, j21, j22, Vec3{me, mn, 0.0}, parameters_.terminal_max_step);
+            p = entry_terminal_steering_step(p, j11, j12, j21, j22, Vec3{me, mn, 0.0}, parameters_.terminal_max_step,
+                                             min_fraction);
         }
         terminal_steering_ = p;
         if (std::getenv("STARSIM_DEBUG_ENTRY")) {  // diagnostics

@@ -42,14 +42,20 @@ struct EntryPredictorModel {
     // piecewise linear and continuous: 0 -> the least-lift end (steering_least_lift_alpha: 90 deg, no lift, where the
     // flaps trim it with control margin), 0.5 -> the entry's alpha schedule (the entry's own prediction), 1 ->
     // `terminal_alpha_authority_rad` below it (most lift, at least the minimum alpha and the lowest trimmed alpha).
-    // Both ends are trimmed attitudes (user 2026-11-06). Where the least-lift end is 90 deg (below Mach ~2 at the
-    // entry mass: the belly flop, the nose sector) the steering vector is continuous through zero lift. Where the flaps
-    // cannot hold 90 deg (Mach 3-8: ~68 deg at 35 t, EntryAeroTable::highest_trimmed_alpha_rad) no trimmed attitude
-    // carries zero lift, so no steering law over trimmed attitudes is continuous there: the half f < 0.5 is stretched
-    // to the capped span (alpha linear in f, no flat part - a flat part leaves the Newton step no radial slope, the
-    // failure steering_difference guards against at the trim floor), and the lift jumps between opposite directions,
-    // by cl(least-lift alpha), only at the single point f = 0 (the guidance keeps the last lift direction below
-    // min_steering_fraction; the predictor flies no lift exactly at 0).
+    // Both ends are trimmed attitudes (user 2026-11-06). Where the least-lift end is 90 deg (below Mach ~2 at 35-38 t:
+    // the belly flop, the nose sector) the steering vector is continuous through zero lift. Where the flaps cannot hold
+    // 90 deg (Mach 3-8: ~68 deg at 35 t, EntryAeroTable::highest_trimmed_alpha_rad) no trimmed attitude carries zero
+    // lift, so no steering law over trimmed attitudes is continuous there: the half f < 0.5 is stretched to the capped
+    // span (alpha linear in f), and the lift would jump between opposite directions, by cl(least-lift alpha), at f = 0.
+    // The Newton steps therefore never hold a fraction below steering_min_fraction (origin_fraction: the direction is
+    // always defined, so guidance and predictor fly the same lift; steering_above_floor). Their differences are left as
+    // they were (they may cross the origin: one-sided differences pointing away from it, review I3's suggestion, made the
+    // vented-ship return "A ship return vents the residue its flaps cannot trim" find no pass - measured 2026-11-06). Where the cap lies within least_lift_min_span_rad of the
+    // schedule (the ship vented to the residue limit, ~41 t, Mach 0.9-1.5: the schedule itself lacks the control margin)
+    // no trimmable attitude carries less lift than the schedule - accepted physics (user 2026-11-06 "Physik
+    // akzeptieren"): the half f < 0.5 is flat there (alpha = schedule exactly, steering_fraction 0.5: no division by
+    // the zero span), locally saturated; the Newton's slope is the predicted miss's over the rest of the descent (see
+    // steering_min_fraction).
     double terminal_min_alpha_rad = 50.0 * constants::deg_to_rad;          // [E] trimmed range (b1)
     double terminal_alpha_authority_rad = 20.0 * constants::deg_to_rad;    // [E]
     double steering_freeze_gamma_rad = -70.0 * constants::deg_to_rad;      // [E]
@@ -92,16 +98,38 @@ struct EntryPredictorModel {
         const double limit = norm(steering) <= schedule_fraction ? schedule_fraction : 1.0;
         return norm(steering + direction * step) <= limit ? step : -step;
     }
+    // The steering lifted onto |p| >= min_fraction along its own direction (a reversal through the origin stays a
+    // reversal), along `fallback` (the lift direction flown) when it has none; e1 when neither has one.
+    static math::Vec3 steering_above_floor(const math::Vec3& steering, const math::Vec3& fallback, double min_fraction) {
+        const double r = norm(steering);
+        if (r >= min_fraction) return steering;
+        if (r > 1e-12) return steering * (min_fraction / r);
+        if (norm(fallback) > 1e-12) return fallback * (min_fraction / norm(fallback));
+        return math::Vec3{min_fraction, 0.0, 0.0};
+    }
+    // Smallest steering fraction the terminal steering's Newton steps hold at this Mach: origin_fraction where the flaps
+    // bound the steering (a table with the cap), 0 without flaps (the law reaches zero lift at 90 deg). Not the
+    // schedule's fraction where the least-lift half is flat: the Newton's slope is that of the predicted miss over the
+    // rest of the descent, and a fraction below 0.5 held through the flat Mach range is what flies less lift once the
+    // cap opens again below it (clamping it to 0.5 there left the 41 t heavy-residue return without a pass:
+    // deorbit.no_pass). Where the whole remaining descent is flat the Jacobian's radial column is zero, and the
+    // Levenberg-Marquardt step has no component along it (no division: det > 0 by the damping).
+    static constexpr double least_lift_min_span_rad = 1.0 * constants::deg_to_rad;  // the cap's walk step (no finer span)
+    static constexpr double origin_fraction = 0.01;  // [E] > the guidance's 1e-3 hold threshold; lift change < cl/50
+    double steering_min_fraction(double mach) const { return aero.highest_trimmed_alpha_rad(mach) > 0.0 ? origin_fraction : 0.0; }
     // Most lift the steering may ask for: never below what the flaps can trim at this Mach.
     double steering_most_lift_alpha(double nominal, double mach) const {
         const double floor = std::max(terminal_min_alpha_rad, aero.lowest_trimmed_alpha_rad(mach));
         return std::min(nominal, std::max(nominal - terminal_alpha_authority_rad, floor));
     }
     // Least lift the steering may ask for: 90 deg (no lift), never above what the flaps trim with control margin at this
-    // Mach (EntryAeroTable::highest_trimmed_alpha_rad; no flaps - a table without that bound - 90 deg).
+    // Mach (EntryAeroTable::highest_trimmed_alpha_rad; no flaps - a table without that bound - 90 deg). A cap within
+    // least_lift_min_span_rad of the schedule is the schedule (no trimmed span: the flat, saturated half).
     double steering_least_lift_alpha(double nominal, double mach) const {
         const double cap = aero.highest_trimmed_alpha_rad(mach);
-        return cap > 0.0 ? std::clamp(cap, nominal, 0.5 * constants::pi) : 0.5 * constants::pi;
+        if (!(cap > 0.0)) return 0.5 * constants::pi;
+        const double least = std::clamp(cap, nominal, 0.5 * constants::pi);
+        return least - nominal < least_lift_min_span_rad ? nominal : least;
     }
     double steering_alpha(double fraction, double mach) const {
         const double f = std::clamp(fraction, 0.0, 1.0);

@@ -127,8 +127,9 @@ Trim trim(vehicle::FlightBody& body) {
 // below Mach 5), and since the mesh centre-of-pressure table (47904b61) and the 177 t mass / CG (357c3b67) the forward
 // pair needs 79.7 deg to hold it. Terminal phase (Mach 4.5, 40 km): between the corridor points 45 km / 2500 m/s and
 // 35 km / 900 m/s of the residue-limit case below, at both ends of what the terminal steering commands there (its
-// least-lift end, capped by the flaps' trim with control margin, and its most-lift end).
-// Low and slow: 5 km, 128 m/s, 75 deg.
+// least-lift end, capped by the flaps' trim with control margin, and its most-lift end); also Mach 3.5 (37 km), where the
+// cap falls steeply with Mach (review I2), and Mach 3.625 between two nodes of the cap's grid. Low and slow: 5 km,
+// 128 m/s, 75 deg. The window is the table's own margin (EntryAeroTable::trim_control_margin_rad).
 TEST_CASE("The ship trims belly first with control margin on its flaps", "[entry][flap][trim]") {
     World world;
     const auto cfg = config::load_vehicle(config_dir, "starship_block3");
@@ -148,28 +149,36 @@ TEST_CASE("The ship trims belly first with control margin on its flaps", "[entry
         cases.push_back({65000.0, 6500.0, nominal / deg});
         cases.push_back({65000.0, 6500.0, (nominal + excursion_rad) / deg});
     }
-    {
+    double cap_beyond_deg = 0.0, cap_beyond_height_m = 0.0, cap_beyond_speed_mps = 0.0;
+    for (const auto& [height_m, mach] : {std::pair{40000.0, 4.5}, std::pair{37000.0, 3.5}, std::pair{37000.0, 3.625}}) {
         // What the terminal steering can command there (EntryPredictorModel::steering_alpha, as EntryGuidance sets it
         // up from this ship and config): its least-lift end (fraction 0, capped by the flaps' trim with control margin)
         // and its most-lift end (fraction 1).
-        constexpr double mach = 4.5;
-        const auto [speed, nominal] = at_mach(40000.0, mach);
-        auto ship_body = entry_ship(40000.0, speed, nominal, world);
+        const auto [speed, nominal] = at_mach(height_m, mach);
+        auto ship_body = entry_ship(height_m, speed, nominal, world);
         gnc::EntryPredictorModel model;
-        model.aero = gnc::EntryAeroTable(ship_body->vehicle(), schedule);
+        model.aero = gnc::EntryAeroTable(ship_body->vehicle(), schedule, ship.entry->terminal_mach);
         model.terminal_min_alpha_rad = ship.entry->terminal_min_alpha_rad;
         model.terminal_alpha_authority_rad = authority_rad;
         const double least_lift = model.steering_alpha(0.0, mach), most_lift = model.steering_alpha(1.0, mach);
+        CAPTURE(mach);
         CHECK(least_lift > nominal);  // the cap leaves room to steer above the schedule
         CHECK(least_lift <= 0.5 * constants::pi);
         CHECK(most_lift < nominal);
-        cases.push_back({40000.0, speed, least_lift / deg});
-        cases.push_back({40000.0, speed, most_lift / deg});
+        cases.push_back({height_m, speed, least_lift / deg});
+        cases.push_back({height_m, speed, most_lift / deg});
+        if (mach == 4.5) {  // on a node of the cap's grid on the Mach 4-6 plateau: the walked value itself
+            cap_beyond_deg = least_lift / deg + 1.0;
+            cap_beyond_height_m = height_m;
+            cap_beyond_speed_mps = speed;
+        }
     }
     cases.push_back({5000.0, 128.0, 75.0});
+    constexpr double margin_rad = gnc::EntryAeroTable::trim_control_margin_rad;
     for (const auto& c : cases) {
         auto body = entry_ship(c.height_m, c.speed_mps, c.alpha_deg * deg, world);
         const Trim t = trim(*body);
+        const auto& flaps = body->vehicle().stages().back().flaps;
         if (std::getenv("STARSIM_VERBOSE")) {
             std::cout << "alpha " << c.alpha_deg << " h " << c.height_m << " v " << c.speed_mps << ": flaps [deg]";
             for (double d : t.deflection_rad) std::cout << " " << d / deg;
@@ -178,10 +187,25 @@ TEST_CASE("The ship trims belly first with control margin on its flaps", "[entry
         }
         CAPTURE(c.alpha_deg, c.height_m, c.speed_mps);
         CHECK(norm(t.remainder_fraction) < 0.01);  // trimmed by the flaps alone
-        for (double d : t.deflection_rad) {
-            CHECK(d >= 15.0 * deg);
-            CHECK(d <= 75.0 * deg);
+        for (size_t k = 0; k < t.deflection_rad.size(); ++k) {
+            CHECK(t.deflection_rad[k] >= margin_rad);
+            CHECK(t.deflection_rad[k] <= flaps[k].max_deflection_rad - margin_rad);
         }
+    }
+    // The cap is the edge, checked on the flown allocation (not on the table's own trim): 1 deg above it (still below
+    // 90 deg) some flap leaves the window.
+    REQUIRE(cap_beyond_deg > 0.0);
+    if (cap_beyond_deg < 90.0) {
+        auto body = entry_ship(cap_beyond_height_m, cap_beyond_speed_mps, cap_beyond_deg * deg, world);
+        const Trim t = trim(*body);
+        const auto& flaps = body->vehicle().stages().back().flaps;
+        bool outside = false;
+        for (size_t k = 0; k < t.deflection_rad.size(); ++k) {
+            outside = outside || t.deflection_rad[k] < margin_rad ||
+                      t.deflection_rad[k] > flaps[k].max_deflection_rad - margin_rad;
+        }
+        CAPTURE(cap_beyond_deg);
+        CHECK(outside);
     }
 }
 

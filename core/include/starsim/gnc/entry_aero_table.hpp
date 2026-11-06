@@ -32,8 +32,11 @@ AlphaSchedule load_alpha_schedule(const std::filesystem::path& config_dir, const
 class EntryAeroTable {
 public:
     EntryAeroTable() = default;
-    // `ship`: a single-stage vehicle with flaps (its first stage carries them).
-    EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule& schedule);
+    // `ship`: a single-stage vehicle with flaps (its first stage carries them). `steering_mach_max`: the highest Mach
+    // the terminal steering flies (EntryGuidanceParameters::terminal_mach; highest_trimmed_alpha_rad is walked only up to
+    // it); 0: no steering (the residue limit's builds: no cap at all).
+    EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule& schedule,
+                   double steering_mach_max = std::numeric_limits<double>::infinity());
     // A capsule (Vehicle::capsule_aero): drag and lift area at its trim over Mach about the current CG; the alpha
     // schedule is pi - theta_trim (the angle between the nose and the air velocity). It has one angle of attack, so the
     // alpha-grid accessors return the trim's values at any alpha (the capsule flies no terminal phase).
@@ -60,10 +63,20 @@ public:
     // The highest angle of attack above the schedule the flaps trim in pitch with control margin at this Mach (the
     // terminal steering's least-lift end): walking up from the schedule in 1 deg steps, the last alpha whose settled trim
     // (the allocation's end point, as trim_flap_rad) keeps every flap `trim_control_margin_rad` inside both geometric
-    // stops [margin, max - margin]. At least the schedule (min(schedule, 90 deg)), at most 90 deg; 0: no flaps, no bound.
+    // stops [margin, max - margin]. At least the schedule (min(schedule, 90 deg)), at most 90 deg; 0: no flaps or no
+    // steering (steering_mach_max 0), no bound. Walked on its own Mach grid (0.25 steps over Mach 1.5-4, where it falls
+    // steeply: 90 deg at Mach 2 to 68 at Mach 4, 35 t) up to steering_mach_max, then each node lowered to the smallest of
+    // itself and its neighbours: the linear interpolation between two nodes then stays below both walked values, so
+    // between nodes the cap keeps the margin wherever the walked cap does not dip inside the interval. Never below the
+    // schedule at a node: where a neighbour's cap lies below this node's schedule the schedule lacks the margin itself
+    // (the residue limit's domain) and the steering's least-lift half is flat there anyway. Above steering_mach_max the
+    // value at it (the steering never flies there).
     double highest_trimmed_alpha_rad(double mach) const;
     // Control margin of the flap trim [E]: the ship return spec (b1, 2026-10-13) - every trimmed deflection inside
     // [15 deg, max - 15 deg], the window of the trim margin test ("The ship trims belly first with control margin").
+    // Measured from the geometric stops (0 and max_deflection_rad) like that test, not from the flow-dependent lower stop
+    // schedule_trim_margin_rad uses: the two criteria differ, so the schedule itself can lack this margin at the residue
+    // limit (~41 t, Mach 0.9-1.5) - there the cap is the schedule.
     static constexpr double trim_control_margin_rad = 15.0 * constants::deg_to_rad;
     // How far the flaps' pitch trim along the schedule stays inside their stops (planner plan Task 12b): over the Mach
     // grid, the smallest distance of any flap of the trim the table holds (the settled one, else the antisymmetric) from
@@ -76,7 +89,8 @@ public:
 private:
     double schedule_trim_margin_rad_ = std::numeric_limits<double>::infinity();
     std::vector<double> lowest_trimmed_alpha_rad_;  // per mach_
-    std::vector<double> highest_trimmed_alpha_rad_;  // per mach_
+    std::vector<double> highest_mach_;               // the cap's own Mach grid
+    std::vector<double> highest_trimmed_alpha_rad_;  // per highest_mach_
     AlphaSchedule schedule_;
     std::vector<double> mach_;
     std::vector<double> cd_area_m2_;

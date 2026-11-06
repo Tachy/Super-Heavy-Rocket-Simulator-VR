@@ -284,9 +284,11 @@ inline constexpr double entry_terminal_max_prediction_s = 900.0;
 // One Levenberg-Marquardt step of the terminal steering (no nose sector): with the 2x2 Jacobian J (j11 j12; j21 j22) of
 // the horizontal miss (east, north) over the steering (e1, e2) and the miss `z0` (x: east, y: north) at `steering`,
 // solves (J^T J + lambda I) dp = -J^T z0 (least squares when the gate is out of reach), the step limited to `max_step`,
-// the steering to |p| <= 1. The steering unchanged when the system is singular.
+// the steering to |p| <= 1 and, with `min_fraction` (EntryPredictorModel::steering_min_fraction), to |p| >= it
+// (EntryPredictorModel::steering_above_floor, along the step's own direction). The steering unchanged
+// (but lifted onto the floor) when the system is singular.
 math::Vec3 entry_terminal_steering_step(const math::Vec3& steering, double j11, double j12, double j21, double j22,
-                                        const math::Vec3& z0, double max_step);
+                                        const math::Vec3& z0, double max_step, double min_fraction = 0.0);
 
 // One entry-phase cycle of the corrector from `state` (bank flown now, its roll): the bank sign (chosen once: the one
 // ending closer across), the bank magnitude for the range, the reversal check (EntryGuidance's rules, in the header

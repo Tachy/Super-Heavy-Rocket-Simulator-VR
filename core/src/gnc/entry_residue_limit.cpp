@@ -24,7 +24,7 @@ void scale_main(vehicle::Vehicle& ship, const vehicle::Vehicle& base, double fra
 }
 
 bool trims(const vehicle::Vehicle& ship, const AlphaSchedule& schedule) {
-    return EntryAeroTable(ship, schedule).schedule_trim_margin_rad() > 0.0;
+    return EntryAeroTable(ship, schedule, 0.0).schedule_trim_margin_rad() > 0.0;  // no steering: no cap walk
 }
 
 }  // namespace

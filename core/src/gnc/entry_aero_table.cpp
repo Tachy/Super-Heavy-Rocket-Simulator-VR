@@ -30,6 +30,10 @@ constexpr double alpha_grid_max_deg = 140.0;
 constexpr double alpha_grid_step_deg = 5.0;
 const std::vector<double> mach_grid{0.3, 0.5, 0.7, 0.8, 0.9, 1.0, 1.2, 1.5, 2.0, 3.0,
                                     4.0, 6.0, 8.0, 10.0, 15.0, 20.0, 25.0, 30.0};
+// The cap's grid (highest_trimmed_alpha_rad): the table's nodes plus 0.25 steps over Mach 1.5-4 and 0.5 over 4-6, where
+// the cap falls steeply (review I2: 90 / 84 / 68 deg at Mach 2 / 3 / 4, 35 t, with nothing between).
+const std::vector<double> cap_mach_grid{0.3,  0.5,  0.7, 0.8,  0.9,  1.0, 1.2, 1.5,  1.75, 2.0,  2.25, 2.5,  2.75, 3.0,
+                                        3.25, 3.5, 3.75, 4.0, 4.5, 5.0, 5.5, 6.0, 8.0, 10.0, 15.0, 20.0, 25.0, 30.0};
 // The settled trim's Newton solve: pitch slopes over the allocation's 1 deg difference (AttitudeController's
 // flap_difference_step_rad), its Jacobian over 0.5 deg, steps of at most 10 deg, done below 1e-6 rad.
 constexpr double trim_slope_step_rad = 1.0 * constants::deg_to_rad;
@@ -55,7 +59,8 @@ AlphaSchedule load_alpha_schedule(const std::filesystem::path& config_dir, const
     return s;
 }
 
-EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule& schedule) : schedule_(schedule) {
+EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule& schedule, double steering_mach_max)
+    : schedule_(schedule) {
     const auto& stage = ship.stages().front();
     const double cg = ship.mass_properties().cg_station_m;
     const double belly_azimuth = stage.config.aero.belly_azimuth_rad;
@@ -200,8 +205,14 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
         }
     }
     // Walking up from the schedule while the settled trim keeps every flap the control margin inside its stops (the
-    // terminal steering's least-lift end, EntryPredictorModel::steering_alpha).
-    if (stage.flap_table && !flaps.empty()) {
+    // terminal steering's least-lift end, EntryPredictorModel::steering_alpha), on the cap's grid up to the steering's
+    // highest Mach. Where the settled Newton does not converge the antisymmetric trim stands in (as in trim_flap_rad).
+    if (stage.flap_table && !flaps.empty() && steering_mach_max > 0.0) {
+        for (double mach : cap_mach_grid) {
+            if (mach >= steering_mach_max) break;
+            highest_mach_.push_back(mach);
+        }
+        if (steering_mach_max <= cap_mach_grid.back()) highest_mach_.push_back(std::max(steering_mach_max, cap_mach_grid.front()));
         const auto within_margin = [&] {
             if (!trim_bracketed) return false;
             for (const auto& s : flaps) {
@@ -211,7 +222,8 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
             }
             return true;
         };
-        for (double mach : mach_grid) {
+        std::vector<double> walked;
+        for (double mach : highest_mach_) {
             double alpha = std::min(schedule.at(mach), constants::pi / 2.0);
             double highest = alpha;
             while (alpha < constants::pi / 2.0) {
@@ -220,7 +232,14 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
                 if (!within_margin()) break;
                 highest = alpha;
             }
-            highest_trimmed_alpha_rad_.push_back(highest);
+            walked.push_back(highest);
+        }
+        // conservative between nodes: each node the smallest of itself and its neighbours, not below the schedule
+        for (size_t i = 0; i < walked.size(); ++i) {
+            double low = walked[i];
+            if (i > 0) low = std::min(low, walked[i - 1]);
+            if (i + 1 < walked.size()) low = std::min(low, walked[i + 1]);
+            highest_trimmed_alpha_rad_.push_back(std::max(low, std::min(schedule.at(highest_mach_[i]), constants::pi / 2.0)));
         }
     }
     for (const auto& s : flaps) {
@@ -292,7 +311,7 @@ double EntryAeroTable::lowest_trimmed_alpha_rad(double mach) const {
 }
 
 double EntryAeroTable::highest_trimmed_alpha_rad(double mach) const {
-    return highest_trimmed_alpha_rad_.empty() ? 0.0 : interpolate(mach_, highest_trimmed_alpha_rad_, mach);
+    return highest_trimmed_alpha_rad_.empty() ? 0.0 : interpolate(highest_mach_, highest_trimmed_alpha_rad_, mach);
 }
 
 std::vector<double> EntryAeroTable::trim_flap_rad(double mach) const {

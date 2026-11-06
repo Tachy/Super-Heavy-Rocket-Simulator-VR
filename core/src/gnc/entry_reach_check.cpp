@@ -90,10 +90,15 @@ double terminal_miss_m(const EntryGuidanceParameters& p, const EntryPredictorMod
     // the guidance steps every terminal_cycle_s by at most terminal_max_step: the same steering rate over this cycle
     const double max_step = p.terminal_max_step * std::max(1.0, cycle_s / p.terminal_cycle_s);
     Vec3 steering = Vec3{std::cos(bank_rad), -std::sin(bank_rad), 0.0} * EntryPredictorModel::schedule_fraction;
+    const environment::Us76Atmosphere atmosphere;
     for (double t = 0.0; t < entry_terminal_max_prediction_s; t += cycle_s) {
         bool reached = false;
         const Vec3 z0 = miss(steering, reached);
         if (!reached) return std::numeric_limits<double>::infinity();
+        // the guidance's floor at this Mach (EntryPredictorModel::steering_min_fraction)
+        const double height = frames::fixed_to_geodetic(s.position_itrf_m).height_m;
+        const double sound = atmosphere.at(height).speed_of_sound_mps;
+        const double min_fraction = model.steering_min_fraction(sound > 0.0 ? norm(s.velocity_itrf_mps) / sound : 0.0);
         const double d1 = EntryPredictorModel::steering_difference(steering, Vec3{1.0, 0.0, 0.0}, p.terminal_newton_step);
         const double d2 = EntryPredictorModel::steering_difference(steering, Vec3{0.0, 1.0, 0.0}, p.terminal_newton_step);
         bool r1 = false, r2 = false;
@@ -101,7 +106,7 @@ double terminal_miss_m(const EntryGuidanceParameters& p, const EntryPredictorMod
         const Vec3 z2 = miss(steering + Vec3{0.0, d2, 0.0}, r2);
         if (r1 && r2) {  // EntryGuidance::terminal's step, its limit over the guidance's cycles within this one
             steering = entry_terminal_steering_step(steering, (z1.x - z0.x) / d1, (z2.x - z0.x) / d2, (z1.y - z0.y) / d1,
-                                                    (z2.y - z0.y) / d2, z0, max_step);
+                                                    (z2.y - z0.y) / d2, z0, max_step, min_fraction);
         }
         EntryPredictorState q = s;
         q.steering = steering;

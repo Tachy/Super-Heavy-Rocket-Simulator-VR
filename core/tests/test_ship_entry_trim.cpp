@@ -5,15 +5,19 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <limits>
 
 #include "starsim/aero/flap.hpp"
 #include "starsim/config/propellant_loading.hpp"
 #include "starsim/gnc/entry_aero_table.hpp"
+#include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
+#include "starsim/gnc/entry_residue_limit.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
@@ -95,7 +99,7 @@ TEST_CASE("The terminal steering never asks for an alpha the flaps cannot trim",
     for (const double propellant : {35000.0, 64000.0}) {  // both ends of the entry's mass and CG
         const auto v = ship(propellant);
         gnc::EntryPredictorModel model;
-        model.aero = gnc::EntryAeroTable(*v, schedule);
+        model.aero = gnc::EntryAeroTable(*v, schedule, v->stages().front().config.entry->terminal_mach);
         for (const double mach : {0.3, 0.7, 0.9, 1.2, 1.5, 2.0, 3.0, 4.0}) {
             CAPTURE(propellant, mach);
             const double nominal = std::min(schedule.at(mach), constants::pi / 2.0);
@@ -118,10 +122,72 @@ TEST_CASE("The terminal steering never asks for an alpha the flaps cannot trim",
             const double highest = model.aero.highest_trimmed_alpha_rad(mach);
             CHECK(highest >= nominal - 1e-9);
             CHECK(highest <= constants::pi / 2.0 + 1e-9);
+            // independent of the walk: above the schedule the flaps bracket the pitch trim there (the margin itself is
+            // checked on the flown allocation: test_entry_attitude)
+            if (highest > nominal + 1e-9) CHECK(pitch_trimmable(*v, mach, highest));
             const double least_lift = model.steering_alpha(0.0, mach);
-            CHECK(least_lift == Catch::Approx(highest));
-            if (least_lift - nominal > 1e-3) CHECK(model.steering_fraction(least_lift, mach) == Catch::Approx(0.0));
+            const bool flat = highest - nominal < gnc::EntryPredictorModel::least_lift_min_span_rad;
+            CHECK(least_lift == Catch::Approx(flat ? nominal : highest));
+            if (!flat) CHECK(model.steering_fraction(least_lift, mach) == Catch::Approx(0.0));
         }
+    }
+}
+
+// Review I1 (user decision 2026-11-06 "Physik akzeptieren"): the ship vented to the residue limit enters with the
+// headers full and the most main-tank residue the flaps trim along the schedule (~41 t); there at Mach 0.9-1.5 the
+// schedule itself lacks the 15 deg control margin, so no trimmable attitude carries less lift than the schedule. The
+// least-lift half is flat (locally saturated): the steering stays well-defined - no division by its zero span, and a
+// Newton step on a Jacobian without radial slope has no radial component (it steers only along the slope it has). The
+// fraction is not clamped to the schedule's: the predicted miss's radial slope comes from the rest of the descent,
+// where the cap opens again (that clamp left the heavy-residue return without a pass).
+TEST_CASE("At the residue limit the terminal steering's least-lift half is saturated, not singular",
+          "[entry][flap][trim][guidance]") {
+    const gnc::AlphaSchedule schedule = gnc::load_alpha_schedule(STARSIM_CONFIG_DIR, "aero/ship_entry_alpha.csv");
+    const auto heavy = ship(62000.0);  // the campaign's heaviest (test_entry_attitude's residue-limit case)
+    const auto limit = gnc::entry_residue_limit(*heavy, schedule);
+    const double headers_kg = heavy->propellant_kg() - heavy->main_propellant_kg();
+    const double entry_propellant_kg = headers_kg + limit.max_main_propellant_kg;
+    CAPTURE(entry_propellant_kg);
+    CHECK(entry_propellant_kg > 38000.0);  // ~41 t (the review's figure), well above the 35 t of full headers
+    CHECK(entry_propellant_kg < 45000.0);
+    const auto v = ship(entry_propellant_kg);
+    gnc::EntryPredictorModel model;
+    model.aero = gnc::EntryAeroTable(*v, schedule, v->stages().front().config.entry->terminal_mach);
+    constexpr double mach = 1.2;
+    const double nominal = schedule.at(mach);
+    CHECK(model.aero.highest_trimmed_alpha_rad(mach) - nominal < gnc::EntryPredictorModel::least_lift_min_span_rad);
+    // saturated: the half f < 0.5 flies the schedule, its inverse is the schedule's fraction (no division by ~0)
+    for (const double f : {0.0, 0.1, 0.3, 0.5}) CHECK(model.steering_alpha(f, mach) == Catch::Approx(nominal));
+    for (const double alpha : {nominal, nominal + 5.0 * deg, constants::pi / 2.0}) {
+        const double f = model.steering_fraction(alpha, mach);
+        CHECK(std::isfinite(f));
+        CHECK(f == Catch::Approx(0.5));
+    }
+    // At this mass and Mach the flaps hold no alpha below the schedule either (the floor is the schedule: the residue
+    // limit's one pair at its stop), so the outer half is flat too: here only the lift's direction steers, the radial
+    // slope of the predicted miss comes from the rest of the descent (the guided case in test_entry_guidance).
+    CHECK(model.steering_alpha(1.0, mach) <= nominal + 1e-12);
+    CHECK(model.steering_min_fraction(mach) == gnc::EntryPredictorModel::origin_fraction);
+    // the differences stay in the unit disk; a step with no radial slope (the miss depends on the lift's direction
+    // only) is finite and has no radial component
+    const double floor = model.steering_min_fraction(mach);
+    const math::Vec3 x{1.0, 0.0, 0.0}, y{0.0, 1.0, 0.0};
+    for (const math::Vec3 p : {math::Vec3{0.5, 0.0, 0.0}, math::Vec3{0.0, -0.55, 0.0}, math::Vec3{0.2, 0.2, 0.0},
+                               math::Vec3{0.005, 0.0, 0.0}}) {
+        CAPTURE(p.x, p.y);
+        for (const math::Vec3& e : {x, y}) {
+            const double s = gnc::EntryPredictorModel::steering_difference(p, e, 0.1);
+            CHECK(norm(p + e * s) <= 1.0);
+        }
+        // radial slope 0: the Jacobian sees only the angle (d miss / d p along p is zero)
+        const math::Vec3 radial = math::normalized(p), across{-radial.y, radial.x, 0.0};
+        const double j11 = 1000.0 * across.x, j12 = 1000.0 * across.y;  // miss east = 1000 m * the angle's change
+        const auto next = gnc::entry_terminal_steering_step(p, j11, j12, 0.0, 0.0, {300.0, 0.0, 0.0}, 0.3, floor);
+        CHECK(std::isfinite(next.x));
+        CHECK(std::isfinite(next.y));
+        CHECK(norm(next) >= floor - 1e-12);
+        CHECK(norm(next) <= 1.0 + 1e-12);
+        if (norm(p) >= floor) CHECK(std::abs(dot(next - p, radial)) < 1e-9);
     }
 }
 
@@ -156,10 +222,31 @@ TEST_CASE("Ship entry trimmed alpha range dump", "[.][trim_range_dump]") {
     for (const double propellant : {35000.0, 38000.0, 41000.0}) {
         const auto v = ship(propellant);
         const gnc::EntryAeroTable table(*v, schedule);
-        for (const double mach : {0.3, 0.5, 0.7, 0.8, 0.9, 1.0, 1.2, 1.5, 2.0, 3.0, 4.0, 4.5, 5.0, 6.0, 8.0}) {
+        for (const double mach : {0.3, 0.5, 0.7, 0.8, 0.9, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0, 8.0}) {
             std::cout << "prop " << propellant / 1000.0 << " t mach " << mach << ": schedule " << schedule.at(mach) / deg
                       << " lowest " << table.lowest_trimmed_alpha_rad(mach) / deg << " highest "
                       << table.highest_trimmed_alpha_rad(mach) / deg << "\n";
+        }
+    }
+}
+
+// Hidden: the table's build time, mean over builds at 35 and 41 t: the cap over the whole grid (default), up to the
+// guidance's terminal Mach (as EntryGuidance builds it), none (as the residue limit's bisection builds it).
+TEST_CASE("Ship entry aero table build time", "[.][trim_build_time]") {
+    const gnc::AlphaSchedule schedule = gnc::load_alpha_schedule(STARSIM_CONFIG_DIR, "aero/ship_entry_alpha.csv");
+    for (const double propellant : {35000.0, 41000.0}) {
+        const auto v = ship(propellant);
+        for (const double steering_mach_max : {std::numeric_limits<double>::infinity(),
+                                               v->stages().front().config.entry->terminal_mach, 0.0}) {
+            constexpr int builds = 5;
+            const auto start = std::chrono::steady_clock::now();
+            for (int i = 0; i < builds; ++i) {
+                const gnc::EntryAeroTable table(*v, schedule, steering_mach_max);
+                CHECK(table.cd_area_m2(1.0) > 0.0);
+            }
+            const std::chrono::duration<double, std::milli> took = std::chrono::steady_clock::now() - start;
+            std::cout << "prop " << propellant / 1000.0 << " t, cap to Mach " << steering_mach_max << ": "
+                      << took.count() / builds << " ms per build\n";
         }
     }
 }

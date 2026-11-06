@@ -14,6 +14,7 @@
 #include "starsim/gnc/entry_aero_table.hpp"
 #include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
+#include "starsim/gnc/entry_residue_limit.hpp"
 
 using namespace starsim;
 using Catch::Matchers::WithinAbs;
@@ -358,6 +359,40 @@ TEST_CASE("The steering difference stays on its side of the schedule's fraction"
     CHECK(Model::steering_difference({0.8, 0.6, 0.0}, x, 0.1) == -0.1);
 }
 
+// Review I3 (2026-11-06): where the flaps cap the least-lift end below 90 deg the lift jumps by cl(cap) at fraction 0;
+// the guidance held the old lift direction below 1e-3 while the predictor flew the new one (or none). The Newton steps
+// therefore keep the steering off the origin, along its own direction: guidance and predictor fly the same lift.
+TEST_CASE("The terminal steering stays off the origin where the lift would jump", "[ship][guidance]") {
+    using Model = gnc::EntryPredictorModel;
+    const math::Vec3 x{1.0, 0.0, 0.0}, y{0.0, 1.0, 0.0};
+    const double floor = Model::origin_fraction;
+    CHECK(floor > 1e-3);  // above the guidance's hold threshold: the guidance always flies the steering's own direction
+    // lifted onto the floor along its own direction (a reversal stays a reversal), along the flown one when it has none
+    const auto own = Model::steering_above_floor({0.002, 0.001, 0.0}, x, floor);
+    CHECK_THAT(norm(own), WithinAbs(floor, 1e-12));
+    CHECK_THAT(own.y / own.x, WithinAbs(0.5, 1e-12));
+    CHECK_THAT(Model::steering_above_floor({-0.003, 0.0, 0.0}, x, floor).x, WithinAbs(-floor, 1e-12));
+    CHECK_THAT(Model::steering_above_floor({0.0, 0.0, 0.0}, y, floor).y, WithinAbs(floor, 1e-12));
+    CHECK(Model::steering_above_floor({0.3, 0.0, 0.0}, y, floor).x == 0.3);
+    // a Newton step ending (almost) at the origin ends on the floor, with a direction
+    const math::Vec3 p{0.05, 0.0, 0.0};
+    const auto onto = gnc::entry_terminal_steering_step(p, 1.0, 0.0, 0.0, 1.0, {0.05 * 1.001, 0.0, 0.0}, 0.3, floor);
+    CHECK_THAT(norm(onto), WithinAbs(floor, 1e-12));
+    // a step well across (the lift wanted the other way) is taken
+    CHECK(gnc::entry_terminal_steering_step(p, 1.0, 0.0, 0.0, 1.0, {0.25, 0.0, 0.0}, 0.3, floor).x < -floor);
+    // without the floor (no flaps) the step is unchanged
+    CHECK(norm(gnc::entry_terminal_steering_step(p, 1.0, 0.0, 0.0, 1.0, {0.05 * 1.001, 0.0, 0.0}, 0.3)) < 1e-3);
+    // the floor holds for a flapped ship's table at every Mach (35 t: cap 68 deg at Mach 4.5, 90 at Mach 0.5), none
+    // without flaps
+    const auto schedule = ship_alpha_schedule();
+    test::ShipEntryScenario scenario(test::EntryStart{});
+    Model model;
+    model.aero = gnc::EntryAeroTable(scenario.body().vehicle(), schedule, gnc::EntryGuidanceParameters{}.terminal_mach);
+    CHECK(model.steering_min_fraction(4.5) == floor);
+    CHECK(model.steering_min_fraction(0.5) == floor);
+    CHECK(Model{}.steering_min_fraction(4.5) == 0.0);
+}
+
 TEST_CASE("Belly flop steers to the gate", "[ship][guidance]") {
     test::EntryStart start;
     start.height_m = 12000.0;
@@ -398,6 +433,59 @@ TEST_CASE("Belly flop steers to the gate", "[ship][guidance]") {
     CHECK(miss < 50.0);
     CHECK(belly_off_down < 15.0 * deg);
     CHECK(-t.vertical_speed_mps < 200.0);
+}
+
+// Review I1 (user decision 2026-11-06 "Physik akzeptieren"): the ship vented to the residue limit (headers full plus the
+// most main-tank residue the flaps trim along the schedule, ~41 t) placed in the terminal phase at Mach ~1.2, where the
+// flaps hold no attitude with less lift than the schedule (the least-lift half flat), aimed 400 m short of where
+// the schedule at bank 0 would take it: the steering stays well-defined (finite commands, no lift reversal per cycle)
+// and flies to the gate.
+TEST_CASE("At the residue limit the terminal steering flies through the saturated Mach range", "[ship][guidance]") {
+    const auto schedule = ship_alpha_schedule();
+    double entry_propellant_kg = 0.0;
+    {
+        test::EntryStart heavy;
+        heavy.mass_propellant_kg = 62000.0;  // the campaign's heaviest
+        test::ShipEntryScenario scenario(heavy);
+        const auto& v = scenario.body().vehicle();
+        const auto limit = gnc::entry_residue_limit(v, schedule);
+        entry_propellant_kg = v.propellant_kg() - v.main_propellant_kg() + limit.max_main_propellant_kg;
+    }
+    CAPTURE(entry_propellant_kg);
+    test::EntryStart start;
+    start.height_m = 20000.0;
+    start.speed_relative_mps = 355.0;  // Mach 1.2 at 20 km
+    start.flight_path_angle_rad = -50.0 * deg;
+    start.heading_rad = 0.0;
+    start.mass_propellant_kg = entry_propellant_kg;
+    test::ShipEntryScenario scenario(start);
+    gnc::EntryGuidance guidance(scenario.body(), schedule, predicted_target(scenario, schedule, 0.0, -400.0),
+                                test_parameters());
+    REQUIRE(guidance.model().steering_alpha(0.0, 1.2) == guidance.model().steering_alpha(0.5, 1.2));  // flat half
+    guidance.skip_to(gnc::EntryPhase::Terminal);
+    const auto samples = scenario.run_guided(guidance, gnc::EntryPhase::Gate, 600.0);
+    REQUIRE_FALSE(samples.empty());
+    double largest_alpha_step = 0.0;
+    for (size_t i = 0; i < samples.size(); ++i) {
+        const auto& c = samples[i].command;
+        CHECK(std::isfinite(c.alpha_rad));
+        if (i > 0 && c.phase == gnc::EntryPhase::Terminal) {
+            largest_alpha_step = std::max(largest_alpha_step, std::abs(c.alpha_rad - samples[i - 1].command.alpha_rad));
+        }
+    }
+    const double miss = gnc::ground_range_m(scenario.position_itrf_m(), guidance.target().position_itrf_m);
+    if (verbose()) {
+        for (size_t i = 0; i < samples.size(); i += 10) {
+            const auto& g = samples[i];
+            std::cout << "t " << g.t_s << " h " << g.telemetry.altitude_m << " mach " << g.telemetry.mach << " alpha cmd "
+                      << g.command.alpha_rad / deg << " aoa " << g.telemetry.angle_of_attack_rad / deg << "\n";
+        }
+        std::cout << "gate: miss " << miss << " m, largest alpha command step " << largest_alpha_step / deg << " deg\n";
+    }
+    CHECK(guidance.phase() == gnc::EntryPhase::Gate);
+    CHECK_FALSE(scenario.body().impacted());
+    CHECK(miss < 100.0);
+    CHECK(largest_alpha_step < 5.0 * deg);  // no jump of the command between ticks
 }
 
 
