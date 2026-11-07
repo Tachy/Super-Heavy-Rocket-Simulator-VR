@@ -19,6 +19,7 @@ import hull_profile  # noqa: E402  (pure Python, shared with the Blender generat
 
 ROOT = Path(__file__).resolve().parents[2]
 VEHICLES = ROOT / "config" / "vehicles"
+COCKPITS = ROOT / "config" / "cockpits"
 ENGINES = ROOT / "config" / "engines"
 
 
@@ -286,6 +287,76 @@ def validate_dragon_detail(detail: dict) -> None:
                 raise VehicleSpecError(f"[{table}]: missing key '{k}'")
 
 
+COCKPIT_KEYS = {
+    "cockpit": ("capsule_stage",),
+    "cabin": ("wall_m", "floor_x_m", "ceiling_x_m", "tunnel_radius_m", "tunnel_top_x_m", "profile_m", "windows", "hatch", "window_reveal_radius_m", "window_bezel_m", "hatch_trim_m"),
+    "eye": ("position_m", "forward", "up"),
+    "console": ("centre_m", "normal", "up", "width_m", "height_m", "depth_m", "fold_deg", "strut_z_m"),
+    "hotas": ("props", "stick_grip_m", "throttle_grip_m"),
+}
+COCKPIT_SCREENS = ("left", "centre", "right")
+COCKPIT_SEATS = ("s1", "s2", "s3", "s4")
+COCKPIT_BUTTON_KINDS = ("push", "covered", "handle")
+COCKPIT_BUTTON_SHAPES = ("round", "rect")
+
+
+def validate_cockpit(cockpit: dict) -> None:
+    """The cabin tables the generator reads: keys present, screens / seats / tablets complete, every button on a known screen, unit vectors normalised."""
+    for table, keys in COCKPIT_KEYS.items():
+        t = cockpit.get(table)
+        if not isinstance(t, dict):
+            raise VehicleSpecError(f"cockpit: missing table [{table}]")
+        for k in keys:
+            if k not in t:
+                raise VehicleSpecError(f"cockpit [{table}]: missing key '{k}'")
+    if tuple(s["id"] for s in cockpit.get("seat", [])) != COCKPIT_SEATS:
+        raise VehicleSpecError(f"cockpit: [[seat]] ids must be {COCKPIT_SEATS}")
+    screens = {s["id"]: s for s in cockpit.get("screen", [])}
+    if tuple(sorted(screens)) != tuple(sorted(COCKPIT_SCREENS)):
+        raise VehicleSpecError(f"cockpit: [[screen]] ids must be {COCKPIT_SCREENS}")
+    if sorted(t["id"] for t in cockpit.get("tablet", [])) != ["l", "r"]:
+        raise VehicleSpecError("cockpit: [[tablet]] ids must be l and r")
+    if not cockpit.get("light"):
+        raise VehicleSpecError("cockpit: no [[light]]")
+
+    def unit(name, v):
+        if abs(math.sqrt(sum(c * c for c in v)) - 1.0) > 2e-3:
+            raise VehicleSpecError(f"cockpit {name}: vector {v} is not a unit vector")
+
+    unit("eye.forward", cockpit["eye"]["forward"])
+    unit("eye.up", cockpit["eye"]["up"])
+    unit("console.normal", cockpit["console"]["normal"])
+    for sid, s in screens.items():
+        unit(f"screen {sid} normal", s["normal"])
+        unit(f"screen {sid} up", s["up"])
+        for k in ("centre_m", "size_m"):
+            if k not in s:
+                raise VehicleSpecError(f"cockpit screen {sid}: missing key '{k}'")
+    for t in cockpit["tablet"]:
+        unit(f"tablet {t['id']} normal", t["normal"])
+    ids = set()
+    for b in cockpit.get("button", []):
+        for k in ("id", "panel", "centre_m", "size_m", "shape", "kind", "function"):
+            if k not in b:
+                raise VehicleSpecError(f"cockpit button {b.get('id', '?')}: missing key '{k}'")
+        if b["id"] in ids:
+            raise VehicleSpecError(f"cockpit: duplicate button id {b['id']}")
+        ids.add(b["id"])
+        if b["panel"] not in screens:
+            raise VehicleSpecError(f"cockpit button {b['id']}: unknown panel {b['panel']}")
+        if b["kind"] not in COCKPIT_BUTTON_KINDS or b["shape"] not in COCKPIT_BUTTON_SHAPES:
+            raise VehicleSpecError(f"cockpit button {b['id']}: unknown kind {b['kind']} / shape {b['shape']}")
+    if "handle" not in ids:
+        raise VehicleSpecError("cockpit: no [[button]] with id handle")
+
+
+def load_cockpit(cockpit_id: str, cockpits_dir: Path = COCKPITS) -> dict:
+    with open(cockpits_dir / f"{cockpit_id}.toml", "rb") as f:
+        cockpit = tomllib.load(f)
+    validate_cockpit(cockpit)
+    return cockpit
+
+
 def dragon_lobes(angles_deg: list) -> list:
     """Centres of the SuperDraco pods: the middle of each consecutive pair of the config's engine angles."""
     if len(angles_deg) % 2:
@@ -339,7 +410,13 @@ def load_dragon(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:
                           "rcs_pods": cap["rcs"]["pod"], "superdraco_lobes_deg": dragon_lobes(group["angles_deg"]),
                           "superdraco_half_gap_deg": 0.5 * (group["angles_deg"][1] - group["angles_deg"][0]),
                           "port_position_m": cap["docking_port"][0]["position_m"], "port_axis": cap["docking_port"][0]["axis"], "port_up": cap["docking_port"][0]["up"]}}
-    return {"vehicle_id": vehicle_id, "stages": stages, "engines": {}, "detail": detail, "nose": nose, "idss": idss_block(detail, stages["capsule"])}
+    spec = {"vehicle_id": vehicle_id, "stages": stages, "engines": {}, "detail": detail, "nose": nose, "idss": idss_block(detail, stages["capsule"])}
+    cockpit_id = vehicle.get("vehicle", {}).get("cockpit")
+    if cockpit_id:  # the cabin tables (config/cockpits/<id>.toml, next to the vehicles folder): gen_dragon_cabin.py
+        spec["cockpit"] = load_cockpit(cockpit_id, vehicles_dir.parent / "cockpits")
+        if spec["cockpit"]["cockpit"]["capsule_stage"] != "capsule":
+            raise VehicleSpecError("cockpit: capsule_stage must name the Dragon's capsule stage")
+    return spec
 
 
 ISS_DETAIL_TABLES = ("paint", "pose", "ida", "lathe", "box", "bay", "plate", "tube", "wing", "gamma", "array", "irosa_plane", "joint", "array_shape", "truss_lattice")

@@ -34,6 +34,7 @@ import mount_textures  # noqa: E402
 import vehicle_spec  # noqa: E402
 import dorsal_layout  # noqa: E402  (blender/, put on the path by vehicle_spec)
 import hls_layout  # noqa: E402  (blender/)
+import cabin_layout  # noqa: E402  (blender/)
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_DIR = ROOT / "tools" / "structures" / "blender"
@@ -241,7 +242,8 @@ def dragon_manifest(spec: dict, digest: str, version: str, triangles: dict, tabl
                       "paint_hook": {"albedo": idss["hook_albedo"], "roughness": 0.35, "metallic": 0.8},
                       "paint_strut": {"albedo": idss["strut_albedo"], "roughness": 0.5, "metallic": 0.5}}}
     return {"input_hash": digest, "blender": version, "vehicle": spec["vehicle_id"], "files": list(vehicle_outputs(spec, table)),
-            "triangles": triangles, "frame": VEHICLE_FRAME, "flaps": {}, "engines": {}, "look": look, "nose": spec["nose"], "idss": spec["idss"]}
+            "triangles": triangles, "frame": VEHICLE_FRAME, "flaps": {}, "engines": {}, "look": look, "nose": spec["nose"], "idss": spec["idss"],
+            "cockpit": cabin_layout.cockpit_manifest(spec["cockpit"])}
 
 
 def iss_manifest(spec: dict, digest: str, version: str, triangles: dict, table: dict, textured: dict) -> dict:
