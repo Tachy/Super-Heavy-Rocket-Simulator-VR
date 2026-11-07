@@ -1,17 +1,32 @@
 # Look shots of the Crew Dragon cabin from a REAL session (needs a GPU, no --headless; models generated):
-#   pilot_eye         the commander's eye point (CockpitConfig.eye), 100 deg horizontal
-#   gopro_discovery2  the Discovery photographers' camera (between the s2 / s3 heads, 0.15 m behind the eye points, the eye's
-#                     direction), same field of view; + gopro_vs_discovery2 (side by side) and gopro_overlay_discovery2 (50 %)
-#   pilot_vs_discovery1  the eye shot beside discovery1
-#   hatch_crew1_1     from the hatch toward the seat row, beside crew1_1 (side by side)
+#   pilot_eye              the commander's eye point (CockpitConfig.eye), 100 deg horizontal (our own view, no photo pair)
+#   gopro_discovery2       the Discovery photographers' GoPro (pose fitted on discovery2's screen corners, docs/subsystems/cockpit.md),
+#                          rendered rectilinear 140 deg and remapped to the GoPro's equidistant fisheye (113 x 64 deg, 1600 x 900);
+#                          + gopro_vs_discovery2 / gopro_overlay_discovery2 and, as discovery1 has the same framing, gopro_vs_discovery1
+#   hatch_crew1_1          from the open hatch toward the seat row (3:2, ~87 deg horizontal, level), hatch frame and exterior hull
+#                          hidden; + hatch_vs_crew1_1
 # godot --path game --script res://tests/cockpit_shots.gd -- --mission=falcon9_crew_dragon --t_plus=-60 --out_dir=<abs>/screenshots/m7-cockpit/look
-#   --fov=100 (horizontal, deg)  --crew=<n> (default the mission's)  --refs=<abs dir of the reference photos>
+#   --fov=100 (pilot_eye, horizontal deg)  --crew=<n> (default the mission's)  --refs=<abs dir of the reference photos>
+#   --field_key=<0.18..1> (the eye adaptation's field grey, default CABIN_FIELD_KEY; 0.18 = the game default)
+#   --fixed_exposure (eye adaptation off; default: on as in the game, snapped to each shot)
 extends SceneTree
 
 const FRAMES_TO_SETTLE := 10
 const SHOT_SETTLE_FRAMES := 40
 const NEAR_M := 0.04
-const GOPRO_BACK_M := 0.15  # task-3 review: about 0.15 m behind the eye points
+## GoPro fit (docs/subsystems/cockpit.md "Shot cameras"): position, forward and right (capsule frame), equidistant fisheye focal
+## length in px / rad on the 4128 x 2322 photo (the output scales it by 1600 / 4128).
+const GOPRO_POS := Vector3(2.6545, -0.4837, -0.0251)
+const GOPRO_FORWARD := Vector3(0.48568, 0.87422, 0.00729)
+const GOPRO_RIGHT := Vector3(-0.02094, 0.01996, -0.99958)
+const GOPRO_F_PX := 2085.47
+const GOPRO_PHOTO_SIZE := Vector2(4128.0, 2322.0)
+const GOPRO_OUT_SIZE := Vector2i(1600, 900)
+const GOPRO_RENDER_FOV := 140.0  # rectilinear, covers the fisheye frame's corners (65 deg off axis)
+## [call] Field key of the white cabin (Atmosphere.field_key; 0.18 = the default grey world): the wall reads ~0.85-0.9 sRGB as in the photos.
+const CABIN_FIELD_KEY := 1.2
+const RENDER_SIZE := Vector2i(2560, 1440)
+const HATCH_VFOV := 65.0  # 3:2 at 87 deg horizontal
 
 var _args := {}
 var _main: Node
@@ -31,7 +46,7 @@ func _initialize() -> void:
 	for arg in OS.get_cmdline_user_args():
 		var parts := arg.trim_prefix("--").split("=", true, 1)
 		_args[parts[0]] = parts[1] if parts.size() > 1 else ""
-	root.size = Vector2i(1600, 900)
+	root.size = RENDER_SIZE
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 
@@ -63,6 +78,8 @@ func _setup() -> bool:
 	_rig.fly_to_target(sim)
 	_rig.print_bodies(sim)
 	_rig.hide_ui(_main)
+	_world.atmosphere.eye_adaptation_enabled = not _args.has("fixed_exposure")
+	_world.atmosphere.field_key = float(_args.get("field_key", CABIN_FIELD_KEY))
 	_rig.place(sim, 0, 62.0, Vector3(0.0, 15.0, 0.0), 40.0)  # the orbit camera near the capsule first: the views are placed only near the camera
 	RenderingServer.frame_pre_draw.connect(func() -> void: _world.camera.near = NEAR_M)
 	_stage = 1
@@ -95,6 +112,7 @@ func _shoot() -> bool:
 		_cockpit.set_crew(crew)
 		_define_shots()
 	if _index >= _shots.size():
+		_set_exterior_visible(true)
 		_compose()
 		quit(0)
 		return true
@@ -103,8 +121,9 @@ func _shoot() -> bool:
 	for label in _world.find_children("*", "Label3D", true, false):
 		(label as Label3D).visible = false  # the stale-structure-models notice is no part of the cabin
 	var fov_deg := float(shot.get("fov", _args.get("fov", 100.0)))
-	_world.camera.keep_aspect = Camera3D.KEEP_WIDTH
+	_world.camera.keep_aspect = Camera3D.KEEP_HEIGHT if shot.get("keep_height", false) else Camera3D.KEEP_WIDTH
 	_world.camera.fov = fov_deg
+	_set_exterior_visible(not shot.get("hide_exterior", false))
 	# the pose in the capsule frame -> render axes of this frame; converge: the view is placed relative to the camera
 	var stage := _cockpit.get_parent() as Node3D
 	var local: Transform3D = shot["local"]
@@ -119,8 +138,14 @@ func _shoot() -> bool:
 	if _wait < SHOT_SETTLE_FRAMES:
 		return false
 	var path := _out_dir.path_join(String(shot["name"]) + ".png")
-	print("cockpit_shots: saved %s (error %d), camera error %.4f m" % [path, root.get_viewport().get_texture().get_image().save_png(path),
-			target.origin.length()])
+	var image := root.get_viewport().get_texture().get_image()
+	image.convert(Image.FORMAT_RGB8)
+	if shot.has("fisheye"):
+		image = _fisheye(image)
+	elif shot.has("crop_aspect"):
+		var width := roundi(image.get_height() * float(shot["crop_aspect"]))
+		image = image.get_region(Rect2i((image.get_width() - width) / 2, 0, width, image.get_height()))
+	print("cockpit_shots: saved %s (error %d), %s" % [path, image.save_png(path), _brightness(image)])
 	_index += 1
 	_wait = 0
 	return false
@@ -128,19 +153,78 @@ func _shoot() -> bool:
 
 func _define_shots() -> void:
 	var eye := _cockpit.config.eye
-	var behind := eye.basis * Vector3(0.0, 0.0, GOPRO_BACK_M)
-	var between := Vector3(eye.origin.x, eye.origin.y, 0.0) + behind  # centre line between the s2 and s3 eye points
+	var gopro_up := (-GOPRO_FORWARD).cross(GOPRO_RIGHT).normalized()
+	var gopro_basis := Basis(GOPRO_RIGHT, gopro_up, -GOPRO_FORWARD)
+	# hatch: looks along -Y (toward the seat row), image up = +X (toward the forward tunnel), image right = +Z
+	var hatch_basis := Basis(Vector3(0.0, 0.0, 1.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0))
 	_shots = [
 		{"name": "pilot_eye", "local": eye},
-		{"name": "gopro_discovery2", "local": Transform3D(eye.basis, between)},
-		{"name": "hatch_crew1_1", "local": Transform3D(Basis.looking_at(Vector3(-0.15, -1.0, 0.0).normalized(), Vector3.RIGHT), Vector3(2.45, 1.2, 0.0)), "fov": 85.0},
+		{"name": "gopro_discovery2", "local": Transform3D(gopro_basis, GOPRO_POS), "fov": GOPRO_RENDER_FOV, "fisheye": true},
+		# [E] crew1_1 (docs/subsystems/cockpit.md): in the open hatch, level, 3:2 at ~87 deg = 65 deg vertical
+		{"name": "hatch_crew1_1", "local": Transform3D(hatch_basis, Vector3(2.05, 1.7, 0.0)), "fov": HATCH_VFOV, "keep_height": true,
+				"crop_aspect": 1.5, "hide_exterior": false, "hide_head": false},
 	]
+
+
+## The hatch frame and the exterior hull (every stage node child but the cockpit) are hidden for the shot from outside the inner wall.
+func _set_exterior_visible(on: bool) -> void:
+	var stage := _cockpit.get_parent() as Node3D
+	for child in stage.get_children():
+		if child != _cockpit and child is Node3D:
+			(child as Node3D).visible = on
+	var hatch := _cockpit.cabin_node("hatch_frame")
+	if hatch != null:
+		hatch.visible = on
+
+
+## Rectilinear render (GOPRO_RENDER_FOV, keep width) -> the GoPro's equidistant fisheye (r = f theta), bilinear.
+func _fisheye(src: Image) -> Image:
+	var out := Image.create(GOPRO_OUT_SIZE.x, GOPRO_OUT_SIZE.y, false, Image.FORMAT_RGB8)
+	var f := GOPRO_F_PX * GOPRO_OUT_SIZE.x / GOPRO_PHOTO_SIZE.x
+	var px_per_tan := src.get_width() * 0.5 / tan(deg_to_rad(GOPRO_RENDER_FOV) * 0.5)
+	var sw := src.get_width()
+	var sh := src.get_height()
+	var centre := Vector2(GOPRO_OUT_SIZE) * 0.5
+	for y in GOPRO_OUT_SIZE.y:
+		for x in GOPRO_OUT_SIZE.x:
+			var d := Vector2(x + 0.5, y + 0.5) - centre
+			var r := d.length()
+			var theta := r / f
+			if theta >= 1.5:
+				continue
+			var k := tan(theta) / maxf(r, 1.0e-6)
+			var u := sw * 0.5 + d.x * k * px_per_tan - 0.5
+			var v := sh * 0.5 + d.y * k * px_per_tan - 0.5
+			if u < 0.0 or v < 0.0 or u > sw - 1.0 or v > sh - 1.0:
+				continue
+			var x0 := int(u)
+			var y0 := int(v)
+			var x1 := mini(x0 + 1, sw - 1)
+			var y1 := mini(y0 + 1, sh - 1)
+			var top := src.get_pixel(x0, y0).lerp(src.get_pixel(x1, y0), u - x0)
+			var bottom := src.get_pixel(x0, y1).lerp(src.get_pixel(x1, y1), u - x0)
+			out.set_pixel(x, y, top.lerp(bottom, v - y0))
+	return out
+
+
+## Brightness reported with every shot: 90th percentile and mean of the grey over the frame (sRGB, 0..1); the white wall is ~ p90.
+func _brightness(image: Image) -> String:
+	var greys: Array[float] = []
+	for y in range(0, image.get_height(), 8):
+		for x in range(0, image.get_width(), 8):
+			var c := image.get_pixel(x, y)
+			greys.append((c.r + c.g + c.b) / 3.0)
+	greys.sort()
+	var mean := 0.0
+	for g in greys:
+		mean += g
+	return "p90 grey %.2f, mean %.2f" % [greys[int(greys.size() * 0.9)], mean / greys.size()]
 
 
 func _compose() -> void:
 	_side_by_side("gopro_discovery2", "discovery2", "gopro_vs_discovery2", false)
 	_side_by_side("gopro_discovery2", "discovery2", "gopro_overlay_discovery2", true)
-	_side_by_side("pilot_eye", "discovery1", "pilot_vs_discovery1", false)
+	_side_by_side("gopro_discovery2", "discovery1", "gopro_vs_discovery1", false)  # same framing as discovery2
 	_side_by_side("hatch_crew1_1", "crew1_1", "hatch_vs_crew1_1", false)
 
 

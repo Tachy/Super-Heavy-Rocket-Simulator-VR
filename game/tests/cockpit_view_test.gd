@@ -180,5 +180,9 @@ func _check_figures(config: CockpitConfig) -> void:
 		var hips := skeleton.get_bone_global_pose(skeleton.find_bone("hips")).origin
 		var world := (skeleton.global_transform * Transform3D(Basis(), hips)).origin
 		var hip: Vector3 = config.seats[1]["hip"]
-		_check(world.distance_to(hip) < 0.25, "s2 figure's hips %.3f m from the seat hip point" % world.distance_to(hip))
+		_check(world.distance_to(hip) < 0.2, "s2 figure's hips %.3f m from the seat hip point" % world.distance_to(hip))
+		# orientation (the seat basis is duplicated from figure_layout.seat_basis): the head sits near the eye point
+		var head_bone := skeleton.find_bone("head")
+		var head := (skeleton.global_transform * Transform3D(Basis(), skeleton.get_bone_global_pose(head_bone).origin)).origin
+		_check(head.distance_to(config.eye.origin) < 0.2, "s2 figure's head %.3f m from the eye point" % head.distance_to(config.eye.origin))
 	cockpit.free()

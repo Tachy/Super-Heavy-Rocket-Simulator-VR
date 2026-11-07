@@ -148,6 +148,10 @@ var sun_direction_local := Vector3.ZERO
 var camera_local_m := Vector3.ZERO
 ## Fidelity flag: eye adaptation (EyeAdaptation) - on in the game; off: the fixed day exposure (atmosphere_check.gd).
 var eye_adaptation_enabled := true
+## The grey the measured field is taken as (EyeAdaptation.FIELD_MID_GREY by default). A high-key scene - the white Crew Dragon
+## cabin seen from inside - sets a higher key [E: Reinhard et al. 2002 raise the key for high-key scenes] so its white walls
+## are not metered down to 18 % grey; whoever puts the camera in the cabin sets it (cockpit_shots.gd --field_key).
+var field_key := EyeAdaptation.FIELD_MID_GREY
 ## The cone gain of the eye adaptation this frame (1 without it). Times `brightness` it is in luminance_scale and
 ## scene_per_cd_m2, and the shaders read that product as atmosphere_exposure_gain for what is not lit through the tables
 ## (Moon, Sun disc).
@@ -388,8 +392,8 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 			adaptation_from_field = true
 			if _field_snap:
 				_eye.snap()
-			_eye.advance(last_field_cd_m2 / EyeAdaptation.FIELD_MID_GREY,
-					last_field_scotopic_cd_m2 / EyeAdaptation.FIELD_MID_GREY, reference_luminance(d_au), adaptation_dt_s)
+			_eye.advance(last_field_cd_m2 / field_key,
+					last_field_scotopic_cd_m2 / field_key, reference_luminance(d_au), adaptation_dt_s)
 			# A new view stays snapped while it is still streaming in, and at least FIELD_SNAP_MIN_S after the jump
 			# (the streaming may not have started on its first frames).
 			_field_snap = _field_snap and (_field_loading

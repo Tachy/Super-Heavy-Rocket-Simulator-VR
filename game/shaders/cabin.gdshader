@@ -12,6 +12,7 @@ uniform float roughness : hint_range(0.0, 1.0) = 0.85;
 uniform float metallic : hint_range(0.0, 1.0) = 0.0;
 uniform float specular : hint_range(0.0, 1.0) = 0.4;
 uniform float ambient_visibility : hint_range(0.0, 1.0) = 0.2;
+uniform float fill = 0.0;  // scene value of the cabin's bounced light (E / pi x scene_per_cd_m2), set by CockpitView each frame
 uniform float seam_depth : hint_range(0.0, 1.0) = 0.0;
 uniform vec2 seam_pitch_m = vec2(0.42, 0.30);
 uniform float seam_width_m = 0.0015;
@@ -47,6 +48,7 @@ void fragment() {
 	ROUGHNESS = roughness;
 	METALLIC = metallic;
 	SPECULAR = specular;
+	EMISSION = albedo.rgb * (1.0 - metallic) * fill;
 	AO = ambient_visibility;
 	AO_LIGHT_AFFECT = 0.0;
 }

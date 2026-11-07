@@ -111,8 +111,26 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   `cabin_glass.gdshader` (windows), screens through `display_colour.gdshader` (dark Dragon blue placeholder, display-referred). Lamps: `OmniLight3D` at the `[[light]]` rows
   plus two fill lights standing in for bounced light ([call], flux constants in the class), energy = `TowerLights.energy_of(cd, scene_per_cd_m2)` every frame. Seats are one
   black surface (the mesh has no white shell split yet); housing dark grey; walls white matte.
-- Shots: `game/tests/cockpit_shots.gd` (GPU) writes `pilot_eye`, `gopro_discovery2` (camera between the s2 / s3 eye points, 0.15 m behind, eye direction), `hatch_crew1_1` and
-  side-by-side / overlay PNGs with the photos to `screenshots/m7-cockpit/look/`. Test: `cockpit_view_test.gd` (needs models; in `$needsGpuOrModels`).
+- Lighting (fix round 1): the cabin has no GI, so each cabin surface gets a flat bounced-light term in the shader (`fill` = `FILL_LUX` 450 lx / pi x
+  `scene_per_cd_m2`, emission albedo x fill, set every frame; scene-referred like the lamps) on top of the lamps and the sky-AO remainder; the two ceiling lamps cast
+  shadows; a ceiling ring light (8 omnis on r 0.72 m at `ceiling_x_m` - 0.10, 6000 lm, [E] crew1_1 annulus r 0.45..0.9 m) stands in for the annulus (its emissive mesh
+  comes with the generator). The scene-referred eye adaptation meters the cabin to 18 % grey whatever the light level, so flux alone cannot make it white: `Atmosphere.field_key`
+  (default `EyeAdaptation.FIELD_MID_GREY` 0.18) is the field's grey; the shots set 1.2 ([call], `--field_key`) and measure white wall p90 0.82-0.87 sRGB
+  (pilot_eye 0.87, gopro 0.82, hatch 0.86; at key 0.18 they were 0.56-0.62, at 0.40: 0.67-0.74). Whoever puts the player camera in the cabin (Task 8/9) must set `field_key`.
+  Open: a sound way to set the key (cabin-local high-key rule) is a decision for the eye-adaptation subsystem.
+- Shots: `game/tests/cockpit_shots.gd` (GPU, 2560 x 1440 window) writes `pilot_eye` (our own view, no photo pair), `gopro_discovery2` (the photographers' GoPro, rendered 140 deg
+  rectilinear and remapped to the equidistant fisheye, 1600 x 900), `hatch_crew1_1` (3:2) and side-by-side / overlay PNGs (`gopro_vs_discovery2`, `gopro_overlay_discovery2`,
+  `gopro_vs_discovery1`, `hatch_vs_crew1_1`) with the photos to `screenshots/m7-cockpit/look/`; each shot prints its p90 / mean grey. Eye adaptation on (`--fixed_exposure` off).
+  Test: `cockpit_view_test.gd` (needs models; in `$needsGpuOrModels`).
+
+### Shot cameras (fit, fix round 1)
+- GoPro (discovery2 = discovery1 framing): least-squares fit (scipy, own equidistant fisheye r = f theta, principal point at the image centre) on the 12 active-area corners of the
+  three screens (TOML positions; pixels read by eye from the 4128 x 2322 photo, +-5 px), 7 parameters. Result in the capsule frame: position (2.6545, -0.4837, -0.0251),
+  forward (0.4857, 0.8742, 0.0073), image right (-0.0209, 0.0200, -0.9996), f = 2085 px/rad (113.4 x 64 deg), reprojection error rms 20 px, max 36 px of 4128 (~0.5 %).
+  The fit puts the camera 0.50 m from the screen plane, 0.2 m toward the hatch of the eye points (not the review's 0.64 m estimate; position and f are correlated, the fisheye
+  distortion is tied by the three coplanar screens).
+- Hatch (crew1_1): not fitted (no measurable 3D points in the TOML beyond window / helmet estimates); review estimate: (2.05, 1.7, 0), level, looking -Y, image up +X, 3:2,
+  ~87 deg horizontal (65 deg vertical). Exterior hull is left visible (single-sided, culled from inside; hiding it would remove the window shadows and flood the floor with sun).
 
 ## Validation
 - Wall check (scratch script, Task 1): inner profile >= 0.094 m from the exterior meridian and the neck well everywhere.

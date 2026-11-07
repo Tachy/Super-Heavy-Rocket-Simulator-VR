@@ -16,6 +16,17 @@ const CREW_ORDER: Array[String] = ["s2", "s3", "s1", "s4"]
 const LAMP_LUMENS := 3000.0
 const FILL_LUMENS := 7000.0
 const LAMP_RANGE_M := 6.0
+## [call] Look pass 2: the light the white walls bounce around the closed cabin (no GI): a flat illuminance on every cabin
+## surface as emission albedo x E / pi, scene-referred like the lamps (so the eye adaptation sees a lit cabin at any hour).
+const FILL_LUX := 450.0
+## Lamp height below the ceiling mesh (the lamp housing hangs 0.08 m under the panel).
+const LAMP_DROP_M := 0.08
+## [E] The ceiling ring light around the forward tunnel (crew1_1: a bright white annulus, r ~0.45..0.9 m at the ceiling):
+## RING_LAMPS omnis on r = RING_RADIUS_M (mid-annulus), RING_LUMENS in total (an area light's stand-in; its emissive mesh is the generator's).
+const RING_LAMPS := 8
+const RING_RADIUS_M := 0.72
+const RING_LUMENS := 6000.0
+const RING_DROP_M := 0.10
 ## [E] Screen placeholder: a dark Dragon-blue UI background, display-referred (no exposure, as every emitter).
 const SCREEN_COLOUR := Color(0.025, 0.07, 0.17)
 
@@ -115,18 +126,26 @@ func _process(_delta: float) -> void:
 	var scene_per_cd: float = ShaderGlobals.value(&"atmosphere_scene_per_cd_m2")
 	for i in _lights.size():
 		_lights[i].light_energy = TowerLights.energy_of(_light_cd[i], scene_per_cd)
+	var fill := FILL_LUX / PI * scene_per_cd
+	for material: Material in _materials.values():
+		if material is ShaderMaterial and (material as ShaderMaterial).shader == CABIN_SHADER:
+			(material as ShaderMaterial).set_shader_parameter("fill", fill)
 
 
 func _build_lights() -> void:
 	for i in config.lights.size():
 		var row: Dictionary = config.lights[i]
 		var p: Vector3 = CockpitConfig._vec(row.get("position_m"))
-		_add_omni("light_%s" % row.get("id", i), p + Vector3(-0.08, 0.0, 0.0), LAMP_LUMENS)
+		_add_omni("light_%s" % row.get("id", i), p + Vector3(-LAMP_DROP_M, 0.0, 0.0), LAMP_LUMENS).shadow_enabled = true  # two lamps: cheap shadows
+	var ceiling_x := float(config.cabin.get("ceiling_x_m", 3.35))
+	for k in RING_LAMPS:
+		var az := TAU * float(k) / RING_LAMPS
+		_add_omni("ring_%d" % k, Vector3(ceiling_x - RING_DROP_M, RING_RADIUS_M * cos(az), RING_RADIUS_M * sin(az)), RING_LUMENS / RING_LAMPS)
 	_add_omni("fill_ceiling", Vector3(3.1, 0.0, 0.0), FILL_LUMENS)
 	_add_omni("fill_seats", Vector3(2.0, 0.55, 0.0), FILL_LUMENS)
 
 
-func _add_omni(light_name: String, at: Vector3, lumens: float) -> void:
+func _add_omni(light_name: String, at: Vector3, lumens: float) -> OmniLight3D:
 	var omni := OmniLight3D.new()
 	omni.name = light_name
 	omni.omni_attenuation = 2.0
@@ -137,15 +156,17 @@ func _add_omni(light_name: String, at: Vector3, lumens: float) -> void:
 	add_child(omni)
 	_lights.append(omni)
 	_light_cd.append(TowerLights.candela_omni(lumens))
+	return omni
 
 
 func _build_figures(models: Dictionary) -> void:
 	var manifest: Dictionary = (models.get("manifest", {}) as Dictionary).get("crew_figure", {})
 	var look: Dictionary = manifest.get("materials", {})
+	var template := VehicleModels.scene_for(VEHICLE_ID, FIGURE_FILE)  # parsed once, duplicated per seat
+	if template == null:
+		return
 	for seat: Dictionary in config.seats:
-		var scene := VehicleModels.scene_for(VEHICLE_ID, FIGURE_FILE)
-		if scene == null:
-			return
+		var scene := template.duplicate()
 		var seat_id := String(seat["id"])
 		var angle := deg_to_rad(float(seat.get("back_angle_deg", 0.0)))
 		var root := Node3D.new()
@@ -168,6 +189,7 @@ func _build_figures(models: Dictionary) -> void:
 					var c: Array = entry["albedo"]
 					mesh_node.set_surface_override_material(s, _cabin_material(Color(c[0], c[1], c[2]).linear_to_srgb(),
 							float(entry["roughness"]), float(entry["metallic"]), 0.03, 0.0))
+	template.free()
 
 
 func _material_of(part: String) -> Material:
