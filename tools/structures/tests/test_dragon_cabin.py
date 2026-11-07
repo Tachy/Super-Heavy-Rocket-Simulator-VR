@@ -114,7 +114,7 @@ def test_generated_node_set_is_the_brief_list(spec, nodes):
     assert sorted(nodes) == cl.node_names(spec["cockpit"])
     names = set(nodes)
     for required in ("cabin_shell", "floor", "hatch_frame", "console_housing", "handle", "hotas_stick", "hotas_throttle",
-                     "tablet_l", "tablet_r", "screen_left", "screen_centre", "screen_right", "seat_s1", "seat_s4", "light_0", "light_1",
+                     "tablet_l", "tablet_r", "screen_left", "screen_centre", "screen_right", "seat_shell_s1", "seat_pad_s2", "seat_rest_s4", "console_back", "console_shelf", "console_lockers", "ceiling_ring_light", "light_0", "light_1",
                      "window_0", "window_3", "window_glass_0", "window_glass_3", "button_cam1", "button_r_cover"):
         assert required in names, required
 
@@ -251,8 +251,10 @@ def _ray_triangle(o, d, a, b, c):
 
 def test_every_button_stands_proud_of_the_housing(spec, nodes):
     """Shelves are built per button module: no button is buried in a neighbouring panel's housing (cluster C under the left wing, r_led_3)."""
-    housing = nodes["console_housing"]
-    pos, idx = housing["pos"], housing["idx"]
+    pos, idx = [], []
+    for name in ("console_housing", "console_shelf"):  # the shelf modules carry the buttons, the housing shows between them
+        idx += [len(pos) + i for i in nodes[name]["idx"]]
+        pos += nodes[name]["pos"]
     screens = {s["id"]: s for s in spec["cockpit"]["screen"]}
     worst = (1e9, None)
     for b in spec["cockpit"]["button"]:
@@ -298,3 +300,106 @@ def test_cockpit_toml_is_part_of_the_input_hash(spec):
     edited = copy.deepcopy(spec)
     edited["cockpit"]["console"]["width_m"] += 0.01
     assert build_models.vehicle_hash(vehicle_spec.dumps(edited), "x", table) != base
+
+
+# ---------- fix round 2: console proportions, ring light, seats, foot rests ----------
+
+def _extent(node, axis):
+    vals = [sum(p[i] * axis[i] for i in range(3)) for p in node["pos"]]
+    return min(vals), max(vals)
+
+
+def test_screen_gap_is_one_to_two_centimetres(spec):
+    """Bezels nearly touch (discovery2): the gap between neighbouring active areas follows console.screen_gap_m = 1-2 cm."""
+    c = spec["cockpit"]
+    gap = c["console"]["screen_gap_m"]
+    assert 0.01 <= gap <= 0.02 + 1e-9
+    screens = {s["id"]: s for s in c["screen"]}
+    for sid in ("left", "right"):
+        lat = abs(cl.lateral(screens["centre"], screens[sid]["centre_m"]))
+        assert lat - screens["centre"]["size_m"][0] == pytest.approx(gap, abs=1e-4), sid
+
+
+def test_shelf_is_a_ten_centimetre_row_of_separate_modules(spec, nodes):
+    c = spec["cockpit"]
+    modules = cl.shelf_modules(c)
+    assert len(modules) >= 6  # clusters A, B + C (they touch), handle, right of the handle, covered panel, right cluster
+    for (a0, a1), (b0, b1) in zip(modules, modules[1:]):
+        assert b0 - a1 >= 0.003, "modules need a dark gap between them"
+    centre = next(s for s in c["screen"] if s["id"] == "centre")
+    for b in c["button"]:
+        lat = cl.lateral(centre, b["centre_m"])
+        assert any(m0 <= lat - b["size_m"][0] / 2.0 and lat + b["size_m"][0] / 2.0 <= m1 for m0, m1 in modules), b["id"]
+    lo, hi = _extent(nodes["console_shelf"], centre["up"])
+    assert hi - lo == pytest.approx(c["console"]["shelf_height_m"], abs=0.004) and 0.09 <= hi - lo <= 0.11
+
+
+def test_shelf_is_proud_of_the_screens_and_the_dark_panel_runs_up_to_the_ceiling(spec, nodes):
+    c = spec["cockpit"]
+    cen = next(s for s in c["screen"] if s["id"] == "centre")
+    n = cen["normal"]
+    front = max(sum(p[i] * n[i] for i in range(3)) for p in nodes["console_shelf"]["pos"])
+    plane = sum(cen["centre_m"][i] * n[i] for i in range(3))
+    assert front - plane > 0.015, "the ledge stands at least 1.5 cm proud of the screens"
+    up = cen["up"]
+    top = max(sum(p[i] * up[i] for i in range(3)) for p in nodes["console_housing"]["pos"])
+    screen_top = sum(cen["centre_m"][i] * up[i] for i in range(3)) + cen["size_m"][1] / 2.0
+    assert max(p[0] for p in nodes["console_housing"]["pos"]) < c["cabin"]["ceiling_x_m"]
+    assert top - screen_top > 0.3, "dark area above the screens up toward the ceiling"
+
+
+def test_lockers_5_and_6_flank_the_tablets(spec, nodes):
+    c = spec["cockpit"]
+    lk = {l["id"]: l for l in c["locker"]}
+    assert lk["5"]["size_m"] == pytest.approx([0.15, 0.165], abs=0.02)
+    tab = {t["id"]: t for t in c["tablet"]}
+    assert lk["5"]["centre_m"][2] > tab["l"]["centre_m"][2] + 0.1 and lk["6"]["centre_m"][2] < tab["r"]["centre_m"][2] - 0.1
+    assert "console_lockers" in nodes
+
+
+def test_ring_light_is_an_annulus_at_the_ceiling(spec, nodes):
+    c = spec["cockpit"]
+    r0, r1 = c["cabin"]["ring_light_radii_m"]
+    pos = nodes["ceiling_ring_light"]["pos"]
+    radii = [math.hypot(p[1], p[2]) for p in pos]
+    assert min(radii) == pytest.approx(r0, abs=1e-3) and max(radii) == pytest.approx(r1, abs=1e-3)
+    assert {round(p[0], 3) for p in pos} == {round(c["cabin"]["ceiling_x_m"] - 0.004, 3)}
+
+
+def test_seats_are_split_into_white_shell_and_black_pads(spec, nodes):
+    for s in cl.SEAT_IDS:
+        for part in cl.SEAT_PARTS:
+            assert nodes[f"seat_{part}_{s}"]["idx"], (part, s)
+    seat = next(s for s in spec["cockpit"]["seat"] if s["id"] == "s2")
+    a = math.radians(seat["back_angle_deg"])
+    n = (math.sin(a), math.cos(a), 0.0)
+    assert _extent(nodes["seat_pad_s2"], n)[1] > _extent(nodes["seat_shell_s2"], n)[0]  # the pad is in front of the shell's back
+
+
+def test_foot_rest_lies_under_the_boots_of_every_seat(spec, nodes):
+    import figure_layout as fl
+    bones = fl.bones(spec["crew_figure"])
+    for seat in spec["cockpit"]["seat"]:
+        n, c = seat["foot_rest_normal"], seat["foot_rest_m"]
+        for side in "lr":
+            ankle = fl.to_capsule(bones[f"foot_{side}"]["head"], seat["hip_m"], seat["back_angle_deg"])
+            d = [ankle[i] - c[i] for i in range(3)]
+            along = sum(d[i] * n[i] for i in range(3))
+            assert 0.02 <= along <= 0.12, (seat["id"], side, along)  # the ankle stands about the sole height over the plate
+            assert math.sqrt(max(0.0, sum(x * x for x in d) - along * along)) < 0.20, (seat["id"], side)
+        pos = nodes[f"seat_rest_{seat['id']}"]["pos"]
+        on_plate = [p for p in pos if abs(sum((p[i] - c[i]) * n[i] for i in range(3))) < 0.02 and math.dist(p, c) < 0.3]
+        assert len(on_plate) >= 8  # the plate's front face lies in the plane through foot_rest_m
+
+
+def test_knee_and_shin_follow_the_review(spec):
+    """Interior knee 110-120 deg, shins -15..-25 deg from the hatch axis (crew1_1, review item 5)."""
+    import figure_layout as fl
+    cfg = spec["crew_figure"]
+    assert 110.0 <= cfg["figure"]["knee_angle_deg"] <= 120.0
+    seat = next(s for s in spec["cockpit"]["seat"] if s["id"] == "s2")
+    b = fl.bones(cfg)
+    knee = fl.to_capsule(b["shin_l"]["head"], seat["hip_m"], seat["back_angle_deg"])
+    ankle = fl.to_capsule(b["shin_l"]["tail"], seat["hip_m"], seat["back_angle_deg"])
+    angle = math.degrees(math.atan2(ankle[0] - knee[0], ankle[1] - knee[1]))  # from +Y (the hatch side) toward +X
+    assert -25.0 <= angle <= -15.0, angle

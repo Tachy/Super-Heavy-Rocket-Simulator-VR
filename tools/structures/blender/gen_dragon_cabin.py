@@ -6,8 +6,10 @@ Z = az +90 = the crew's left). Silhouette only: panel lines, labels and placards
 
 Nodes: `cabin_shell` (inner wall of revolution with the ceiling ring, the forward tunnel and the top plate; normals into the cabin; cut at the window
 reveals and the hatch), `floor`, `hatch_frame` (white trim, the recessed hatch inner face and its reveal), `window_<i>` (funnel from the round interior
-reveal to the exterior pane, bezel ring; i = exterior table row, +az then -az) with `window_glass_<i>`, `seat_s1..s4`, `console_housing` (one straight box across the three screens,
-one straight lower shelf under the screens, two struts to the ceiling), `screen_left|centre|right` (one quad, UV 0..1 over the active area,
+reveal to the exterior pane, bezel ring; i = exterior table row, +az then -az) with `window_glass_<i>`, `seat_shell|pad|rest_<s1..s4>` (white shell, black pads, black leg-rest rails
++ foot plate at the seat's foot_rest_m), `console_housing` (dark: one straight box across the three screens + the dark upper panel up to the ceiling), `console_back`
+(light grey back, underside, two hand-hold posts), `console_shelf` (the button shelf as separate light grey modules, cabin_layout.shelf_modules), `console_lockers` (5 / 6),
+`ceiling_ring_light` (emissive annulus), `screen_left|centre|right` (one quad, UV 0..1 over the active area,
 (0, 0) top left, +normal toward the crew), `tablet_l|r`, `button_<id>` (one node per button; the centre handle is the node `handle`), `light_<i>`
 ([[light]] rows in file order), `hotas_stick`, `hotas_throttle`.
 The cabin layout helpers (apertures, node names, manifest block) live in cabin_layout.py; the wall is the exterior meridian offset along its normal.
@@ -41,6 +43,14 @@ STRUT_RADIUS_M = 0.02  # [E] console strut
 SEAT_BACK_HALF_M = (0.05, 0.40)  # [E] seat back half thickness / half height (a 0.8 m back, crew1_1 / Wikimedia)
 SEAT_THIGH_M, SEAT_SHIN_M = 0.44, 0.40  # [E] pan length / lower-leg support length (seated adult, 5th percentile hip to knee 0.5)
 SIDES = 16  # [E] sides of round parts
+FOOT_PLATE_M = (0.32, 0.34, 0.02)  # [E] foot frame: length along the foot, width across, (thickness unused) (crew1_1: a plate-wide carbon frame under both boots)
+FOOT_FRAME_TUBE_M = 0.012  # [E] carbon tube radius of the foot frame
+FOOT_RAIL_Z_M = 0.17  # [E] leg-rest rails stand this far either side of the seat centre (outside the shins: hip joint 0.088 + boot half width 0.05)
+FOOT_RAIL_RADIUS_M = 0.014  # [E] carbon rail radius (crew1_1 frame tubes ~30 mm)
+LIGHT_PROUD_M = 0.006  # [E] lamp panel height over the console front
+BACK_PLATE_M = 0.003  # [E] the light grey skin of the console's back / underside, outside the dark housing
+RING_LIFT_M = 0.004  # [E] the ring light stands this far under the ceiling plane
+RING_STEP_DEG = 3.0  # [E] segments of the ring light
 
 V = Vector
 
@@ -255,21 +265,48 @@ class Panel:
 
 
 def build_seat(seat, floor_x):
+    """(shell, pad, rest): white shell, black pads, black carbon leg-rest frame + foot plate (crew1_1: white shells, black pads, carbon frames)."""
     n, b, z = seat_axes(seat["back_angle_deg"])
     hip, w = V(seat["hip_m"]), seat["width_m"]
-    mesh = vc.VMesh()
-    vc.box(mesh, hip + b * SEAT_BACK_HALF_M[1] - n * 0.06, n, b, z, (SEAT_BACK_HALF_M[0], SEAT_BACK_HALF_M[1], 0.5 * w))
-    vc.box(mesh, hip + b * (2.0 * SEAT_BACK_HALF_M[1] + 0.06) - n * 0.02, n, b, z, (0.04, 0.09, 0.14))  # headrest
-    vc.box(mesh, hip + n * 0.5 * SEAT_THIGH_M - b * 0.05, n, b, z, (0.5 * SEAT_THIGH_M, 0.04, 0.5 * w * 0.95))  # pan
-    end = hip + n * SEAT_THIGH_M - b * 0.05
-    vc.box(mesh, end - b * 0.5 * SEAT_SHIN_M + n * 0.02, n, b, z, (0.03, 0.5 * SEAT_SHIN_M, 0.5 * w * 0.7))  # lower-leg support
-    for side in (-1.0, 1.0):  # armrests
-        vc.box(mesh, hip + n * 0.2 + b * 0.2 + z * (side * (0.5 * w + 0.03)), n, b, z, (0.2, 0.025, 0.03))
-    return mesh
+    shell, pad, rest = vc.VMesh(), vc.VMesh(), vc.VMesh()
+    half_back = SEAT_BACK_HALF_M[1]
+    # back: the shell behind (front face 0.035 behind the hip plane), the pad on its front (front face 0.01 behind the hip point, as before)
+    vc.box(shell, hip + b * half_back - n * 0.0725, n, b, z, (0.0375, half_back, 0.5 * w))
+    for side in (-1.0, 1.0):  # side bolsters of the shell
+        vc.box(shell, hip + b * 0.30 - n * 0.0075 + z * (side * (0.5 * w - 0.02)), n, b, z, (0.0275, 0.26, 0.02))
+    vc.box(pad, hip + b * 0.36 - n * 0.0225, n, b, z, (0.0125, 0.30, 0.5 * w * 0.78))
+    vc.box(shell, hip + b * (2.0 * half_back + 0.06) - n * 0.06, n, b, z, (0.03, 0.09, 0.15))  # headrest shell
+    vc.box(pad, hip + b * (2.0 * half_back + 0.06) - n * 0.02, n, b, z, (0.01, 0.08, 0.13))  # headrest pad
+    # pan: shell below (b -0.09 .. -0.04), pad on top (-0.04 .. -0.01)
+    vc.box(shell, hip + n * 0.5 * SEAT_THIGH_M - b * 0.065, n, b, z, (0.5 * SEAT_THIGH_M, 0.025, 0.5 * w * 0.95))
+    vc.box(pad, hip + n * 0.5 * SEAT_THIGH_M - b * 0.025, n, b, z, (0.5 * SEAT_THIGH_M * 0.95, 0.015, 0.5 * w * 0.78))
+    for side in (-1.0, 1.0):  # armrests (black)
+        vc.box(rest, hip + n * 0.2 + b * 0.2 + z * (side * (0.5 * w + 0.03)), n, b, z, (0.2, 0.025, 0.03))
+    # leg rest: two carbon rails from the pan's front end to the foot plate, the plate under the boots (foot_rest_m / foot_rest_normal)
+    plate_n, plate_c = V(seat["foot_rest_normal"]), V(seat["foot_rest_m"])
+    plate_f = z.cross(plate_n)  # along the foot
+    # the foot plate is a carbon tube frame (outline + one cross bar) whose front face lies in the plane through foot_rest_m: the boots stay visible through it
+    half_l, half_w, tube_r = 0.5 * FOOT_PLATE_M[0], 0.5 * FOOT_PLATE_M[1], FOOT_FRAME_TUBE_M
+    corner = lambda a, c: plate_c - plate_n * tube_r + plate_f * (a * half_l) + z * (c * half_w)
+    for (a0, c0), (a1, c1) in (((-1, -1), (1, -1)), ((1, -1), (1, 1)), ((1, 1), (-1, 1)), ((-1, 1), (-1, -1)), ((0, -1), (0, 1))):
+        vc.tube(rest, corner(a0, c0), corner(a1, c1), tube_r, 10, ("foot_frame", seat["id"], a0, c0, a1, c1))
+    pan_end = hip + n * SEAT_THIGH_M - b * 0.065
+    for side in (-1.0, 1.0):
+        start = pan_end + z * (side * FOOT_RAIL_Z_M)
+        end = plate_c - plate_f * half_l - plate_n * tube_r
+        end.z = hip.z + side * FOOT_RAIL_Z_M
+        vc.tube(rest, start, end, FOOT_RAIL_RADIUS_M, SIDES, ("rail", seat["id"], side))
+    return shell, pad, rest
+
+
+def shelf_front_off(cockpit, cen):
+    """The shelf modules' front plane along the console normal from the centre screen: the buttons' faces minus their height."""
+    return min((V(b["centre_m"]) - cen.o).dot(cen.n) for b in cockpit["button"] if b["kind"] != "handle") - BUTTON_PROUD_M
 
 
 def build_console(cockpit):
-    """One straight housing and one straight shelf across all three screens (fold_deg 0, user decision 2026-11-07)."""
+    """(housing, back, shelf, lockers): one straight dark housing and dark upper panel across all three screens (fold_deg 0, user decision 2026-11-07),
+    light grey back / underside / posts, the shelf as separate light grey modules, the two lockers 5 / 6."""
     con = cockpit["console"]
     if con["fold_deg"] != 0.0:
         raise ValueError("console: only the straight console (fold_deg 0) is built")
@@ -277,17 +314,38 @@ def build_console(cockpit):
     shift = (cen.o - V(con["centre_m"])).dot(cen.up)  # the screens' centre stands this far above the housing's front-plane centre
     half_w, depth = con["width_m"] / 2.0, con["depth_m"]
     u0, u1 = -shift - con["height_m"] / 2.0, -shift + con["height_m"] / 2.0
-    mesh = vc.VMesh()
-    cen.box(mesh, -half_w, half_w, u0, u1, -SCREEN_PROUD_M, -depth)
-    # lower shelf under the screens carrying the buttons: front plane at the buttons' faces minus their height
-    mine = [b for b in cockpit["button"] if b["kind"] != "handle"]
-    front = min((V(b["centre_m"]) - cen.o).dot(cen.n) for b in mine) - BUTTON_PROUD_M
-    cen.box(mesh, -half_w, half_w, u0, -cen.h / 2.0 - SHELF_TOP_GAP_M, front, -SCREEN_PROUD_M)
-    # two struts from the housing top up to the ceiling ring
-    for z_strut in con["strut_z_m"]:
+    u_top = (con["upper_top_x_m"] - cen.o.x) / cen.up.x  # the dark upper panel's front top edge reaches this station
+    up_depth = con["upper_depth_m"]
+    housing, back, shelf, lockers = vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh()
+    cen.box(housing, -half_w, half_w, u0, u1, -SCREEN_PROUD_M, -depth)
+    cen.box(housing, -half_w, half_w, u1, u_top, -SCREEN_PROUD_M, -up_depth)
+    # light grey (silver) back, underside and the housing's top behind the upper panel
+    cen.box(back, -half_w, half_w, u0, u1, -depth, -depth - BACK_PLATE_M)
+    cen.box(back, -half_w, half_w, u1, u_top, -up_depth, -up_depth - BACK_PLATE_M)
+    cen.box(back, -half_w, half_w, u0 - BACK_PLATE_M, u0, -SCREEN_PROUD_M, -depth - BACK_PLATE_M)
+    cen.box(back, -half_w, half_w, u1, u1 + BACK_PLATE_M, -up_depth, -depth)
+    for z_strut in con["strut_z_m"]:  # the hand-hold posts: from the upper panel's top edge to the ceiling
         lat = (z_strut - cen.o.z) / cen.right.z
-        top = cen.at(lat, u1, -depth / 2.0)
-        vc.tube(mesh, top - V((0.01, 0.0, 0.0)), V((cockpit["cabin"]["ceiling_x_m"], top.y, top.z)), STRUT_RADIUS_M, SIDES, ("strut", z_strut))
+        top = cen.at(lat, u_top, -up_depth / 2.0)
+        vc.tube(back, top - V((0.01, 0.0, 0.0)), V((cockpit["cabin"]["ceiling_x_m"], top.y, top.z)), STRUT_RADIUS_M, SIDES, ("strut", z_strut))
+    # the shelf: separate modules (clusters of buttons), dark housing showing in the gaps; the ledge stands proud of the screens
+    front = shelf_front_off(cockpit, cen)
+    s1 = -cen.h / 2.0 - con["shelf_top_gap_m"]
+    for lat0, lat1 in cl.shelf_modules(cockpit):
+        cen.box(shelf, lat0, lat1, s1 - con["shelf_height_m"], s1, front, -SCREEN_PROUD_M)
+    for lk in cockpit["locker"]:  # dark lockers with the placards 5 / 6 (the placard: texture)
+        c = V(lk["centre_m"]) - cen.o
+        cen.box(lockers, c.dot(cen.right) - lk["size_m"][0] / 2.0, c.dot(cen.right) + lk["size_m"][0] / 2.0,
+                c.dot(cen.up) - lk["size_m"][1] / 2.0, c.dot(cen.up) + lk["size_m"][1] / 2.0, con["locker_proud_m"], -SCREEN_PROUD_M)
+    return housing, back, shelf, lockers
+
+
+def build_ring_light(cabin):
+    """The ceiling ring light: an emissive annulus around the forward tunnel, facing into the cabin (crew1_1)."""
+    r0, r1 = cabin["ring_light_radii_m"]
+    mesh = vc.VMesh()
+    x = cabin["ceiling_x_m"] - RING_LIFT_M
+    lathe(mesh, [(x, r0), (x, r1)], (-1.0, 0.0, 0.0), [k * RING_STEP_DEG for k in range(int(360.0 / RING_STEP_DEG))], ("ring", 0))
     return mesh
 
 
@@ -323,12 +381,10 @@ def build_tablet(t):
     return mesh
 
 
-def build_light(light):
-    c = V(light["position_m"])
-    r = math.hypot(c.y, c.z)
-    e_r, t = V((0.0, c.y / r, c.z / r)), V((0.0, -c.z / r, c.y / r))
+def build_light(light, cen):
+    """A lamp panel on the console's front plane (size = along the row x up)."""
     mesh = vc.VMesh()
-    vc.box(mesh, c, V((1.0, 0.0, 0.0)), e_r, t, (0.005, light["size_m"][1] / 2.0, light["size_m"][0] / 2.0))
+    vc.box(mesh, V(light["position_m"]) + cen.n * (LIGHT_PROUD_M / 2.0), cen.n, cen.up, cen.right, (LIGHT_PROUD_M / 2.0, light["size_m"][1] / 2.0, light["size_m"][0] / 2.0))
     return mesh
 
 
@@ -391,20 +447,21 @@ def main():
     for ap in cl.window_apertures(cabin):
         parts[f"window_{ap['index']}"], parts[f"window_glass_{ap['index']}"] = build_window(cabin, profile, ap)
     for seat in cockpit["seat"]:
-        parts[f"seat_{seat['id']}"] = build_seat(seat, cabin["floor_x_m"])
-    parts["console_housing"] = build_console(cockpit)
+        for part, mesh in zip(cl.SEAT_PARTS, build_seat(seat, cabin["floor_x_m"])):
+            parts[f"seat_{part}_{seat['id']}"] = mesh
+    parts["console_housing"], parts["console_back"], parts["console_shelf"], parts["console_lockers"] = build_console(cockpit)
+    parts["ceiling_ring_light"] = build_ring_light(cabin)
     scr = screens_by_id(cockpit)
     for s in cockpit["screen"]:
         parts[f"screen_{s['id']}"] = screen_mesh(s)
     for t in cockpit["tablet"]:
         parts[f"tablet_{t['id']}"] = build_tablet(t)
     for i, light in enumerate(cockpit["light"]):
-        parts[f"light_{i}"] = build_light(light)
+        parts[f"light_{i}"] = build_light(light, Panel(scr["centre"]))
     for b in cockpit["button"]:
         panel = Panel(scr[b["panel"]])
         if b["kind"] == "handle":
-            shelf = min((V(o["centre_m"]) - panel.o).dot(panel.n) for o in cockpit["button"] if o["panel"] == b["panel"] and o["kind"] != "handle") - BUTTON_PROUD_M
-            parts["handle"] = build_handle(b, panel, shelf)
+            parts["handle"] = build_handle(b, panel, shelf_front_off(cockpit, panel))
         else:
             parts[cl.button_node(b)] = build_button(b, panel)
     eye = cockpit["eye"]["position_m"]

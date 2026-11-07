@@ -18,6 +18,7 @@ wall_m = 0.18                  # [E] side wall normal thickness (backshell TPS +
 floor_x_m = 1.15               # [E] floor panels: Wikimedia photo, cargo C5-C7 (bags ~0.45 m) under the seat pans; 0.5 m below the hatch sill (x 1.70 exterior); +-0.15
 ceiling_x_m = 3.35             # [E] upper bulkhead trim around the forward tunnel (crew1_1, Wikimedia: flat annular ceiling with the tunnel ring); parachute bay above it; +-0.1
 tunnel_radius_m = 0.45         # [E] forward-hatch tunnel trim: IDSS passage 0.8 m [S: IDSS IDD Rev E] + trim; dragon_crew12_portrait (four heads in the opening)
+ring_light_radii_m = [0.50, 0.85]   # [E] ceiling ring light around the forward tunnel: crew1_1, bright white annulus r ~0.45..0.9 m at the ceiling (review item 2); the lamp ring of the game lies on its mid radius
 tunnel_top_x_m = 3.66          # [D] forward hatch face: exterior recess floor 3.74 (detail file neck_m) - 0.08 hatch plate
 # Inner wall of revolution [x, r], floor centre -> side wall -> ceiling -> tunnel -> forward hatch centre. Side wall = exterior profile_m offset inward by wall_m along the meridian normal.
 profile_m = [[1.15, 0.0], [1.15, 1.756], [1.4, 1.716], [1.6, 1.675], [1.8, 1.622], [2.0, 1.562], [2.2, 1.499], [2.4, 1.429], [2.6, 1.356], [2.8, 1.276], [3.0, 1.196], [3.2, 1.116], [3.35, 1.064], [3.35, 0.45], [3.66, 0.45], [3.66, 0.0]]  # [D] wall_m offset of the exterior profile_m (closest exterior point 0.094 m), floor_x_m, ceiling_x_m, tunnel_*
@@ -34,6 +35,8 @@ role = "specialist"            # [S] spec 2026-11-07: mission specialists on the
 hip_m = [1.72, -0.02, 1.05]    # [E] Z = 1.5 seat pitches; outer seats 0.08 lower (Wikimedia: outer seat tops lower in the image); +-0.1
 back_angle_deg = 35.0          # [E] seat back from +X toward -Y: crew1_1 torso foreshortening (hip-helmet 0.65 of 0.75 m seen from the hatch), knees above hips; +-10
 width_m = 0.58                 # [E] seat shell at the hip: Wikimedia, pitch / back width = 1.2
+foot_rest_m = [2.089, 0.784, 1.050]   # [D] sole plate centre under the boots: seat hip + figure bones (thigh 15 deg raised, interior knee 110 deg: ankle 0.71 m ahead of the hatch axis at x 2.09), + 0.055 m along the shin (sole thickness + plate), at 0.8 x mid-foot; the same for all seats (tested against the figure: tests/test_dragon_cabin.py)
+foot_rest_normal = [0.342, -0.9397, 0.0]  # [D] plate normal, toward the knee = minus the shin direction (shin -20 deg from the hatch axis, figure_layout.bones)
 
 [[seat]]
 id = "s2"                      # [D] see s1
@@ -41,6 +44,8 @@ role = "commander"             # [S] spec 2026-11-07: player = commander, left o
 hip_m = [1.80, -0.02, 0.35]    # [E] Z = half seat pitch 0.70 (Wikimedia pitch / back width 1.2, back 0.58); X, Y: eye 0.70 m from the console (arm's reach, crew2_1, inspiration4_1) and 0.55 m above the hatch sill; +-0.1
 back_angle_deg = 35.0          # [E] see s1
 width_m = 0.58                 # [E] see s1
+foot_rest_m = [2.169, 0.784, 0.350]   # [D] sole plate centre under the boots: seat hip + figure bones (thigh 15 deg raised, interior knee 110 deg: ankle 0.71 m ahead of the hatch axis at x 2.17), + 0.055 m along the shin (sole thickness + plate), at 0.8 x mid-foot; the same for all seats (tested against the figure: tests/test_dragon_cabin.py)
+foot_rest_normal = [0.342, -0.9397, 0.0]  # [D] plate normal, toward the knee = minus the shin direction (shin -20 deg from the hatch axis, figure_layout.bones)
 
 [[seat]]
 id = "s3"                      # [D] see s1
@@ -48,6 +53,8 @@ role = "pilot"                 # [S] spec 2026-11-07: pilot right of centre
 hip_m = [1.80, -0.02, -0.35]   # [D] mirror of s2
 back_angle_deg = 35.0          # [E] see s1
 width_m = 0.58                 # [E] see s1
+foot_rest_m = [2.169, 0.784, -0.350]   # [D] sole plate centre under the boots: seat hip + figure bones (thigh 15 deg raised, interior knee 110 deg: ankle 0.71 m ahead of the hatch axis at x 2.17), + 0.055 m along the shin (sole thickness + plate), at 0.8 x mid-foot; the same for all seats (tested against the figure: tests/test_dragon_cabin.py)
+foot_rest_normal = [0.342, -0.9397, 0.0]  # [D] plate normal, toward the knee = minus the shin direction (shin -20 deg from the hatch axis, figure_layout.bones)
 
 [[seat]]
 id = "s4"                      # [D] see s1
@@ -55,6 +62,8 @@ role = "specialist"            # [S] spec 2026-11-07
 hip_m = [1.72, -0.02, -1.05]   # [D] mirror of s1
 back_angle_deg = 35.0          # [E] see s1
 width_m = 0.58                 # [E] see s1
+foot_rest_m = [2.089, 0.784, -1.050]   # [D] sole plate centre under the boots: seat hip + figure bones (thigh 15 deg raised, interior knee 110 deg: ankle 0.71 m ahead of the hatch axis at x 2.09), + 0.055 m along the shin (sole thickness + plate), at 0.8 x mid-foot; the same for all seats (tested against the figure: tests/test_dragon_cabin.py)
+foot_rest_normal = [0.342, -0.9397, 0.0]  # [D] plate normal, toward the knee = minus the shin direction (shin -20 deg from the hatch axis, figure_layout.bones)
 
 [eye]
 position_m = [2.447, -0.351, 0.35]  # [D] s2 hip + 0.72 m up the seat back + 0.10 m forward (seated eye height 0.79 m above the pan, hip point 0.07 above it); +-0.10 per axis
@@ -63,18 +72,27 @@ up = [0.57358, -0.81915, 0.0]         # [D] perpendicular to forward in the X-Y 
 
 [console]
 # Housing: one straight slab across the panel, front face in the centre screen's plane; the three screens are coplanar (user decision 2026-11-07).
-centre_m = [3.010, 0.066, 0.0]      # [D] centre screen centre - 0.02 up (housing reaches 0.25 above and 0.29 below it)
+centre_m = [3.0296, 0.0377, 0.0]    # [D] centre screen centre + 0.015 up (housing reaches 0.265 above and 0.235 below the screen centre: 0.1575 above the screen top, review item 3: 0.15-0.17)
 normal = [-0.81915, -0.57358, 0.0]    # [D] = centre screen normal
 up = [0.57358, -0.81915, 0.0]         # [D] = eye up
 width_m = 1.32                      # [E] discovery2 / discovery10 at the iPad-mini scale (134.8 mm tablet = ~255 px, ~1,900-2,100 px/m): the three screens with gaps span 1.22 m, the button shelf ends 0.03-0.05 m past the outer screen edges (dark upper panel 0.05-0.08 m); the tablets stand above the outer screens, not on wings; +-0.05
-height_m = 0.54                     # [D] 0.13 housing above the screens (tablet mounts, discovery10) + 0.215 screen + 0.195 shelf, button rows, handle box below
+height_m = 0.50                     # [D] 0.1575 housing above the screens (discovery2 / discovery10, review item 3: 0.15-0.17) + 0.215 screen + 0.1275 below the screens (0.0175 gap + the 0.10 button shelf + 0.01 lip; the photo shelf ~0.083 + 0.015 lip)
 depth_m = 0.15                      # [E] crew11, crew13: thin box; back top stays below ceiling_x_m (x 3.29)
 fold_deg = 0.0                      # [S] user decision 2026-11-07: the console runs straight across all three screens, no folded wings. Photo check: discovery10 (top-down: screens and the button shelf in one straight line), crew2_1 / inspiration4_1 (side views: one flat front, the three screens share the plane), training2 / discovery10 shelf continuous under all three
-strut_z_m = [0.55, -0.55]           # [E] two struts from the housing top to the ceiling ring, crew1_1 / Wikimedia (at 1/3 and 2/3 of the box)
+strut_z_m = [0.55, -0.55]           # [E] hand-hold posts of crew1_1, silver, from the dark upper panel to the ceiling ring; two struts from the housing top to the ceiling ring, crew1_1 / Wikimedia (at 1/3 and 2/3 of the box)
+
+screen_gap_m = 0.020                # [D] gap between the active areas of neighbouring screens: 2 x 0.007 bezel + 0.006 seam of the housing (discovery2: bezels nearly touch, review item 3 says 1-2 cm; the earlier 0.045 was read from discovery10's 90 px active gap and is superseded); left / right screen centres = 0.382 + 0.020 = 0.402 m from the centre
+shelf_height_m = 0.10               # [D] button shelf (modules) height: discovery2 module row ~160 px of 415 px screen height (0.215 m) = 0.083 m + 0.015 m lip (review item 3: ~0.10)
+shelf_top_gap_m = 0.0175            # [E] the shelf's top edge lies this far under the screens' lower edge (housing seam)
+module_split_m = 0.012              # [E] buttons whose edges lie further apart than this start a new module (discovery2: clusters A, B, C, handle, right clusters, each a light grey module with dark gaps between)
+module_margin_m = 0.004             # [E] a module's face extends this far past its outermost buttons
+upper_top_x_m = 3.30                # [D] the dark upper panel (soffit) above the housing reaches this station at its front top edge; 0.05 under the ceiling plane (ceiling_x_m 3.35) with the back edge at 3.33
+upper_depth_m = 0.04                # [E] thickness of the upper panel (it only closes the view up to the ceiling; crew1_1 / discovery2: dark grey structure up to the frame top)
+locker_proud_m = 0.012              # [E] the lockers 5 / 6 stand this far proud of the housing front (discovery2)
 
 [[screen]]
 id = "left"                         # [S] spec 2026-11-07: left screen = external cameras
-centre_m = [3.021, 0.050, 0.427]    # [D] centre + (0.382/2 + 0.045 + 0.382/2) = 0.427 m along the row, coplanar with the centre screen (fold 0)
+centre_m = [3.021, 0.050, 0.402]    # [D] centre + (0.382/2 + 0.020 + 0.382/2) = 0.402 m along the row (console screen_gap_m), coplanar with the centre screen (fold 0)
 normal = [-0.81915, -0.57358, 0.0]  # [D] = centre screen normal (fold 0)
 up = [0.57358, -0.81915, 0.0]         # [D] = eye up
 size_m = [0.382, 0.215]             # [E] active area: training2 finger scale (index finger ~0.072 m on the screen) gives 0.35-0.40 wide; 16:9 (17.3 in class); +-15 %
@@ -90,36 +108,46 @@ aspect = 1.7778                     # [E] see left
 
 [[screen]]
 id = "right"                        # [S] spec 2026-11-07
-centre_m = [3.021, 0.050, -0.427]   # [D] mirror of left
+centre_m = [3.021, 0.050, -0.402]   # [D] mirror of left
 normal = [-0.81915, -0.57358, 0.0]  # [D] = centre screen normal (fold 0)
 up = [0.57358, -0.81915, 0.0]         # [D] = eye up
 size_m = [0.382, 0.215]             # [E] see left
 aspect = 1.7778                     # [E] see left
-# Screen gap 0.045 m [E]: discovery10 centre-right active gap 90 px of 780 px width.
+# Screen gap 0.020 m [D] (console screen_gap_m): bezels nearly touch in discovery2; supersedes the 0.045 m of discovery10 (90 px of 780 px active gap, which includes the glass border).
 
 [[tablet]]
 id = "l"                            # [E] procedure tablets on mounts above the outer screens, discovery1..15
-centre_m = [3.103, -0.171, 0.382]   # [E] lower edge on the left screen's top bezel, 0.045 inboard of its centre (discovery10: at 0.61 of its width), 0.06 proud on the mount
+centre_m = [3.103, -0.171, 0.367]   # [E] lower edge on the left screen's top bezel, 0.035 inboard of its centre (was 0.045 with the 0.427 screen row) (discovery10: at 0.61 of its width), 0.06 proud on the mount
 normal = [-0.81915, -0.57358, 0.0]  # [D] = left screen normal = centre normal (fold 0)
 up = [0.57358, -0.81915, 0.0]         # [D] portrait, = eye up
 size_m = [0.1348, 0.2032]           # [S] Apple iPad mini (5th gen) 134.8 x 203.2 mm; model assumed from the shape in discovery1..15 [E]
 
 [[tablet]]
 id = "r"                            # [E] see l
-centre_m = [3.103, -0.171, -0.382]  # [E] mirror of l (discovery10: right tablet at 0.34 of the right screen's width)
+centre_m = [3.103, -0.171, -0.367]  # [E] mirror of l (discovery10: right tablet at 0.34 of the right screen's width)
 normal = [-0.81915, -0.57358, 0.0] # [D] = right screen normal = centre normal (fold 0)
 up = [0.57358, -0.81915, 0.0]         # [D] = eye up
 size_m = [0.1348, 0.2032]           # [S] see l
 
 [[light]]
-id = "l"                            # [E] ceiling lamp panel above the commander's side, discovery10 top-left corner
-position_m = [3.34, -0.45, 0.70]    # [E] on the ceiling behind the console, discovery10 / crew11 (lamp beside the console top)
-size_m = [0.25, 0.08]               # [E] discovery10 lamp ~1.5 tablet widths long
+id = "l"                            # [E] lamp panel in the top-left corner of the dark upper panel, discovery2 (white rectangle above the locker 5, outboard of it)
+position_m = [3.2676, -0.3022, 0.585]  # [D] on the front plane of the console: centre-screen centre + 0.43 up, 0.585 along the row toward the crew's left (discovery2: x 1340-1425 of 2576 vs locker 5 at 1375-1495, 0.00132 m/px)
+size_m = [0.10, 0.04]               # [E] discovery2 lamp 80 x 35 px at 0.00132 m/px, rounded
 
 [[light]]
 id = "r"                            # [E] mirror, discovery4 / crew11 (lamp on the other side)
-position_m = [3.34, -0.45, -0.70]   # [E] mirror of l
-size_m = [0.25, 0.08]               # [E] see l
+position_m = [3.2676, -0.3022, -0.585]  # [E] mirror of l
+size_m = [0.10, 0.04]               # [E] see l
+
+[[locker]]
+id = "5"                            # [E] dark locker with the placard 5, outboard of the left tablet (discovery2 x 1375-1495 / y 90-215 of 2576 x 725; the right one is 6)
+centre_m = [3.1449, -0.1269, 0.562]   # [D] on the console front plane: centre-screen centre + 0.216 up (lower edge 0.026 above the screen top) + 0.160 outboard of the left screen centre (0.402 + 0.160 = 0.562 along the row)
+size_m = [0.15, 0.165]              # [E] discovery2 120 x 125 px at 0.00132 m/px (the review: ~0.15 x 0.17)
+
+[[locker]]
+id = "6"                            # [E] mirror of locker 5 (discovery2, right side)
+centre_m = [3.1449, -0.1269, -0.562]  # [E] mirror of locker 5
+size_m = [0.15, 0.165]              # [E] see 5
 
 # Buttons on the left / right panels: fold 0, they lie on the flat plane at their in-plane (row, height) position (re-placed 2026-11-07 from the folded values).
 # Physical buttons, flight panel as discovery10 shows it (camera between s2 and s3). Positions: read along the screens' lower
@@ -134,7 +162,7 @@ size_m = [0.25, 0.08]               # [E] see l
 id = "cam1"                         # [E] cluster A upper row, round
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.898, 0.172, 0.570]    # [E] discovery10 x 402 px on the left screen's edge 340-830
+centre_m = [2.898, 0.172, 0.545]    # [E] shifted 0.025 with the screen row; discovery10 x 402 px on the left screen's edge 340-830
 size_m = [0.016, 0.016]             # [E] round, ~0.6 of the 0.027 m pitch
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -146,7 +174,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam2"                         # [E] cluster A upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.899, 0.173, 0.549]    # [E] discovery10 x 429 px
+centre_m = [2.899, 0.173, 0.524]    # [E] shifted 0.025 with the screen row; discovery10 x 429 px
 size_m = [0.024, 0.016]             # [E] labelled key, pitch 0.027-0.035
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -158,7 +186,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam3"                         # [E] cluster A upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.899, 0.173, 0.524]    # [E] discovery10 x 460 px
+centre_m = [2.899, 0.173, 0.499]    # [E] shifted 0.025 with the screen row; discovery10 x 460 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -170,7 +198,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam4"                         # [E] cluster A upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.899, 0.173, 0.497]    # [E] discovery10 x 496 px
+centre_m = [2.899, 0.173, 0.472]    # [E] shifted 0.025 with the screen row; discovery10 x 496 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -182,7 +210,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam5"                         # [E] cluster A upper row, round
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.898, 0.172, 0.469]    # [E] discovery10 x 531 px
+centre_m = [2.898, 0.172, 0.444]    # [E] shifted 0.025 with the screen row; discovery10 x 531 px
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -194,7 +222,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam6"                         # [E] cluster B upper row, round
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.899, 0.173, 0.431]    # [E] discovery10 x 580 px
+centre_m = [2.899, 0.173, 0.406]    # [E] shifted 0.025 with the screen row; discovery10 x 580 px
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -206,7 +234,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam7"                         # [E] cluster B upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.899, 0.172, 0.403]    # [E] discovery10 x 616 px
+centre_m = [2.899, 0.172, 0.378]    # [E] shifted 0.025 with the screen row; discovery10 x 616 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -218,7 +246,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam8"                         # [E] cluster B upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.899, 0.173, 0.372]    # [E] discovery10 x 656 px
+centre_m = [2.899, 0.173, 0.347]    # [E] shifted 0.025 with the screen row; discovery10 x 656 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -230,7 +258,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam9"                         # [E] cluster B upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.898, 0.173, 0.340]    # [E] discovery10 x 696 px
+centre_m = [2.898, 0.173, 0.315]    # [E] shifted 0.025 with the screen row; discovery10 x 696 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -242,7 +270,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam10"                        # [E] cluster B upper row, round
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.898, 0.173, 0.306]    # [E] discovery10 x 741 px
+centre_m = [2.898, 0.173, 0.281]    # [E] shifted 0.025 with the screen row; discovery10 x 741 px
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -254,7 +282,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam11"                        # [E] cluster A lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.882, 0.197, 0.536]    # [E] discovery10 x 446 px
+centre_m = [2.882, 0.197, 0.511]    # [E] shifted 0.025 with the screen row; discovery10 x 446 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -266,7 +294,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam12"                        # [E] cluster A lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.882, 0.197, 0.513]    # [E] discovery10 x 475 px
+centre_m = [2.882, 0.197, 0.488]    # [E] shifted 0.025 with the screen row; discovery10 x 475 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -278,7 +306,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam13"                        # [E] cluster A lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.881, 0.197, 0.487]    # [E] discovery10 x 509 px
+centre_m = [2.881, 0.197, 0.462]    # [E] shifted 0.025 with the screen row; discovery10 x 509 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -290,7 +318,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam14"                        # [E] cluster B lower row, round
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.882, 0.197, 0.420]    # [E] discovery10 x 594 px
+centre_m = [2.882, 0.197, 0.395]    # [E] shifted 0.025 with the screen row; discovery10 x 594 px
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -302,7 +330,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam15"                        # [E] cluster B lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.881, 0.197, 0.393]    # [E] discovery10 x 629 px
+centre_m = [2.881, 0.197, 0.368]    # [E] shifted 0.025 with the screen row; discovery10 x 629 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -314,7 +342,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam16"                        # [E] cluster B lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.881, 0.198, 0.364]    # [E] discovery10 x 667 px
+centre_m = [2.881, 0.198, 0.339]    # [E] shifted 0.025 with the screen row; discovery10 x 667 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -326,7 +354,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam17"                        # [E] cluster B lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.882, 0.197, 0.331]    # [E] discovery10 x 708 px
+centre_m = [2.882, 0.197, 0.306]    # [E] shifted 0.025 with the screen row; discovery10 x 708 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -338,7 +366,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 id = "cam18"                        # [E] cluster B lower row, round
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.882, 0.198, 0.297]    # [E] discovery10 x 752 px
+centre_m = [2.882, 0.198, 0.272]    # [E] shifted 0.025 with the screen row; discovery10 x 752 px
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -488,7 +516,7 @@ evidence = "discovery10 blue lit key, no readable label"  # [E]
 id = "r_cover"                      # [E] dark covered panel with a round knob, under the right screen's inner half
 panel = "right"                     # [E] discovery10
 row = 1                             # [E] spans both rows
-centre_m = [2.890, 0.185, -0.362]   # [E] discovery10 x 1771-1983 px, between the rows (0.185 below the screen centre)
+centre_m = [2.890, 0.185, -0.337]   # [E] shifted 0.025 with the screen row; discovery10 x 1771-1983 px, between the rows (0.185 below the screen centre)
 size_m = [0.11, 0.05]               # [E] discovery10, 212 px of the right screen's 540
 shape = "rect"                      # [E] discovery10
 kind = "covered"                    # [E] discovery10: hinged dark cover
@@ -499,7 +527,7 @@ evidence = "discovery10 covered panel, no label readable"  # [E]
 id = "r_upper_1"                    # [E] right cluster upper row, round (mirror of cluster A)
 panel = "right"                     # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.899, 0.173, -0.456]   # [E] discovery10 x 2011 px on the right screen's edge 1700-2240
+centre_m = [2.899, 0.173, -0.431]   # [E] shifted 0.025 with the screen row; discovery10 x 2011 px on the right screen's edge 1700-2240
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -510,7 +538,7 @@ evidence = "discovery10 label unreadable"  # [E]
 id = "r_upper_2"                    # [E] right cluster upper row
 panel = "right"                     # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.899, 0.173, -0.483]   # [E] discovery10 x 2050 px
+centre_m = [2.899, 0.173, -0.458]   # [E] shifted 0.025 with the screen row; discovery10 x 2050 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -521,7 +549,7 @@ evidence = "discovery10 label unreadable"  # [E]
 id = "r_upper_3"                    # [E] right cluster upper row
 panel = "right"                     # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.899, 0.173, -0.508]   # [E] discovery10 x 2084 px
+centre_m = [2.899, 0.173, -0.483]   # [E] shifted 0.025 with the screen row; discovery10 x 2084 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -532,7 +560,7 @@ evidence = "discovery10 label unreadable"  # [E]
 id = "r_upper_4"                    # [E] right cluster upper row
 panel = "right"                     # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.899, 0.173, -0.531]   # [E] discovery10 x 2117 px
+centre_m = [2.899, 0.173, -0.506]   # [E] shifted 0.025 with the screen row; discovery10 x 2117 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -543,7 +571,7 @@ evidence = "discovery10 label unreadable"  # [E]
 id = "r_upper_5"                    # [E] right cluster upper row, round
 panel = "right"                     # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.898, 0.173, -0.557]   # [E] discovery10 x 2154 px
+centre_m = [2.898, 0.173, -0.532]   # [E] shifted 0.025 with the screen row; discovery10 x 2154 px
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -554,7 +582,7 @@ evidence = "discovery10 label unreadable"  # [E]
 id = "r_lower_1"                    # [E] right cluster lower row
 panel = "right"                     # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.881, 0.197, -0.474]   # [E] discovery10 x 2036 px
+centre_m = [2.881, 0.197, -0.449]   # [E] shifted 0.025 with the screen row; discovery10 x 2036 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -565,7 +593,7 @@ evidence = "discovery10 label unreadable"  # [E]
 id = "r_lower_2"                    # [E] right cluster lower row
 panel = "right"                     # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.882, 0.197, -0.501]   # [E] discovery10 x 2074 px
+centre_m = [2.882, 0.197, -0.476]   # [E] shifted 0.025 with the screen row; discovery10 x 2074 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -576,7 +604,7 @@ evidence = "discovery10 label unreadable"  # [E]
 id = "r_lower_3"                    # [E] right cluster lower row
 panel = "right"                     # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.882, 0.197, -0.525]   # [E] discovery10 x 2108 px
+centre_m = [2.882, 0.197, -0.500]   # [E] shifted 0.025 with the screen row; discovery10 x 2108 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10

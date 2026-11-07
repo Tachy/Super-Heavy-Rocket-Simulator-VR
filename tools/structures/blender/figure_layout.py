@@ -117,7 +117,7 @@ def bones(cfg):
     shoulder_base = on_axis(ln["torso"])
     ang = math.radians(fig["thigh_raise_deg"])
     thigh_dir = (math.sin(ang), math.cos(ang), 0.0)
-    shin_ang = ang - math.radians(fig["knee_angle_deg"])
+    shin_ang = ang - math.radians(180.0 - fig["knee_angle_deg"])  # knee_angle_deg is the interior angle (180 = straight)
     shin_dir = (math.sin(shin_ang), math.cos(shin_ang), 0.0)
     foot_dir = (math.sin(shin_ang + math.pi / 2.0), math.cos(shin_ang + math.pi / 2.0), 0.0)
     for side in SIDES:

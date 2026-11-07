@@ -141,6 +141,16 @@ func _check_eye(cockpit: CockpitView) -> void:
 	_check(cockpit.screen_surface("centre") != null and cockpit.screen_surface("left") != null and cockpit.screen_surface("right") != null, "three screen surfaces")
 	_check(cockpit.button_node("handle") != null and cockpit.button_node("cam1") != null, "button nodes (handle, cam1)")
 	_check(cockpit.screen_surface("centre").material_override.shader.resource_path.ends_with("display_colour.gdshader"), "screens use the display-referred colour shader")
+	var ring := cockpit.cabin_node("ceiling_ring_light")
+	_check(ring != null and ring.material_override.shader.resource_path.ends_with("display_colour.gdshader") and ring.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
+			"ceiling ring light: an emissive (display-referred) mesh")
+	var shell := cockpit.cabin_node("seat_shell_s2")
+	var pad := cockpit.cabin_node("seat_pad_s2")
+	_check(shell != null and pad != null and shell.material_override != pad.material_override, "seats: shell and pad are separate nodes with separate materials")
+	var shell_albedo: Color = (shell.material_override as ShaderMaterial).get_shader_parameter("albedo")
+	var pad_albedo: Color = (pad.material_override as ShaderMaterial).get_shader_parameter("albedo")
+	_check(shell_albedo.get_luminance() > 0.6 and pad_albedo.get_luminance() < 0.1, "seats: white shells, black pads")
+	_check(cockpit.cabin_node("console_shelf") != null and cockpit.cabin_node("console_back") != null and cockpit.cabin_node("console_lockers") != null, "console: shelf modules, back and lockers are nodes of their own")
 
 
 ## The capsule's exterior hull parts cast shadows double-sided (the sunlight enters only through the windows).

@@ -19,12 +19,12 @@ const LAMP_RANGE_M := 6.0
 ## [call] Look pass 2: the light the white walls bounce around the closed cabin (no GI): a flat illuminance on every cabin
 ## surface as emission albedo x E / pi, scene-referred like the lamps (so the eye adaptation sees a lit cabin at any hour).
 const FILL_LUX := 450.0
-## Lamp height below the ceiling mesh (the lamp housing hangs 0.08 m under the panel).
+## Lamp offset in front of its panel on the console (toward the crew, along the console normal).
 const LAMP_DROP_M := 0.08
 ## [E] The ceiling ring light around the forward tunnel (crew1_1: a bright white annulus, r ~0.45..0.9 m at the ceiling):
-## RING_LAMPS omnis on r = RING_RADIUS_M (mid-annulus), RING_LUMENS in total (an area light's stand-in; its emissive mesh is the generator's).
+## RING_LAMPS omnis on the mid radius of [cabin] ring_light_radii_m, RING_LUMENS in total (an area light's stand-in; its emissive mesh `ceiling_ring_light` is the generator's).
 const RING_LAMPS := 8
-const RING_RADIUS_M := 0.72
+const RING_RADIUS_FALLBACK_M := 0.675
 const RING_LUMENS := 6000.0
 const RING_DROP_M := 0.10
 ## [E] Screen placeholder: a dark Dragon-blue UI background, display-referred (no exposure, as every emitter).
@@ -54,7 +54,7 @@ func build(models: Dictionary, cockpit: CockpitConfig) -> void:
 		instance.name = part
 		instance.mesh = cabin[part]
 		instance.material_override = _material_of(part)
-		if part.begins_with("window_glass") or part.begins_with("light_") or part.begins_with("screen_"):
+		if part.begins_with("window_glass") or part.begins_with("light_") or part.begins_with("screen_") or part == "ceiling_ring_light":
 			instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(instance)
 		_nodes[part] = instance
@@ -136,13 +136,19 @@ func _build_lights() -> void:
 	for i in config.lights.size():
 		var row: Dictionary = config.lights[i]
 		var p: Vector3 = CockpitConfig._vec(row.get("position_m"))
-		_add_omni("light_%s" % row.get("id", i), p + Vector3(-LAMP_DROP_M, 0.0, 0.0), LAMP_LUMENS).shadow_enabled = true  # two lamps: cheap shadows
+		_add_omni("light_%s" % row.get("id", i), p + _console_normal() * LAMP_DROP_M, LAMP_LUMENS).shadow_enabled = true  # two lamps: cheap shadows
 	var ceiling_x := float(config.cabin.get("ceiling_x_m", 3.35))
+	var radii: Array = config.cabin.get("ring_light_radii_m", [])
+	var ring_r := 0.5 * (float(radii[0]) + float(radii[1])) if radii.size() == 2 else RING_RADIUS_FALLBACK_M
 	for k in RING_LAMPS:
 		var az := TAU * float(k) / RING_LAMPS
-		_add_omni("ring_%d" % k, Vector3(ceiling_x - RING_DROP_M, RING_RADIUS_M * cos(az), RING_RADIUS_M * sin(az)), RING_LUMENS / RING_LAMPS)
+		_add_omni("ring_%d" % k, Vector3(ceiling_x - RING_DROP_M, ring_r * cos(az), ring_r * sin(az)), RING_LUMENS / RING_LAMPS)
 	_add_omni("fill_ceiling", Vector3(3.1, 0.0, 0.0), FILL_LUMENS)
 	_add_omni("fill_seats", Vector3(2.0, 0.55, 0.0), FILL_LUMENS)
+
+
+func _console_normal() -> Vector3:
+	return CockpitConfig._vec(config.console.get("normal")).normalized()
 
 
 func _add_omni(light_name: String, at: Vector3, lumens: float) -> OmniLight3D:
@@ -199,18 +205,29 @@ func _material_of(part: String) -> Material:
 		var glass := ShaderMaterial.new()
 		glass.shader = GLASS_SHADER
 		return glass
-	if part.begins_with("light_"):
+	if part.begins_with("light_") or part == "ceiling_ring_light":
 		return _display(Color(0.95, 0.95, 0.9))
 	if part == "cabin_shell":
 		return _cabin_material(Color(0.8, 0.8, 0.79), 0.85, 0.0, 0.03, 0.5)
 	if part == "floor" or part == "hatch_frame" or part.begins_with("window_"):
 		return _cabin_material(Color(0.8, 0.8, 0.79), 0.8, 0.0, 0.03, 0.0)
+	## [E] Console (review item 3): the housing front is near black and matte (no specular sheen: it must not read beige under the lamps),
+	## the shelf modules are light grey (albedo ~0.3 linear), the back / underside / posts silver, the lockers dark gloss.
 	if part == "console_housing":
-		return _cabin_material(Color(0.045, 0.045, 0.05), 0.55, 0.1, 0.03, 0.0)
+		return _cabin_material(Color(0.028, 0.028, 0.032), 0.9, 0.0, 0.03, 0.0, 0.1)
+	if part == "console_shelf":
+		return _cabin_material(Color(0.32, 0.32, 0.34), 0.7, 0.0, 0.03, 0.0, 0.15)
+	if part == "console_back":
+		return _cabin_material(Color(0.76, 0.77, 0.79), 0.45, 0.3, 0.03, 0.0)
+	if part == "console_lockers":
+		return _cabin_material(Color(0.035, 0.035, 0.04), 0.6, 0.0, 0.03, 0.0, 0.12)
+	## [E] Seats (review item 4, crew1_1): white shells, black pads and black carbon leg-rest frames.
+	if part.begins_with("seat_shell_"):
+		return _cabin_material(Color(0.82, 0.82, 0.81), 0.5, 0.0, 0.03, 0.0)
 	if part.begins_with("seat_"):
-		return _cabin_material(Color(0.03, 0.03, 0.032), 0.7, 0.0, 0.03, 0.0)
+		return _cabin_material(Color(0.03, 0.03, 0.032), 0.7, 0.0, 0.03, 0.0, 0.2)
 	if part.begins_with("tablet_"):
-		return _cabin_material(Color(0.1, 0.1, 0.11), 0.35, 0.6, 0.03, 0.0)
+		return _cabin_material(Color(0.06, 0.06, 0.07), 0.6, 0.0, 0.03, 0.0, 0.12)  # glass front: dark, no metal sheen under the lamps
 	if part.begins_with("hotas_"):
 		return _cabin_material(Color(0.06, 0.06, 0.065), 0.5, 0.4, 0.03, 0.0)
 	return _cabin_material(Color(0.09, 0.09, 0.1), 0.45, 0.3, 0.03, 0.0)  # buttons, handle
@@ -226,8 +243,8 @@ func _display(colour: Color) -> ShaderMaterial:
 	return _materials[key]
 
 
-func _cabin_material(albedo: Color, roughness: float, metallic: float, ambient: float, seams: float) -> ShaderMaterial:
-	var key := "cabin_%s_%s_%s_%s_%s" % [albedo, roughness, metallic, ambient, seams]
+func _cabin_material(albedo: Color, roughness: float, metallic: float, ambient: float, seams: float, specular := 0.4) -> ShaderMaterial:
+	var key := "cabin_%s_%s_%s_%s_%s_%s" % [albedo, roughness, metallic, ambient, seams, specular]
 	if not _materials.has(key):
 		var m := ShaderMaterial.new()
 		m.shader = CABIN_SHADER
@@ -236,5 +253,6 @@ func _cabin_material(albedo: Color, roughness: float, metallic: float, ambient: 
 		m.set_shader_parameter("metallic", metallic)
 		m.set_shader_parameter("ambient_visibility", ambient)
 		m.set_shader_parameter("seam_depth", seams)
+		m.set_shader_parameter("specular", specular)
 		_materials[key] = m
 	return _materials[key]

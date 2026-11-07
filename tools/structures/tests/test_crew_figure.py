@@ -237,3 +237,25 @@ def test_stature_and_triangle_budget(cfg, mesh):
     assert 2000 < tris < 20000
     top = max(p[0] for _, pos, _ in prims for p in pos)
     assert 0.85 < top < 1.1  # crown of the helmet above the seat's hip point
+
+
+def test_visor_is_a_large_forward_dome_and_the_collar_is_wider_than_the_neck(cfg, mesh):
+    """Helmet shape (USER 2026-11-07): the visor wraps face and forehead (>= 140 deg wide, >= 80 deg tall), stands clearly ahead of the shell,
+    and the neck collar is a distinct ring wider than the neck."""
+    h = cfg["helmet"]
+    assert 2.0 * h["visor_half_angle_deg"] >= 140.0 and h["visor_up_deg"] - h["visor_down_deg"] >= 80.0
+    assert h["visor_proud_m"] >= 0.03 > h["visor_edge_m"] and h["half_depth_m"] > h["half_width_m"]
+    assert h["collar_radius_m"] > cfg["suit"]["neck_radius_m"] * 1.25
+    _, _, prims = mesh
+    _, pos, _ = next(p for p in prims if p[0] == "visor")
+    front = max(p[1] for p in pos) - cfg["pose"]["head_centre_forward_m"]
+    assert front >= h["half_depth_m"] + 0.5 * h["visor_proud_m"]  # the dome leaves the shell's front
+    zs = [p[2] for p in pos]
+    assert max(zs) - min(zs) >= 1.5 * h["half_width_m"]  # wraps round the sides
+
+
+def test_visor_is_its_own_surface_and_the_helmet_is_neutral_white(cfg, mesh):
+    _, _, prims = mesh
+    names = [p[0] for p in prims]
+    assert names.count("visor") == 1 and names.count("helmet") == 1
+    assert max(cfg["material"]["helmet"]["albedo"]) - min(cfg["material"]["helmet"]["albedo"]) < 0.02  # no blue tint

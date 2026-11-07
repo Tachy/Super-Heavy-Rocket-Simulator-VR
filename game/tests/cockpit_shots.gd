@@ -118,6 +118,12 @@ func _shoot() -> bool:
 		return true
 	var shot: Dictionary = _shots[_index]
 	_cockpit.set_player_head_hidden(shot.get("local").origin.is_equal_approx(_cockpit.config.eye.origin) or bool(shot.get("hide_head", false)))
+	var isolate := bool(shot.get("isolate", false))  # close-up of one figure: the other figures and the leg rests are hidden
+	for figure in _cockpit.find_children("figure_*", "Node3D", false, false):
+		(figure as Node3D).visible = not isolate or figure.name == "figure_s3"
+	for part: String in ["seat_rest_", "seat_shell_s1", "seat_shell_s2", "seat_shell_s4", "seat_pad_s1", "seat_pad_s2", "seat_pad_s4", "console_", "screen_", "tablet_", "button_", "handle"]:
+		for node in _cockpit.find_children(part + "*" if part.ends_with("_") else part, "MeshInstance3D", false, false):
+			(node as Node3D).visible = not isolate
 	for label in _world.find_children("*", "Label3D", true, false):
 		(label as Label3D).visible = false  # the stale-structure-models notice is no part of the cabin
 	var fov_deg := float(shot.get("fov", _args.get("fov", 100.0)))
@@ -157,7 +163,18 @@ func _define_shots() -> void:
 	var gopro_basis := Basis(GOPRO_RIGHT, gopro_up, -GOPRO_FORWARD)
 	# hatch: looks along -Y (toward the seat row), image up = +X (toward the forward tunnel), image right = +Z
 	var hatch_basis := Basis(Vector3(0.0, 0.0, 1.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0))
+	# helmet close-up of the pilot (s3) from the front, 30 deg toward the cabin centre, at the distance of eva_suit_detail2's framing; up = up the seat back
+	var s3: Dictionary = {}
+	for seat: Dictionary in _cockpit.config.seats:
+		if seat["id"] == "s3":
+			s3 = seat
+	var back := deg_to_rad(float(s3["back_angle_deg"]))
+	var up_back := Vector3(cos(back), -sin(back), 0.0)
+	var chest := Vector3(sin(back), cos(back), 0.0)
+	var helmet_c: Vector3 = s3["hip"] + up_back * 0.80 + chest * 0.17
+	var helmet_cam := helmet_c + chest * 0.62 + Vector3(0.0, 0.0, 0.30) - up_back * 0.02
 	_shots = [
+		{"name": "helmet_closeup", "local": Transform3D(Basis.looking_at(helmet_c - helmet_cam, up_back), helmet_cam), "fov": 36.0, "hide_exterior": false, "isolate": true},
 		{"name": "pilot_eye", "local": eye},
 		{"name": "gopro_discovery2", "local": Transform3D(gopro_basis, GOPRO_POS), "fov": GOPRO_RENDER_FOV, "fisheye": true},
 		# [E] crew1_1 (docs/subsystems/cockpit.md): in the open hatch, level, 3:2 at ~87 deg = 65 deg vertical

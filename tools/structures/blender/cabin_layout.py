@@ -8,6 +8,7 @@ import math
 
 SCREEN_IDS = ("left", "centre", "right")
 SEAT_IDS = ("s1", "s2", "s3", "s4")
+SEAT_PARTS = ("shell", "pad", "rest")  # white shell, black pads, black carbon leg-rest frame with the foot plate
 HATCH_POWER = 4.0  # [E] the hatch outline's super-ellipse exponent, same as gen_dragon.py (ellipse(..., power=4.0))
 GLASS_DEPTH_M = 0.02  # [E] window glass sits this far under the exterior surface (the exterior window is lifted 8 mm on it, gen_dragon.py lift_detail)
 LIFT_M = 0.006  # [E] trim, bezel and frame stand this far proud of the inner wall
@@ -65,14 +66,41 @@ def screen_right(screen):
     return (f[1] * u[2] - f[2] * u[1], f[2] * u[0] - f[0] * u[2], f[0] * u[1] - f[1] * u[0])
 
 
+def dot3(a, b):
+    return sum(x * y for x, y in zip(a, b))
+
+
+def lateral(screen, point):
+    """Position of `point` along the screen's row (right as the crew sees it), from the screen centre."""
+    right = screen_right(screen)
+    return dot3([p - c for p, c in zip(point, screen["centre_m"])], right)
+
+
+def shelf_modules(cockpit):
+    """The button shelf's light-grey modules as (lat0, lat1) in the centre screen's row: buttons (and the handle) whose edges lie closer than
+    console.module_split_m share a module; each module reaches module_margin_m past its outermost edges. Sorted by lat."""
+    con = cockpit["console"]
+    centre = next(s for s in cockpit["screen"] if s["id"] == "centre")
+    spans = sorted((lateral(centre, b["centre_m"]) - b["size_m"][0] / 2.0, lateral(centre, b["centre_m"]) + b["size_m"][0] / 2.0) for b in cockpit["button"])
+    groups = [list(spans[0])]
+    for lo, hi in spans[1:]:
+        if lo - groups[-1][1] > con["module_split_m"]:
+            groups.append([lo, hi])
+        else:
+            groups[-1][1] = max(groups[-1][1], hi)
+    m = con["module_margin_m"]
+    return [(lo - m, hi + m) for lo, hi in groups]
+
+
 def button_node(button):
     return "handle" if button["kind"] == "handle" else f"button_{button['id']}"
 
 
 def node_names(cockpit):
     """Every mesh node of dragon_cabin.gltf, sorted."""
-    names = ["cabin_shell", "floor", "hatch_frame", "console_housing", "handle", "hotas_stick", "hotas_throttle", "tablet_l", "tablet_r"]
-    names += [f"seat_{s['id']}" for s in cockpit["seat"]]
+    names = ["cabin_shell", "floor", "hatch_frame", "console_housing", "console_back", "console_shelf", "console_lockers", "ceiling_ring_light",
+             "handle", "hotas_stick", "hotas_throttle", "tablet_l", "tablet_r"]
+    names += [f"seat_{part}_{s['id']}" for s in cockpit["seat"] for part in SEAT_PARTS]
     names += [f"screen_{s['id']}" for s in cockpit["screen"]]
     for w in window_apertures(cockpit["cabin"]):
         names += [f"window_{w['index']}", f"window_glass_{w['index']}"]

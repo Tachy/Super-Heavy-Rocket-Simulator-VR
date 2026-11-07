@@ -289,9 +289,9 @@ def validate_dragon_detail(detail: dict) -> None:
 
 COCKPIT_KEYS = {
     "cockpit": ("capsule_stage",),
-    "cabin": ("wall_m", "floor_x_m", "ceiling_x_m", "tunnel_radius_m", "tunnel_top_x_m", "profile_m", "windows", "hatch", "window_reveal_radius_m", "window_bezel_m", "hatch_trim_m"),
+    "cabin": ("wall_m", "floor_x_m", "ceiling_x_m", "tunnel_radius_m", "tunnel_top_x_m", "profile_m", "windows", "hatch", "window_reveal_radius_m", "window_bezel_m", "hatch_trim_m", "ring_light_radii_m"),
     "eye": ("position_m", "forward", "up"),
-    "console": ("centre_m", "normal", "up", "width_m", "height_m", "depth_m", "fold_deg", "strut_z_m"),
+    "console": ("centre_m", "normal", "up", "width_m", "height_m", "depth_m", "fold_deg", "strut_z_m", "screen_gap_m", "shelf_height_m", "shelf_top_gap_m", "module_split_m", "module_margin_m", "upper_top_x_m", "upper_depth_m", "locker_proud_m"),
     "hotas": ("props", "stick_grip_m", "throttle_grip_m"),
 }
 COCKPIT_SCREENS = ("left", "centre", "right")
@@ -318,6 +318,12 @@ def validate_cockpit(cockpit: dict) -> None:
         raise VehicleSpecError("cockpit: [[tablet]] ids must be l and r")
     if not cockpit.get("light"):
         raise VehicleSpecError("cockpit: no [[light]]")
+    for seat in cockpit["seat"]:
+        for k in ("foot_rest_m", "foot_rest_normal"):
+            if k not in seat:
+                raise VehicleSpecError(f"cockpit seat {seat['id']}: missing key '{k}'")
+    if sorted(l.get("id") for l in cockpit.get("locker", [])) != ["5", "6"]:
+        raise VehicleSpecError("cockpit: [[locker]] ids must be 5 and 6")
 
     def unit(name, v):
         if abs(math.sqrt(sum(c * c for c in v)) - 1.0) > 2e-3:
@@ -326,6 +332,8 @@ def validate_cockpit(cockpit: dict) -> None:
     unit("eye.forward", cockpit["eye"]["forward"])
     unit("eye.up", cockpit["eye"]["up"])
     unit("console.normal", cockpit["console"]["normal"])
+    for seat in cockpit["seat"]:
+        unit(f"seat {seat['id']} foot_rest_normal", seat["foot_rest_normal"])
     for sid, s in screens.items():
         unit(f"screen {sid} normal", s["normal"])
         unit(f"screen {sid} up", s["up"])
@@ -365,7 +373,7 @@ FIGURE_KEYS = {
              "fingers_radius_m", "fingers_offset_m", "thumb_m", "thumb_radius_m", "thumb_root_offset_m", "thumb_root_forward_m", "thumb_spread_deg", "finger_curl_deg"),
     "suit": ("torso_rings_m", "thigh_radius_m", "shin_radius_m", "upper_arm_radius_m", "forearm_radius_m", "cuff_radius_m", "cuff_length_m", "boot_shaft_fraction",
              "boot_foot_half_width_m", "boot_foot_half_height_m", "boot_heel_m", "neck_radius_m"),
-    "helmet": ("half_width_m", "half_depth_m", "half_below_m", "half_above_m", "visor_half_angle_deg", "visor_up_deg", "visor_down_deg", "visor_proud_m", "visor_thickness_m"),
+    "helmet": ("half_width_m", "half_depth_m", "half_below_m", "half_above_m", "visor_half_angle_deg", "visor_up_deg", "visor_down_deg", "visor_proud_m", "visor_edge_m", "visor_thickness_m", "rim_radius_m", "collar_radius_m", "collar_height_m"),
 }
 FIGURE_MATERIALS = ("suit", "boots", "gloves", "helmet", "visor")
 
