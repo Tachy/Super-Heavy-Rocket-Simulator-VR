@@ -104,18 +104,28 @@ shaders:
   engine-internal (no script binding of `sky_get_radiance_texture_rd`), so the analytic model it is drawn from is
   evaluated on the CPU (`Atmosphere._surround_luminance`) into a store of 24 x 24 directions about the local vertical
   (7.5 deg bands, a band edge on the horizon; 8 cells per frame, a complete store swapped in every 0.8 s; a view jump
-  builds a new one at once): the core's sky luminance
+  builds a new one in frames of at most ~2 ms each, the frame alone meanwhile; while V = 0 the store ticks every 8th
+  frame): the core's sky luminance
   along the ray (the Moon's penumbra segmented) or the model ground (Sun + sky, through the air) with the near
   imagery's albedo profile (GroundAlbedoNear, faded to the tables' ground albedo 1.5-6 km out, as the cube), x the
   cube's cloud factors (sky / ground half); near the Moon the regolith on the eye's ground sphere as the Moon-in-view
   term (both lights, grey), the sky black. Directions the model shows black add no weight (no signal). Enclosed views:
   the model knows no walls, so the out-of-frame part is weighted by a visibility V from the frame's field against the
-  model's field over the in-frame directions: 1 within 0.3 decades, 0 beyond 0.6 (smoothstep) [call]; both black: 1,
-  one black: 0. The highlight cut, the 3.7-decade range, the anchor percentile and rule D run on the combined field
+  model's field over the in-frame directions - the same statistic (the model's in-frame rays as a histogram through
+  `AdaptationMeter.field_log_average`: 2 % cut, 3.7-decade range): 1 within 0.3 decades, 0 beyond 0.6 (smoothstep)
+  [call]. The disagreement in decades is low-passed with a 1 s time constant (`VISIBILITY_TIME_S`; a view jump
+  restarts it), so panning across a structure or a hull does not fade the surround in and out; a black field counts as
+  the histogram floor (1e-6 cd/m^2), so the measure is continuous (both black: 0 decades, open). The highlight cut, the 3.7-decade range, the anchor percentile and rule D run on the combined field
   unchanged; display-referred emitters stay out (the model has none). Test `game/tests/adaptation_surround_test.gd`
   (headless): the query set integrates the cap's weight (1 %), a uniform world keeps its field (1e-9), looking up the
   field rises and level it falls (they converge), an enclosed view and a black surround leave the histogram unchanged,
-  two VR eyes show more of the cap than one, the store's cells round-trip.
+  two VR eyes show more of the cap than one, the store's cells round-trip, V changes by small steps over a sweep of
+  the frame's field and a bright structure closes it over seconds, not at once, the model's in-frame field excludes a
+  ground 4.5 decades down like the frame, the scotopic histogram gets the out-of-frame content, a rebuild with a dear
+  luminance takes several frames. `game/tests/adaptation_surround_cost.gd` (headless, real atmosphere): the view jump's
+  rebuild, worst frame / total: pad noon 2.0 / 3.7 ms (2 frames), Dallas totality 2024-04-08 (penumbra, 8 segments per
+  ray, 56 us per cell) 2.4 / 32.0 ms (15 frames) - complete in one go the penumbra store would have cost 32 ms, three
+  VR frames.
   Values (render_check / cockpit_shots, gain frame alone -> with the surround, field cd/m^2; sheets and logs
   `screenshots/look_fixes/t4/`, report `.superpowers/sdd/2026-11-07-look-fixes/t4-report.md`): pad noon view east el 5
   1.674 -> 1.839 (4642 -> 4226), el 60 3.301 -> 2.729 (2354 -> 2847), el 88 2.943 -> 2.800 (2640 -> 2775): looking up
@@ -127,7 +137,8 @@ shaders:
   the model's 1600-2400 cd/m^2). Stereo mock (both eyes, 3534 x 2838): el 5 1.689 -> 1.732, el 60 2.657 -> 2.581 (the
   headset's frame covers most of the cap: out-of-frame share 0.13 against the desktop's 0.46). Cost: no GPU work (pad
   noon median GPU time desktop 1.876-1.880 -> 1.878-1.894 ms, stereo mock 5.805-6.084 -> 5.782-5.815 ms, noise); main
-  thread 0.09 ms per frame (store) + 0.12 ms per measurement (every 4th frame), ~6 ms once at a view jump.
+  thread 0.09 ms per frame (store) + 0.12 ms per measurement (every 4th frame), a view jump's rebuild spread over frames
+  (see the test above).
 - **White-plate rule** (the fallback and the GPU check's / headless tests' rule; formerly the only one):
   [call 2026-10-25, `eye_adaptation.gd`, fidelity flag `Atmosphere.eye_adaptation_enabled`, on in
   the game, off in the GPU check's comparisons]: cone gain on every physical luminance (tables, Sun light, Moon, Sun
@@ -325,6 +336,9 @@ shaders:
   2169 cd/m^2 over the same directions, the open point of the Moon shading below; still inside the visibility's x2), so
   on the Moon the surround brightens the field. A lit surround of less than the 2 % highlight share is cut whole (lunar
   day 60 deg up: 2.4 % of the weight is regolith, just above the cut; a narrower lit rim would leave the black field).
+  The store's state (Sun, cloud factors, eye, local vertical) is frozen at the start of each rebuild, so the swapped-in
+  store is up to 0.8 s old (a view jump's: a few frames, a penumbra's ~0.2 s): fine on the ground, in an ascent or an
+  orbit (altitude and Sun angle changing fast) the surround lags by that much; not refreshed on large changes.
   The visibility's thresholds (x2 / x4) are a call, not a measurement; the desktop runs at a fixed head, the "saccade"
   part of the eye's integration is the cap's Gaussian, not a temporal memory.
 - Scene-referred rule (Task 14): `moon_rock.gdshader` (unshaded) does not multiply by `atmosphere_exposure_gain`, so

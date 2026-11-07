@@ -180,6 +180,11 @@ func set_frame(scene_per_cd_m2: float, epoch: int, loading: bool, view := {}) ->
 			view))
 
 
+## Whether the next set_frame is a measuring frame (the view is only needed then).
+func measures_next_frame() -> bool:
+	return (_frame + 1) % MEASURE_EVERY == 0
+
+
 ## Main thread: the newest histogram pair of that epoch not taken yet ([counts, loading, serial, view]), else [].
 func take_result(epoch: int, after_serial: int) -> Array:
 	_mutex.lock()

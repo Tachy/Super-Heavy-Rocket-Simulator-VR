@@ -342,7 +342,8 @@ func update_world() -> void:
 	# A new view stays snapped to its field until the streamed terrain has loaded (scene-referred adaptation).
 	atmosphere.view_loading = int(earth_terrain.stats.get("nodes_loading", 0)) + int(moon_terrain.stats.get("nodes_loading", 0)) > 0
 	var camera_sun_fraction := 1.0 - core.solar_eclipse_fraction_gcrf(cam, t)
-	atmosphere.adaptation_view = _adaptation_view()
+	# The meter takes the view on its measuring frames only.
+	atmosphere.adaptation_view = _adaptation_view() if atmosphere.adaptation_meter.measures_next_frame() else {}
 	atmosphere.update(cam, Vector3.ZERO, earth.fixed_to_gcrf, sun_apparent_from_earth_m, adaptation_dt,
 			camera_sun_fraction, moon_apparent_from_earth_m, t, moon_gcrf_m)
 	_update_sky_radiance(cam, camera_sun_fraction)

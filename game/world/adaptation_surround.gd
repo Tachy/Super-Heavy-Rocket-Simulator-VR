@@ -18,8 +18,12 @@ extends RefCounted
 ##
 ## Enclosed views (the cabin, under a hull): the model knows no walls. The out-of-frame part is weighted by a visibility V
 ## from how well the model agrees with the frame where both look: V = 1 while the frame's field and the model's field over
-## the in-frame directions agree within VISIBILITY_FULL_DECADES, 0 beyond VISIBILITY_NONE_DECADES (smoothstep). In the cabin
-## (field 16 cd/m^2 against ~3000 outside) V = 0: the frame alone, as before; under the open sky V = 1.
+## the in-frame directions agree within VISIBILITY_FULL_DECADES, 0 beyond VISIBILITY_NONE_DECADES (smoothstep). Both fields
+## are the same statistic (AdaptationMeter.field_log_average: the 2 % highlight cut, the 3.7-decade exclusion; the model's
+## in-frame directions as a histogram with the frame's black bin). The disagreement in decades is low-passed in time
+## (VISIBILITY_TIME_S; a view jump restarts it), so panning across a structure does not fade the surround in and out; a black
+## field counts as the histogram's floor (LOG_MIN), so the measure is continuous. In the cabin (field 16 cd/m^2 against
+## ~3000 outside) V = 0: the frame alone, as before; under the open sky V = 1.
 ## Directions the model shows black (space, the lunar sky) add no weight: no signal, as the 3.7-decade exclusion (so the 2 %
 ## highlight cut keeps its in-frame share of a lit field).
 
@@ -51,6 +55,16 @@ const LOOKUP_REUSE := 0.005
 ## decades (x4): enclosed (V = 0).
 const VISIBILITY_FULL_DECADES := 0.3
 const VISIBILITY_NONE_DECADES := 0.6
+## [call] Time constant (s) of the low-pass on the disagreement in decades: slower than a head turn, as fast as the eye's
+## adaptation steps (a cabin entered by walking fades in about this time; a view jump restarts it).
+const VISIBILITY_TIME_S := 1.0
+## The model's in-frame histogram as integer counts for AdaptationMeter.field_log_average (resolution 1e-6 of the weight).
+const MODEL_COUNTS := 1.0e6
+## [call] Main-thread time (us) a view jump's complete store may take per frame (a penumbra costs ~56 us per cell, 32 ms in
+## all; the frame alone meanwhile). The budget is checked after every CELLS_PER_FRAME cells.
+const REBUILD_BUDGET_USEC := 2000
+## [call] While the surround is not used (V = 0 in the cabin) the store advances only every this many frames.
+const IDLE_REFRESH_EVERY := 8
 ## The fidelity flag (on in the game; the user argument --frame_only_adaptation meters the frame alone, as before T4).
 static var enabled := not OS.get_cmdline_user_args().has("--frame_only_adaptation")
 
@@ -80,7 +94,10 @@ var _build_state: Variant = null
 var _store_serial := 0
 var _rebuild_now := true
 var _lookup_key := []
-var _lookup := []  ## [weight in frame, lit weight in frame, its weighted log10, out-of-frame samples]
+var _lookup := []  ## [weight in frame, the model's in-frame field (cd/m^2), out-of-frame samples]
+var _decades := -1.0  ## the low-passed disagreement of the frame and the model (decades); < 0: none yet
+var _last_combine_usec := 0
+var _idle_frames := 0
 
 
 func _init() -> void:
@@ -110,8 +127,9 @@ func query_weight_total() -> float:
 
 
 ## A view jump: the store belongs to another place; the next refresh builds a complete one at once (576 cells, ~6 ms of
-## the main thread at the jump, which hitches anyway), so the new view's first measurements already have the surround.
+## the main thread, spread over frames by REBUILD_BUDGET_USEC; the frame alone meanwhile).
 func reset() -> void:
+	_decades = -1.0
 	_valid = false
 	_build_next = 0
 	_build_state = null
@@ -125,19 +143,26 @@ func is_ready() -> bool:
 ## Advances the store by `cells` cells (all: a complete store at once). up_render: the eye's local vertical (render world);
 ## begin: Callable() -> state, called at the start of a store; luminance: Callable(direction_render, state) -> RGB cd/m^2.
 func refresh(up_render: Vector3, begin: Callable, luminance: Callable, cells := CELLS_PER_FRAME) -> void:
-	var start := Time.get_ticks_usec()
 	var total := STORE_BANDS * STORE_AZIMUTHS
-	if _rebuild_now:
-		cells = total
-		_rebuild_now = false
+	if _valid and last_visibility <= 0.0 and cells < total:  # the surround is not used: tick slowly
+		_idle_frames += 1
+		if _idle_frames % IDLE_REFRESH_EVERY != 0:
+			return
+	var start := Time.get_ticks_usec()
 	if _build_next == 0:
 		_build_basis = _local_basis(up_render)
 		_build_state = begin.call()
-	var end := mini(total, _build_next + cells)
-	for index in range(_build_next, end):
-		_build_rgb[index] = luminance.call(_build_basis * _cell_direction(index), _build_state)
-	_build_next = end
+	var chunk := mini(cells, total)
+	while true:
+		var end := mini(total, _build_next + chunk)
+		for index in range(_build_next, end):
+			_build_rgb[index] = luminance.call(_build_basis * _cell_direction(index), _build_state)
+		_build_next = end
+		# A view jump's rebuild: more chunks while the frame's budget lasts.
+		if not (_rebuild_now and _build_next < total and Time.get_ticks_usec() - start < REBUILD_BUDGET_USEC):
+			break
 	if _build_next >= total:
+		_rebuild_now = false
 		_basis = _build_basis
 		_rgb = _build_rgb.duplicate()
 		_valid = true
@@ -157,15 +182,18 @@ func lookup(direction_render: Vector3) -> Vector3:
 ## The frame's histograms (AdaptationMeter layout: photopic then scotopic) with the out-of-frame part of the field added.
 ## view: {"head": Basis (render world, -Z the view axis), "eyes": [[Basis of the eye in the head's axes, Projection], ...]}
 ## (both VR eyes: in the frame is in either). Without a store, a view or any lit out-of-frame direction: counts unchanged.
-func combine(counts: PackedInt32Array, view: Dictionary) -> PackedInt32Array:
+func combine(counts: PackedInt32Array, view: Dictionary, dt_s := -1.0) -> PackedInt32Array:
 	var start := Time.get_ticks_usec()
-	var out := _combine(counts, view)
+	if dt_s < 0.0:  # the time since the last combine (tests pass it)
+		dt_s = minf(float(start - _last_combine_usec) * 1.0e-6, 1.0) if _last_combine_usec > 0 else 1.0
+	_last_combine_usec = start
+	var out := _combine(counts, view, dt_s)
 	combine_usec += Time.get_ticks_usec() - start
 	combine_calls += 1
 	return out
 
 
-func _combine(counts: PackedInt32Array, view: Dictionary) -> PackedInt32Array:
+func _combine(counts: PackedInt32Array, view: Dictionary, dt_s: float) -> PackedInt32Array:
 	var bins := AdaptationMeter.HISTOGRAM_BINS
 	last_visibility = 0.0
 	last_out_share = 0.0
@@ -187,13 +215,15 @@ func _combine(counts: PackedInt32Array, view: Dictionary) -> PackedInt32Array:
 		_lookup_key = key
 		_lookup = _look_up(to_store)
 	var weight_in: float = _lookup[0]
-	var lit_in: float = _lookup[1]
-	var log_in: float = _lookup[2]
-	var outside: Dictionary = _lookup[3]
+	last_model_in_cd_m2 = _lookup[1]
+	var outside: Dictionary = _lookup[2]
 	if weight_in <= 0.0:
 		return counts
-	last_model_in_cd_m2 = pow(10.0, log_in / lit_in) if lit_in > 0.0 else 0.0
-	last_visibility = visibility(last_frame_field_cd_m2, last_model_in_cd_m2)
+	var target := decades_between(last_frame_field_cd_m2, last_model_in_cd_m2)
+	if target < 0.0:
+		return counts
+	_decades = target if _decades < 0.0 else lerpf(_decades, target, 1.0 - exp(-dt_s / VISIBILITY_TIME_S))
+	last_visibility = visibility_of_decades(_decades)
 	if last_visibility <= 0.0 or outside.is_empty():
 		return counts
 	var scale := frame_total / weight_in * last_visibility
@@ -211,44 +241,57 @@ func _combine(counts: PackedInt32Array, view: Dictionary) -> PackedInt32Array:
 
 
 ## The query directions through the store for a head orientation in the store's axes: [weight in frame, lit weight in
-## frame, its weighted log10 luminance, the lit out-of-frame weight by histogram index {bin: weight} (photopic bins,
-## then the scotopic ones at + HISTOGRAM_BINS)].
+## frame, the model's field over the in-frame directions (cd/m^2; the frame's statistic), the lit out-of-frame weight by
+## histogram index {bin: weight} (photopic bins, then the scotopic ones at + HISTOGRAM_BINS)].
 func _look_up(to_store: Basis) -> Array:
 	var black := pow(10.0, AdaptationMeter.LOG_MIN)
 	var weight_in := 0.0
-	var lit_in := 0.0
-	var log_in := 0.0
 	var outside := {}
 	var bins := AdaptationMeter.HISTOGRAM_BINS
+	var in_bins := PackedFloat64Array()
+	in_bins.resize(bins)
 	for j in range(_query_dirs.size()):
 		var w := _query_weights[j]
 		var rgb := _rgb[_cell_of(to_store * _query_dirs[j])]
 		var y := rgb.dot(Atmosphere.LUMINANCE_WEIGHTS)
 		if _in_frame[j] != 0:
 			weight_in += w
-			if y > black:
-				lit_in += w
-				log_in += w * log(y) / log(10.0)
+			in_bins[AdaptationMeter.bin_of(y)] += w  # black in bin 0, as the frame's
 		elif y > black:
 			var photopic := AdaptationMeter.bin_of(y)
 			var scotopic := bins + AdaptationMeter.bin_of(rgb.dot(EyeAdaptation.SCOTOPIC_WEIGHTS))
 			outside[photopic] = float(outside.get(photopic, 0.0)) + w
 			outside[scotopic] = float(outside.get(scotopic, 0.0)) + w
-	return [weight_in, lit_in, log_in, outside]
+	var model_in := -1.0
+	if weight_in > 0.0:
+		var counts := PackedInt32Array()
+		counts.resize(bins)
+		for k in range(bins):
+			counts[k] = int(round(in_bins[k] / weight_in * MODEL_COUNTS))
+		model_in = AdaptationMeter.field_log_average(counts, 0)
+	return [weight_in, model_in, outside]
 
 
-## The visibility of the surround (0 .. 1) from the frame's field and the model's over the same directions (cd/m^2; 0:
-## black, < 0: none): both black, open; one of them black, enclosed (the model sees nothing there or the frame shows
-## something the model does not know); else by how far they differ in decades.
-static func visibility(frame_cd_m2: float, model_cd_m2: float) -> float:
+## The disagreement of the frame's field and the model's over the same directions (cd/m^2; 0: black, < 0: none) in
+## decades; black counts as the histogram's floor, so a field fading to black grows the measure continuously (both black:
+## 0). < 0 without a field.
+static func decades_between(frame_cd_m2: float, model_cd_m2: float) -> float:
 	if frame_cd_m2 < 0.0 or model_cd_m2 < 0.0:
-		return 0.0
-	if frame_cd_m2 == 0.0 and model_cd_m2 == 0.0:
-		return 1.0
-	if frame_cd_m2 == 0.0 or model_cd_m2 == 0.0:
-		return 0.0
-	var decades := absf(log(frame_cd_m2 / model_cd_m2)) / log(10.0)
+		return -1.0
+	var floor_cd_m2 := pow(10.0, AdaptationMeter.LOG_MIN)
+	return absf(log(maxf(frame_cd_m2, floor_cd_m2) / maxf(model_cd_m2, floor_cd_m2))) / log(10.0)
+
+
+## The visibility (0 .. 1) of a disagreement in decades: open within VISIBILITY_FULL_DECADES, enclosed beyond
+## VISIBILITY_NONE_DECADES.
+static func visibility_of_decades(decades: float) -> float:
 	return 1.0 - smoothstep(VISIBILITY_FULL_DECADES, VISIBILITY_NONE_DECADES, decades)
+
+
+## The instantaneous visibility from the two fields (no time filter).
+static func visibility(frame_cd_m2: float, model_cd_m2: float) -> float:
+	var decades := decades_between(frame_cd_m2, model_cd_m2)
+	return 0.0 if decades < 0.0 else visibility_of_decades(decades)
 
 
 ## Which query directions a view shows (cached per set of eye orientations and projections).

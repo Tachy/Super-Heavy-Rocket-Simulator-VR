@@ -441,7 +441,11 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 		if scene_referred_adaptation and AdaptationSurround.enabled:
 			_surround_inputs = [camera_fixed, sun_fixed, gcrf_to_fixed * sun_from_earth, d_au, gcrf_to_fixed,
 					moon_fixed, camera_gcrf_m - earth_center_gcrf_m, moon_gcrf_m - earth_center_gcrf_m]
-			var up_gcrf := (camera_gcrf_m - moon_gcrf_m).normalized() if moon_gcrf_m != Vector3.ZERO 					and near_moon((camera_gcrf_m - earth_center_gcrf_m).length(), (camera_gcrf_m - moon_gcrf_m).length()) 					else earth_fixed_to_gcrf * _geodetic_up(camera_fixed)
+			var eye_gcrf: Vector3 = _surround_inputs[6]
+			var from_moon_gcrf: Vector3 = eye_gcrf - (_surround_inputs[7] as Vector3)
+			var up_gcrf: Vector3 = earth_fixed_to_gcrf * _geodetic_up(camera_fixed)
+			if moon_gcrf_m != Vector3.ZERO and near_moon(eye_gcrf.length(), from_moon_gcrf.length()):
+				up_gcrf = from_moon_gcrf.normalized()
 			adaptation_surround.refresh(Frames.to_render(up_gcrf), _surround_begin, _surround_luminance)
 		_take_field_measurement()
 		if scene_referred_adaptation and _field_valid:
