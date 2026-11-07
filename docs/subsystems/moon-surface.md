@@ -400,6 +400,25 @@ on top of that relief.
   1.35 / A_Hapke(0) = 5.420 [D] (`Atmosphere.hapke_normalisation`): the full-phase disc equals the Lommel-Seeliger law's
   (both at K&S's full-Moon illuminance, the regolith scale's calibration point), so the albedo map's mean brightness is
   unchanged at full Moon; away from it the disc follows Hapke's own phase curve (Validation).
+- Light colour (look fixes T5 fix round 1, 2026-11-07): every Moon shader multiplies its Sun-derived light (the Sun,
+  the earthshine, the fill from the sunlit ground, the near-field shadow-gated Sun in `light()`) by the global
+  `moon_sun_color` (`moon_regolith.gdshaderinc`; set by `Atmosphere.moon_sun_color()`): the TOA Sun's linear Rec.709
+  colour at luminance 1, the same core spectrum the post step's white balance adopts, so a grey regolith displays grey
+  (before: a white Sun under a Sun-coloured white balance came out ~9 % blue). Users: `moon.gdshader` (the disc from
+  Earth, the far globe), `terrain_moon.gdshader`, `moon_rock.gdshader`, `sky.gdshader` (the radiance map's Moon). The
+  umbra glow keeps its own colour. [call] The earthshine takes the Sun's colour (the Earth's bluer spectral albedo is
+  not modelled). (1, 1, 1) until the atmosphere tables load and in the GPU checks without an Atmosphere.
+  A/B (`screenshots/look_fixes/t5_fix1/`, sheet_moon_abc.png, sheet_fullmoon_bc.png): Apollo 11 site, lunar day el 5,
+  ground displayed B/R 1.30 / G/R 1.34 (white light, T5) -> 1.01 / 1.10 (pre-T5 AgX 1.15 / 1.16); full Moon from
+  Starbase (2026-11-24T06:00, fov 2) disc (153, 152, 131) B/R 0.72 G/R 0.99 (greenish) -> (163, 149, 125) B/R 0.56
+  G/R 0.82 (warm: the mosaic's slope, the air's reddening, S 1.53).
+- Albedo map colour vs reference (T5 fix round 1; linear sRGB means of `moon_color.png`): +-70 deg B/R 0.893, G/R
+  0.974; near side 0.886 / 0.970; Mare Tranquillitatis 0.951 / 1.014; highland (12-20 S, 10-20 E) 0.906 / 0.980 -
+  red-sloped, not blue. Reference: the full Moon's B-V 0.92 against the Sun's 0.65 [S: Allen's Astrophysical
+  Quantities] is a reflectance ratio R(440)/R(550) of 0.78; as a linear slope through CIE 1931 (Wyman et al. 2013 fit)
+  into linear sRGB under a neutral light B/R 0.66, G/R 0.85 (0.62-0.73 for a B-V difference of 0.20-0.32; equivalent
+  Clementine-style 415/750 ratio 0.52). The mosaic carries about a third of the real slope (log ratio); a colour factor
+  would be a texture-colour change for the user to decide (open point), not applied.
 - Albedo map (Task 11 fix C, ruling T11-C4): `data/textures/moon_color.png` is the CGI Moon Kit colour mosaic with its
   large-scale brightness tied to the LROC WAC Hapke w map (Sato et al. 2014, 1 deg, +-70 deg;
   `tools/data_pipeline/moon_albedo.py`, run by `prepare.py`; source `lroc_wac_hapke_parameter_map`): per 1-deg cell

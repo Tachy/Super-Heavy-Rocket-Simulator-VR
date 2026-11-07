@@ -29,6 +29,11 @@ const float REGOLITH_PHASE_MAX_DEG = 150.0;
 global uniform float moon_regolith_scale;
 // A white Lambertian at normal incidence under the Sun at its distance (DAY_EXPOSURE / d_AU^2), without the gain.
 global uniform float moon_sun_scene;
+// The colour of that light (look fixes T5 fix round 1, review I3): the Sun above the atmosphere in linear Rec.709 at
+// luminance 1 (Atmosphere.update: the white balance's own solar_illuminance_rgb x sun_radiance_to_luminance), so the
+// post step's white balance maps a grey regolith to grey. The earthshine takes it too [call: the Earth's spectral
+// albedo (bluer than the Sun) is not modelled]; the umbra glow keeps its own colour. (1, 1, 1) before the tables load.
+global uniform vec3 moon_sun_color;
 // The same under the earthshine (Atmosphere.earthshine_scene), without the gain.
 global uniform float moon_earthshine;
 // The BRDF (above): 0 Lommel-Seeliger x K&S, 1 Hapke.

@@ -385,6 +385,7 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	var sun_au := (sun_apparent_gcrf_m - earth_center_gcrf_m).length() / ASTRONOMICAL_UNIT_M
 	ShaderGlobals.set_value(&"moon_earthshine", earthshine_scene)
 	ShaderGlobals.set_value(&"moon_sun_scene", DAY_EXPOSURE / (sun_au * sun_au))
+	ShaderGlobals.set_value(&"moon_sun_color", moon_sun_color())
 	ShaderGlobals.set_value(&"moon_regolith_scale",
 			regolith_scale(float(parameters.get("toa_solar_illuminance_lux", NOMINAL_TOA_LUX))))
 	if not poll():
@@ -518,6 +519,18 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	ShaderGlobals.set_value(&"atmosphere_world_to_earth", world_to_earth)
 	ShaderGlobals.set_value(&"atmosphere_sun_direction", sun_direction_local)
 	ShaderGlobals.set_value(&"atmosphere_luminance_scale", luminance_scale)
+
+
+## The colour of the Sun's light on the Moon (global moon_sun_color, moon_regolith.gdshaderinc; T5 fix round 1, review
+## I3): the Sun above the atmosphere in linear Rec.709 at luminance 1 - the same core spectrum the post step's white
+## balance adopts (solar_illuminance_rgb x sun_radiance_to_luminance), so a grey regolith comes out grey. White before
+## the tables have loaded.
+func moon_sun_color() -> Vector3:
+	if not (parameters.has("solar_illuminance_rgb") and parameters.has("sun_radiance_to_luminance")):
+		return Vector3.ONE
+	var sun := Vector3(parameters["solar_illuminance_rgb"]) * Vector3(parameters["sun_radiance_to_luminance"])
+	var luminance := EyeAdaptation.LUMINANCE_WEIGHTS.dot(sun)
+	return sun / luminance if luminance > 0.0 else Vector3.ONE
 
 
 ## Eye adaptation's luminance at an Earth-fixed eye (cd/m^2), the larger of two white-plate equivalents (both view-

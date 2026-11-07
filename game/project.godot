@@ -110,6 +110,10 @@ moon_sun_scene={
 "type": "float",
 "value": 1.5
 }
+moon_sun_color={
+"type": "vec3",
+"value": Vector3(1, 1, 1)
+}
 water_wave_vectors={
 "type": "mat4",
 "value": Projection(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)

@@ -47,7 +47,7 @@ void fragment() {
 			+ regolith_reflectance(n, normalize(to_earth), to_eye) * moon_earthshine);
 	vec3 albedo = texture(albedo_texture, UV).rgb;
 	vec3 eclipse_light = umbra_glow * (1.0 - sunlit) * lommel_seeliger;
-	vec3 color = albedo * (light + eclipse_light);
+	vec3 color = albedo * (light * moon_sun_color + eclipse_light);
 	if (atmosphere_enabled) {
 		// The view ray from the camera (scaled space draws the Moon closer; its true distance comes from the Moon-local
 		// camera, in true metres).

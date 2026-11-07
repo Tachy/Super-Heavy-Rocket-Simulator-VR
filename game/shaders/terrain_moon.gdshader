@@ -192,7 +192,7 @@ void fragment() {
 		near_radiance = sun_base;
 	}
 	vec3 eclipse_light = umbra_glow * (1.0 - sunlit) * sun_visible * lommel_seeliger;
-	vec3 color = albedo * (light + eclipse_light);
+	vec3 color = albedo * (light * moon_sun_color + eclipse_light);
 	vec3 gate = albedo;  // what multiplies the light() part (the shadow-gated Sun)
 	if (atmosphere_enabled) {
 		// Through the Earth's atmosphere only if the view ray crosses it before the ground (a camera near the Moon:
@@ -224,6 +224,6 @@ void fragment() {
 }
 
 void light() {
-	DIFFUSE_LIGHT += vec3(moon_near_light(near_sun_radiance, near_fade, near_horizon, near_sun_view, LIGHT,
+	DIFFUSE_LIGHT += moon_sun_color * (moon_near_light(near_sun_radiance, near_fade, near_horizon, near_sun_view, LIGHT,
 			LIGHT_IS_DIRECTIONAL, ATTENUATION));
 }

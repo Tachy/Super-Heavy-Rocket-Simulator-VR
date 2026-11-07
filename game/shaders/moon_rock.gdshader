@@ -325,7 +325,7 @@ void fragment() {
 				* mix(1.0, detail_rock_shape.y, fillet) / norm;
 	}
 	float gain = atmosphere_enabled ? atmosphere_exposure_gain : 1.0;
-	EMISSION = albedo * relative_albedo * surface_albedo * light * gain;
+	EMISSION = albedo * relative_albedo * surface_albedo * light * moon_sun_color * gain;
 	ALBEDO = albedo * relative_albedo * surface_albedo * gain;
 	SPECULAR = 0.0;
 	ROUGHNESS = 1.0;
@@ -336,6 +336,6 @@ void fragment() {
 }
 
 void light() {
-	DIFFUSE_LIGHT += vec3(moon_near_light(near_sun_radiance, near_fade, near_horizon, near_sun_view, LIGHT,
+	DIFFUSE_LIGHT += moon_sun_color * (moon_near_light(near_sun_radiance, near_fade, near_horizon, near_sun_view, LIGHT,
 			LIGHT_IS_DIRECTIONAL, ATTENUATION));
 }

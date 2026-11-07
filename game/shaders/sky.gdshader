@@ -181,7 +181,7 @@ bool radiance_moon_ground(vec3 v, out vec3 color) {
 	float light = moon_regolith_scale * (regolith_reflectance(n, radiance_moon_to_sun, -v) * radiance_moon_sun_visible
 			* moon_sun_scene + regolith_reflectance(n, radiance_moon_to_earth, -v) * radiance_moon_earth_visible
 			* moon_earthshine);
-	color = vec3(radiance_moon_albedo * light * atmosphere_exposure_gain);
+	color = radiance_moon_albedo * light * atmosphere_exposure_gain * moon_sun_color;
 	return true;
 }
 

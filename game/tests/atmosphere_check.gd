@@ -889,7 +889,7 @@ const LOW_SITE_DEPTH_M := 1551.0
 ## Section 12: the Moon (moon.gdshader, the SURFACE_ALBEDO_8 texture) seen from 50 000 km on the Earth-Moon line, its
 ## sub-Earth point on the camera axis; the Sun phase_deg from the Moon's direction seen from the Earth (the Earth's phase
 ## angle at the Moon; 0: full Earth) on the far side, so the pixel is unlit by the Sun. Fixed exposure (gain 1), outside
-## the atmosphere (T 1, no sky): the pixel must be albedo x moon_earthshine (x cos 1).
+## the atmosphere (T 1, no sky): the pixel must be albedo x moon_earthshine (x cos 1) x moon_sun_color.
 func _earthshine_sample(label: String, moon_dir: Vector3, side: Vector3, phase_deg: float) -> void:
 	var phase := deg_to_rad(phase_deg)
 	var sun_itrf := (moon_dir * cos(phase) + side * sin(phase)).normalized()
@@ -925,7 +925,10 @@ func _earthshine_sample(label: String, moon_dir: Vector3, side: Vector3, phase_d
 	# surge), x the regolith scale (night-vision fix round I3: the earthshine through the sunlight's BRDF).
 	var regolith := Atmosphere.regolith_scale(float(_atmosphere.parameters["toa_solar_illuminance_lux"])) \
 			* Atmosphere.regolith_reflectance(Vector3.UP, Vector3.UP, Vector3.UP)
-	_compare(label + " [regolith %.4f]" % regolith, albedo * scene * regolith, got, EARTHSHINE_TOLERANCE)
+	# x the colour of the Moon's light (moon_sun_color: the TOA Sun at luminance 1, T5 fix round 1; the earthshine
+	# takes it too).
+	_compare(label + " [regolith %.4f]" % regolith, albedo * scene * regolith * _atmosphere.moon_sun_color(), got,
+			EARTHSHINE_TOLERANCE)
 
 
 const EARTHSHINE_VIEW_DISTANCE_M := 5.0e7
