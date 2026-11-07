@@ -491,3 +491,15 @@ the analytic surround model (eye-adaptation.md, "Field beyond the frame"); `--fr
 behaviour. The rule values listed with the anchored / protected comparisons (eye-adaptation.md open points) are
 frame-only measurements.
 
+
+## Hunt factor against L_day and Godot's AgX alone, superseded 2026-11-07 (look fixes T5)
+
+- Chroma factor (user decision 2026-10-25, the reference a call): S = (F_L(L_a) / F_L(L_day))^0.25 with L_day = 1e4
+  cd/m^2, 1 at and above L_day (the day look colourimetric), held at the mesopic limit below 4 cd/m^2. Values (L_a ->
+  S): >= 1e4 -> 1; 3264 -> 0.91; 181 -> 0.72; Sun -3 deg (90 cd/m^2) -> 0.676; <= 4 -> 0.521. Applied wholly in the
+  post step as the linear map Y + S (rgb - Y). The look investigation (2026-11-07, F2) found the noon sky dull: the
+  eye adapted to ~2.6e4-3.8e4 cd/m^2 sees ~1.6 x the colourfulness a 100 cd/m^2 display reproduces colourimetrically.
+  Still available: `EyeAdaptation.hunt_display_reference = false` (render_check / cockpit_shots `--hunt=day`).
+- Display: Godot's AgX alone (inset matrix, allenwp curve per channel, outset). It took 16-26 % of the sky's and the
+  ocean's B/R at mid-high scene values (investigation F3) and turned the noon sky's OkLab hue by ~8 deg (pad noon
+  A/B, T5 report). Still available: `DisplayTone.enabled = false` (`--tone=agx`).

@@ -55,6 +55,8 @@
 #          model: Monte Carlo table, default; closed form).
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off;
 #          --white_balance=off: no chromatic adaptation to the Sun's white (EyeAdaptation.white_balance_enabled).
+#          --tone=agx: Godot's AgX alone, without the chroma-preserving display tone step (DisplayTone.enabled);
+#          --hunt=day: the Hunt factor against L_day as before look fixes T5, S <= 1 (EyeAdaptation.hunt_display_reference).
 # Camera exposure: --camera_exposure=<f-number>,<shutter s>,<ISO> displays the scene as that film camera exposes it
 #          (ISO 2720 meter constant 12.5, mid grey 18 %, linear, clipped; the eye adaptation off) - photo comparisons;
 #          with --luminance_probe=<x0>,<y0>,<x1>,<y1> (image fractions) the rectangle's mean luminance in cd/m^2 is printed.
@@ -177,6 +179,8 @@ func _initialize() -> void:
 	MoonDetailShading.enabled = _args.get("moon_detail_shading", "on") != "off"  # read at the Moon terrain's setup
 	MoonRockLayer.geometry_enabled = _args.get("rocks", "on") != "off"
 	EyeAdaptation.white_balance_enabled = _args.get("white_balance", "on") != "off"
+	DisplayTone.enabled = _args.get("tone", "chroma") != "agx"
+	EyeAdaptation.hunt_display_reference = _args.get("hunt", "display") != "day"
 	MoonNearShadow.enabled = _args.get("moon_near_shadows", "on") != "off"  # the fidelity setting (Task 12)
 	MoonNearShadow.fill_enabled = _args.get("moon_fill", "on") != "off"
 	if _args.has("moon_shadow_casters"):
@@ -472,6 +476,9 @@ func _process(_delta: float) -> bool:
 		print("render_check: night vision: twilight glow %s cd/m^2, scotopic %s cd/m^2, rod scale %s, moonlight %s of the Sun (%s), vehicle Moon light %s, brightness %.4f, chroma %.4f" % [
 				a.last_adaptation_glow_cd_m2, a.scotopic_cd_m2, a.rod_scale, a.moonlight_relative_value, "on" if a.moonlight_active else "off",
 				world.moon_light.light_energy if world.moon_light.visible else 0.0, a.brightness, a.chroma])
+		print("render_check: display tone %s, Hunt factor S %.4f (linear part %.4f, OkLab part %.4f)" % [
+				"chroma-preserving" if DisplayTone.enabled else "AgX", a.chroma, minf(a.chroma, 1.0),
+				EyeAdaptation.display_hunt(a.chroma)])
 		if _args.has("centre_dump"):
 			_dump_centre(world, String(_args["centre_dump"]))
 		if _args.has("shadow_dump"):

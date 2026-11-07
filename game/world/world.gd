@@ -234,6 +234,8 @@ var _camera_serial := 0  ## serial the camera distance was last fitted to
 var _last_world_tdb_s := NAN  ## the instant of the previous update_world (eye adaptation's time step)
 var _sim_target_tdb_s := NAN  ## the instant the flight sim was asked for last frame (clock_held_back)
 var _environment: Environment  ## the WorldEnvironment's (ambient energy under the clouds, Task 9)
+## The display tone step after the eye's post step (look fixes T5: chroma-preserving tone curve, daylight Hunt factor).
+var display_tone := DisplayToneEffect.new()
 
 
 ## The atmosphere's worker tasks write into it and use the core: finished before both go away (review M2); the ground albedo
@@ -346,6 +348,7 @@ func update_world() -> void:
 	atmosphere.adaptation_view = _adaptation_view() if atmosphere.adaptation_meter.measures_next_frame() else {}
 	atmosphere.update(cam, Vector3.ZERO, earth.fixed_to_gcrf, sun_apparent_from_earth_m, adaptation_dt,
 			camera_sun_fraction, moon_apparent_from_earth_m, t, moon_gcrf_m)
+	display_tone.update(_environment, atmosphere.chroma)
 	_update_sky_radiance(cam, camera_sun_fraction)
 	FrameProfiler.end(&"atmosphere")
 
@@ -1157,8 +1160,9 @@ func _setup_environment() -> void:
 	# The field meter of the eye adaptation (AdaptationMeter, Task 14) reads the cones' image before the transparent pass
 	# (after the cloud pass, whose result it composites itself) and before the rod step.
 	atmosphere.adaptation_meter.cloud_effect = clouds.effect
+	# Then the display tone step (DisplayToneEffect), the last before glow and AgX.
 	compositor.compositor_effects = [clouds.shadow_effect, clouds.effect, atmosphere.adaptation_meter,
-			atmosphere.vision_effect]
+			atmosphere.vision_effect, display_tone]
 	world_environment.compositor = compositor
 	add_child(world_environment)
 

@@ -10,6 +10,7 @@
 #   --field_key=<0.18..1> (the eye adaptation's field grey for every shot, default the shot's key or CABIN_FIELD_KEY; 0.18 = the game default;
 #   not used with the game's --anchored_adaptation)
 #   --fixed_exposure (eye adaptation off; default: on as in the game, snapped to each shot)
+#   --tone=agx (Godot's AgX alone, no display tone step), --hunt=day (the Hunt factor against L_day, as before look fixes T5)
 extends SceneTree
 
 const FRAMES_TO_SETTLE := 10
@@ -92,6 +93,8 @@ func _setup() -> bool:
 	_rig.hide_ui(_main)
 	_world.atmosphere.eye_adaptation_enabled = not _args.has("fixed_exposure")
 	_world.atmosphere.field_key = float(_args.get("field_key", CABIN_FIELD_KEY))
+	DisplayTone.enabled = _args.get("tone", "chroma") != "agx"  # --tone=agx: Godot's AgX alone (look fixes T5)
+	EyeAdaptation.hunt_display_reference = _args.get("hunt", "display") != "day"  # --hunt=day: S <= 1 as before T5
 	_rig.place(sim, 0, 62.0, Vector3(0.0, 15.0, 0.0), 40.0)  # the orbit camera near the capsule first: the views are placed only near the camera
 	RenderingServer.frame_pre_draw.connect(func() -> void: _world.camera.near = NEAR_M)
 	_stage = 1

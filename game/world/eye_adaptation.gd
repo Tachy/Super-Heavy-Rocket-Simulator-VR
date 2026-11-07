@@ -22,7 +22,7 @@ extends RefCounted
 ##   observer's adaptation is the day look's) [call]; at least 1 (the fixed day exposure in sunlit space, as before);
 ## - the rods: a full-screen post step (VisionEffect, a CompositorEffect after the transparent pass, before glow and the
 ##   tone mapper; the same for both VR eyes) adapts the cones' image to the Sun's white (white_balance, below), takes
-##   its chroma to `chroma` (below) and adds
+##   its chroma to `chroma` (below; its daylight part > 1 in the display tone step, DisplayToneEffect) and adds
 ##   rod_scale x (w_s . rgb) x ROD_TINT to every pixel (linear: w_s >= 0), rod_scale =
 ##   k g_r / g_c with the rod gain g_r = L_ref / (10^1.255 t_s(L_as)) (Ferwerda's m_r: the display observer is
 ##   photopic) and the scotopic luminance from the pixel's linear RGB (SCOTOPIC_WEIGHTS);
@@ -95,22 +95,44 @@ const XYZ_TO_CAT02 := Basis(Vector3(0.7328, -0.7036, 0.0030), Vector3(0.4296, 1.
 ## (R'_a = G'_a = B'_a = 400 F_L^0.42 / (27.13 + F_L^0.42) + 0.1 for the adapted white; N_bb = 0.725 (Y_w / Y_b)^0.2).
 ## The display factors: brightness B = Q_w(L_a) / Q_w(L_day) on the displayed luminance [call: the brightness ratio
 ## applied as a luminance ratio - matching it through the display observer's ~1/3-power brightness would ask for B^3,
-## 6e-5 for a full-Moon cone image], chroma S = (F_L(L_a) / F_L(L_day))^0.25 on the cones' chroma at constant
-## luminance; both 1 at and above L_day (the day look, noon identical). L_A = L_a x Y_b / 100: L_a is the scene's white
-## (the sunlit plate, half the brightest sky) [call]. Held below their ranges, so nothing is counted twice:
+## 6e-5 for a full-Moon cone image], 1 at and above L_day (the display cannot be brighter than its white: the day look);
+## chroma S = (F_L(L_a) / F_L(L_display))^0.25 (look fixes T5, 2026-11-07): the colourfulness M = C F_L^0.25 the eye sees
+## at its adaptation matched on the display, whose viewer is adapted to the display's white L_display
+## (DISPLAY_WHITE_CD_M2) - CIECAM02's corresponding colours between the two viewing conditions. So S = 1 where the scene's
+## white is the display's (~100 cd/m^2, civil twilight), below 1 in dimmer scenes and above 1 in daylight (noon at the
+## pad, L_a ~2.6e4-3.8e4: S 1.58-1.64): a sunlit scene is seen more colourful than a 100 cd/m^2 display reproduces it
+## colourimetrically (the Hunt effect in daylight; the former reference L_day held S = 1 there, so the noon sky looked
+## dull). L_A = L_a x Y_b / 100: L_a is the scene's white (the sunlit plate, half the brightest sky) [call]. Held below
+## their ranges, so nothing is counted twice:
 ## - B below the Weber range (L_a < 10^CONE_LOG_WEBER = 79 cd/m^2), where Ferwerda's flattening cone threshold dims the
 ##   display already (the product stays monotonic in L_a);
 ## - S below the mesopic upper limit (10^(MESOPIC_LOG_LOW + MESOPIC_LOG_SPAN) = 4 cd/m^2), where the rods' achromatic
 ##   share (Eq. 6) takes over the desaturation (and the display-referred inverse's 1 / S amplification stays bounded
-##   in the rgba16f buffer).
-## Values (L_a cd/m^2 -> B, S): 1e4 and above 1, 1; 3264 0.79, 0.91; Sun -3 deg 181 0.44, 0.72; 79 and below
-## 0.368; 4 and below S 0.52.
+##   in the rgba16f buffer); capped at CHROMA_FACTOR_MAX above (a guard: L_a itself is capped at the reference plate).
+## Values (L_a cd/m^2 -> B, S): 3.8e4 1, 1.64; 1e4 1, 1.47; 3264 0.79, 1.34; 181 0.44, 1.05; Sun -3 deg 90 0.378, 0.99;
+## 79 and below B 0.368; 4 and below S 0.77.
 ## B multiplies the whole displayed image (the cone gain's pre-exposure in the shaders x B: the rods, relative to that
-## pixel, follow); S acts in the post step (VisionEffect) on the cones' image before the rods are added.
+## pixel, follow). S acts on the cones' image in two places: S <= 1 linearly in the post step (VisionEffect: toward the
+## pixel's luminance before the rods are added; the display-referred inverse exact), S > 1 in the display tone step
+## (DisplayToneEffect: OkLab chroma at constant lightness and hue - a linear boost about the luminance turns saturated
+## blues 4-7 deg in hue - then gamut-mapped at constant hue; display_hunt). Fidelity flag hunt_display_reference
+## (render_check --hunt=day: the former reference L_day, S <= 1).
 const APPEARANCE_BACKGROUND_PERCENT := 20.0  ## [S: CIE 159:2004] Y_b of an average scene (grey world)
 ## [call] The day look's luminance level: a white plate under ~3.1e4 lux (the Sun ~15 deg up in a clear sky); every
 ## daylight adaptation above it keeps B = S = 1 (noon at the pad: L_a 3.8e4).
 const APPEARANCE_DAY_CD_M2 := 1.0e4
+## [S: ITU-R BT.2035 (2013), reference viewing environment for HDTV programme evaluation: reference display white
+## 100 cd/m^2; IEC 61966-2-1 (sRGB) reference display 80 cd/m^2] the display's white, the display observer's adapting
+## white for the Hunt factor S. [call] The same for the VR headset (micro-OLED HMDs run their white at ~100-200 cd/m^2;
+## 100 is the reference value, 200 would lower S by 6 %); the surround's effect on CIECAM02's C (dim monitor vs dark HMD
+## surround, N_c 0.9 vs 0.8) left out.
+const DISPLAY_WHITE_CD_M2 := 100.0
+## [call] Guard on the Hunt factor (no blow-out of the chroma): at most this. L_a is capped at the reference plate
+## (4.3e4 cd/m^2 under the TOA Sun: S 1.66), so the guard acts only on a larger reference.
+const CHROMA_FACTOR_MAX := 1.7
+## Fidelity flag: the Hunt factor against the display's white (true, look fixes T5) or against L_day as before (false:
+## S <= 1, the daylight colourimetric).
+static var hunt_display_reference := true
 ## Rod vision's colour, linear sRGB at unit luminance: chromaticity (x, y) = (0.25, 0.25) [S: Jensen, Premoze,
 ## Shirley, Thompson, Ferwerda & Stark 2000, "Night rendering", sec. 3.1: their rendering choice, south-west of the
 ## mean (0.29, 0.28) they measured in the "dark" parts of ten realist night paintings]. Rods are achromatic (Ferwerda
@@ -154,7 +176,8 @@ const ANCHOR_WHITE := 0.9
 var gain := 1.0
 ## The rods' share on screen this frame: rod_scale (see above); 0 in daylight.
 var rod_scale := 0.0
-## The suprathreshold display factors this frame (brightness_factor, chroma_factor of the paced adaptation): 1 by day.
+## The suprathreshold display factors this frame (brightness_factor, chroma_factor of the paced adaptation): B 1 by
+## day, S above 1 in daylight (cone_map takes its part <= 1, display_hunt its part >= 1).
 var brightness := 1.0
 var chroma := 1.0
 ## The paced photopic adaptation luminance (cd/m^2): the cone gain, the mesopic share and the star threshold's
@@ -204,12 +227,19 @@ static func white_balance(white_rgb: Vector3) -> Basis:
 	return to_cones.inverse() * Basis.from_scale(grey / white) * to_cones
 
 
-## The post step's linear cone map C (VisionEffect): the white balance, then the chroma map (chroma_apply) -
-## C c = chroma_apply(W c, chroma).
+## The post step's linear cone map C (VisionEffect): the white balance, then the chroma map (chroma_apply) of the
+## chroma factor's part <= 1 - C c = chroma_apply(W c, min(chroma, 1)). Its part above 1 is the display tone step's
+## (display_hunt).
 static func cone_map(chroma_factor: float, white: Basis) -> Basis:
-	var chroma_map := Basis(chroma_apply(Vector3(1, 0, 0), chroma_factor), chroma_apply(Vector3(0, 1, 0), chroma_factor),
-			chroma_apply(Vector3(0, 0, 1), chroma_factor))
+	var linear := minf(chroma_factor, 1.0)
+	var chroma_map := Basis(chroma_apply(Vector3(1, 0, 0), linear), chroma_apply(Vector3(0, 1, 0), linear),
+			chroma_apply(Vector3(0, 0, 1), linear))
 	return chroma_map * white
+
+
+## The chroma factor's daylight part (>= 1): the display tone step's OkLab chroma factor (DisplayToneEffect).
+static func display_hunt(chroma_factor: float) -> float:
+	return maxf(chroma_factor, 1.0)
 
 
 ## The whole post step on a scene pixel (VisionEffect): the cones' white balance and chroma, then the rods (from the
@@ -242,11 +272,16 @@ static func brightness_factor(adaptation_cd_m2: float) -> float:
 	return white_brightness(level) / white_brightness(APPEARANCE_DAY_CD_M2)
 
 
-## The cones' chroma factor S (Hunt effect): (F_L(L_a) / F_L(L_day))^0.25, L_a held at the mesopic upper limit below
-## it; 1 at and above APPEARANCE_DAY_CD_M2.
+## The cones' chroma factor S (Hunt effect): (F_L(L_a) / F_L(L_display))^0.25, L_a held at the mesopic upper limit
+## below it, at most CHROMA_FACTOR_MAX. With hunt_display_reference off: against L_day, 1 at and above it (as before T5).
 static func chroma_factor(adaptation_cd_m2: float) -> float:
-	var level := clampf(adaptation_cd_m2, pow(10.0, MESOPIC_LOG_LOW + MESOPIC_LOG_SPAN), APPEARANCE_DAY_CD_M2)
-	return pow(luminance_level_factor(level) / luminance_level_factor(APPEARANCE_DAY_CD_M2), 0.25)
+	var low := pow(10.0, MESOPIC_LOG_LOW + MESOPIC_LOG_SPAN)
+	if not hunt_display_reference:
+		var day_level := clampf(adaptation_cd_m2, low, APPEARANCE_DAY_CD_M2)
+		return pow(luminance_level_factor(day_level) / luminance_level_factor(APPEARANCE_DAY_CD_M2), 0.25)
+	var level := maxf(adaptation_cd_m2, low)
+	return minf(pow(luminance_level_factor(level) / luminance_level_factor(DISPLAY_WHITE_CD_M2), 0.25),
+			CHROMA_FACTOR_MAX)
 
 
 static func _paced(current: float, target: float, dt_s: float) -> float:

@@ -173,6 +173,7 @@ func _run() -> void:
 	# 400 km by day: gain 1 (the day look in orbit).
 	var noon_zenith := await _adapted_sample("adapted, pad noon zenith", pad, zenith, sun_60)
 	var noon_scene := _last_scene
+	var noon_chroma := _atmosphere.chroma
 	var twilight := await _adapted_sample("adapted, pad zenith, Sun -3 deg", pad, zenith,
 			_local_direction(PAD_LAT_DEG, PAD_LON_DEG, 270.0, -3.0))
 	var twilight_scene := _last_scene
@@ -185,15 +186,18 @@ func _run() -> void:
 	_check("adapted Sun -3 deg zenith visible, below noon", twilight_y > ADAPTED_TWILIGHT_MIN and twilight_y < noon_y,
 			"luminance %s (needs > %s and < the noon zenith %s), ratio %s; %s" % [_num(twilight_y),
 			_num(ADAPTED_TWILIGHT_MIN), _num(noon_y), _num(twilight_y / noon_y), twilight_factors])
-	# Less colourful: the displayed chroma relative to the scene's (the sky's own colour, from the CPU) below noon's
-	# (1: the day look). Not the absolute chroma: the -3 deg zenith's own colour is ~1.6 x more saturated than the
-	# noon zenith's (the deep twilight blue), more than the Hunt factor takes away (printed).
+	# Less colourful: the Hunt factor S at Sun -3 deg below noon's (look fixes T5: S against the display's white, ~0.98
+	# at -3 deg, 1.64 at noon; its part above 1 is the display tone step's, not in this linear environment), and the
+	# displayed chroma relative to the scene's (the sky's own colour, from the CPU; the white balance in both) below
+	# noon's. Not the absolute chroma: the -3 deg zenith's own colour is ~1.6 x more saturated than the noon zenith's
+	# (the deep twilight blue).
 	var twilight_relative := _chroma_of(twilight) / _chroma_of(twilight_scene)
 	var noon_relative := _chroma_of(noon_zenith) / _chroma_of(noon_scene)
-	_check("adapted Sun -3 deg zenith less colourful than noon", twilight_relative < noon_relative
-			and noon_relative > 0.99, "displayed / scene chroma %s (needs < noon %s, ~1); chroma |c - Y| / Y on screen %s, scene %s, noon on screen %s; %s" % [
-			_num(twilight_relative), _num(noon_relative), _num(_chroma_of(twilight)), _num(_chroma_of(twilight_scene)),
-			_num(_chroma_of(noon_zenith)), twilight_factors])
+	_check("adapted Sun -3 deg zenith less colourful than noon", _atmosphere.chroma < noon_chroma
+			and twilight_relative < noon_relative and noon_relative > 0.99, "S %s (needs < noon %s); displayed / scene chroma %s (needs < noon %s); chroma |c - Y| / Y on screen %s, scene %s, noon on screen %s; %s" % [
+			_num(_atmosphere.chroma), _num(noon_chroma), _num(twilight_relative), _num(noon_relative),
+			_num(_chroma_of(twilight)), _num(_chroma_of(twilight_scene)), _num(_chroma_of(noon_zenith)),
+			twilight_factors])
 	var dusk := await _adapted_sample("adapted, pad zenith, Sun -8 deg", pad, zenith,
 			_local_direction(PAD_LAT_DEG, PAD_LON_DEG, 270.0, -8.0))
 	var dusk_y := dusk.dot(LUMINANCE_WEIGHTS)
@@ -1303,8 +1307,9 @@ func _night_vision_samples() -> void:
 		# (and the white balance to the Sun's white: the cones' map of the post step, no rods by day)
 		_compare("night vision: day %s = fixed x gain %.3f" % [day[0], gain], _post(fixed * gain), adapted,
 				NV_DAY_TOLERANCE)
-		_check("night vision: day %s, no rods, no moonlight, B = S = 1" % day[0], _atmosphere.rod_scale == 0.0
-				and _atmosphere.brightness == 1.0 and _atmosphere.chroma == 1.0 and not _atmosphere.moonlight_active,
+		# S >= 1 by day (look fixes T5): the post step's linear part is 1, the rest is the display tone step's.
+		_check("night vision: day %s, no rods, no moonlight, B = 1, S >= 1" % day[0], _atmosphere.rod_scale == 0.0
+				and _atmosphere.brightness == 1.0 and _atmosphere.chroma >= 1.0 and not _atmosphere.moonlight_active,
 				"rod scale %s, moonlight %s, brightness %s, chroma %s" % [_num(_atmosphere.rod_scale),
 				_atmosphere.moonlight_active, _num(_atmosphere.brightness), _num(_atmosphere.chroma)])
 		# The day look unchanged (night-vision review I7): the gain is the former Weber gain L_ref / L_a (at least 1)

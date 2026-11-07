@@ -203,12 +203,17 @@ shaders:
   - Where: cone gain in the shaders as pre-exposure; rods by one CompositorEffect (`VisionEffect`, on the
     WorldEnvironment's Compositor in world.gd and the GPU check) after the transparent pass with the resolved MSAA
     colour, before glow and AgX: rgb' = C rgb + k g_r / g_c x (w_s . rgb) x tint, C = `EyeAdaptation.cone_map`: the
-    white balance W (below), then Y + S (rgb - Y) (Y the BT.709 luminance); per pixel on every view layer; nothing
-    dispatched while k g_r / g_c = 0 and C = I (the adaptation off).
+    white balance W (below), then Y + min(S, 1) (rgb - Y) (Y the BT.709 luminance); per pixel on every view layer;
+    nothing dispatched while k g_r / g_c = 0 and C = I (the adaptation off). Then the display tone step (below).
   - Display-referred emitters write the inverse of that linear step (Sherman-Morrison): q = C^-1 c, then
     q - u (w_s . q), u = s C^-1 tint / (1 + s w_s . C^-1 tint) (`vision.gdshaderinc`, globals `vision_rod_weights`,
     `vision_inverse_tint`, `vision_cone_inverse`): plume, the stars' own brightness, the orbit ribbon, flight trail, the
-    Moon's orbit line, map labels and the VR panel look as before. Holds under alpha and additive blending. GPU check:
+    Moon's orbit line, map labels and the VR panel look as before. Holds under alpha and additive blending. Before it
+    the emitter takes the display tone step's inverse (`vision_tone_inverse`, `vision_hunt_inverse`; globals
+    `vision_tone`, `vision_tone_white`, `vision_hunt`, neutral while the step is off): AgX's colour of c scaled to the
+    scene luminance the step's curve shows at its luminance, then the OkLab chroma / S - shown as AgX alone showed it,
+    exact for an emitter alone on its pixel (CPU within 0.7 % per channel, GPU patches within 2e-3), approximate where
+    it blends with the scene (the step is not linear). GPU check:
     opaque `display_colour` quad at the moonless night (rod scale 138, S 0.52) = its day pixel within 0.5 % of its
     peak; half-transparent over a scene-referred background within 0.5 % (limit rgba16f; tolerance 2 % of the peak).
     Map labels (`MapLabel`) draw Label3D's black outline as eight black copies 2.5 font pixels out. The Sun disc
@@ -222,16 +227,24 @@ shaders:
     Solar eclipse at the eye (its own visible fraction < 1): the same over 8 azimuths x 1 / 3 / 6 / 12 deg of the
     eclipsed sky (`_eclipsed_in_scatter`). Orbit: above the atmosphere with the Sun behind the Earth and the eye not
     near the Moon (its disc smaller than the Earth's), the brightest limb toward the Sun (tangent heights 2-40 km).
-  - Brightness and colourfulness (user decision 2026-10-25, `EyeAdaptation.brightness_factor` / `chroma_factor`):
-    CIECAM02 luminance-level factor F_L [S: CIE 159:2004; Moroney et al. 2002, IS&T/SID CIC 10], F_L = 0.2 k^4 (5 L_A) +
-    0.1 (1 - k^4)^2 (5 L_A)^(1/3), k = 1 / (5 L_A + 1); brightness Q ~ (A_w + 4) F_L^0.25, colourfulness M = C
-    F_L^0.25. B = Q_w(L_a) / Q_w(L_day) applied as a luminance ratio, S = (F_L(L_a) / F_L(L_day))^0.25 on the cones'
-    chroma at constant luminance; L_A = L_a x Y_b / 100, Y_b = 20; both 1 at and above L_day = 1e4 cd/m^2 [call]. B
-    held below 79 cd/m^2 (Weber range), S below 4 cd/m^2 (mesopic limit). Values (L_a -> B, S): >= 1e4 -> 1, 1; 3264
-    -> 0.79, 0.91; Sun -3 deg (90 cd/m^2) -> 0.378, 0.676; <= 79 -> B 0.368; <= 4 -> S 0.521. B multiplies the cone
-    gain's pre-exposure (`luminance_scale`, `scene_per_cd_m2`, `atmosphere_exposure_gain`; the `exposure_gain` field
-    stays the cone gain), so the star threshold (true luminance via `scene_per_cd_m2`) is unchanged; S acts in the
-    post step (it runs every frame since the white balance, 958263d1).
+  - Brightness and colourfulness (user decision 2026-10-25, `EyeAdaptation.brightness_factor` / `chroma_factor`; S's
+    reference look fixes T5, 2026-11-07): CIECAM02 luminance-level factor F_L [S: CIE 159:2004; Moroney et al. 2002,
+    IS&T/SID CIC 10], F_L = 0.2 k^4 (5 L_A) + 0.1 (1 - k^4)^2 (5 L_A)^(1/3), k = 1 / (5 L_A + 1); brightness Q ~ (A_w +
+    4) F_L^0.25, colourfulness M = C F_L^0.25; L_A = L_a x Y_b / 100, Y_b = 20. B = Q_w(L_a) / Q_w(L_day) applied as a
+    luminance ratio, 1 at and above L_day = 1e4 cd/m^2 [call: the display cannot be brighter than its white], held
+    below 79 cd/m^2 (Weber range). S = (F_L(L_a) / F_L(L_display))^0.25: the colourfulness the adapted eye sees matched
+    on a display whose viewer is adapted to its white L_display = 100 cd/m^2 (`DISPLAY_WHITE_CD_M2` [S: ITU-R BT.2035
+    reference display white; sRGB's reference 80 cd/m^2]; the same for the HMD [call]) - CIECAM02's corresponding
+    colours; held below 4 cd/m^2 (mesopic limit), at most `CHROMA_FACTOR_MAX` 1.7 [call: guard; L_a is capped at the
+    reference plate, S <= 1.66]. Values (L_a -> B, S): 3.8e4 (pad noon plate) -> 1, 1.64; 1e4 -> 1, 1.47; 3264 -> 0.79,
+    1.34; 181 -> 0.44, 1.05; 100 -> -, 1; Sun -3 deg (90) -> 0.378, 0.99; <= 79 -> B 0.368; <= 4 -> S 0.77. B
+    multiplies the cone gain's pre-exposure (`luminance_scale`, `scene_per_cd_m2`, `atmosphere_exposure_gain`; the
+    `exposure_gain` field stays the cone gain), so the star threshold (true luminance via `scene_per_cd_m2`) is
+    unchanged. S acts on the cones' image in two places: its part <= 1 linearly in the post step (Y + S (rgb - Y),
+    `cone_map`; the display-referred inverse exact), its part > 1 in the display tone step (OkLab chroma x S at
+    constant lightness and hue, `display_hunt`, below) - a linear boost about Y turns saturated blues 4-7 deg in OkLab
+    hue. Fidelity flag `EyeAdaptation.hunt_display_reference` (render_check / cockpit_shots `--hunt=day`: the former
+    reference L_day, S <= 1; docs/history/atmosphere-rendering.md).
   - Moon disc and regolith (`moon_regolith.gdshaderinc`, mirrored by `Atmosphere.regolith_reflectance`): one BRDF for
     every light on the regolith, albedo x R x E / pi x LS(mu0, mu) x f(g), LS = 2 mu0 / (mu0 + mu), f(g) = O(g)
     10^(-0.4 (0.026 g + 4e-9 g^4)) / Phi_LS(g), opposition surge O = 1.35 - 0.05 g below 7 deg [S: K&S 1991 as
@@ -255,7 +268,7 @@ shaders:
     full Earth from the lunar night, the full Moon's disc, city lights take the rods' tint); no loss of acuity, no
     glare; rods' slower dark adaptation (~30 min) paced like the cones' (110 s); no airglow, zodiacal light or
     integrated starlight (a moonless sky is black); Jensen's k on the adaptation luminance, not per pixel; B and S one
-    value per view, no Bezold-Bruecke hue shift (lunar day keeps B = S = 1).
+    value per view, no Bezold-Bruecke hue shift (lunar day keeps B = 1, S 1.66).
 
 - **White balance: chromatic adaptation to the Sun's white** [look fixes T2, 2026-11-07; `EyeAdaptation.white_balance`,
   `cone_map`, `Atmosphere.white_balance`; fidelity flag `EyeAdaptation.white_balance_enabled`, render_check
@@ -276,6 +289,43 @@ shaders:
   (identity), the TOA Sun B/R 0.856 in 0.80-0.90 and drawn grey at its luminance (1e-6), the Sun through Rayleigh air
   mass 4 at 700 hPa still warm (B/R 0.485 -> 0.564 < 0.75), post step o display-referred inverse = identity (1e-6).
   A/B numbers: `.superpowers/sdd/2026-11-07-look-fixes/t1-t2-report.md`.
+
+- **Display tone step: chroma-preserving tone curve** [look fixes T5, 2026-11-07; `display_tone.gd` `DisplayTone` (model
+  and CPU mirror), `display_tone_effect.gd` `DisplayToneEffect` (compute step); fidelity flag `DisplayTone.enabled`,
+  render_check / cockpit_shots `--tone=agx`]. Godot's AgX (inset matrix, the allenwp curve per channel, outset) took
+  16-26 % of the sky's and the ocean's B/R at mid-high scene values and turns the noon sky's OkLab hue by ~8 deg; a plain
+  luminance curve keeps B/R but its per-channel clip turns saturated blues violet. The step, per pixel x (scene-linear
+  Rec.709 after the post step; on every view layer, after `VisionEffect`, before glow and AgX): (1) the luminance Y goes
+  through AgX's own grey curve, g = awp(Y) (Godot's contrast 1.25 and white 16.29 read from the environment) - the
+  former tonality on the grey axis; (2) the chromaticity is kept, d0 = x g / Y: OkLab [S: Ottosson 2020] is homogeneous
+  of degree 1/3, so d0 has x's OkLab hue exactly; (3) the Hunt factor's daylight part: OkLab chroma x max(S, 1) at
+  constant lightness and hue; (4) path to white [call]: chroma x (1 - smoothstep) over log2 Y from scene 2 (above the
+  sunlit white plate, 1.5) to AgX's white - Sun disc, glints and the brightest highlights end in display white; (5)
+  gamut mapping at constant OkLab lightness and hue [call]: C_max(L, h) = the largest chroma AgX can show (in the sRGB
+  cube and reached from a non-negative AgX input; 12 bisection steps, skipped while C / 0.75 is reachable), C / C_max
+  compressed softly above the knee 0.75 (1 - 0.25 exp(-(r - 0.75) / 0.25)); (6) the pixel is written as AgX's exact
+  inverse of the result, INSET^-1 awp^-1(OUTSET^-1 d), so the engine's AgX shows d (glow, encoding and the HDR
+  magnitudes downstream unchanged; on the grey axis the pixel is untouched); at and above AgX's white the pixel is
+  scaled to at least white in every AgX channel (white on screen, magnitude kept for the glow). Active only while the
+  environment's tone mapper is AgX (the linear camera exposures and the GPU checks' linear environments stay
+  colourimetric). Display-referred emitters take the step's inverse (above) and look as before.
+  Tests: `game/tests/display_tone_test.gd` (headless: grey written unchanged and shown on AgX's grey curve, AgX o step
+  = target within 1e-5, monotonic in the scene level, OkLab hue kept within 0.5 deg over 3600 random colours at S 1
+  and 1.64 (largest 0.0000 deg), the noon sky's B/R kept (AgX turns its hue 7.1 deg), Hunt = OkLab chroma x S at the
+  same lightness, path to white, S's values / monotonic / cap / flag, cone_map's part <= 1, the emitters' inverse =
+  AgX within 3 %, largest 0.7 %); `game/tests/display_tone_check.gd` (GPU: 9 patches through the shader at S 1 and
+  1.64 and with the step off against the CPU mirror, largest error 7e-4 of display-linear, tolerance 3e-3; 3
+  display-referred emitter patches = AgX, largest 1.9e-3, tolerance 1e-2).
+  A/B (A = AgX + S against L_day, B = this step + S against the display; `screenshots/look_fixes/t5/`, report
+  `.superpowers/sdd/2026-11-07-look-fixes/t5-report.md`): pad noon el 5 (S 1.58) sky el ~29 sRGB (82, 118, 154) B/R
+  3.81 -> (62, 111, 182) B/R 9.85, OkLab hue -110.3 -> -102.4 deg = the scene's -102.4 (AgX turned it 7.9 deg); zenith
+  (el 85, S 1.53) (105, 133, 163) -> (87, 128, 192), hue -109.0 -> -101.1 (scene -101.1); displayed luma within 7 %.
+  Start view (weather analog, S 1.61): ocean (60, 81, 110) B/R 3.50 -> (61, 82, 125) 4.36 (EPIC 4.8-5.6); 400 km nadir
+  ocean (48, 72, 102) -> (39, 68, 117) (ISS photo (24, 76, 123)). Sun disc unchanged (75 px at display white in both,
+  centre (247, 247, 247) -> (245, 250, 254)); plume core noon (253, 233, 219) -> (255, 234, 221), night (254, 228, 202)
+  -> (255, 231, 213). Cost (the step + its bisection only where C / 0.75 leaves the gamut): pad view 1600 x 900 median
+  1.858 / 1.860 -> 1.923 / 1.905 ms (+0.06 ms), stereo mock 3534 x 2838 per eye 5.910 / 5.732 -> 6.041 / 6.034 ms
+  (+0.13 / +0.30 ms, two rounds).
 
 - **Lamps in view** [call 2026-10-31, `Atmosphere.lamp_adaptation_cd_m2`]: one more candidate of L_a's maximum (white, and its scotopic
   equivalent), set by `World` from `TowerView.lamp_adaptation_cd_m2`: 3 % of the lit pad's luminance (Pad B deck 16.8 cd/m^2 at night) x the
@@ -320,8 +370,19 @@ shaders:
 - City lights scene-referred with scale [E] (user ruling 2026-10-25).
 - White balance to the TOA Sun's white, fixed (not to the plate's current light: a sunset stays red) (look fixes plan,
   user 2026-11-07 "Alles wie vorgeschlagen umsetzen", proposal F7).
+- Hunt factor against the display's white (100 cd/m^2), no cap at 1 by day, and the chroma-preserving display tone
+  step on AgX's grey curve, hue-stable in OkLab (look fixes plan, user 2026-11-07 "Alles wie vorgeschlagen umsetzen",
+  proposals F2 + F3).
 
 ## Open points and known limits
+
+- Display tone step (T5): with the chroma kept (and x1.6 by day) the clouds' residual warmth after the white balance
+  shows - cloud radiance B/R 0.93-0.95 of the TOA Sun's white (start view / 400 km), displayed B/R 0.88-0.92 against
+  AgX's 0.97-0.98 and EPIC's 1.00-1.04: the clouds read pink. Candidates: the adopted white (the eye adapting to the
+  scene's bright field, the clouds, rather than the TOA Sun) or the clouds' TOA colour (T7). The lunar regolith reads
+  teal (displayed B/R 1.15 -> 1.30): the Moon's Sun light is white (`moon_sun_scene` a scalar, not the TOA Sun's colour)
+  while the white balance assumes the TOA Sun, and the albedo texture is slightly blue (the real regolith is
+  red-sloped). The S reference moved civil dusk from S 0.68 to ~1.0 (more colourful twilight).
 
 - Earth in view for a Moon eye at partial phases underestimates up to ~2x; the eclipse-time Earth renders several
   times its day brightness (AgX rolls it toward white) - kept physical.
