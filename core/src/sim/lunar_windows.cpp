@@ -162,7 +162,6 @@ public:
           earliest_start_(earliest_start), lead_s_(lead_s) {
         const double gm_moon = env_.sources.ephemeris->gm_m3ps2(ephemeris::Body::Moon);
         settling_s_ = lunar_llo_settling_s(m_, gm_moon);
-        first_pass_s_ = lunar_first_pass_after_arrival_s(m_, gm_moon);
         period_s_ = llo_period_s(m_, gm_moon);
     }
 
@@ -211,26 +210,54 @@ private:
                     after_s = next_after_s;  // start earlier by the drift, the plane epoch kept
                     continue;
                 }
+                return later_pass(c, m, start, touchdown);
             }
-            double inclination_rad = mission::LloTarget{}.inclination_rad;
-            if (plan->llo_plane_normal_moon_inertial) {
-                const math::Vec3 pole = session->moon_orientation()->fixed_to_gcrf(touchdown).rotation *
-                                        math::Vec3{0.0, 0.0, 1.0};
-                inclination_rad =
-                    std::acos(std::clamp(dot(*plan->llo_plane_normal_moon_inertial, pole), -1.0, 1.0));
-            } else if (m.llo_inclination_rad) {
-                inclination_rad = *m.llo_inclination_rad;
-            }
-            auto result = finish(c, m, start, touchdown, *started.lunar_budget_margin_kg, inclination_rad, missed);
-            if (!result.window && missed) {  // a geometry cause, not the daylight: the planned pass was missed
-                const double late_s = plan->insertion.epoch + first_pass_s_ - c.touchdown;
-                result.cause = report::make(report::Code::lunar_arrival_after_site_pass,
-                                            {report::time("late", std::max(late_s, 0.0))});
-            }
-            return result;
+            // the stay's plane change from the touchdown the descent flies (the start budgeted the planned pass)
+            const double margin_kg = lunar_llo_budget_margin_kg(*session, m, start, touchdown);
+            return finish(c, m, start, touchdown, margin_kg, plane_inclination(*session, *plan, m, touchdown), false);
         }
     }
 
+    // The planned pass is missed and the start cannot move earlier: the flight that takes the later pass has its plane
+    // chosen for that pass (ruling R18). One more run of the chain with it as the planned touchdown, same start; listed
+    // only when that run holds (its own touchdown, Sun and reserve), else the candidate is refused as late.
+    ChainResult later_pass(const Candidate& c, const config::LunarLandingMission& m0, time::Epoch start,
+                           time::Epoch pass) const {
+        const auto late = [&](time::Epoch taken) {
+            return ChainResult{std::nullopt, report::make(report::Code::lunar_arrival_after_site_pass,
+                                                          {report::time("late", std::max(taken - c.touchdown, 0.0))})};
+        };
+        auto m = m0;
+        m.touchdown_after_epoch_s = pass - start;
+        const auto session = session_from(env_, config_dir_);
+        const auto started = start_lunar_landing_mission(*session, config_dir_, m, start, nullptr, &site_);
+        if (!started.refusal.ok() || !started.lunar_planned_touchdown) return late(pass);
+        const auto descent = descent_plan(*session, m, start);
+        if (!descent.feasible) return late(pass);
+        const time::Epoch touchdown = descent.site_pass_epoch;
+        if (touchdown - pass > period_s_) return late(pass);  // not the pass the plane was chosen for
+        const auto* plan = session->lunar_outbound_plan();
+        const double margin_kg = lunar_llo_budget_margin_kg(*session, m, start, touchdown);
+        auto result = finish(c, m, start, touchdown, margin_kg, plane_inclination(*session, *plan, m, touchdown), true);
+        if (debug_enabled()) {
+            std::fprintf(stderr, "[lunar_windows]   later pass %+.3f d re-run: pass %+.3f d, reserve %.2f t, %s\n",
+                         (pass - c.touchdown) / 86400.0, (touchdown - c.touchdown) / 86400.0, margin_kg / 1000.0,
+                         result.window ? "listed" : "refused");
+        }
+        if (!result.window) return late(pass);
+        return result;
+    }
+
+    static double plane_inclination(const FlightSession& session, const mission::OutboundPlan& plan,
+                                    const config::LunarLandingMission& m, time::Epoch touchdown) {
+        if (plan.llo_plane_normal_moon_inertial) {
+            const math::Vec3 pole = session.moon_orientation()->fixed_to_gcrf(touchdown).rotation *
+                                    math::Vec3{0.0, 0.0, 1.0};
+            return std::acos(std::clamp(dot(*plan.llo_plane_normal_moon_inertial, pole), -1.0, 1.0));
+        }
+        if (m.llo_inclination_rad) return *m.llo_inclination_rad;
+        return mission::LloTarget{}.inclination_rad;
+    }
 
     // The hard Sun rule on the touchdown the flight takes (daylight from it through the stay and the ascent), then the
     // window.
@@ -296,7 +323,7 @@ private:
     config::LunarSiteConfig site_;
     time::Epoch earliest_start_;
     double lead_s_ = 0.0;
-    double settling_s_ = 0.0, first_pass_s_ = 0.0, period_s_ = 0.0;
+    double settling_s_ = 0.0, period_s_ = 0.0;
 };
 
 // ---- NRHO screen (ruling R16) ----
@@ -511,6 +538,29 @@ LunarWindowResult find_lunar_landing_windows(const FlightSession& prototype, con
                                              const LunarWindowRequest& request,
                                              const std::function<bool(double)>& progress) {
     return find_lunar_landing_windows(lunar_window_environment(prototype), config_dir, request, progress);
+}
+
+LunarCandidateResult evaluate_lunar_window_candidate(const LunarWindowEnvironment& environment,
+                                                     const std::filesystem::path& config_dir,
+                                                     const LunarWindowRequest& request, time::Epoch touchdown) {
+    auto m = config::load_lunar_landing_mission(config_dir, request.mission_id);
+    m.surface_stay_s = std::max(request.stay_s, 0.0);
+    const auto& sources = environment.sources;
+    const double gm_moon = sources.ephemeris->gm_m3ps2(ephemeris::Body::Moon);
+    const double lead_s = lunar_first_pass_after_arrival_s(m, gm_moon);
+    const double hold_s = m.surface_stay_s + lunar_window_ascent_lead_s;
+    const double lat = request.site.latitude_rad, lon = request.site.longitude_rad;
+    const auto days = mission::daylight_intervals(*sources.ephemeris, *sources.moon, lat, lon, request.start,
+                                                  m.windows.horizon_s + hold_s + lunar_window_candidate_step_s);
+    for (const auto& day : days) {
+        if (touchdown < day.sunrise || touchdown + hold_s > day.sunset) continue;
+        const auto sun = mission::site_sun(*sources.ephemeris, *sources.moon, lat, lon, touchdown);
+        const Candidate c{touchdown, day, band_distance(sun.elevation_rad, m.windows)};
+        const Chain chain(environment, config_dir, m, request.site, request.start, lead_s);
+        auto out = chain.run(c);
+        return {out.window, out.cause};
+    }
+    return {std::nullopt, no_daylight(m.surface_stay_s, 0.0)};
 }
 
 void clear_lunar_window_cache() {

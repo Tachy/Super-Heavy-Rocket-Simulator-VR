@@ -61,6 +61,17 @@ struct LunarWindowEnvironment {
 // The snapshot of `session`: take it on the session's thread (the sim thread writes the flags).
 LunarWindowEnvironment lunar_window_environment(const FlightSession& session);
 
+// One candidate through the chain (the search's step 4), for tests and callers that check a given date: `touchdown` is
+// the planned pass; `window` is set when the chain holds, else `cause` names why not (lunar.no_daylight_for_stay when
+// `touchdown` lies in no daylight that holds the stay, lunar.arrival_after_site_pass, lunar.budget_short, ...).
+struct LunarCandidateResult {
+    std::optional<LunarLandingWindow> window;
+    report::Report cause;
+};
+LunarCandidateResult evaluate_lunar_window_candidate(const LunarWindowEnvironment& environment,
+                                                     const std::filesystem::path& config_dir,
+                                                     const LunarWindowRequest& request, time::Epoch touchdown);
+
 // The landing windows of `request` within the mission's [windows] horizon_days after request.start:
 // 1. daylight intervals at the site (mission::daylight_intervals) over the horizon and the stay after it;
 // 2. touchdown candidates every lunar_window_candidate_step_s inside intervals that still hold the stay and
@@ -72,8 +83,9 @@ LunarWindowEnvironment lunar_window_environment(const FlightSession& session);
 //    predicted LLO (TLI and insertion flown impulsively, planned once settled in the LLO as the session does). The
 //    plane-through-site transfer lets the arrival drift from start + transfer; when the descent misses the planned
 //    pass for it, the start is re-solved earlier by the drift (plane epoch kept, never before request.start, up to
-//    lunar_window_max_resolves times); a pass still missed is lunar.arrival_after_site_pass unless the later pass
-//    still holds the stay in daylight. The touchdown must lie in the daylight holding the stay - until [windows]
+//    lunar_window_max_resolves times); a pass still missed is re-run once with the later pass as the planned
+//    touchdown (ruling R18): listed with that run's touchdown and reserve when it holds (Sun over the stay, budget),
+//    else lunar.arrival_after_site_pass. The touchdown must lie in the daylight holding the stay - until [windows]
 //    count pass. The list spreads over the lunar days first: a candidate whose daylight already holds a window is
 //    tried only after every other candidate (dates, not one morning's slots).
 // NRHO missions (ruling R16): before the candidates the budget is bounded from below once - the outbound at the

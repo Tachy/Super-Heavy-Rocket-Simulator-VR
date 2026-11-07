@@ -277,7 +277,8 @@ double lunar_stay_plane_change_mps(const frames::BodyOrientation& moon, const co
 
 double lunar_mission_stay_plane_change_mps(const FlightSession& session, const config::LunarLandingMission& m,
                                            time::Epoch epoch,
-                                           const std::optional<mission::NrhoSiteDeparture>& departure) {
+                                           const std::optional<mission::NrhoSiteDeparture>& departure,
+                                           std::optional<time::Epoch> touchdown_override) {
     const auto* site = session.lunar_landing_site();
     const auto* moon = session.moon_orientation();
     if (!site || !moon || m.surface_stay_s <= 0.0) return 0.0;
@@ -290,12 +291,28 @@ double lunar_mission_stay_plane_change_mps(const FlightSession& session, const c
     };
     if (departure) return stay(departure->llo_plane_normal_moon_inertial, departure->touchdown);
     const auto* plan = session.lunar_outbound_plan();
+    if (touchdown_override) {
+        return stay(plan ? plan->llo_plane_normal_moon_inertial : std::nullopt, *touchdown_override);
+    }
     if (plan && plan->llo_plane_normal_moon_inertial && plan->llo_touchdown) {
         return stay(plan->llo_plane_normal_moon_inertial, *plan->llo_touchdown);
     }
     const auto planned = lunar_planned_touchdown(m, epoch);
     return stay(std::nullopt, planned ? *planned
                                       : epoch + m.flight_time_s + lunar_first_pass_after_arrival_s(m, gm_moon));
+}
+
+double lunar_llo_budget_margin_kg(const FlightSession& session, const config::LunarLandingMission& m,
+                                  time::Epoch epoch, time::Epoch stay_touchdown) {
+    const auto setup = lunar_landing_setup(m);
+    const auto& v = session.body(session.controlled_index()).vehicle();
+    const auto& sets = setup.guidance.braking_sets;
+    const double mass_kg = v.mass_properties().mass_kg;
+    return lunar_mission_budget(m, *session.lunar_outbound_plan(), mass_kg, mass_kg - v.propellant_kg(),
+                                gnc::groups_vacuum_isp_s(v, sets.front()), gnc::groups_vacuum_isp_s(v, sets.back()),
+                                session.settling_gas_bound_kg(), 0.0,
+                                lunar_mission_stay_plane_change_mps(session, m, epoch, std::nullopt, stay_touchdown))
+        .margin_kg;
 }
 
 size_t lunar_in_orbit_ignitions(const std::vector<mission::BudgetLeg>& legs) {

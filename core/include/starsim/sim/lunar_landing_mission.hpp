@@ -53,7 +53,13 @@ double lunar_stay_plane_change_mps(const frames::BodyOrientation& moon, const co
 // a landing site or Moon orientation.
 double lunar_mission_stay_plane_change_mps(const FlightSession& session, const config::LunarLandingMission& mission,
                                            time::Epoch epoch,
-                                           const std::optional<mission::NrhoSiteDeparture>& departure);
+                                           const std::optional<mission::NrhoSiteDeparture>& departure,
+                                           std::optional<time::Epoch> touchdown_override = std::nullopt);
+
+// The budget margin of an LLO mission planned in `session` (after start_lunar_landing_mission) with the stay's plane
+// change taken at `stay_touchdown` - the touchdown the descent actually flies (the start budgets the planned pass).
+double lunar_llo_budget_margin_kg(const FlightSession& session, const config::LunarLandingMission& mission,
+                                  time::Epoch epoch, time::Epoch stay_touchdown);
 
 // Rocket-equation budget of the whole mission from the planned outbound flight (TLI, swing-by, insertion / LOI) and the
 // mission's nominal legs (NRHO -> LLO, descent, ascent, LLO -> NRHO). `vacuum_isp_s`: the vacuum Raptors (outbound,

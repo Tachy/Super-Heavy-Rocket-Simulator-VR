@@ -327,6 +327,48 @@ TEST_CASE("a candidate whose arrival drifts past its pass is re-solved, not drop
     CHECK(resolved >= 1);
 }
 
+// Task 8 re-review N1 (ruling R18): a candidate right after `earliest` cannot start earlier, so a positive arrival drift
+// misses its planned pass. Either the later pass is re-run as the planned touchdown and listed with that run's own
+// touchdown and reserve (Sun over the stay holds), or the candidate is refused as lunar.arrival_after_site_pass with the
+// real lateness (N2: not 0 h).
+TEST_CASE("a candidate that cannot start earlier is re-run at its later pass or refused as late",
+          "[sim][lunar][lunar_windows][terrain][data]") {
+    test::spice_session();
+    Fixture fx;
+    const auto site = config::load_lunar_site(STARSIM_CONFIG_DIR, "apollo_11");
+    if (!site_tile(site)) SKIP("Apollo 11 tile not installed");
+    const auto m = config::load_lunar_landing_mission(STARSIM_CONFIG_DIR, "hls_lunar_llo");
+    const auto env = sim::lunar_window_environment(fx.prototype);
+    const double gm = fx.ephemeris.gm_m3ps2(ephemeris::Body::Moon);
+    const double lead_s = m.flight_time_s + sim::lunar_first_pass_after_arrival_s(m, gm);
+    int listed_later = 0, refused_late = 0;
+    for (const double stay_s : {24.0 * 3600.0, 2.0 * 3600.0})
+    for (int k = 0; k < 24; ++k) {
+        const sim::LunarWindowRequest request{"hls_lunar_llo", site, stay_s, fx.utc(2026, 11, 11) + k * 3.0 * 3600.0};
+        const time::Epoch td = request.start + lead_s;  // the earliest candidate: its start cannot move earlier
+        const auto r = sim::evaluate_lunar_window_candidate(env, STARSIM_CONFIG_DIR, request, td);
+        if (r.window) {
+            const auto& w = *r.window;
+            std::printf("[lunar_windows]   start 11-11 + %d h: listed, touchdown %+.3f d from it, reserve %.2f t\n", 3 * k,
+                        (w.touchdown - td) / 86400.0, w.propellant_reserve_kg / 1000.0);
+            CHECK(w.mission_start >= request.start);
+            CHECK(sun_up_over_stay(fx, site, w));
+            CHECK(w.propellant_reserve_kg > 0.0);
+            if (w.touchdown - td > 6.0 * 86400.0) ++listed_later;  // the later pass, a whole node period on
+        } else {
+            std::printf("[lunar_windows]   start 11-11 + %d h: %s\n", 3 * k, report::describe(r.cause).c_str());
+            if (r.cause.code == report::Code::lunar_arrival_after_site_pass) {
+                ++refused_late;
+                REQUIRE_FALSE(r.cause.params.empty());
+                CHECK(r.cause.params.front().value_si > 3600.0);  // the real lateness, not a clamped 0
+            }
+        }
+    }
+    // the 24 h stay does not fit the daylight left at the later pass, the 2 h stay does
+    CHECK(refused_late >= 1);
+    CHECK(listed_later >= 1);
+}
+
 // Review I2: a refusal from missing data is not cached - after the download the same request searches again.
 TEST_CASE("a refusal from a missing site tile is not cached", "[sim][lunar][lunar_windows]") {
     test::spice_session();

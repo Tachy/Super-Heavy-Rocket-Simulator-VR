@@ -269,8 +269,11 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   the listed touchdown. Arrival drift (the plane-through-site transfer arrives -10 .. +21 h from start + flight time):
   when the descent takes a pass more than one LLO revolution after the candidate, the start is re-solved earlier by
   the drift (fixed point, the plane epoch kept, never before the request's start, up to 3 times; Apollo 11 candidate
-  +9.96 d: started 22 h earlier, listed); a pass still missed that leaves the daylight counts
-  `lunar.arrival_after_site_pass(late)`. The touchdown must lie in the candidate's daylight with the stay and the lead.
+  +9.96 d: started 22 h earlier, listed); a pass still missed (re-solve blocked by the request's start or the cap) is
+  re-run once with the later pass as the planned touchdown (ruling R18, same start): listed with that run's own
+  touchdown, Sun check and reserve when it holds, else `lunar.arrival_after_site_pass(late)` (late = the later pass
+  after the planned one, about one node period, 14 d). The stay's plane change is budgeted from the touchdown the
+  descent flies (`lunar_llo_budget_margin_kg`); `evaluate_lunar_window_candidate` runs one candidate. The touchdown must lie in the candidate's daylight with the stay and the lead.
   The list spreads over the lunar days first (a candidate whose daylight already holds a window waits for a second
   round), then is sorted by preference on the listed touchdown's Sun. No window: `lunar.no_window(cause)`, the most
   frequent cause over the candidates (`lunar.no_daylight_for_stay(stay, daylight)` - also when no interval holds the
