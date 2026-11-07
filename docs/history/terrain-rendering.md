@@ -147,3 +147,15 @@ near-field Sun shadow map's light() (the off path gives the same image).
   in Task 13b: 16-bit gives the same image (shadow length and pixel diffs in terrain-rendering.md Validation), 128 MB, -0.56 ms GPU.
 - The shadows switched off as a step when the eye passed 20 km over the ground (the vehicles' self-shadows vanished at once); now
   they fade between 20 and 30 km (`shadow_opacity`).
+
+## Global sea: the Blue Marble fill through the land tables (Task 15 / U-3, 2026-11-05; replaced 2026-11-07, look fixes T3)
+- Outside the Sentinel-2 boxes the sea was the Blue Marble Next Generation's ocean fill mapped through the land-fitted
+  tables: [0.0086, 0.0212, 0.0284], luminance 0.019, worldwide - the tables' floor, 4x clear water in red and 3.5x in
+  green. The look investigation (`.superpowers/look-investigation-2026-11-07.md`) measured the open Pacific at the start
+  view at TOA reflectance 0.070 (clear water 0.062, a black ocean 0.058). Replaced by the water-leaving reflectance of
+  open Case-1 water (terrain-rendering.md, "Open ocean").
+- The water body was lit diffusely x (1 - F) without the nadir normalisation 1 / (1 - r0) (the body's diffuse part
+  2 % lower).
+- The scaled-space Earth (beyond 1.5e7 m) and the sky's model ground drew the sea as a Lambertian body (the day
+  texture x the Sun and sky light): no Fresnel sky reflection, no glint (cloud_far_check listed the terrain's glint
+  at the sub-camera point as a hand-over step).

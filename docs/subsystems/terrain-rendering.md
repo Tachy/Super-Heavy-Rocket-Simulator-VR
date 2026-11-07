@@ -90,7 +90,8 @@ on top; it replaced the interim `GroundPatch`.
     cloud- and glint-bright offshore spots - are left out). Elsewhere (sea, sea ice, polar night) the
     Blue Marble Next Generation (Dec 2004) through per-channel monotone tables count -> reflectance, fitted to MCD43A4
     NBAR of 2004-12-16 (279 tiles, 3.0 M pixels; luminance error per pixel median 10 %, 90th percentile 59 % - snow
-    and season). Inside each Sentinel-2 box the land texture pixels carry the Sentinel-2 reflectance of the land pixels
+    and season); on the sea pixels (ETOPO water rule) the water optics of the next item but one replace the Blue
+    Marble's ocean fill. Inside each Sentinel-2 box the land texture pixels carry the Sentinel-2 reflectance of the land pixels
     averaged into them, and outside the box the edge ratio Sentinel-2 / MODIS of the land pixels fades out over 50 km
     on land pixels only (`EMBED_FEATHER_M` [E]): the two calibrated land products differ there (Sentinel-2 +9.5 % at
     Starbase, -10 % at the Cape against the climatology), and the embedding spreads that over the feather instead of
@@ -98,15 +99,28 @@ on top; it replaced the interim `GroundPatch`.
     feather is justified by the land disagreement): sea pixels inside a box take the box's calibrated open-water
     level (next item) plus the mean brightness of their water pixels above the open-water pedestal (below). 2.5 MB
     (JPEG quality 95).
-  - Calibrated sea (follow-up U-3, `earth_albedo.open_water_levels`, `SEA_FEATHER_M`): the Blue Marble sea through the
-    land tables is one nearly constant colour worldwide (luminance 0.019: [0.0087, 0.0215, 0.0283]), and it is not a
-    calibrated product. Inside each Sentinel-2 box the sea texels take the median (`OPEN_WATER_LEVEL_PERCENTILE` [E]) of
+  - Open ocean (look fixes T3, `earth_albedo.water_optics_sea`, `OCEAN_RRS_SR`, `BMNG_OCEAN_FILL_COUNTS`): the Blue
+    Marble's sea is a flat fill colour (counts (2, 5, 20) in 85 % of the 9.61 M sea pixels), not a measurement; the
+    sea pixels take the water-leaving reflectance pi Rrs of open oligotrophic Case-1 water (chlorophyll ~0.1 mg m^-3,
+    Morel & Maritorena 2001 model spectra [S], Rrs 443 nm 0.0095 sr^-1 = the SeaWiFS clear-water nLw 1.76-1.83 / F0
+    [S], the OC3M band ratio of the set gives chlorophyll 0.10 [S: O'Reilly & Werdell 2019]) at the channels' MODIS
+    band centres (645 / 555 / 469 nm): [0.00079, 0.00597, 0.0251], luminance 0.0063 - plus the pixel's brightness
+    above the fill through the same tables (shallow banks, sediment plumes, sea ice keep their excess; JPEG ringing
+    below the fill is clear water). Shipped texture: sea median [0.0006, 0.0061, 0.0252] (8-bit sRGB), luminance
+    median 0.0063, 95th percentile 0.0105, 99th 0.035. The body colour is the water's nadir reflectance; the sea model
+    adds the surface (Fresnel sky, glint). Land is unchanged except the JPEG's ringing within ~8 texels of a coast
+    (luminance p5-p95 -7..+6 %, the JPEG's own error there is ~9 %). The tiles need no retile: their water pixels
+    take the box's L2A level (unchanged). Not modelled: turbid / coastal (Case-2) water outside the boxes where the
+    Blue Marble draws it at or below its fill (e.g. the Yellow Sea), regional chlorophyll (upwelling, high latitudes:
+    greener), the Sun-angle dependence of Rrs (f / Q).
+  - Calibrated sea (follow-up U-3, `earth_albedo.open_water_levels`, `SEA_FEATHER_M`): the global open sea is not a
+    calibrated product of the scene (above). Inside each Sentinel-2 box the sea texels take the median (`OPEN_WATER_LEVEL_PERCENTILE` [E]) of
     the L2A reflectance over open water (renderer's water rule, > 2 km from non-water, per channel; Starbase [0.033,
     0.042, 0.049] = luminance 0.040, Cape [0.0054, 0.0133, 0.0281] = 0.0127: the turbid Gulf against the clear Atlantic),
     fading back to the global sea with a cosine over 100 km outside the box (`SEA_FEATHER_M` [E]; the Gulf east of
-    -94.8 deg and the Atlantic beyond ~300 km of the Cape keep 0.019). A single global open-water value cannot be
-    sourced from the two scenes (a factor 3 apart; the global 0.019 lies between them), so the calibration is
-    regional: where we have L2A the sea is L2A. Open-water tile pixels read 0.0404 at the Gulf (L2A median 0.0404)
+    -94.8 deg and the Atlantic beyond ~300 km of the Cape take the open ocean, 0.0063). The calibration is regional:
+    where we have L2A the sea is L2A - near-shore water (shelf turbidity, sediment, bottom) is legitimately brighter
+    than the open ocean; the L2A level also holds the sky reflection, which the sea model adds again (below). Open-water tile pixels read 0.0404 at the Gulf (L2A median 0.0404)
     and 0.0125 at the Cape (0.0127); the offshore z13 mean over 330 sampled pixels is 0.0404. Rendered, the sea at
     the pad view and a 5 km Gulf view changes by < 1 % in luminance (Sun 87 deg, 18:30 UTC: 0.2318 -> 0.2284 and
     0.2626 -> 0.2620 mean linear luminance of the sea patch): the sea shader's reflected sky dominates the body colour
@@ -169,8 +183,10 @@ on top; it replaced the interim `GroundPatch`.
   edge never reads as a line from orbit. Consequence: a fine patch smaller than about 0.1 x its viewing distance fades
   out entirely from far away (the base / day texture shows instead).
 - **Sea** (`water.gdshaderinc`): where the node's 128 x 128 water mask (the core's water flag) says sea, the geoid
-  surface is shaded by a calm-sea model: body colour from the imagery where it covers, else the day texture, lit
-  diffusely x (1 - F); Fresnel (Schlick, n = 1.333 [S]) times the reflected sky (the atmosphere model's sky along the
+  surface is shaded by a calm-sea model: body colour (the water's nadir water-leaving reflectance pi Rrs, look fixes
+  T3) from the imagery where it covers, else the day texture (`deep_water`, the open-ocean value, without one), lit
+  diffusely x (1 - F) / (1 - r0) (the water-leaving radiance through the surface, L_w = L_u (1 - F) / n^2 [S: Morel,
+  IOCCG-6 2001], normalised to the nadir value the body colour holds); Fresnel (Schlick, n = 1.333 [S]) times the reflected sky (the atmosphere model's sky along the
   reflected ray, `docs/subsystems/atmosphere-rendering.md`); sun glint by the Cox-Munk slope pdf (sigma^2 = 0.003 +
   0.00512 U [S], `glint_wind_mps` 5 [E]) with Smith masking-shadowing [S]; four Gerstner normal octaves (60 / 23 / 9 /
   3.5 m [E], slope 0.04, Q = 0.5), phases computed in double at the camera (`WaterWaves`, global
@@ -182,6 +198,13 @@ on top; it replaced the interim `GroundPatch`.
   distance; lower down only after 10 deg [E]. Bodies without water (the Moon) build no water mask. Geometry stays on
   the geoid (a mission's sea state rescales the wave set: `docs/subsystems/sea-state.md`). The Sun light on the sea,
   the glint and the reflected sky are the transmitted ones, so the far sea fades into the horizon sky.
+  The same model on the flat normal (no resolved waves, as the terrain beyond 20 km) shades the sea of the scaled-space
+  Earth (`earth_surface.gdshaderinc`, beyond 1.5e7 m; with the far-field clouds the terrain's cloud light: Sun x
+  cloud.x, sky light and reflected sky x cloud.z plus the deck's glow) and of the sky's model ground (`sky.gdshader`:
+  the radiance cube's ground bounce and earthshine), where the global water fraction says sea
+  (`data/textures/earth_water.png`, 8-bit, 1 - `land_fraction` on the day texture's grid, written by `prepare.py`;
+  missing: those two draw the sea as land, with a warning). So the ocean keeps the same body, sky reflection and glint
+  from the pad to the start view (before T3 the scaled-space Earth drew the sea as a Lambertian body only, no glint).
 - **Clouds** (Task 9, `weather-clouds.md` "Light"): `terrain_earth.gdshader` includes `clouds.gdshaderinc` and
   `cloud_light.gdshaderinc` inside `CLOUD_LIGHT_BEGIN` / `_END` blocks (active only while `cloud_enabled`): the Sun
   through the cloud shadow maps, the Sun's diffuse light and the sky light through the column, the sea's reflected sky
@@ -429,10 +452,12 @@ on top; it replaced the interim `GroundPatch`.
 - The Moon's detail flag is read when the world builds its Moon tree (`World.moon_surface_detail`); a running world
   does not rebuild its tree on a change.
 
-- Earth surface albedo (Task 15, U-3): the global sea outside the Sentinel-2 boxes is still the Blue Marble through
-  land-fitted tables (luminance 0.019, no calibrated global ocean product): only the sea in and around the two boxes
-  is L2A (above). The cosine fade over 100 km makes the Gulf shelf east of Starbase a brighter patch against the
-  0.019 Gulf beyond it (a real shelf is turbid; the rim itself is an [E] construction). The pedestal stays the 90th
+- Earth surface albedo (Task 15, U-3, T3): the global sea outside the Sentinel-2 boxes is one open-ocean
+  water-leaving reflectance (oligotrophic, luminance 0.0063) plus the Blue Marble's excess over its fill: no regional
+  chlorophyll / turbidity product (a MODIS Rrs climatology would need an Earthdata login), and Case-2 water the Blue
+  Marble draws at its fill reads as clear ocean. Only the sea in and around the two boxes is L2A (above). The cosine
+  fade over 100 km makes the Gulf shelf east of Starbase a brighter patch (luminance 0.040) against the 0.0063 Gulf
+  beyond it (a real shelf is turbid; the box rim itself is an [E] construction). The pedestal stays the 90th
   percentile, so a bright flat pixel reads median + (value - pedestal): below its L2A value by pedestal - median (0.021
   at Starbase; the beach-spot figures of the Task 15 gates were not re-measured). The water rule
   (0.05 m) flags tidal flats as water; their brightness is kept through the pedestal rule, which is an [E] construction

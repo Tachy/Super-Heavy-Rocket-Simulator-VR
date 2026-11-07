@@ -334,3 +334,37 @@ def test_open_water_pedestal_logs_when_there_is_no_open_water(tmp_path):
     ped = ea.open_water_pedestal(src, ea.WaterMask(tmp_path, "t"), log=lines.append)
     assert ped.tolist() == [0.0, 0.0, 0.0]
     assert len(lines) == 1 and "open-water samples" in lines[0] and "land.tif" in lines[0]
+
+
+def test_open_ocean_reflectance_is_clear_case1_water():
+    """pi Rrs at the channels' band centres; the Rrs set is oligotrophic Case-1 water by the NASA OC3M band ratio
+    (chlorophyll 0.05-0.2 mg m^-3) and its 443 nm value matches the SeaWiFS clear-water nLw (0.0093-0.0096 sr^-1)."""
+    rho = ea.open_ocean_reflectance()
+    rrs = dict(zip(ea.OCEAN_RRS_WAVELENGTHS_NM, ea.OCEAN_RRS_SR))
+    assert rho.tolist() == pytest.approx([math.pi * 0.00025, math.pi * 0.0019, math.pi * 0.0080], rel=1e-9)
+    assert 0.05 <= ea.oc3m_chlorophyll(rrs[443.0], rrs[488.0], rrs[547.0]) <= 0.2
+    assert 0.0093 <= rrs[443.0] <= 0.0096
+    assert float(rho @ ea.LUMA_WEIGHTS) == pytest.approx(0.0064, abs=0.0005)  # luminance, vs 0.019 of the fill
+
+
+def test_water_optics_sea_replaces_the_fill_and_keeps_the_excess():
+    luts = np.tile(np.linspace(0.0, 1.0, 256), (3, 1))  # count / 255
+    counts = np.array([[ea.BMNG_OCEAN_FILL_COUNTS, (2, 5, 60), (0, 0, 8), (200, 200, 200)]], dtype=np.uint8)
+    rho = ea.apply_lut(counts, luts)
+    sea = np.array([[True, True, True, False]])
+    out = ea.water_optics_sea(rho.copy(), sea, luts)
+    clear = ea.open_ocean_reflectance()
+    assert out[0, 0].tolist() == pytest.approx(clear.tolist())  # the fill: clear water
+    assert out[0, 1].tolist() == pytest.approx((clear + [0.0, 0.0, 40 / 255]).tolist())  # brighter: excess kept
+    assert out[0, 2].tolist() == pytest.approx(clear.tolist())  # darker than the fill: clear water
+    assert out[0, 3].tolist() == pytest.approx(rho[0, 3].tolist())  # land untouched
+
+
+def test_shader_fallback_is_the_open_ocean():
+    """water.gdshaderinc's deep_water (the sea body without a day texture) is the pipeline's open-ocean value (0.5 %)."""
+    import re
+
+    text = (Path(__file__).resolve().parents[2] / "game" / "shaders" / "water.gdshaderinc").read_text(encoding="utf-8")
+    m = re.search(r"uniform vec3 deep_water = vec3\(([^)]*)\);", text)
+    values = [float(v) for v in m.group(1).split(",")]
+    assert values == pytest.approx(ea.open_ocean_reflectance().tolist(), rel=5e-3)

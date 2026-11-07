@@ -12,9 +12,12 @@ global uniform vec4 water_wave_phases;
 // Gerstner steepness Q_i of every octave (WaterWaves.STEEPNESS, <= 1: the deep-water trochoid limit).
 global uniform float water_wave_steepness;
 
-// [E] Open-ocean body colour, the fallback when no day texture is bound (terrain_earth: the body colour is the
-// imagery, else the day texture); open-ocean albedo ~0.06 [S: Payne 1972, J. Atmos. Sci. 29].
-uniform vec3 deep_water = vec3(0.02, 0.05, 0.08);
+// Open-ocean water-leaving reflectance pi Rrs (R, G, B), the fallback when no day texture is bound (terrain_earth: the
+// body colour is the imagery, else the day texture, whose open sea holds the same value): oligotrophic Case-1 water,
+// chlorophyll ~0.1 mg m^-3 [S: Morel & Maritorena 2001; the source and its checks in tools/data_pipeline/earth_albedo.py,
+// OCEAN_RRS_SR]. The body colour is the nadir reflectance of the water body (it includes the transmission through the
+// flat surface, 1 - r0); the surface's own reflection is the Fresnel sky and the glint below.
+uniform vec3 deep_water = vec3(0.000785, 0.00597, 0.0251);
 // [E] Wind speed of the glint's slope distribution (m/s at 12.5 m).
 uniform float glint_wind_mps = 5.0;
 
@@ -122,7 +125,10 @@ vec3 water_radiance(vec3 body, vec3 n, vec3 wave_n, float resolved_variance, vec
 	float sigma2 = max(COX_MUNK_SIGMA2_0 + COX_MUNK_SIGMA2_PER_MPS * glint_wind_mps - resolved_variance,
 			GLINT_MIN_SIGMA2);
 	float fresnel_view = water_mean_fresnel(dot(wave_n, to_camera), sqrt(0.5 * sigma2));
-	vec3 diffuse = body * (sun_normal * max(sun_up, 0.0) * sunlit + sky_light) * (1.0 - fresnel_view);
+	// The water-leaving radiance through the surface: L_w = L_u (1 - F(theta')) / n^2 [S: A. Morel, IOCCG-6 meeting 2001,
+	// "Normalized water-leaving radiance"] - the body colour is the nadir value, hence (1 - F) / (1 - r0).
+	float r0 = (WATER_REFRACTIVE_INDEX - 1.0) / (WATER_REFRACTIVE_INDEX + 1.0);
+	vec3 diffuse = body * (sun_normal * max(sun_up, 0.0) * sunlit + sky_light) * ((1.0 - fresnel_view) / (1.0 - r0 * r0));
 	vec3 sky = sky_reflected * fresnel_view;
 
 	// Cox-Munk glint: BRDF F p(tan beta) G / (4 cos_s cos_v cos^4 beta), p = exp(-tan^2 beta / s2) / (pi s2), G the

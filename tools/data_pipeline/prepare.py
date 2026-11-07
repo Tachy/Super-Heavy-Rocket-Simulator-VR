@@ -5,6 +5,7 @@ Usage: python tools/data_pipeline/prepare.py
 Outputs (git-ignored):
   data/textures/earth_day.jpg     surface reflectance, sRGB-encoded (earth_albedo.py); equirectangular, lon -180..180,
                                   lat 90..-90
+  data/textures/earth_water.png   water fraction (255 = sea) on the same grid (earth_albedo.write_water_texture)
   data/textures/moon_color.png    LROC colour mosaic, large-scale albedo from the WAC Hapke w map (moon_albedo.py;
                                   equirectangular, lon -180..180)
   data/stars/stars.csv            stars to magnitude 7.5: ra_deg, dec_deg, mag, color_index (ICRS / J2000)
@@ -36,6 +37,8 @@ def prepare_textures() -> None:
         import earth_albedo
 
         earth_albedo.write_day_texture(REPO_ROOT, TEXTURES / "earth_day.jpg")
+        if not earth_albedo.write_water_texture(REPO_ROOT, TEXTURES / "earth_water.png"):
+            print("earth_water: no ETOPO relief / geoid, skipped (the scaled-space sea is drawn as land)")
     else:
         print("earth_day: raw file missing (fetch.py earth_day), skipped")
     if (RAW / "moon_color_4k.tif").exists():

@@ -10,8 +10,13 @@
 // ground lit through the cloud column and the cloud layer over it (cloud_far.gdshaderinc). Without it the preprocessed
 // source is the pre-Task-10 earth.gdshader: weather off draws every pixel as before (cloud_far_check.gd compares bit
 // for bit; one shader with a run-time flag changed the code generation and ~1400 pixels by up to 4 half-float ulps).
+// The sea (look fixes T3): where the global water fraction (water_texture: data/textures/earth_water.png, the
+// renderer's sea rule on the day texture's grid) says water, the terrain's calm-sea model (water.gdshaderinc) on the flat
+// ellipsoid normal - the day texture's water-leaving reflectance under (1 - F), the Fresnel sky and the Cox-Munk glint -
+// so the ocean keeps its radiance across the hand-over to the terrain (whose waves are faded out beyond 20 km).
 #include "res://shaders/eclipse.gdshaderinc"
 #include "res://shaders/atmosphere.gdshaderinc"
+#include "res://shaders/water.gdshaderinc"
 #ifdef EARTH_CLOUDS
 #include "res://shaders/clouds.gdshaderinc"
 #include "res://shaders/cloud_light.gdshaderinc"
@@ -19,6 +24,8 @@
 #endif
 
 uniform sampler2D day_texture : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
+// Water fraction (255 = all sea) on the day texture's grid; unbound (no data): black, every pixel land.
+uniform sampler2D water_texture : filter_linear_mipmap, repeat_disable, hint_default_black;
 uniform vec3 sun_position_local;   // apparent, from the Earth's centre
 uniform vec3 moon_position_local;  // apparent, from the Earth's centre
 uniform float sun_radius_m = 695700000.0;
@@ -57,6 +64,24 @@ void fragment() {
 		vec3 sun_light = atm_sun_and_sky(local_position, n, sky_light);
 		vec3 moon_light = atm_moonlit() ? atm_moon_light(local_position, n) : vec3(0.0);
 		vec3 day = albedo * (sun_light * sunlit + sky_light * eclipse_factor + moon_light);
+		// Camera-relative offset: the mesh is far from the camera whenever it is drawn (the terrain takes over near
+		// the ground), so the difference of the absolute float32 positions is accurate enough here.
+		vec3 offset = (local_position - atmosphere_camera_hi) - atmosphere_camera_lo;
+		// The sea's light as terrain_earth's: the Sun at normal incidence (glint), the sky light, the sky along the
+		// mirrored view (it carries the eclipse itself); the Moon's likewise. Clouds scale them below.
+		float water = texture(water_texture, UV).r;
+		vec3 to_camera = normalize(-offset);
+		vec3 reflected_dir = water_reflected_direction(n, n, to_camera);
+		vec3 sea_sun = atm_sun_at(local_position);
+		vec3 sea_sky_light = sky_light * eclipse_factor;
+		vec3 sea_sky_reflected = vec3(0.0);
+		if (water > 0.0) {
+			vec3 reflected_transmittance;
+			sea_sky_reflected = atm_sky_at_offset(offset, reflected_dir, reflected_transmittance);
+		}
+		bool sea_moonlit = water > 0.0 && atm_moonlit();
+		vec3 sea_moon = sea_moonlit ? atm_moon_at(local_position) : vec3(0.0);
+		vec3 sea_moon_sky_light = sea_moonlit ? atm_moon_sky_light(local_position, n) : vec3(0.0);
 #ifdef EARTH_CLOUDS
 		// The light through the cloud column (cloud_ground_light's column tier, as the terrain beyond 140 km): the
 		// direct Sun x its transmittance, the sky x its diffuse transmittance, the Sun's light diffused through the
@@ -78,11 +103,30 @@ void fragment() {
 			}
 			day = albedo * (sun_light * (cloud.x * sunlit) + sky_light * (cloud.z * eclipse_factor) + moon_clouded
 					+ glow);
+			// The sea under the column (terrain_earth's CLOUD_LIGHT block): the direct Sun x its transmittance, the sky
+			// light and the reflected sky through the deck plus the deck's glow.
+			vec3 sea_glow = sea_sun * (max(cloud.w, 0.0) * cloud.y * sunlit);
+			sea_sky_light = sea_sky_light * cloud.z + sea_glow * upper;
+			sea_sky_reflected = sea_sky_reflected * cloud.z + sea_glow;
+			sea_sun *= cloud.x;
+			if (sea_moonlit) {
+				vec4 moon_cloud = cloud_ground_light(camera_offset, normalize(atmosphere_moon_direction), false);
+				sea_moon_sky_light = sea_moon_sky_light * moon_cloud.z
+						+ sea_moon * (max(moon_cloud.w, 0.0) * moon_cloud.y * upper);
+				sea_moon *= moon_cloud.x;
+			}
 		}
 #endif
-		// Camera-relative offset: the mesh is far from the camera whenever it is drawn (the terrain takes over near
-		// the ground), so the difference of the absolute float32 positions is accurate enough here.
-		vec3 offset = (local_position - atmosphere_camera_hi) - atmosphere_camera_lo;
+		if (water > 0.0) {
+			// The flat ellipsoid normal (no resolved waves: the terrain fades them out beyond 20 km).
+			vec3 sea = water_radiance(albedo, n, n, 0.0, normalize(to_sun), to_camera, sunlit, sea_sun, sea_sky_light,
+					sea_sky_reflected);
+			if (sea_moonlit) {
+				sea += water_radiance(albedo, n, n, 0.0, normalize(atmosphere_moon_direction), to_camera, 1.0, sea_moon,
+						sea_moon_sky_light, atm_moon_sky_at_offset(offset, reflected_dir));
+			}
+			day = mix(day, sea, water);
+		}
 		vec3 transmittance;
 		vec3 in_scatter = atm_to_point_offset(offset, transmittance);
 		ALBEDO = day * transmittance + in_scatter;

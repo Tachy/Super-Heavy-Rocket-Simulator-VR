@@ -11,9 +11,12 @@ shader_type sky;
 
 #include "res://shaders/atmosphere.gdshaderinc"
 #include "res://shaders/moon_regolith.gdshaderinc"
+#include "res://shaders/water.gdshaderinc"
 
 uniform sampler2D day_texture : source_color, filter_linear_mipmap, repeat_enable;
 uniform bool day_texture_bound = false;
+// Water fraction (255 = sea) on the day texture's grid (data/textures/earth_water.png); unbound: black, no sea.
+uniform sampler2D water_texture : filter_linear_mipmap, repeat_enable, hint_default_black;
 // Albedo without the day texture: the precomputation's ground albedo, atmosphere_ground_albedo (the tables' parameters,
 // config/atmosphere/earth_optics.toml).
 
@@ -130,9 +133,33 @@ vec3 ground_radiance(vec3 camera_local, vec3 view_local) {
 	vec3 sun_light = atm_sun_and_sky(point_local, normal_local, sky_light) * atm_sunlit(point_local);  // Moon shadow
 	sky_light *= atm_sky_eclipse_factor(point_local);
 	vec3 moon_light = atm_moonlit() ? atm_moon_light(point_local, normal_local) : vec3(0.0);
+	vec3 day = albedo * (sun_light + sky_light + moon_light);
+	// The sea (look fixes T3): the calm-sea model of the terrain and the Earth mesh (water.gdshaderinc, flat normal) where
+	// the global water fraction says water - the water-leaving reflectance under (1 - F), the Fresnel sky, the glint.
+	float water = 0.0;
+	if (day_texture_bound) {
+		float lon = atan(point_local.x, point_local.z);
+		float lat = asin(clamp(normal_local.y, -1.0, 1.0));
+		water = textureLod(water_texture, vec2(lon / (2.0 * ATM_PI) + 0.5, 0.5 - lat / ATM_PI), 0.0).r;
+	}
+	if (water > 0.0) {
+		vec3 offset_local = (v * t) / ATM_STRETCH;
+		vec3 to_camera = -normalize(view_local);
+		vec3 reflected_dir = water_reflected_direction(normal_local, normal_local, to_camera);
+		vec3 reflected_transmittance;
+		vec3 sky_reflected = atm_sky_at_offset(offset_local, reflected_dir, reflected_transmittance);
+		vec3 sea = water_radiance(albedo, normal_local, normal_local, 0.0, normalize(atmosphere_sun_direction), to_camera,
+				atm_sunlit(point_local), atm_sun_at(point_local), sky_light, sky_reflected);
+		if (atm_moonlit()) {
+			sea += water_radiance(albedo, normal_local, normal_local, 0.0, normalize(atmosphere_moon_direction), to_camera,
+					1.0, atm_moon_at(point_local), atm_moon_sky_light(point_local, normal_local),
+					atm_moon_sky_at_offset(offset_local, reflected_dir));
+		}
+		day = mix(day, sea, water);
+	}
 	vec3 transmittance;
 	vec3 in_scatter = atm_to_point_model(v * t, transmittance);  // camera-relative: the hit's offset along the ray
-	return albedo * (sun_light + sky_light + moon_light) * transmittance + in_scatter;
+	return day * transmittance + in_scatter;
 }
 
 // The lunar ground along the unit world ray v; false: the ray misses it.

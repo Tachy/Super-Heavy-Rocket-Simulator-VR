@@ -11,8 +11,8 @@
 #      outside 1.5e7 m: the game's cloud pass (the baked volume: every cloud there in its flat levels) against the far
 #      field, the 5 x 5 block luminance at seven Earth points (Sun 20-75 deg up) within 5 %, a broken layer (cf 0.4) as
 #      21 x 21 block means within 5 %; points where the ground itself steps across the limit by more than the
-#      tolerance (weather off: the terrain's sea glint at the sub-camera point, which the scaled-space Earth lacks) are
-#      listed, not asserted; the volume pass draws only inside (cloud_enabled), the far field only outside
+#      tolerance are listed, not asserted - and the cloudless ground itself is asserted within the same tolerance at
+#      all seven points (look fixes T3: the scaled-space sea has the terrain's sea model, glint included); the volume pass draws only inside (cloud_enabled), the far field only outside
 #      (earth_clouds.gdshader); the CPU light factors are (1, 0, 1) outside;
 #   4. from the Moon's distance (3.844e8 m) with an ERA5 snapshot (cached 2024-04-08 18:00 UTC, else the
 #      service fetches the epoch's pair, 14:00 UTC, see _era5_file): five cells the snapshot
@@ -234,6 +234,17 @@ func _handover_sample(label: String, radius: int, tolerance: float, snapshot := 
 		for p in points:
 			lums.append(_block_luminance(image, _pixel_of(p), radius))
 		values[inside] = lums
+	if not snapshot.is_empty():
+		# Look fixes T3: the scaled-space Earth draws the sea with the terrain's sea model (body, Fresnel sky, glint),
+		# so the cloudless ground itself no longer steps across the limit, the sub-camera glint included.
+		var ground_worst := 0.0
+		var ground_trace := ""
+		for i in range(points.size()):
+			ground_worst = maxf(ground_worst, absf(ground[false][i] - ground[true][i]) / maxf(ground[true][i], 1.0e-6))
+			ground_trace += " %.4f/%.4f" % [ground[true][i], ground[false][i]]
+		_check("%s, weather off: the ground's %d x %d block luminance inside / outside at %d points within %.0f %%" % [
+				label, 2 * radius + 1, 2 * radius + 1, points.size(), tolerance * 100.0], ground_worst <= tolerance,
+				"worst %.2f %%:%s" % [ground_worst * 100.0, ground_trace])
 	var worst := 0.0
 	var trace := ""
 	var excluded := ""

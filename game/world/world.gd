@@ -863,6 +863,16 @@ func _setup_bodies(data_dir: String) -> void:
 	_earth_material.set_shader_parameter("day_exposure", Atmosphere.DAY_EXPOSURE)
 	_sky_material.set_shader_parameter("day_texture", _earth_material.get_shader_parameter("day_texture"))
 	_sky_material.set_shader_parameter("day_texture_bound", _earth_material.get_shader_parameter("day_texture") != null)
+	# The global water fraction (look fixes T3): the scaled-space Earth and the sky's model ground draw the sea model
+	# with it; without it (an older data/ set) they draw the sea as land.
+	var water_path := data_dir.path_join("textures/earth_water.png")
+	if FileAccess.file_exists(water_path):
+		var water := _load_texture(water_path)
+		_earth_material.set_shader_parameter("water_texture", water)
+		_sky_material.set_shader_parameter("water_texture", water)
+	else:
+		push_warning("World: %s missing (python tools/data_pipeline/prepare.py): no sea model on the scaled-space Earth"
+				% water_path)
 	earth.name = "Earth"
 	earth.setup(EARTH_SEMI_MAJOR_AXIS_M, EARTH_FLATTENING, _earth_material)
 	add_child(earth)

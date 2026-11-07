@@ -14,7 +14,9 @@ CLIMATOLOGY_YEAR (the Sentinel-2 composites' year, so the levels meet; a month t
 samples (sea, sea ice, polar night, persistent cloud) the Blue Marble Next Generation (Dec 2004, NASA Earth Observatory)
 fills in: a display product (MODIS surface reflectance stretched for appearance, Stoeckli et al. 2005), mapped back to
 reflectance by per-channel monotone look-up tables fitted to the MCD43A4 NBAR of its own month (`fit`, stored in
-config/earth_albedo.toml). prepare.py writes the texture (`write_day_texture`, offline).
+config/earth_albedo.toml); on the sea (ETOPO water rule) the open-ocean water-leaving reflectance replaces the Blue
+Marble's ocean fill (`water_optics_sea`). prepare.py writes the texture (`write_day_texture`, offline) and the global
+water fraction (`write_water_texture`).
 
 Usage: python tools/data_pipeline/earth_albedo.py fit           (re-fits config/earth_albedo.toml)
        python tools/data_pipeline/earth_albedo.py climatology   (= fetch.py earth_albedo --force)
@@ -69,6 +71,25 @@ OPEN_WATER_MIN_PIXELS = 100  # [E] fewer open-water samples than this give no pe
 LAND_BLOCK_PX = 512  # block of the land-only Sentinel-2 file
 LAND_LATTICE_PX = 64  # lat / lon of a block's pixels from a lattice of this spacing (UTM to geographic is smooth: sub-mm)
 CLIMATOLOGY_FILE = REPO_ROOT / "data" / "raw" / f"earth_albedo_modis_{CLIMATOLOGY_YEAR}.npz"
+
+# Open ocean (look fixes T3): the Blue Marble's sea is a flat fill colour, not a measurement - through the land tables it
+# reads (0.0086, 0.0215, 0.0283), 4x clear water in red / green. The sea pixels outside the Sentinel-2 boxes take the
+# water-leaving reflectance of open Case-1 water instead (`water_optics_sea`); the renderer adds the surface's Fresnel
+# sky reflection and the sun glint (water.gdshaderinc).
+# [E] Remote-sensing reflectance Rrs (sr^-1) of oligotrophic Case-1 water, chlorophyll ~0.1 mg m^-3 (the subtropical gyres,
+# most of the open-ocean area): read from the Case-1 model spectra of Morel & Maritorena 2001 (J. Geophys. Res. 106(C4),
+# 7163-7180) [S]; consistent with the SeaWiFS clear-water normalised water-leaving radiance at 443 nm, 1.76-1.83
+# uW cm^-2 nm^-1 sr^-1 / F0 189.9 = 0.0093-0.0096 sr^-1 (NASA OBPG vicarious calibration, Gordon & Clark 1981
+# definition) [S]; the NASA OC3M band ratio of these values gives chlorophyll 0.10 mg m^-3 (test_earth_albedo).
+OCEAN_RRS_WAVELENGTHS_NM = (443.0, 469.0, 488.0, 547.0, 555.0, 645.0, 667.0)
+OCEAN_RRS_SR = (0.0095, 0.0080, 0.0068, 0.0021, 0.0019, 0.00025, 0.00015)
+CHANNEL_WAVELENGTHS_NM = (645.0, 555.0, 469.0)  # [S] MODIS band 1 / 4 / 3 centres: the texture's R, G, B
+# [S: O'Reilly & Werdell 2019, Remote Sens. Environ. 229, 32-47, OC3M] log10 chl = sum a_i x^i, x = log10(max(Rrs443,
+# Rrs488) / Rrs547): the cross-check of the Rrs set above.
+OC3M_COEFFICIENTS = (0.2424, -2.7423, 1.8017, 0.0015, -1.2280)
+# [D] The Blue Marble Next Generation's ocean fill: the counts of 85 % of the sea pixels (8.21 M of 9.61 M, ETOPO water
+# rule); brighter sea pixels (shallow banks, sediment, sea ice) keep their brightness above it.
+BMNG_OCEAN_FILL_COUNTS = (2, 5, 20)
 
 
 # ----------------------------------------------------------------------------------------------- transfer
@@ -617,6 +638,42 @@ def sea_only(texture: np.ndarray, repo_root: Path) -> np.ndarray:
     return texture[idx[0], idx[1]]
 
 
+def open_ocean_reflectance() -> np.ndarray:
+    """The open-ocean water-leaving reflectance per texture channel (R, G, B): pi x Rrs at the channels' band centres
+    (linear in wavelength between the tabled points). Reflectance as every texel: the radiance over E_d / pi, nadir view."""
+    return math.pi * np.interp(CHANNEL_WAVELENGTHS_NM, OCEAN_RRS_WAVELENGTHS_NM, OCEAN_RRS_SR)
+
+
+def oc3m_chlorophyll(rrs443: float, rrs488: float, rrs547: float) -> float:
+    """Chlorophyll (mg m^-3) of the NASA OC3M band-ratio algorithm (O'Reilly & Werdell 2019)."""
+    x = math.log10(max(rrs443, rrs488) / rrs547)
+    return 10.0 ** sum(a * x ** i for i, a in enumerate(OC3M_COEFFICIENTS))
+
+
+def water_optics_sea(rho: np.ndarray, sea: np.ndarray, luts: np.ndarray) -> np.ndarray:
+    """The sea pixels (`sea`, h x w) of a tabled Blue Marble reflectance: the open-ocean water-leaving reflectance plus
+    the pixel's brightness above the Blue Marble's ocean fill (through the same tables), per channel - the fill becomes
+    clear water, shallow banks, sediment plumes and sea ice keep their excess (a darker pixel - JPEG ringing at the fill
+    - is clear water). In place; returns rho."""
+    fill = apply_lut(np.array([[BMNG_OCEAN_FILL_COUNTS]], dtype=np.uint8), luts)[0, 0]
+    rho[sea] = open_ocean_reflectance() + np.maximum(rho[sea] - fill, 0.0)
+    return rho
+
+
+def write_water_texture(repo_root: Path, out_path: Path, shape: tuple[int, int] = (2700, 5400)) -> bool:
+    """The global water fraction (8-bit PNG, 255 = all water) on the day texture's grid: 1 - `land_fraction`, the
+    renderer's sea rule. The scaled-space Earth and the sky's ground draw the sea model with it (the terrain has its own
+    per-node mask from the core). False without the relief / geoid."""
+    from PIL import Image
+
+    frac = land_fraction(repo_root, *shape)
+    if frac is None:
+        return False
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(np.rint((1.0 - frac) * 255.0).astype(np.uint8), "L").save(out_path, "PNG", optimize=True)
+    return True
+
+
 def build_day_texture(repo_root: Path = REPO_ROOT, embed: bool = True) -> np.ndarray:
     """The calibrated day texture as sRGB-encoded counts (h, w, 3): the MODIS climatology where it has samples
     (`CLIMATOLOGY_MIN_SAMPLES`), elsewhere (sea, sea ice, polar night, persistent cloud) the Blue Marble through the
@@ -627,12 +684,16 @@ def build_day_texture(repo_root: Path = REPO_ROOT, embed: bool = True) -> np.nda
 
     with Image.open(repo_root / "data" / "raw" / "earth_day_5400.jpg") as img:
         counts = np.asarray(img.convert("RGB"))
-    rho = apply_lut(counts, load_luts(repo_root / "config" / "earth_albedo.toml"))
+    luts = load_luts(repo_root / "config" / "earth_albedo.toml")
+    rho = apply_lut(counts, luts)
     clim = repo_root / CLIMATOLOGY_FILE.relative_to(REPO_ROOT)
     frac = land_fraction(repo_root, *rho.shape[:2])
     if frac is None:
-        print("  earth_albedo: no ETOPO relief / geoid (fetch.py earth_terrain geoid_egm2008): no land mask")
+        print("  earth_albedo: no ETOPO relief / geoid (fetch.py earth_terrain geoid_egm2008): no land mask, the sea "
+              "keeps the Blue Marble fill")
     land_mask = None if frac is None else frac >= CLIMATOLOGY_MIN_LAND_FRACTION
+    if land_mask is not None:  # the sea: water optics instead of the Blue Marble's fill (the boxes' L2A sea follows)
+        water_optics_sea(rho, ~land_mask, luts)
     if clim.exists():
         with np.load(clim) as z:
             land, hits = z["rho"].astype(np.float64), z["hits"]
