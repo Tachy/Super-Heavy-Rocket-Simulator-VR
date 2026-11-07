@@ -362,3 +362,9 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   first perilune after the insertion (969 + 276 = 1,245 m/s: the polar plane through a perilune at 73.1 N is turned
   35.5 deg from the NRHO plane; the l3 case had 660 + 216). The leg is mission config: re-measure needs the user's
   decision.
+
+## Lunar sites plan, Task 8 fix round 1 (2026-11-07)
+
+- The stay's plane change (leg `stay_plane_change`, ruling R15: the Moon turns under the landing plane over the
+  stay) is budgeted in the start, the window reserve and the refuelling demand, but not flown: the ascent ends in the
+  plane through the liftoff point and no turn back onto the landing plane is commanded. Mons Mouton 24 h: 33.9 m/s.

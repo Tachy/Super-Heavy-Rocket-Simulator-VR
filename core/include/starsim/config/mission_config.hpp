@@ -131,6 +131,10 @@ struct LunarLandingMission {
         // the Sun elevation band at touchdown that ranks the windows (no filter: Sun above the horizon is the rule)
         double sun_preferred_min_rad = 5.0 * constants::deg_to_rad;
         double sun_preferred_max_rad = 20.0 * constants::deg_to_rad;
+        // NRHO missions (ruling R16): the least outbound delta-v (TLI + swing-by + insertion) the planner flies from
+        // the parking orbit at any start - the search's budget lower bound decides NRHO infeasibility at once. Absent:
+        // no screen (every candidate runs the chain).
+        std::optional<double> nrho_outbound_floor_mps;
     } windows;
 };
 

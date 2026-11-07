@@ -46,6 +46,8 @@ struct NrhoSiteDeparture {
     double plane_change_rad = 0.0;      // the turn of the cheaper option
     bool in_llo = false;                // (b) rather than (a)
     double extra_delta_v_mps = 0.0;     // over the polar transfer
+    // the LLO's plane after the cheaper option (Moon-centred inertial): holds the site at `touchdown`
+    math::Vec3 llo_plane_normal_moon_inertial{0.0, 0.0, 1.0};
 };
 
 // `after`: the NRHO is joined then (the outbound plan's insertion); the departure is its first perilune at least the

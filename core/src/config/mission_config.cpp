@@ -300,6 +300,10 @@ LunarLandingMission load_lunar_landing_mission(const std::filesystem::path& conf
         m.windows.sun_preferred_max_rad > 0.5 * constants::pi) {
         doc.fail("windows: need 0 <= sun_preferred_min_deg <= sun_preferred_max_deg <= 90");
     }
+    if (windows.contains("nrho_outbound_floor_mps")) {
+        if (m.lunar_orbit != "nrho") doc.fail("windows: nrho_outbound_floor_mps only for an NRHO mission");
+        m.windows.nrho_outbound_floor_mps = doc.positive(windows, "nrho_outbound_floor_mps");
+    }
     return m;
 }
 

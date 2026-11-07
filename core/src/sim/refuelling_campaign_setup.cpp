@@ -114,7 +114,8 @@ HlsDemand hls_demand(const CampaignSources& src, const config::LunarLandingMissi
     const auto& sets = lunar_landing_setup(lunar).guidance.braking_sets;
     const auto legs = lunar_mission_legs(lunar, *session.lunar_outbound_plan(), gnc::groups_vacuum_isp_s(v, sets.front()),
                                          gnc::groups_vacuum_isp_s(v, sets.back()),
-                                         departure ? departure->extra_delta_v_mps : 0.0);
+                                         departure ? departure->extra_delta_v_mps : 0.0,
+                                         lunar_mission_stay_plane_change_mps(session, lunar, lunar_epoch, departure));
     auto& out = d.values;
     out.capacity_kg = v.propellant_kg();
     out.headers_kg = v.propellant_kg() - v.main_propellant_kg();

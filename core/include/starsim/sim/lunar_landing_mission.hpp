@@ -27,9 +27,33 @@ LunarLandingSetup lunar_landing_setup(const config::LunarLandingMission& mission
 
 // The budget legs of the mission (refuelling r6: the campaign's HLS demand), in flight order. NRHO: the leg
 // "nrho_plane_change" = `nrho_plane_change_mps` (lunar_nrho_site_departure: the site's share of the departure burn).
+// After the ascent, when positive, the leg "stay_plane_change" = `stay_plane_change_mps` (lunar_stay_plane_change_mps:
+// the Moon's rotation over the stay, turned back in the LLO; one ignition).
 std::vector<mission::BudgetLeg> lunar_mission_legs(const config::LunarLandingMission& mission,
                                                    const mission::OutboundPlan& plan, double vacuum_isp_s,
-                                                   double approach_isp_s, double nrho_plane_change_mps = 0.0);
+                                                   double approach_isp_s, double nrho_plane_change_mps = 0.0,
+                                                   double stay_plane_change_mps = 0.0);
+
+// The plane change the surface stay causes (lunar sites plan, ruling R15). The ascent flies into the plane through the
+// liftoff point closest to the landing LLO's plane (gnc::ascent_plane_through: no plane change in the ascent); the
+// orbit the mission returns to starts from that landing plane - the LLO the HLS ends in (the LLO mission), the LLO the
+// [budget] llo_to_nrho leg was measured from (the NRHO mission). The turn back is the site's distance from the landing
+// plane at liftoff, di = asin(|n . s(touchdown + stay)|), flown as a pure plane change at a node of the circular LLO,
+// dv = 2 v_llo sin(di / 2) [S: Vallado, Fundamentals of Astrodynamics and Applications, 4th ed., sec. 6.4 "Inclination
+// Only"]. The LLO plane is inertially fixed over the stay (the force model has no lunar gravity harmonics). Without a
+// known plane (`llo_plane_normal_moon_inertial` empty) the bound: the site's inertial turn over the stay, the angle
+// between s(touchdown) and s(touchdown + stay) (a plane holding s(touchdown) is never farther from s(liftoff)).
+double lunar_stay_plane_change_mps(const frames::BodyOrientation& moon, const config::LunarSiteConfig& site,
+                                   const std::optional<math::Vec3>& llo_plane_normal_moon_inertial,
+                                   time::Epoch touchdown, double stay_s, double llo_radius_m, double gm_moon_m3ps2);
+
+// lunar_stay_plane_change_mps for the mission planned in `session` (its site, outbound plan and, NRHO, `departure`):
+// the plane and touchdown of the NRHO departure, else of the outbound plan's LLO (llo_plane_normal_moon_inertial,
+// llo_touchdown), else the bound at the mission's planned touchdown (or the first pass after the arrival). 0 without
+// a landing site or Moon orientation.
+double lunar_mission_stay_plane_change_mps(const FlightSession& session, const config::LunarLandingMission& mission,
+                                           time::Epoch epoch,
+                                           const std::optional<mission::NrhoSiteDeparture>& departure);
 
 // Rocket-equation budget of the whole mission from the planned outbound flight (TLI, swing-by, insertion / LOI) and the
 // mission's nominal legs (NRHO -> LLO, descent, ascent, LLO -> NRHO). `vacuum_isp_s`: the vacuum Raptors (outbound,
@@ -39,7 +63,7 @@ std::vector<mission::BudgetLeg> lunar_mission_legs(const config::LunarLandingMis
 mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& mission, const mission::OutboundPlan& plan,
                                            double initial_mass_kg, double dry_mass_kg, double vacuum_isp_s,
                                            double approach_isp_s, double settling_gas_kg,
-                                           double nrho_plane_change_mps = 0.0);
+                                           double nrho_plane_change_mps = 0.0, double stay_plane_change_mps = 0.0);
 
 // NRHO variant (lunar sites plan, ruling R12): the site-dependent extra delta-v of the NRHO -> LLO departure - the turn
 // from the NRHO plane at the departure perilune onto the plane through the site (mission::nrho_site_departure; the

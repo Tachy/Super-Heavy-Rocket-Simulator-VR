@@ -24,3 +24,14 @@ Superseded states of `docs/subsystems/lunar.md` (older lunar history: `docs/hist
 - A site on the arrival axis took the plane through it of least inclination even with an arrival plane given.
 - Plan time noted as "whole mission start LLO ~7 s, NRHO ~8 s, aircatch ~4.5 s" (return starts, before the l6 timing
   work was re-measured).
+
+## Task 8 first state (2026-11-07, superseded by its fix round 1)
+
+- Window search: a candidate whose arrival drifted past its planned pass (the descent then took a pass days later,
+  Apollo 11 candidate +9.96 d -> +14.0 d) was dropped and counted as `lunar.no_daylight_for_stay`; now the start is
+  re-solved by the drift.
+- The budget had no leg for the Moon's rotation over the stay (the listed reserve ended after the ascent).
+- NRHO: every candidate ran the chain with its own NRHO reference - a full refusal took 488 s (165 candidates,
+  ~2.2-3 s each); now decided once by the budget lower bound.
+- The search kept references into the prototype session and read its surface flags per candidate; every complete
+  result was cached, also refusals from a missing site tile.

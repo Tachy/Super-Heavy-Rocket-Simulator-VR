@@ -90,6 +90,10 @@ std::optional<NrhoSiteDeparture> nrho_site_departure(const NrhoReference& nrho, 
         c.in_llo = in_llo < in_burn;
         c.plane_change_rad = c.in_llo ? llo_turn : std::acos(std::clamp(dot(site_plane, polar), -1.0, 1.0));
         c.extra_delta_v_mps = std::min(in_burn, in_llo);
+        // (b): the polar plane turned least onto the site (its normal's component along the site removed)
+        const Vec3 turned = polar - site * dot(polar, site);
+        c.llo_plane_normal_moon_inertial =
+            c.in_llo ? (norm(turned) < 1e-12 ? polar : math::normalized(turned)) : site_plane;
         return c;
     };
     if (touchdown) return evaluate(*touchdown);

@@ -386,7 +386,11 @@ flow separation (vacuum engines).
   budget does not close ("Mission nicht durchführbar: ... fehlen N t"). `[windows]` (required; the landing window
   search `sim::find_lunar_landing_windows`, lunar sites plan Task 8): `horizon_days` (touchdowns within this after the
   chosen start), `count` (windows listed), `sun_preferred_min_deg` / `sun_preferred_max_deg` (the Sun elevation band
-  at touchdown that ranks the dates - no filter: the rule is Sun above the horizon over the whole stay).
+  at touchdown that ranks the dates - no filter: the rule is Sun above the horizon over the whole stay); NRHO missions
+  optionally `nrho_outbound_floor_mps` ([D]: the least outbound delta-v - TLI + swing-by + insertion - the planner flies
+  from the parking orbit, measured over start epochs; the search's budget lower bound refuses an NRHO that cannot close
+  at once, ruling R16; absent: every candidate runs the planners). The budget also carries the plane change the stay
+  causes (the Moon turns under the landing plane), computed per window.
 - `ship_lunar_return_llo.toml`, `ship_lunar_return_nrho.toml`, `ship_lunar_aircatch_llo.toml` (`kind = "lunar_return"`,
   `config::load_lunar_return_mission`, `sim::start_lunar_return_mission`; lunar l5): a ship (`[mission]` `vehicle`,
   `stage`, `site` = the Starbase tower) returns from lunar orbit. `[orbit]` `epoch_utc`, `kind = "llo" | "nrho"`; LLO

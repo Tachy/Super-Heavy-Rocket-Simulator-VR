@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <future>
 #include <memory>
 #include <stdexcept>
@@ -105,12 +106,14 @@ MissionStart plan_after_touchdown_check(FlightSession& session, const config::Lu
         departure = lunar_nrho_site_departure(m, outbound, *outbound_plan, session.ephemeris(),
                                               *session.moon_orientation(), site->config, epoch);
     }
+    // the Moon's rotation over the stay, turned back in the LLO before the return (ruling R15)
+    const double stay_plane_change_mps = lunar_mission_stay_plane_change_mps(session, m, epoch, departure);
     const double mass_kg = v.mass_properties().mass_kg;
     const auto& sets = setup.guidance.braking_sets;
     const auto budget = lunar_mission_budget(m, *outbound_plan, mass_kg, mass_kg - v.propellant_kg(),
                                              gnc::groups_vacuum_isp_s(v, sets.front()),
                                              gnc::groups_vacuum_isp_s(v, sets.back()), session.settling_gas_bound_kg(),
-                                             departure ? departure->extra_delta_v_mps : 0.0);
+                                             departure ? departure->extra_delta_v_mps : 0.0, stay_plane_change_mps);
     if (!budget.closes && via_nrho) {  // the site is out of the NRHO's reach on this budget
         const auto unreachable = report::make(
             report::Code::lunar_nrho_site_unreachable,
@@ -123,6 +126,7 @@ MissionStart plan_after_touchdown_check(FlightSession& session, const config::Lu
     s.kind = config::MissionKind::LunarLanding;
     s.epoch = epoch;
     s.lunar_budget_margin_kg = budget.margin_kg;
+    s.lunar_stay_plane_change_mps = stay_plane_change_mps;
     LunarMissionSequence sequence;
     sequence.landing = setup;
     // the descent takes the pass the LLO plane was chosen for (or the mission's planned touchdown)
@@ -230,7 +234,8 @@ LunarLandingSetup lunar_landing_setup(const config::LunarLandingMission& m) {
 
 std::vector<mission::BudgetLeg> lunar_mission_legs(const config::LunarLandingMission& m,
                                                    const mission::OutboundPlan& plan, double vacuum_isp_s,
-                                                   double approach_isp_s, double nrho_plane_change_mps) {
+                                                   double approach_isp_s, double nrho_plane_change_mps,
+                                                   double stay_plane_change_mps) {
     const auto setup = lunar_landing_setup(m);
     const bool nrho = m.lunar_orbit == "nrho";
     std::vector<mission::BudgetLeg> legs{{"tli", norm(plan.tli.delta_v_gcrf_mps), vacuum_isp_s}};
@@ -247,8 +252,50 @@ std::vector<mission::BudgetLeg> lunar_mission_legs(const config::LunarLandingMis
     // the approach continues the braking burn
     legs.push_back({"descent_approach", m.descent_delta_v_mps - setup.braking_delta_v_mps, approach_isp_s, 0});
     legs.push_back({"ascent", m.ascent_delta_v_mps, vacuum_isp_s, 1});  // lit landed; the circularization in orbit
+    // back onto the landing plane the return starts from (ruling R15), a burn of its own in the LLO
+    if (stay_plane_change_mps > 0.0) legs.push_back({"stay_plane_change", stay_plane_change_mps, vacuum_isp_s, 1});
     if (nrho) legs.push_back({"llo_to_nrho", m.llo_to_nrho_delta_v_mps, vacuum_isp_s, 2});
     return legs;
+}
+
+double lunar_stay_plane_change_mps(const frames::BodyOrientation& moon, const config::LunarSiteConfig& site,
+                                   const std::optional<math::Vec3>& llo_plane_normal_moon_inertial,
+                                   time::Epoch touchdown, double stay_s, double llo_radius_m, double gm_moon_m3ps2) {
+    if (stay_s <= 0.0) return 0.0;
+    const math::Vec3 site_fixed{std::cos(site.latitude_rad) * std::cos(site.longitude_rad),
+                                std::cos(site.latitude_rad) * std::sin(site.longitude_rad), std::sin(site.latitude_rad)};
+    const math::Vec3 at_liftoff = moon.fixed_to_gcrf(touchdown + stay_s).rotation * site_fixed;
+    double turn_rad = 0.0;
+    if (llo_plane_normal_moon_inertial) {
+        turn_rad = std::asin(std::min(std::abs(dot(math::normalized(*llo_plane_normal_moon_inertial), at_liftoff)), 1.0));
+    } else {
+        const math::Vec3 at_touchdown = moon.fixed_to_gcrf(touchdown).rotation * site_fixed;
+        turn_rad = std::acos(std::clamp(dot(at_touchdown, at_liftoff), -1.0, 1.0));
+    }
+    return 2.0 * std::sqrt(gm_moon_m3ps2 / llo_radius_m) * std::sin(0.5 * turn_rad);
+}
+
+double lunar_mission_stay_plane_change_mps(const FlightSession& session, const config::LunarLandingMission& m,
+                                           time::Epoch epoch,
+                                           const std::optional<mission::NrhoSiteDeparture>& departure) {
+    const auto* site = session.lunar_landing_site();
+    const auto* moon = session.moon_orientation();
+    if (!site || !moon || m.surface_stay_s <= 0.0) return 0.0;
+    const double gm_moon = session.ephemeris().gm_m3ps2(ephemeris::Body::Moon);
+    // the NRHO variant descends into the default LLO (no [lunar_orbit] altitude_km)
+    const double altitude_m = m.lunar_orbit == "nrho" ? mission::LloTarget{}.altitude_m : m.llo_altitude_m;
+    const double r_llo = constants::moon_mean_radius_m + altitude_m;
+    const auto stay = [&](const std::optional<math::Vec3>& normal, time::Epoch touchdown) {
+        return lunar_stay_plane_change_mps(*moon, site->config, normal, touchdown, m.surface_stay_s, r_llo, gm_moon);
+    };
+    if (departure) return stay(departure->llo_plane_normal_moon_inertial, departure->touchdown);
+    const auto* plan = session.lunar_outbound_plan();
+    if (plan && plan->llo_plane_normal_moon_inertial && plan->llo_touchdown) {
+        return stay(plan->llo_plane_normal_moon_inertial, *plan->llo_touchdown);
+    }
+    const auto planned = lunar_planned_touchdown(m, epoch);
+    return stay(std::nullopt, planned ? *planned
+                                      : epoch + m.flight_time_s + lunar_first_pass_after_arrival_s(m, gm_moon));
 }
 
 size_t lunar_in_orbit_ignitions(const std::vector<mission::BudgetLeg>& legs) {
@@ -260,8 +307,9 @@ size_t lunar_in_orbit_ignitions(const std::vector<mission::BudgetLeg>& legs) {
 mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& m, const mission::OutboundPlan& plan,
                                            double initial_mass_kg, double dry_mass_kg, double vacuum_isp_s,
                                            double approach_isp_s, double settling_gas_kg,
-                                           double nrho_plane_change_mps) {
-    const auto legs = lunar_mission_legs(m, plan, vacuum_isp_s, approach_isp_s, nrho_plane_change_mps);
+                                           double nrho_plane_change_mps, double stay_plane_change_mps) {
+    const auto legs =
+        lunar_mission_legs(m, plan, vacuum_isp_s, approach_isp_s, nrho_plane_change_mps, stay_plane_change_mps);
     return mission::lunar_budget(initial_mass_kg, dry_mass_kg,
                                  m.reserve_kg + settling_gas_kg * static_cast<double>(lunar_in_orbit_ignitions(legs)),
                                  legs);

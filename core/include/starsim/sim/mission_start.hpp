@@ -30,6 +30,7 @@ struct MissionStart {
     // LLO plane's, or the NRHO departure's pass); the window search lists them
     std::optional<double> lunar_budget_margin_kg;
     std::optional<time::Epoch> lunar_planned_touchdown;
+    std::optional<double> lunar_stay_plane_change_mps;  // the budgeted turn back after the stay (ruling R15)
 };
 
 struct StartOptions {
