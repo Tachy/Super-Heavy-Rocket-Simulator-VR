@@ -283,7 +283,9 @@ func _process(_delta: float) -> bool:
 		if not _site_started:
 			_site_started = true
 			var place := String(_args["lunar_site"]).split(",")
-			world.lunar_site_switched.connect(func(_lat: float, _lon: float) -> void: _site_done = true)
+			world.lunar_site_switched.connect(func(_lat: float, _lon: float) -> void:
+				_site_done = true
+				print("render_check: lunar site switch, main-thread rebuild %.1f ms" % world.last_site_rebuild_ms))
 			world.lunar_site_switch_failed.connect(func(report: Dictionary) -> void:
 				_refuse("render_check: lunar site switch failed: " + I18n.report_text(report)))
 			world.switch_lunar_site(float(place[0]), float(place[1]))

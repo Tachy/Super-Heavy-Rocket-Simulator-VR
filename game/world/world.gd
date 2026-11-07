@@ -92,6 +92,9 @@ var _moon_heights: HeightSource
 var _site_albedo := {}  ## LunarSiteService.read_albedo of the active lunar site ({}: the global albedo only)
 var _switch_serial := 0
 var _switch_worker_busy := false
+var last_site_rebuild_ms := 0.0  ## the main-thread part of the last switch_lunar_site (quadtree, rock layer, albedo), measured
+var _tree_site := Vector2(INF, INF)  ## (lat, lon deg) of the Moon quadtree's site; INF: the start terrain
+var _core_site := Vector2(INF, INF)  ## the site the core's terrain was last set to
 var sun_apparent_from_earth_m := Vector3.ZERO
 var moon_apparent_from_earth_m := Vector3.ZERO
 
@@ -929,7 +932,8 @@ func _setup_moon_terrain() -> void:
 ## swaps its terrain on a worker thread together with the unresolved-surface statistics (~1 s) and the albedo tile is read
 ## there; then (main thread) the Moon quadtree, the rock layer and the site albedo are rebuilt and the near-shadow's ground
 ## height is re-sampled. A newer switch discards an older one still running (the terrain never mixes two sites); a failed
-## core switch keeps the old terrain. Emits lunar_site_switched / lunar_site_switch_failed.
+## switch keeps the old terrain (the core is set back to the quadtree's site when a superseded switch had moved it).
+## Emits lunar_site_switched / lunar_site_switch_failed.
 func switch_lunar_site(lat_deg: float, lon_deg: float) -> void:
 	_switch_serial += 1
 	var serial := _switch_serial
@@ -944,14 +948,32 @@ func switch_lunar_site(lat_deg: float, lon_deg: float) -> void:
 	while not WorkerThreadPool.is_task_completed(task):
 		await get_tree().process_frame
 	WorkerThreadPool.wait_for_task_completion(task)
-	_switch_worker_busy = false
-	if serial != _switch_serial:
-		return
 	var result: Dictionary = out["result"]
+	if bool(result.get("ok", false)):
+		_core_site = Vector2(lat_deg, lon_deg)  # the core's terrain is on this site now, whatever happens next
+	if serial != _switch_serial:
+		_switch_worker_busy = false
+		return
 	if not bool(result.get("ok", false)):
+		# A refused newest switch must not leave the core on a site an older, superseded switch set meanwhile.
+		if _core_site != _tree_site and _tree_site.is_finite():
+			var back := {}
+			var resync := WorkerThreadPool.add_task(_switch_worker.bind(_tree_site.x, _tree_site.y, "", back))
+			while not WorkerThreadPool.is_task_completed(resync):
+				await get_tree().process_frame
+			WorkerThreadPool.wait_for_task_completion(resync)
+			if bool(back["result"].get("ok", false)):
+				_core_site = _tree_site
+		elif _core_site != _tree_site:
+			push_warning("World.switch_lunar_site: the core's terrain stays on the site of a superseded switch (no earlier site to return to)")
+		_switch_worker_busy = false
 		lunar_site_switch_failed.emit(result.get("report", {}))
 		return
+	_switch_worker_busy = false
+	_tree_site = _core_site
+	var rebuild_start_us := Time.get_ticks_usec()
 	_rebuild_moon_terrain(out["albedo"])
+	last_site_rebuild_ms = (Time.get_ticks_usec() - rebuild_start_us) * 1.0e-3
 	lunar_site_switched.emit(lat_deg, lon_deg)
 
 

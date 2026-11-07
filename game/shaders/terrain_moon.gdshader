@@ -157,7 +157,7 @@ void fragment() {
 	// v stays half a texel inside the map (repeat would bleed the opposite pole into the polar rows).
 	float half_texel_v = 0.5 / float(textureSize(albedo_texture, 0).y);
 	vec3 albedo = texture(albedo_texture, vec2(global_uv.x, clamp(global_uv.y, half_texel_v, 1.0 - half_texel_v))).rgb;
-	albedo *= site_albedo_factor(global_uv);  // the active landing site's relative albedo (moon_site_albedo.gdshaderinc)
+	albedo = site_albedo_apply(albedo, site_albedo_factor(global_uv));  // the active landing site's relative albedo (moon_site_albedo.gdshaderinc)
 	float light;
 	float near_radiance = 0.0;  // the Sun's part the near-field shadow map gates (light())
 	if (detail_shading) {

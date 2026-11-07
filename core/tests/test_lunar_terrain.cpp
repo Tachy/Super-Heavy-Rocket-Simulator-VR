@@ -205,6 +205,22 @@ TEST_CASE("terrain for Apollo 11 uses its 60 m tile", "[sim][lunar][terrain][dat
     CHECK(terrain->finest_resolution_within_m(a15.latitude_rad, a15.longitude_rad, 100.0) > 400.0);
 }
 
+TEST_CASE("a tile is accepted for any site of its cache key (R19: exact user coordinates)", "[sim][lunar][terrain][data]") {
+    // The Apollo 17 tile was built for (20.19089, 30.77168); its key 2019_3077 holds every coordinate that rounds to it.
+    const auto exact = config::lunar_site_at(STARSIM_CONFIG_DIR, 20.19089 * deg, 30.77168 * deg);
+    if (!sim::lunar_site_tiles_present(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, exact)) SKIP("Apollo 17 tile not installed");
+    for (const auto& [lat, lon] : {std::pair{20.19, 30.77}, std::pair{20.1949, 30.7749}, std::pair{20.1851, 30.7651}}) {
+        const auto site = config::lunar_site_at(STARSIM_CONFIG_DIR, lat * deg, lon * deg);
+        REQUIRE(site.height_tile_key == exact.height_tile_key);
+        const auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, site);
+        CHECK(terrain->finest_resolution_within_m(site.latitude_rad, site.longitude_rad, 100.0) < 400.0);
+    }
+    // Another key (0.01 deg further) has no tile: refused as missing, never matched to this tile.
+    const auto other = config::lunar_site_at(STARSIM_CONFIG_DIR, 20.2 * deg, 30.77 * deg);
+    CHECK(other.height_tile_key != exact.height_tile_key);
+    CHECK_THROWS_AS(sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, other), config::DataMissing);
+}
+
 TEST_CASE("free coordinates resolve like presets and get a coordinate id", "[sim][lunar][terrain][config]") {
     const auto preset = config::load_lunar_site(STARSIM_CONFIG_DIR, "apollo_11");
     const auto free = config::lunar_site_at(STARSIM_CONFIG_DIR, preset.latitude_rad, preset.longitude_rad);

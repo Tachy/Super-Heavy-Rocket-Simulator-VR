@@ -1,6 +1,6 @@
 # Headless test of LunarSiteService (lunar sites plan Task 11): cache hit without a request, progress + assembly + ready,
 # interrupted download and its resumed retry, a site switch mid-download, offline, the albedo rulings (non-fatal), the
-# 429 rule, and the albedo tile reader - with a fake fetcher (files of the requested size) and a fake core, no network.
+# 429 rule, the 503 backoff, a switch during assembly, exact coordinates and the albedo tile reader - with a fake fetcher (files of the requested size) and a fake core, no network.
 # Run: godot --headless --path game --script res://tests/lunar_site_service_test.gd
 extends SceneTree
 
@@ -23,6 +23,7 @@ class FakeFetcher:
 	var retry_after_s := {}
 	var fail_after := -1  ## requests after this many answer code `fail_code`
 	var fail_code := 0
+	var retry_after_value := 3600.0  ## the Retry-After of a 429 / 503 answer
 	var fail_albedo_code := -1  ## >= 0: every albedo request answers this code
 	var offline := false
 	var _next := 1
@@ -42,8 +43,8 @@ class FakeFetcher:
 		elif fail_after >= 0 and requests.size() > fail_after:
 			answer["ok"] = false
 			answer["code"] = fail_code
-			if fail_code == 429:
-				retry_after_s[id] = 3600.0
+			if fail_code == 429 or fail_code == 503:
+				retry_after_s[id] = retry_after_value
 		else:
 			DirAccess.make_dir_recursive_absolute(dest.get_base_dir())
 			var f := FileAccess.open(dest, FileAccess.WRITE)
@@ -79,11 +80,17 @@ class FakeCore:
 	var assembled: Array = []
 	var assemble_ok := true
 	var albedo_assemble_ok := true
+	var gate := Semaphore.new()  ## assembling the tile of `block_key` waits for a post
+	var block_key := ""
+	var entered := 0  ## assemblies that began (worker thread)
 
 	func key(kind: String, lat: float, lon: float) -> String:
 		return "%s_%d_%d" % [kind, int(lat * 100.0), int(lon * 100.0)]
 
+	var requested: Array = []
+
 	func lunar_site_tile_requests(lat: float, lon: float) -> Array:
+		requested.append([lat, lon])
 		var out: Array = []
 		for kind: String in ["height", "albedo"]:
 			var count := HEIGHT_RANGES if kind == "height" else ALBEDO_RANGES
@@ -100,6 +107,9 @@ class FakeCore:
 		return out
 
 	func assemble_lunar_site_tile(request: Dictionary, bodies: Array) -> Dictionary:
+		entered += 1
+		if block_key != "" and request["cache_key"] == block_key:
+			gate.wait()
 		for body: PackedByteArray in bodies:
 			if body.size() != RANGE_BYTES:
 				return {"ok": false, "report": {"code": "command.internal_error", "params": {}, "kinds": {}, "causes": []}}
@@ -135,13 +145,15 @@ func _initialize() -> void:
 
 func _run() -> void:
 	await _test_cached()
-	await _test_snap()
+	await _test_exact_coordinates()
 	await _test_download()
 	await _test_interrupted()
 	await _test_switch()
 	await _test_offline()
 	await _test_albedo_non_fatal()
 	await _test_rate_limit()
+	await _test_backoff_503()
+	await _test_switch_during_assembly()
 	await _test_assemble_failure()
 	_test_read_albedo()
 	for dir in _dirs:
@@ -161,6 +173,7 @@ func _make(parallel := 8) -> Dictionary:
 	var fetcher := FakeFetcher.new()
 	var service := LunarSiteService.new()
 	service.sites_dir = dir
+	service.backoff_base_s = 0.02
 	root.add_child(service)
 	service.setup(core, fetcher, parallel)
 	var probe := Probe.new()
@@ -200,16 +213,19 @@ func _test_cached() -> void:
 	env["service"].queue_free()
 
 
-func _test_snap() -> void:
+func _test_exact_coordinates() -> void:
+	# R19: the user's coordinates are never rounded; the core decides what its cache key accepts.
 	var env := _make()
 	var probe: Probe = env["probe"]
-	var core: FakeCore = env["core"]
-	_touch(env["dir"].path_join(core.key("height", 10.0, 20.01) + ".toml"))
-	_touch(env["dir"].path_join(core.key("albedo", 10.0, 20.01) + ".toml"))
+	var fetcher: FakeFetcher = env["fetcher"]
 	env["service"].prepare(10.004, 20.006)
-	await _until(env, func() -> bool: return not probe.ready.is_empty(), 10)
-	_check(probe.ready.size() == 1 and is_equal_approx(probe.ready[0][0], 10.0) and is_equal_approx(probe.ready[0][1], 20.01),
-			"the site is snapped to hundredths of a degree (%s)" % str(probe.ready))
+	await _until(env, func() -> bool: return not probe.ready.is_empty() or not probe.failed.is_empty())
+	_check(probe.ready.size() == 1 and probe.ready[0][0] == 10.004 and probe.ready[0][1] == 20.006,
+			"site_ready carries the exact coordinates (%s)" % str(probe.ready))
+	var core: FakeCore = env["core"]
+	_check(core.requested.size() > 0 and core.requested.all(func(c: Array) -> bool: return c[0] == 10.004 and c[1] == 20.006),
+			"the core is asked for the exact coordinates (%s)" % str(core.requested))
+	_check(fetcher.requests.size() > 0, "downloaded")
 	env["service"].queue_free()
 
 
@@ -341,6 +357,48 @@ func _test_rate_limit() -> void:
 	await _until(env, func() -> bool: return false, 20)
 	_check(fetcher.requests.size() == count, "no request after the 429 (never hammer)")
 	env["service"].queue_free()
+
+
+func _test_backoff_503() -> void:
+	var env := _make(1)
+	var fetcher: FakeFetcher = env["fetcher"]
+	var probe: Probe = env["probe"]
+	fetcher.fail_after = 0
+	fetcher.fail_code = 503
+	fetcher.retry_after_value = 0.3
+	var started := Time.get_ticks_msec()
+	env["service"].prepare(10.0, 20.0)
+	await _until(env, func() -> bool: return not probe.failed.is_empty() or not probe.ready.is_empty())
+	var elapsed_s := (Time.get_ticks_msec() - started) / 1000.0
+	_check(probe.failed.size() == 1 and probe.failed[0]["code"] == "data.lunar_site_download_failed"
+			and is_equal_approx(float(probe.failed[0]["params"]["http_code"]), 503.0), "503 ends in a download report")
+	_check(fetcher.requests.size() <= HEIGHT_RANGES * LunarSiteService.MAX_ATTEMPTS, "bounded requests, no storm (%d)" % fetcher.requests.size())
+	_check(elapsed_s >= 0.55, "the Retry-After spaces the retries (%.2f s for 2 waits of 0.3 s)" % elapsed_s)
+	env["service"].queue_free()
+
+
+## Site A is assembling (its worker blocked) when site B is prepared and completes; A's late result must not disturb B.
+func _test_switch_during_assembly() -> void:
+	var env := _make(8)
+	var core: FakeCore = env["core"]
+	var fetcher: FakeFetcher = env["fetcher"]
+	var probe: Probe = env["probe"]
+	var service: LunarSiteService = env["service"]
+	core.block_key = core.key("height", 30.0, 40.0)
+	service.prepare(30.0, 40.0)
+	await _until(env, func() -> bool: return core.entered > 0, 200)
+	_check(core.entered == 1 and service.busy(), "site A is assembling")
+	service.prepare(-5.0, 60.0)
+	await _until(env, func() -> bool: return not probe.ready.is_empty() or not probe.failed.is_empty(), 200)
+	_check(probe.ready.size() == 1 and is_equal_approx(probe.ready[0][0], -5.0) and probe.failed.is_empty(),
+			"switch during assembly completes the second site (%s)" % str(probe.ready))
+	core.gate.post()  # A's worker finishes late
+	await _until(env, func() -> bool: return false, 30)
+	_check(probe.ready.size() == 1 and probe.failed.is_empty() and not service.busy(), "A's late result is discarded")
+	_check(FileAccess.file_exists(env["dir"].path_join(core.key("height", 30.0, 40.0) + ".toml")), "A's tile file is complete")
+	var leftovers := DirAccess.get_directories_at(env["dir"]).size()
+	_check(leftovers == 0, "no work directory left (%d)" % leftovers)
+	service.queue_free()
 
 
 func _test_assemble_failure() -> void:

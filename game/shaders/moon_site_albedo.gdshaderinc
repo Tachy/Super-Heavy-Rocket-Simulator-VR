@@ -14,7 +14,9 @@
 // site_albedo_bounds = (latitude min, latitude max, longitude min, longitude max) in rad of the tile's extent (the
 // longitudes of a polar tile span everything): a cheap reject before the mapping.
 
-uniform sampler2D site_albedo_texture : filter_linear, repeat_disable;
+// Mipmapped (LunarSiteService.apply_albedo): from orbit / a far horizon the ~100 m texture is minified; the level comes
+// from the screen footprint of the terrain uv (derivatives taken before any branch), so it neither aliases nor shimmers.
+uniform sampler2D site_albedo_texture : filter_linear_mipmap, repeat_disable;
 uniform vec4 site_albedo_bounds = vec4(0.0);
 uniform vec4 site_albedo_grid = vec4(0.0);
 uniform float site_albedo_blend_m = 5000.0;
@@ -24,7 +26,15 @@ const float SITE_ALBEDO_PI = 3.14159265358979;
 
 // The factor at the equirectangular (u, v) of the terrain (u = (lon + 180) / 360, possibly outside 0 .. 1 across the
 // antimeridian; v = (90 - lat) / 180).
+// The albedo with the site factor applied, the product kept in the physical range: a relative factor above 1 on an already
+// bright global texel must not push the albedo past 1 (or past what the global map held).
+vec3 site_albedo_apply(vec3 albedo, float factor) {
+	return clamp(albedo * factor, vec3(0.0), max(albedo, vec3(1.0)));
+}
+
 float site_albedo_factor(vec2 uv) {
+	// Screen footprint of the uv in metres on the sphere (v spans 180 deg), before any branch (uniform control flow).
+	float footprint_m = max(length(dFdx(uv)), length(dFdy(uv))) * SITE_ALBEDO_PI * SITE_ALBEDO_MOON_RADIUS_M;
 	float mode = site_albedo_grid.w;
 	if (mode < 0.5) {
 		return 1.0;
@@ -37,6 +47,7 @@ float site_albedo_factor(vec2 uv) {
 	vec2 size = vec2(textureSize(site_albedo_texture, 0));
 	float line;
 	float sample_px;
+	float pixel_m;  // the tile pixel on the sphere, metres
 	float edge_m;  // true distance to the nearest tile edge, metres (negative outside)
 	if (mode < 1.5) {
 		float ppd = site_albedo_grid.z;
@@ -45,6 +56,7 @@ float site_albedo_factor(vec2 uv) {
 		sample_px = s0 - period * floor((s0 - 0.5 * size.x) / period + 0.5);
 		line = site_albedo_grid.x - ppd * degrees(lat);
 		float metres_per_px = SITE_ALBEDO_MOON_RADIUS_M * SITE_ALBEDO_PI / (180.0 * ppd);
+		pixel_m = metres_per_px;
 		float d_lat = min(line + 0.5, size.y - 0.5 - line) * metres_per_px;
 		float d_lon = min(sample_px + 0.5, size.x - 0.5 - sample_px) * metres_per_px * cos(lat);
 		edge_m = min(d_lat, d_lon);
@@ -54,6 +66,7 @@ float site_albedo_factor(vec2 uv) {
 		if (denominator <= 1.0e-4) {
 			return 1.0;
 		}
+		pixel_m = site_albedo_grid.z * 0.5 * denominator;  // conformal: true size = projected x denominator / 2
 		float k = 2.0 * SITE_ALBEDO_MOON_RADIUS_M / denominator;
 		float x = cos(lat) * cos(lon);
 		float y = cos(lat) * sin(lon);
@@ -66,7 +79,8 @@ float site_albedo_factor(vec2 uv) {
 	if (edge_m <= 0.0) {
 		return 1.0;
 	}
-	float relative = textureLod(site_albedo_texture, (vec2(sample_px, line) + 0.5) / size, 0.0).r;
+	float lod = max(log2(max(footprint_m / max(pixel_m, 1.0e-3), 1.0)), 0.0);
+	float relative = textureLod(site_albedo_texture, (vec2(sample_px, line) + 0.5) / size, lod).r;
 	float weight = smoothstep(0.0, 1.0, clamp(edge_m / max(site_albedo_blend_m, 1.0), 0.0, 1.0));
 	return mix(1.0, relative, weight);
 }
