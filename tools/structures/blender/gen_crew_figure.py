@@ -131,19 +131,46 @@ def build_helmet(cfg, parts):
     h, pose = cfg["helmet"], cfg["pose"]
     c = V((pose["head_centre_up_m"], pose["head_centre_forward_m"], 0.0))
     # ellipsoid shell about the centre: axis up (x), u = depth (y), v = width (z)
-    ts = [HELMET_BOTTOM_T + (1.0 - HELMET_BOTTOM_T) * i / (HELMET_RINGS - 1) for i in range(HELMET_RINGS)]
-    rings = []
-    for t in ts:
-        r = math.sqrt(max(0.0, 1.0 - t * t))
-        rings.append((t * (h["half_above_m"] if t > 0 else h["half_below_m"]), h["half_depth_m"] * r, h["half_width_m"] * r, 0.0, 0.0))
-    loft(parts.mesh("head", "helmet"), c, (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), rings, HELMET_SIDES, "helmet", cap0=True)
-    # collar: a wider ring under the helmet shell (eva_suit_detail2), slightly flared at the top where the helmet's lower rim sits on it
+    build_shell(h, parts.mesh("head", "helmet"), c)
+    # collar: a wider grey ring under the helmet shell (eva_suit_detail2), slightly flared at the top where the helmet's lower rim sits on it
     top = c.x + HELMET_BOTTOM_T * h["half_below_m"] + 0.02
     cr, ch, nr = h["collar_radius_m"], h["collar_height_m"], cfg["suit"]["neck_radius_m"]
-    loft(parts.mesh("neck", "helmet"), V((top - ch, c.y, 0.0)), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0),
+    loft(parts.mesh("neck", "collar"), V((top - ch, c.y, 0.0)), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0),
          [(0.0, nr * 1.15, nr * 1.15, 0.0, 0.0), (0.2 * ch, cr * 0.94, cr * 0.94, 0.0, 0.0), (0.7 * ch, cr, cr, 0.0, 0.0), (ch, cr * 1.04, cr * 1.04, 0.0, 0.0)],
          SIDES, "neck_ring", True, True)
     build_visor(cfg, parts, c)
+
+
+def shell_point(h, c, t, phi):
+    """Egg-shaped shell (round 4, eva_suit_detail2): ellipsoid rings about the up axis, narrower toward the front (egg_taper), with a low crown
+    ridge along the sagittal line over the top (crown_ridge_m / crown_ridge_width_m). t = height fraction (-1..1), phi = 0 forward, + toward the left."""
+    r = math.sqrt(max(0.0, 1.0 - t * t))
+    y = h["half_depth_m"] * r * math.cos(phi)
+    z = h["half_width_m"] * r * math.sin(phi) * (1.0 - h["egg_taper"] * math.cos(phi))
+    x = t * (h["half_above_m"] if t > 0 else h["half_below_m"])
+    lift = min(1.0, max(0.0, (t - 0.3) / 0.4))
+    front = min(1.0, max(0.0, (y / h["half_depth_m"] - 0.2) / 0.3))  # the ridge fades out before the visor's top edge
+    x += (h["crown_ridge_m"] * lift * lift * (3.0 - 2.0 * lift) * (1.0 - front * front * (3.0 - 2.0 * front))
+          * math.exp(-(z / h["crown_ridge_width_m"]) ** 2))
+    return c + V((x, y, z))
+
+
+def build_shell(h, mesh, c):
+    ts = [HELMET_BOTTOM_T + (1.0 - HELMET_BOTTOM_T) * i / (HELMET_RINGS - 1) for i in range(HELMET_RINGS)]
+    rings = [[shell_point(h, c, t, 2.0 * math.pi * k / HELMET_SIDES) for k in range(HELMET_SIDES)] for t in ts]
+    for i in range(len(ts) - 1):
+        for k in range(HELMET_SIDES):
+            k1 = (k + 1) % HELMET_SIDES
+            quad = [rings[i][k], rings[i][k1], rings[i + 1][k1], rings[i + 1][k]]
+            mid = sum(quad, V((0, 0, 0))) / 4.0
+            if len({(round(p.x, 7), round(p.y, 7), round(p.z, 7)) for p in quad}) < 3:
+                continue
+            mesh.face(quad, [(k / HELMET_SIDES, i / len(ts)), (k1 / HELMET_SIDES, i / len(ts)), (k1 / HELMET_SIDES, (i + 1) / len(ts)), (k / HELMET_SIDES, (i + 1) / len(ts))],
+                      mid - c, "helmet")
+    bottom = c + V((ts[0] * h["half_below_m"], 0.0, 0.0))
+    for k in range(HELMET_SIDES):
+        k1 = (k + 1) % HELMET_SIDES
+        mesh.face([bottom, rings[0][k1], rings[0][k]], [(0.5, 0.5), (1.0, 0.0), (0.0, 0.0)], V((-1.0, 0.0, 0.0)), "helmet")
 
 
 def ellipsoid_point(h, c, el_deg, az_deg):
@@ -151,7 +178,7 @@ def ellipsoid_point(h, c, el_deg, az_deg):
     e, a = math.radians(el_deg), math.radians(az_deg)
     d = V((math.sin(e), math.cos(e) * math.cos(a), math.cos(e) * math.sin(a)))
     rx = h["half_above_m"] if d.x > 0 else h["half_below_m"]
-    radii = V((rx, h["half_depth_m"], h["half_width_m"]))
+    radii = V((rx, h["half_depth_m"], h["half_width_m"] * (1.0 - h["egg_taper"] * math.cos(a))))  # the shell's egg taper (shell_point)
     p = c + V((radii.x * d.x, radii.y * d.y, radii.z * d.z))
     n = V((d.x / radii.x, d.y / radii.y, d.z / radii.z)).normalized()
     return p, n
@@ -205,15 +232,36 @@ def build_visor(cfg, parts, c):
     # the rim ring: a round bar along the visor's boundary (the white brow band of detail2), in the helmet material
     loop = ([(0, j) for j in range(VISOR_COLS + 1)] + [(i, VISOR_COLS) for i in range(1, VISOR_ROWS + 1)]
             + [(VISOR_ROWS, j) for j in range(VISOR_COLS - 1, -1, -1)] + [(i, 0) for i in range(VISOR_ROWS - 1, 0, -1)])
-    rim = parts.mesh("head", "helmet")
-    # one continuous swept bead (smooth, shared vertices) instead of per-segment bars: no visible joints
+    # one continuous swept bead each (smooth, shared vertices): the white visor frame on the opening's edge and, just inside it, the black seal
+    # that lines the face opening (eva_suit_detail2: a black ring between the white shell and the visor)
+    el_mid = 0.5 * (h["visor_up_deg"] + h["visor_down_deg"])
+    for material, radius, inset in (("helmet", h["rim_radius_m"], 0.0), ("boots", h["liner_radius_m"], h["liner_inset_deg"])):
+        pts = {}
+        for key in loop:
+            fa, fe = opening_node(*key)
+            half_el = 0.5 * (h["visor_up_deg"] - h["visor_down_deg"]) - inset
+            p, n = ellipsoid_point(h, c, el_mid + half_el * fe, (h["visor_half_angle_deg"] - inset) * fa)
+            pts[key] = (p + n * (h["visor_edge_m"] * 0.5), n)
+        sweep_bead(parts.mesh("head", material), loop, pts, radius, ("rim", material))
+    # slim black visor-pivot brackets on both cheeks, along the opening's side edges (detail2: thin black hardware, no blocks)
+    bracket = parts.mesh("head", "boots")
+    hx, hy, hz = h["pivot_housing_m"]
+    for side in (-1.0, 1.0):
+        p, n = ellipsoid_point(h, c, h["pivot_el_deg"], side * (h["visor_half_angle_deg"] + h["pivot_az_offset_deg"]))
+        across = n.cross(V((1.0, 0.0, 0.0))).normalized()
+        up = across.cross(n).normalized()
+        vc.box(bracket, p + n * hx, n, up, across, (hx, hy, hz))
+
+
+def sweep_bead(mesh, loop, pts, radius, group):
+    """A round bead of `radius` swept along the closed loop of (point, normal) entries."""
     rings = []
     for k, key in enumerate(loop):
         prev, nxt = loop[k - 1], loop[(k + 1) % len(loop)]
-        t = (shell_pts[nxt] - shell_pts[prev]).normalized()
-        nrm = normals[key]
+        t = (pts[nxt][0] - pts[prev][0]).normalized()
+        nrm = pts[key][1]
         side = t.cross(nrm).normalized()
-        rings.append([shell_pts[key] + (nrm * math.cos(2.0 * math.pi * m / RIM_SIDES) + side * math.sin(2.0 * math.pi * m / RIM_SIDES)) * h["rim_radius_m"]
+        rings.append([pts[key][0] + (nrm * math.cos(2.0 * math.pi * m / RIM_SIDES) + side * math.sin(2.0 * math.pi * m / RIM_SIDES)) * radius
                       for m in range(RIM_SIDES)])
     for k in range(len(loop)):
         k1 = (k + 1) % len(loop)
@@ -221,15 +269,7 @@ def build_visor(cfg, parts, c):
             m1 = (m + 1) % RIM_SIDES
             quad = [rings[k][m], rings[k1][m], rings[k1][m1], rings[k][m1]]
             mid = sum(quad, V((0, 0, 0))) / 4.0
-            rim.face(quad, [(0, 0), (1, 0), (1, 1), (0, 1)], mid - shell_pts[loop[k]], ("rim",))
-    # dark visor-pivot housings on both cheeks, just behind the opening's side edges
-    housing = parts.mesh("head", "boots")
-    hx, hy, hz = h["pivot_housing_m"]
-    for side in (-1.0, 1.0):
-        p, n = ellipsoid_point(h, c, h["pivot_el_deg"], side * (h["visor_half_angle_deg"] + 14.0))
-        across = n.cross(V((1.0, 0.0, 0.0))).normalized()
-        up = across.cross(n).normalized()
-        vc.box(housing, p + n * hx * 0.6, n, up, across, (hx, hy, hz))
+            mesh.face(quad, [(0, 0), (1, 0), (1, 1), (0, 1)], mid - pts[loop[k]][0], group)
 
 
 def build_arm(cfg, parts, bones, side):

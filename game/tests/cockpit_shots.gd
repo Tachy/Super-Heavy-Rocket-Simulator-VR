@@ -1,9 +1,9 @@
 # Look shots of the Crew Dragon cabin from a REAL session (needs a GPU, no --headless; models generated):
-#   pilot_eye              the commander's eye point (CockpitConfig.eye), 100 deg horizontal (our own view, no photo pair)
+#   pilot_eye              the commander's eye point (CockpitConfig.eye), turned toward the screen row, 105 deg horizontal (no photo pair)
 #   gopro_discovery2       the Discovery photographers' GoPro (pose fitted on discovery2's screen corners, docs/subsystems/cockpit.md),
 #                          rendered rectilinear 140 deg and remapped to the GoPro's equidistant fisheye (113 x 64 deg, 1600 x 900);
 #                          + gopro_vs_discovery2 / gopro_overlay_discovery2 and, as discovery1 has the same framing, gopro_vs_discovery1
-#   hatch_crew1_1          from the open hatch toward the seat row (3:2, ~87 deg horizontal, level), hatch frame and exterior hull
+#   hatch_crew1_1          from the open hatch toward the seat row (3:2, fitted: 96 deg horizontal, 8 deg up), hatch frame and exterior hull
 #                          hidden; + hatch_vs_crew1_1
 # godot --path game --script res://tests/cockpit_shots.gd -- --mission=falcon9_crew_dragon --t_plus=-60 --out_dir=<abs>/screenshots/m7-cockpit/look
 #   --fov=100 (pilot_eye, horizontal deg)  --crew=<n> (default the mission's)  --refs=<abs dir of the reference photos>
@@ -16,9 +16,11 @@ const SHOT_SETTLE_FRAMES := 40
 const NEAR_M := 0.04
 ## GoPro fit (docs/subsystems/cockpit.md "Shot cameras"): position, forward and right (capsule frame), equidistant fisheye focal
 ## length in px / rad on the 4128 x 2322 photo (the output scales it by 1600 / 4128).
-const GOPRO_POS := Vector3(2.3045, -0.4837, -0.0251)  # fix round 3: the screen corners moved 0.35 m down X, so the fit moved with them
-const GOPRO_FORWARD := Vector3(0.48568, 0.87422, 0.00729)
-const GOPRO_RIGHT := Vector3(-0.02094, 0.01996, -0.99958)
+## Round 4: the fit is relative to the screens (0.61 m along their normal, 0.23 m along their up from the centre screen centre), so it moved
+## rigidly with the console block (rotated 10 deg about Z, centre screen centre (2.671, 0.050) -> (2.512, -0.043)).
+const GOPRO_POS := Vector3(2.2437, -0.6322, -0.0251)
+const GOPRO_FORWARD := Vector3(0.32649, 0.94528, 0.00729)
+const GOPRO_RIGHT := Vector3(-0.02409, 0.01602, -0.99958)
 const GOPRO_F_PX := 2085.47
 const GOPRO_PHOTO_SIZE := Vector2(4128.0, 2322.0)
 const GOPRO_OUT_SIZE := Vector2i(1600, 900)
@@ -26,7 +28,16 @@ const GOPRO_RENDER_FOV := 140.0  # rectilinear, covers the fisheye frame's corne
 ## [call] Field key of the white cabin (Atmosphere.field_key; 0.18 = the default grey world): the wall reads ~0.85-0.9 sRGB as in the photos.
 const CABIN_FIELD_KEY := 1.2
 const RENDER_SIZE := Vector2i(2560, 1440)
-const HATCH_VFOV := 65.0  # 3:2 at 87 deg horizontal
+## crew1_1 camera, round 4 joint fit (docs/subsystems/cockpit.md "Fix round 4"): position, pitch above level, vertical fov of the 1200 x 800 photo
+## (f 536 px: 96.4 x 73.4 deg); residual 1-8 px on windows, helmets, console back and ceiling.
+const HATCH_POS := Vector3(1.839, 1.454, 0.013)
+const HATCH_PITCH_DEG := 8.2
+const HATCH_VFOV := 73.4
+## pilot_eye: looks from the eye toward the middle of the screen row as the commander sees it (0.15 m to the commander's side of the centre screen centre).
+const PILOT_AIM_LATERAL_M := 0.15
+const PILOT_FOV := 105.0
+## [call] The eye shot is dominated by the dark console: metered at the white-cabin key it clips every white surface around it; a lower key keeps them white.
+const PILOT_FIELD_KEY := 0.5
 
 var _args := {}
 var _main: Node
@@ -113,7 +124,8 @@ func _shoot() -> bool:
 		_define_shots()
 	if _index >= _shots.size():
 		_set_exterior_visible(true)
-		_compose()
+		if not _args.has("only"):
+			_compose()
 		quit(0)
 		return true
 	var shot: Dictionary = _shots[_index]
@@ -145,6 +157,7 @@ func _shoot() -> bool:
 	_world.camera.free_basis = target.basis
 	_wait += 1
 	if _wait == 3:
+		_world.atmosphere.field_key = float(shot.get("field_key", _args.get("field_key", CABIN_FIELD_KEY)))
 		_world.atmosphere.snap_adaptation()
 	if _wait < SHOT_SETTLE_FRAMES:
 		return false
@@ -167,7 +180,11 @@ func _define_shots() -> void:
 	var gopro_up := (-GOPRO_FORWARD).cross(GOPRO_RIGHT).normalized()
 	var gopro_basis := Basis(GOPRO_RIGHT, gopro_up, -GOPRO_FORWARD)
 	# hatch: looks along -Y (toward the seat row), image up = +X (toward the forward tunnel), image right = +Z
-	var hatch_basis := Basis(Vector3(0.0, 0.0, 1.0), Vector3(1.0, 0.0, 0.0), Vector3(0.0, 1.0, 0.0))
+	var pitch := deg_to_rad(HATCH_PITCH_DEG)
+	var hatch_basis := Basis(Vector3(0.0, 0.0, 1.0), Vector3(cos(pitch), sin(pitch), 0.0), Vector3(-sin(pitch), cos(pitch), 0.0))
+	var centre_screen: Dictionary = _cockpit.config.screens["centre"]
+	var aim: Vector3 = centre_screen["centre"] + Vector3(0.0, 0.0, PILOT_AIM_LATERAL_M)
+	var pilot := Transform3D(Basis.looking_at(aim - eye.origin, eye.basis.y), eye.origin)
 	# helmet close-up of the pilot (s3) from the front, 30 deg toward the cabin centre, at the distance of eva_suit_detail2's framing; up = up the seat back
 	var s3: Dictionary = {}
 	for seat: Dictionary in _cockpit.config.seats:
@@ -185,13 +202,19 @@ func _define_shots() -> void:
 		helmet_views.append({"name": view[0], "local": Transform3D(Basis.looking_at(helmet_c - cam, up_back), cam), "fov": float(view[3]), "hide_exterior": false, "isolate": true})
 	var rest: Array = [
 		{"name": "helmet_closeup", "local": Transform3D(Basis.looking_at(helmet_c - helmet_cam, up_back), helmet_cam), "fov": 48.0, "hide_exterior": false, "isolate": true},
-		{"name": "pilot_eye", "local": eye},
+		{"name": "pilot_eye", "local": pilot, "fov": PILOT_FOV, "field_key": PILOT_FIELD_KEY},
 		{"name": "gopro_discovery2", "local": Transform3D(gopro_basis, GOPRO_POS), "fov": GOPRO_RENDER_FOV, "fisheye": true},
-		# [E] crew1_1 (docs/subsystems/cockpit.md): in the open hatch, level, 3:2 at ~87 deg = 65 deg vertical
-		{"name": "hatch_crew1_1", "local": Transform3D(hatch_basis, Vector3(2.11, 1.7, 0.0)), "fov": HATCH_VFOV, "keep_height": true,
+		# [E] crew1_1 (docs/subsystems/cockpit.md "Fix round 4"): the fitted camera, 3:2
+		{"name": "hatch_crew1_1", "local": Transform3D(hatch_basis, HATCH_POS), "fov": HATCH_VFOV, "keep_height": true,
 				"crop_aspect": 1.5, "hide_exterior": false, "hide_head": false},
 	]
 	_shots.assign(helmet_views + rest)
+	if _args.has("only"):  # debugging: render only these shots (comma separated), no comparisons
+		var keep := String(_args["only"]).split(",")
+		_shots.assign(_shots.filter(func(s: Dictionary) -> bool: return keep.has(String(s["name"]))))
+	if _args.has("no_lamp_shadows"):  # debugging: the console lamps without shadows
+		for light in _cockpit.find_children("light_*", "OmniLight3D", false, false):
+			(light as OmniLight3D).shadow_enabled = false
 
 
 ## The hatch frame and the exterior hull (every stage node child but the cockpit) are hidden for the shot from outside the inner wall.

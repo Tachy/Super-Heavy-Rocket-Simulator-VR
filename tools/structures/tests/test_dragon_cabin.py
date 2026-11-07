@@ -406,13 +406,41 @@ def test_knee_and_shin_follow_the_hatch_photo(spec):
     shin = math.degrees(math.atan2(ankle[0] - knee[0], ankle[1] - knee[1]))
     assert 10.0 <= thigh <= 20.0, thigh
     assert -65.5 <= shin <= -60.0, shin
-    assert 1.4 <= ankle[0] <= 1.8 and knee[0] > ankle[0] + 0.3  # shins steep toward the floor
+    # shins steep toward the floor; round 4: the seat sits ~0.3 m lower than in crew1_1 (the launch posture under the reach-fitted eye, see
+    # test_layout_is_one_consistent_fit), so the ankle lies above the floor instead of in the photo's 1.4-1.8 band
+    assert ankle[0] >= spec["cockpit"]["cabin"]["floor_x_m"] + 0.10 and knee[0] > ankle[0] + 0.3
 
 
 def test_foot_rest_is_a_tray_facing_up_the_shin(spec):
-    """The plate normal is up the shin (mostly +X), not an upright wall facing the hatch camera, and the centre sits in the photo's band."""
+    """The plate normal is up the shin (mostly +X), not an upright wall facing the hatch camera; the tray moves with its seat (hip + the figure's
+    leg offset) and its low edge stays above the floor (round 4)."""
+    floor = spec["cockpit"]["cabin"]["floor_x_m"]
     for seat in spec["cockpit"]["seat"]:
-        n, c = seat["foot_rest_normal"], seat["foot_rest_m"]
+        n, c, hip = seat["foot_rest_normal"], seat["foot_rest_m"], seat["hip_m"]
         assert n[0] > 0.8 and -0.6 < n[1] < -0.3 and n[2] == 0.0, n
-        low = 0.08 if seat["id"] in ("s1", "s4") else 0.0  # outer seats 0.08 lower
-        assert 1.50 - low - 0.1 <= c[0] <= 1.60 + 0.1 and 0.5 <= c[1] <= 0.85, (seat["id"], c)
+        assert c[0] - hip[0] == pytest.approx(-0.185, abs=0.002) and c[1] - hip[1] == pytest.approx(0.753, abs=0.002), (seat["id"], c)
+        low_edge = c[0] - 0.16 * abs(n[1]) - 0.02 * n[0]  # tray half length 0.16 along the foot (z x n), thickness 0.02
+        assert low_edge >= floor + 0.01, (seat["id"], low_edge)
+
+
+def test_layout_is_one_consistent_fit(spec):
+    """Round 4 joint fit (docs/subsystems/cockpit.md "Fix round 4"): the commander reaches the screens with near-straight arms (crew2_1, inspiration4_1,
+    demo1_3): eye to the centre screen centre 0.6-0.75 m, the near shoulder to its screen 0.62-0.75 m of the 0.78 m reach; the eye looks at the screens
+    within 30 deg of their normal; the player figure's own eye is the config eye; the console hangs under the ceiling and the posts reach it."""
+    import figure_layout as fl
+    c = spec["cockpit"]
+    cfg = spec["crew_figure"]
+    scr = {s["id"]: s for s in c["screen"]}
+    eye = c["eye"]["position_m"]
+    s2 = next(s for s in c["seat"] if s["id"] == "s2")
+    assert 0.60 <= math.dist(eye, scr["centre"]["centre_m"]) <= 0.75
+    b = fl.bones(cfg)
+    for side, sid in (("r", "centre"), ("l", "left")):
+        shoulder = fl.to_capsule(b[f"upper_arm_{side}"]["head"], s2["hip_m"], s2["back_angle_deg"])
+        d = math.dist(shoulder, scr[sid]["centre_m"])
+        assert 0.62 <= d <= 0.75 and d < fl.arm_reach_m(cfg, side), (side, sid, d)
+    fwd, n = c["eye"]["forward"], scr["centre"]["normal"]
+    assert math.degrees(math.acos(-sum(fwd[i] * n[i] for i in range(3)))) < 30.0
+    fig_eye = fl.to_capsule(fl.eye_point(cfg), s2["hip_m"], s2["back_angle_deg"])
+    assert math.dist(fig_eye, eye) < 0.01
+    assert c["console"]["upper_top_x_m"] < c["cabin"]["ceiling_x_m"] - 0.3

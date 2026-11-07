@@ -7,8 +7,8 @@ Z = az +90 = the crew's left). Silhouette only: panel lines, labels and placards
 Nodes: `cabin_shell` (inner wall of revolution with the ceiling ring, the forward tunnel and the top plate; normals into the cabin; cut at the window
 reveals and the hatch), `floor`, `hatch_frame` (white trim, the recessed hatch inner face and its reveal), `window_<i>` (funnel from the round interior
 reveal to the exterior pane, bezel ring; i = exterior table row, +az then -az) with `window_glass_<i>`, `seat_shell|pad|rest_<s1..s4>` (white shell, black pads, black leg-rest rails
-+ foot plate at the seat's foot_rest_m), `console_housing` (dark: one straight box across the three screens + the dark upper panel up to the ceiling), `console_back`
-(light grey back, underside, two hand-hold posts), `console_shelf` (the button shelf as separate light grey modules, cabin_layout.shelf_modules), `console_lockers` (5 / 6),
++ foot plate at the seat's foot_rest_m), `console_housing` (dark: one straight box across the three screens + the dark upper panel above it), `console_back`
+(silver back face, two hand-hold posts), `console_under` (dark grey underside and top), `console_lamps` (lamp strips under the console), `console_shelf` (the button shelf as separate light grey modules, cabin_layout.shelf_modules), `console_lockers` (5 / 6),
 `ceiling_ring_light` (emissive annulus), `screen_left|centre|right` (one quad, UV 0..1 over the active area,
 (0, 0) top left, +normal toward the crew), `tablet_l|r`, `button_<id>` (one node per button; the centre handle is the node `handle`), `light_<i>`
 ([[light]] rows in file order), `hotas_stick`, `hotas_throttle`.
@@ -50,6 +50,10 @@ LIGHT_PROUD_M = 0.006  # [E] lamp panel height over the console front
 BACK_PLATE_M = 0.003  # [E] the light grey skin of the console's back / underside, outside the dark housing
 RING_LIFT_M = 0.015  # [E] the ring light stands this far under the ceiling plane (0.004 z-fought with the ceiling: concentric banding in pilot_eye)
 RING_STEP_DEG = 3.0  # [E] segments of the ring light
+# [E] crew1_1 (round 4): two groups of light rectangles on the console's underside along its back lip, at u 400-500 and 640-790 px of the 350-855 px back
+# (1.32 m): lateral ranges from the centre (mirrored), and one strip's (width along the console normal, height under the underside, inset from the back edge)
+UNDER_LAMPS_LAT_M = ((0.10, 0.36), (0.42, 0.56))
+UNDER_LAMP_M = (0.015, 0.003, 0.012)
 
 V = Vector
 
@@ -308,8 +312,9 @@ def shelf_front_off(cockpit, cen):
 
 
 def build_console(cockpit):
-    """(housing, back, shelf, lockers): one straight dark housing and dark upper panel across all three screens (fold_deg 0, user decision 2026-11-07),
-    light grey back / underside / posts, the shelf as separate light grey modules, the two lockers 5 / 6."""
+    """(housing, back, under, shelf, lockers, lamps): one straight dark housing and dark upper panel across all three screens (fold_deg 0, user decision 2026-11-07),
+    the silver back face and the two posts (`back`), the dark grey underside and top (`under`, crew1_1), the shelf as separate modules, the two lockers 5 / 6,
+    the lamp strips under the console (`lamps`, crew1_1: light rectangles along the back lip of the underside). The vent band on the back: shader (CockpitView)."""
     con = cockpit["console"]
     if con["fold_deg"] != 0.0:
         raise ValueError("console: only the straight console (fold_deg 0) is built")
@@ -319,17 +324,23 @@ def build_console(cockpit):
     u0, u1 = -shift - con["height_m"] / 2.0, -shift + con["height_m"] / 2.0
     u_top = (con["upper_top_x_m"] - cen.o.x) / cen.up.x  # the dark upper panel's front top edge reaches this station
     up_depth = con["upper_depth_m"]
-    housing, back, shelf, lockers = vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh()
+    housing, back, under, shelf, lockers, lamps = vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh()
     cen.box(housing, -half_w, half_w, u0, u1, -SCREEN_PROUD_M, -depth)
     cen.box(housing, -half_w, half_w, u1, u_top, -SCREEN_PROUD_M, -up_depth)
-    # light grey (silver) back, underside and the housing's top behind the upper panel
+    # silver back face (crew1_1: the face seen from the hatch, with the dark vent band by shader) and the upper panel's back
     cen.box(back, -half_w, half_w, u0, u1, -depth, -depth - BACK_PLATE_M)
     cen.box(back, -half_w, half_w, u1, u_top, -up_depth, -up_depth - BACK_PLATE_M)
-    cen.box(back, -half_w, half_w, u0 - BACK_PLATE_M, u0, -SCREEN_PROUD_M, -depth - BACK_PLATE_M)
-    cen.box(back, -half_w, half_w, u1, u1 + BACK_PLATE_M, -up_depth, -depth)
-    for z_strut in con["strut_z_m"]:  # the hand-hold posts: from the upper panel's top edge to the ceiling
+    # dark grey underside and the housing's top between the upper panel and the back (crew1_1: dark under the silver lip)
+    cen.box(under, -half_w, half_w, u0 - BACK_PLATE_M, u0, -SCREEN_PROUD_M, -depth - BACK_PLATE_M)
+    cen.box(under, -half_w, half_w, u1, u1 + BACK_PLATE_M, -up_depth, -depth)
+    for lat0, lat1 in UNDER_LAMPS_LAT_M:  # lamp strips on the underside, along its back edge
+        for sign in (-1.0, 1.0):
+            a, b = sorted((sign * lat0, sign * lat1))
+            cen.box(lamps, a, b, u0 - BACK_PLATE_M - UNDER_LAMP_M[1], u0 - BACK_PLATE_M,
+                    -depth + UNDER_LAMP_M[2], -depth + UNDER_LAMP_M[2] + UNDER_LAMP_M[0])
+    for z_strut in con["strut_z_m"]:  # the hand-hold posts: from the housing's back top edge to the ceiling (crew1_1, round 4)
         lat = (z_strut - cen.o.z) / cen.right.z
-        top = cen.at(lat, u_top, -up_depth / 2.0)
+        top = cen.at(lat, u1, -depth - STRUT_RADIUS_M)
         vc.tube(back, top - V((0.01, 0.0, 0.0)), V((cockpit["cabin"]["ceiling_x_m"], top.y, top.z)), STRUT_RADIUS_M, SIDES, ("strut", z_strut))
     # the shelf: separate modules (clusters of buttons), dark housing showing in the gaps; the ledge stands proud of the screens
     front = shelf_front_off(cockpit, cen)
@@ -340,7 +351,7 @@ def build_console(cockpit):
         c = V(lk["centre_m"]) - cen.o
         cen.box(lockers, c.dot(cen.right) - lk["size_m"][0] / 2.0, c.dot(cen.right) + lk["size_m"][0] / 2.0,
                 c.dot(cen.up) - lk["size_m"][1] / 2.0, c.dot(cen.up) + lk["size_m"][1] / 2.0, con["locker_proud_m"], -SCREEN_PROUD_M)
-    return housing, back, shelf, lockers
+    return housing, back, under, shelf, lockers, lamps
 
 
 def build_ring_light(cabin):
@@ -452,7 +463,8 @@ def main():
     for seat in cockpit["seat"]:
         for part, mesh in zip(cl.SEAT_PARTS, build_seat(seat, cabin["floor_x_m"], spec["crew_figure"]["figure"]["thigh_raise_deg"])):
             parts[f"seat_{part}_{seat['id']}"] = mesh
-    parts["console_housing"], parts["console_back"], parts["console_shelf"], parts["console_lockers"] = build_console(cockpit)
+    (parts["console_housing"], parts["console_back"], parts["console_under"], parts["console_shelf"], parts["console_lockers"],
+     parts["console_lamps"]) = build_console(cockpit)
     parts["ceiling_ring_light"] = build_ring_light(cabin)
     scr = screens_by_id(cockpit)
     for s in cockpit["screen"]:

@@ -16,6 +16,20 @@ uniform float fill = 0.0;  // scene value of the cabin's bounced light (E / pi x
 uniform float seam_depth : hint_range(0.0, 1.0) = 0.0;
 uniform vec2 seam_pitch_m = vec2(0.42, 0.30);
 uniform float seam_width_m = 0.0015;
+// (3) Band: a dark band on one face of a part (the vent across the console's silver back, crew1_1): fragments whose local normal is within
+// ~25 deg of band_face_normal and whose position lies in [band_up_range] along band_up (from band_origin) and within band_half_width along Z.
+uniform float band_on = 0.0;
+uniform vec3 band_origin = vec3(0.0);
+uniform vec3 band_up = vec3(1.0, 0.0, 0.0);
+uniform vec3 band_face_normal = vec3(0.0, 1.0, 0.0);
+uniform vec2 band_up_range = vec2(0.0, 0.0);
+uniform float band_half_width = 0.0;
+uniform vec4 band_albedo : source_color = vec4(0.0, 0.0, 0.0, 1.0);
+// (4) Two-tone surface by UV.y (the visor: copper-tinted top, dark clear glass below; UV.y = 0 at its top edge): tint_split < 0 = off.
+uniform float tint_split = -1.0;
+uniform vec4 albedo_low : source_color = vec4(0.0, 0.0, 0.0, 1.0);
+uniform float roughness_low = 0.1;
+uniform float metallic_low = 0.0;
 
 varying vec3 world_offset;  // fragment - the render origin (= the atmosphere's camera), world axes
 varying vec3 local_position;
@@ -45,11 +59,31 @@ void fragment() {
 	FOG = fog;
 	float line = seam_depth > 0.0 ? seam(local_position, normalize(local_normal)) : 0.0;
 	line *= smoothstep(0.12, 0.45, abs(dot(normalize(NORMAL), normalize(VIEW))));  // the 1.5 mm seams alias to moire at grazing angles (pilot_eye ceiling): fade them out there
-	ALBEDO = albedo.rgb * (1.0 - seam_depth * 0.55 * line) * colour_factor;
-	ROUGHNESS = roughness;
-	METALLIC = metallic;
+	vec3 base = albedo.rgb;
+	float rough = roughness;
+	float metal = metallic;
+	if (band_on > 0.0 && dot(normalize(local_normal), band_face_normal) > 0.9) {
+		vec3 d = local_position - band_origin;
+		float u = dot(d, band_up);
+		float aa = max(fwidth(u), 1.0e-4);
+		float in_up = smoothstep(band_up_range.x - aa, band_up_range.x + aa, u) * (1.0 - smoothstep(band_up_range.y - aa, band_up_range.y + aa, u));
+		float in_lat = 1.0 - smoothstep(band_half_width - aa, band_half_width + aa, abs(d.z));
+		base = mix(base, band_albedo.rgb, in_up * in_lat);
+		rough = mix(rough, 0.9, in_up * in_lat);  // the vent is a matte dark slot, no metal sheen
+		metal = mix(metal, 0.0, in_up * in_lat);
+	}
+	if (tint_split >= 0.0) {
+		float w = fwidth(UV.y) + 0.02;
+		float low = smoothstep(tint_split - w, tint_split + w, UV.y);
+		base = mix(base, albedo_low.rgb, low);
+		rough = mix(rough, roughness_low, low);
+		metal = mix(metal, metallic_low, low);
+	}
+	ALBEDO = base * (1.0 - seam_depth * 0.55 * line) * colour_factor;
+	ROUGHNESS = rough;
+	METALLIC = metal;
 	SPECULAR = specular;
-	EMISSION = albedo.rgb * (1.0 - metallic) * fill;
+	EMISSION = base * (1.0 - metal) * fill;
 	AO = ambient_visibility;
 	AO_LIGHT_AFFECT = 0.0;
 }

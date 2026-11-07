@@ -10,7 +10,7 @@ SIDES = ("l", "r")
 BONE_NAMES = ["hips", "spine", "chest", "neck", "head"] + [
     f"{n}_{s}" for s in SIDES for n in
     ("shoulder", "upper_arm", "forearm", "hand", "index_1", "index_2", "index_3", "thumb_1", "thumb_2", "fingers", "thigh", "shin", "foot")]
-MATERIALS = ("suit", "boots", "gloves", "helmet", "visor")
+MATERIALS = ("suit", "boots", "gloves", "helmet", "collar", "visor")
 EYE_UP_M, EYE_FORWARD_M = 0.03, 0.06  # [E] the eyes sit this far above / ahead of the helmet centre (behind the visor)
 SPINE_SPLIT_M = (0.12, 0.28)  # [E] heights above the hip joint where hips / spine / chest bones meet
 
@@ -185,4 +185,6 @@ def figure_manifest(cfg):
         "materials": {m: {"albedo": cfg["material"][m]["albedo"], "roughness": cfg["material"][m]["roughness"], "metallic": cfg["material"][m]["metallic"]}
                       for m in MATERIALS},
         "visor_material": "visor",
+        "visor_tint": {"split": cfg["helmet"]["visor_tint_split"], "albedo_low": cfg["helmet"]["visor_low_albedo"],
+                       "roughness_low": cfg["helmet"]["visor_low_roughness"], "metallic_low": cfg["helmet"]["visor_low_metallic"]},
     }

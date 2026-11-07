@@ -29,6 +29,14 @@ const RING_LUMENS := 6000.0
 const RING_DROP_M := 0.10
 ## [E] Screen placeholder: a dark Dragon-blue UI background, display-referred (no exposure, as every emitter).
 const SCREEN_COLOUR := Color(0.025, 0.07, 0.17)
+## [E] crew1_1 (round 4): the dark vent band across the console's silver back, in the console's up coordinate from the centre screen centre
+## (the back face spans -0.235..+0.265: the band at 35-75 % of its height from the top) and to 0.58 m either side of the centre (slot 1.20 of the 1.32 m back).
+## Render layer of the console parts (round 4): the two console lamps hang 8 cm in front of the console face and light it only at grazing
+## angles; their shadow maps on that face gave the concentric shadow-acne rings at the top of pilot_eye (gone with the lamp shadows off).
+## The lamps face the crew, so they do not light the console (light_cull_mask without this layer); the ring and fill lights still do.
+const CONSOLE_LAYER := 1 << 11
+const CONSOLE_VENT_UP_M := Vector2(-0.11, 0.07)
+const CONSOLE_VENT_HALF_WIDTH_M := 0.58
 
 var config: CockpitConfig
 var eye_node := Node3D.new()
@@ -54,14 +62,20 @@ func build(models: Dictionary, cockpit: CockpitConfig) -> void:
 		instance.name = part
 		instance.mesh = cabin[part]
 		instance.material_override = _material_of(part)
-		if part.begins_with("window_glass") or part.begins_with("light_") or part.begins_with("screen_") or part == "ceiling_ring_light":
+		if part.begins_with("window_glass") or part.begins_with("light_") or part.begins_with("screen_") or part == "ceiling_ring_light" or part == "console_lamps":
 			instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if _on_console(part):
+			instance.layers = CONSOLE_LAYER
 		add_child(instance)
 		_nodes[part] = instance
 	_build_lights()
 	_build_figures(models)
 	set_hotas_props(config.hotas_props_enabled)
 	set_crew(config.seats.size())
+
+
+func _on_console(part: String) -> bool:
+	return part.begins_with("console_") or part.begins_with("tablet_") or part.begins_with("button_") or part == "handle" 			or part.begins_with("light_")
 
 
 ## The mesh of a screen ("left", "centre", "right").
@@ -140,6 +154,7 @@ func _build_lights() -> void:
 		lamp.shadow_enabled = true  # two lamps: cheap shadows
 		lamp.shadow_bias = 0.12  # the ceiling is lit at a grazing angle: the default bias showed radial shadow acne (pilot_eye, round 3)
 		lamp.shadow_normal_bias = 3.0
+		lamp.light_cull_mask &= ~CONSOLE_LAYER
 	var ceiling_x := float(config.cabin.get("ceiling_x_m", 3.35))
 	var radii: Array = config.cabin.get("ring_light_radii_m", [])
 	var ring_r := 0.5 * (float(radii[0]) + float(radii[1])) if radii.size() == 2 else RING_RADIUS_FALLBACK_M
@@ -196,8 +211,10 @@ func _build_figures(models: Dictionary) -> void:
 				if look.has(key):
 					var entry: Dictionary = look[key]
 					var c: Array = entry["albedo"]
-					mesh_node.set_surface_override_material(s, _cabin_material(Color(c[0], c[1], c[2]).linear_to_srgb(),
-							float(entry["roughness"]), float(entry["metallic"]), 0.03, 0.0))
+					var material := _cabin_material(Color(c[0], c[1], c[2]).linear_to_srgb(), float(entry["roughness"]), float(entry["metallic"]), 0.03, 0.0)
+					if key == String(manifest.get("visor_material", "")) and manifest.has("visor_tint"):
+						material = _visor_material(material, manifest["visor_tint"])
+					mesh_node.set_surface_override_material(s, material)
 	template.free()
 
 
@@ -208,20 +225,22 @@ func _material_of(part: String) -> Material:
 		var glass := ShaderMaterial.new()
 		glass.shader = GLASS_SHADER
 		return glass
-	if part.begins_with("light_") or part == "ceiling_ring_light":
+	if part.begins_with("light_") or part == "ceiling_ring_light" or part == "console_lamps":
 		return _display(Color(0.95, 0.95, 0.9))
 	if part == "cabin_shell":
 		return _cabin_material(Color(0.8, 0.8, 0.79), 0.85, 0.0, 0.03, 0.5)
 	if part == "floor" or part == "hatch_frame" or part.begins_with("window_"):
 		return _cabin_material(Color(0.8, 0.8, 0.79), 0.8, 0.0, 0.03, 0.0)
 	## [E] Console (review item 3): the housing front is near black and matte (no specular sheen: it must not read beige under the lamps),
-	## the shelf modules are light grey (albedo ~0.3 linear), the back / underside / posts silver, the lockers dark gloss.
+	## the shelf modules dark grey, the back and the posts silver with the dark vent band, the underside dark grey (crew1_1, round 4: not a white slab), the lockers dark.
 	if part == "console_housing":
 		return _cabin_material(Color(0.028, 0.028, 0.032), 0.9, 0.0, 0.03, 0.0, 0.1)
 	if part == "console_shelf":
 		return _cabin_material(Color(0.07, 0.07, 0.075), 0.8, 0.0, 0.03, 0.0, 0.05)  # discovery2: dark grey modules, ~0.05-0.09 linear
 	if part == "console_back":
-		return _cabin_material(Color(0.76, 0.77, 0.79), 0.45, 0.3, 0.03, 0.0)
+		return _console_back_material()
+	if part == "console_under":
+		return _cabin_material(Color(0.10, 0.10, 0.11), 0.6, 0.2, 0.03, 0.0, 0.3)
 	if part == "console_lockers":
 		return _cabin_material(Color(0.02, 0.02, 0.024), 0.85, 0.0, 0.03, 0.0, 0.03)
 	## [E] Seats (review item 4, crew1_1): white shells, black pads and black carbon leg-rest frames.
@@ -234,6 +253,43 @@ func _material_of(part: String) -> Material:
 	if part.begins_with("hotas_"):
 		return _cabin_material(Color(0.06, 0.06, 0.065), 0.5, 0.4, 0.03, 0.0)
 	return _cabin_material(Color(0.09, 0.09, 0.1), 0.45, 0.3, 0.03, 0.0)  # buttons, handle
+
+
+## The visor: copper tint on the upper part, dark clear glass below (manifest crew_figure.visor_tint, crew_figure.toml [helmet]).
+func _visor_material(base: ShaderMaterial, tint: Dictionary) -> ShaderMaterial:
+	var key := "visor_%s" % [tint]
+	if not _materials.has(key):
+		var m := base.duplicate() as ShaderMaterial
+		var low: Array = tint["albedo_low"]
+		m.set_shader_parameter("tint_split", float(tint["split"]))
+		m.set_shader_parameter("albedo_low", Color(low[0], low[1], low[2]).linear_to_srgb())
+		m.set_shader_parameter("roughness_low", float(tint["roughness_low"]))
+		m.set_shader_parameter("metallic_low", float(tint["metallic_low"]))
+		_materials[key] = m
+	return _materials[key]
+
+
+## The silver back with the dark vent band across it (shader band in the console frame; surface detail, not geometry).
+func _console_back_material() -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = CABIN_SHADER
+	m.set_shader_parameter("albedo", Color(0.30, 0.31, 0.33))  # [E] crew1_1: brushed silver, mid grey under the ring light
+	m.set_shader_parameter("roughness", 0.5)
+	m.set_shader_parameter("metallic", 0.25)
+	m.set_shader_parameter("ambient_visibility", 0.03)
+	m.set_shader_parameter("seam_depth", 0.0)
+	_materials["console_back"] = m  # gets the fill term every frame like the other cabin materials
+	var centre: Dictionary = config.screens.get("centre", {})
+	if not centre.is_empty():
+		var normal := _console_normal()
+		m.set_shader_parameter("band_on", 1.0)
+		m.set_shader_parameter("band_origin", centre["centre"])
+		m.set_shader_parameter("band_up", CockpitConfig._vec(config.console.get("up")).normalized())
+		m.set_shader_parameter("band_face_normal", -normal)
+		m.set_shader_parameter("band_up_range", CONSOLE_VENT_UP_M)
+		m.set_shader_parameter("band_half_width", CONSOLE_VENT_HALF_WIDTH_M)
+		m.set_shader_parameter("band_albedo", Color(0.03, 0.03, 0.035))
+	return m
 
 
 func _display(colour: Color) -> ShaderMaterial:

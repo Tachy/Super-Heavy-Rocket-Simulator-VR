@@ -20,7 +20,7 @@ func _initialize() -> void:
 		_check(cockpit.buttons.size() > 10 and cockpit.cameras.is_empty(), "buttons present, no cameras yet")
 		_check(cockpit.tablets.size() == 2 and cockpit.lights.size() == 2 and cockpit.hotas_props_enabled, "extras")
 		_check(cockpit.cabin.has("profile_m") and ((cockpit.cabin["profile_m"] as Array)[0] as Array).size() == 2, "nested profile")
-		_check(absf((-cockpit.eye.basis.z).dot(Vector3(0.81915, 0.57358, 0.0)) - 1.0) < 1e-4, "eye looks along forward")
+		_check(absf((-cockpit.eye.basis.z).dot(Vector3(0.37956, 0.92517, 0.0)) - 1.0) < 1e-4, "eye looks along forward")  # round 4 [eye] forward
 		var errors := cockpit.validate()
 		_check(errors.is_empty(), "validate empty: %s" % ", ".join(errors))
 		_check(cockpit.validate_crew(4).is_empty() and cockpit.validate_crew(1).is_empty(), "crew 1 and 4 valid")

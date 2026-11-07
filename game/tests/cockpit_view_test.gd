@@ -194,5 +194,9 @@ func _check_figures(config: CockpitConfig) -> void:
 		# orientation (the seat basis is duplicated from figure_layout.seat_basis): the head sits near the eye point
 		var head_bone := skeleton.find_bone("head")
 		var head := (skeleton.global_transform * Transform3D(Basis(), skeleton.get_bone_global_pose(head_bone).origin)).origin
-		_check(head.distance_to(config.eye.origin) < 0.2, "s2 figure's head %.3f m from the eye point" % head.distance_to(config.eye.origin))
+		# round 4: the config eye IS the figure's eye (crew_figure.toml helmet half_below 0.17 + figure_layout EYE_UP_M 0.03 up the back, EYE_FORWARD_M 0.06
+		# along the chest normal from the head bone's head), so the player's body sits under the camera
+		var back := deg_to_rad(float(config.seats[1]["back_angle_deg"]))
+		var figure_eye := head + Vector3(cos(back), -sin(back), 0.0) * 0.20 + Vector3(sin(back), cos(back), 0.0) * 0.06
+		_check(figure_eye.distance_to(config.eye.origin) < 0.02, "s2 figure's eye %.3f m from the eye point" % figure_eye.distance_to(config.eye.origin))
 	cockpit.free()

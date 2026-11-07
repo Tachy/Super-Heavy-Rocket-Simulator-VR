@@ -373,13 +373,15 @@ FIGURE_KEYS = {
              "fingers_radius_m", "fingers_offset_m", "thumb_m", "thumb_radius_m", "thumb_root_offset_m", "thumb_root_forward_m", "thumb_spread_deg", "finger_curl_deg"),
     "suit": ("torso_rings_m", "thigh_radius_m", "shin_radius_m", "upper_arm_radius_m", "forearm_radius_m", "cuff_radius_m", "cuff_length_m", "boot_shaft_fraction",
              "boot_foot_half_width_m", "boot_foot_half_height_m", "boot_heel_m", "neck_radius_m"),
-    "helmet": ("half_width_m", "half_depth_m", "half_below_m", "half_above_m", "visor_half_angle_deg", "visor_up_deg", "visor_down_deg", "visor_proud_m", "visor_edge_m", "visor_thickness_m", "rim_radius_m", "collar_radius_m", "collar_height_m"),
+    "helmet": ("half_width_m", "half_depth_m", "half_below_m", "half_above_m", "visor_half_angle_deg", "visor_up_deg", "visor_down_deg", "visor_proud_m", "visor_edge_m", "visor_thickness_m", "rim_radius_m", "collar_radius_m", "collar_height_m",
+               "liner_radius_m", "liner_inset_deg", "egg_taper", "crown_ridge_m", "crown_ridge_width_m", "visor_tint_split", "visor_low_albedo",
+               "visor_low_roughness", "visor_low_metallic", "pivot_housing_m", "pivot_el_deg", "pivot_az_offset_deg"),
 }
-FIGURE_MATERIALS = ("suit", "boots", "gloves", "helmet", "visor")
+FIGURE_MATERIALS = ("suit", "boots", "gloves", "helmet", "collar", "visor")
 
 
 def validate_crew_figure(fig: dict) -> None:
-    """The crew figure tables gen_crew_figure.py reads: keys present, five materials."""
+    """The crew figure tables gen_crew_figure.py reads: keys present, the six materials."""
     for table, keys in FIGURE_KEYS.items():
         t = fig.get(table)
         if not isinstance(t, dict):

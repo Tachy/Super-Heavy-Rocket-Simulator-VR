@@ -73,20 +73,32 @@ boot_heel_m = 0.065              # [E] heel behind the ankle joint
 neck_radius_m = 0.080            # [E] neck ring (suit collar) radius under the helmet
 
 [helmet]
-# Shape after eva_suit_newatlas / eva_suit_detail1-2 / demo1_1: a narrower, elongated white shell over the top and back (depth > width), a white shell around the face opening (brow band, cheeks / ears, chin piece) with the closed copper visor seated in the opening, a white rim bead around it, a wider collar (neck ring).
+# Shape after eva_suit_detail2 (three-quarter, round 4) / detail1 / newatlas / demo1_1: a white egg-shaped shell, longer front to back and narrower at the front, with a low crown ridge;
+# a large face opening lined with a black seal, the closed visor seated in it (upper part copper-tinted, lower part dark clear glass), a white frame bead around it,
+# slim black pivot brackets at the sides, a grey neck ring (collar). Visor closed and copper: user decision (spec).
 half_width_m = 0.150             # [E] helmet shell half width (z): eva_suit_detail2, the shell is ~0.30 across at the temples (the ~0.30 m helmet of crew_dragon.toml's size list)
 half_depth_m = 0.170             # [E] helmet half depth (y): eva_suit_detail2 / demo1_1 side views, the shell is deeper than wide (ratio 1.13); +-0.02
 half_below_m = 0.17              # [E] helmet centre to the neck ring
 half_above_m = 0.20              # [E] helmet centre to the crown
-visor_half_angle_deg = 58.0      # [E] opening half width as azimuth about the forward axis: eva_suit_detail2 / detail1 / demo1_2, the face opening is ~+-55-60 deg, the white cheek / ear shell stands beside it (round 3, user finding)
-visor_up_deg = 42.0             # [E] opening top, elevation above the centre plane: detail2, the white brow band (35-45 mm) lies above it, top at ~+40-45 deg
-visor_down_deg = -30.0          # [E] opening bottom, elevation: the white chin piece lies below it (detail2)
-visor_proud_m = 0.030            # [E] closed copper visor bulge over the shell at its centre (detail2: the visor is seated in the opening, only slightly domed)
+visor_half_angle_deg = 62.0      # [E] opening half width as azimuth about the forward axis: eva_suit_detail2 (round 4), the black-lined opening reaches from the nose line past the cheekbone to ~1/3 of the side; the white cheek / ear shell with the pivot bracket stands beside it; +-5
+visor_up_deg = 38.0             # [E] opening top, elevation above the centre plane: detail2, liner top 145 px above the helmet centre of 260 px half height (0.11 of 0.20 m) = +33 deg, plus the frame; +-5
+visor_down_deg = -40.0          # [E] opening bottom, elevation: detail2, the opening runs down past the chin to just above the neck ring (shell cut at -0.75 x 0.17 = -48 deg); +-5
+visor_proud_m = 0.035            # [E] closed visor bulge over the shell at its centre (detail2: a large clear dome in front of the face)
 visor_edge_m = 0.004             # [E] visor outer surface over the shell at its edge (it sits in the brow band's inner lip)
 visor_thickness_m = 0.006        # [E] visor shell thickness (closed solid)
-rim_radius_m = 0.020             # [E] white brow band / rim bead around the opening: detail2 band ~35-45 mm wide = 2 x 0.020 (smooth, densely sampled bead)
-pivot_housing_m = [0.012, 0.035, 0.025]  # [E] dark visor-pivot housings on the cheek sides (half sizes along the shell normal, up, across): detail2 / detail1
-pivot_el_deg = 8.0               # [E] pivot housing elevation, just behind the opening's side edge (detail2)
+rim_radius_m = 0.016             # [E] white visor frame bead around the opening: detail2 frame band ~38 mm (50 px at 1300 px/m) = 2 x 0.016 + the black seal beside it
+liner_radius_m = 0.012           # [E] black seal lining the face opening, just inside the frame: detail2 black ring ~15-25 mm
+liner_inset_deg = 4.0            # [E] the seal bead runs this far (azimuth / elevation) inside the opening's edge
+egg_taper = 0.08                 # [E] shell half width shrinks by this fraction toward the front (egg shape in top view: detail2 / demo1_1, broader at the back)
+crown_ridge_m = 0.006            # [E] height of the low crown ridge along the sagittal line over the top and back (detail2 highlight line)
+crown_ridge_width_m = 0.030      # [E] the ridge's 1/e half width across
+visor_tint_split = 0.55          # [E] the visor's copper tint covers this fraction of its height from the top; below it dark clear glass shows the black interior (detail2)
+visor_low_albedo = [0.025, 0.022, 0.02]  # [E] lower visor: clear glass over the dark helmet interior (no face modelled), reads near black with a gloss
+visor_low_roughness = 0.22       # [E] clear polycarbonate over a dark interior: soft reflections (round 4 shots: 0.12 mirrored the cabin as a grey band)
+visor_low_metallic = 0.0         # [E] uncoated glass: only the dielectric gloss
+pivot_housing_m = [0.004, 0.040, 0.009]  # [E] slim black visor-pivot brackets on the cheek sides (half sizes along the shell normal, up, across): detail2, a thin black bracket ~80 x 18 mm along the opening's side edge (round 4: no grey blocks)
+pivot_az_offset_deg = 7.0        # [E] the bracket stands this far (azimuth) behind the opening's side edge, just outside the frame bead
+pivot_el_deg = 0.0               # [E] bracket elevation: detail2, at eye height beside the opening
 collar_radius_m = 0.112          # [E] neck collar half width: detail2, the collar ring is wider than the neck (suit neck 0.08) and carries the helmet's lower rim
 collar_height_m = 0.07           # [E] neck collar height: detail2, ~70 mm ring under the helmet shell
 
@@ -106,6 +118,10 @@ metallic = 0.0                   # [E] fabric
 albedo = [0.80, 0.80, 0.80]      # [E] white shell, neutral (eva_suit_detail1, detail2); no blue: it reads white under the lamps
 roughness = 0.5                  # [E] semi-gloss printed shell, the lamp reflections stay soft
 metallic = 0.0                   # [E] composite
+[material.collar]
+albedo = [0.30, 0.30, 0.31]      # [E] grey neck ring under the helmet (eva_suit_detail2: mid-grey collar fabric and ring)
+roughness = 0.6                  # [E] fabric over the ring
+metallic = 0.0                   # [E] fabric
 [material.visor]
 albedo = [0.30, 0.12, 0.05]      # [E] dark copper-tinted coating (eva_suit_detail2: the dome reads brown-bronze, not pale)
 roughness = 0.38                 # [E] coated glass, softer lamp reflections (round 3: smaller hot spots)
