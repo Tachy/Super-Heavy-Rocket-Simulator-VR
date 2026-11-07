@@ -1,7 +1,11 @@
 #include "starsim/sim/lunar_site.hpp"
 
 #include <cmath>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
+#include <string>
 #include <tuple>
 #include <utility>
 
@@ -16,9 +20,13 @@ namespace {
 
 environment::HeightGrid grid_of(config::TerrainGridFile& f) { return {f.lines, f.samples, f.dn_scale_m, std::move(f.dn)}; }
 
-// The global grid (the base of every terrain) and its sphere radius.
-std::pair<environment::CylindricalGrid, double> load_global(const std::filesystem::path& config_dir,
-                                                            const std::filesystem::path& data_dir) {
+struct GlobalGrid {
+    std::shared_ptr<const environment::CylindricalGrid> grid;
+    double sphere_radius_m = 0.0;
+};
+
+// The global grid (the base of every terrain) and its sphere radius, read from disk.
+GlobalGrid read_global(const std::filesystem::path& config_dir, const std::filesystem::path& data_dir) {
     const auto global_name = config::load_lunar_global_grid_name(config_dir);
     auto global_file = config::load_terrain_grid_file(data_dir / "terrain" / (global_name + ".toml"));
     if (global_file.projection != "simple_cylindrical") {
@@ -30,7 +38,30 @@ std::pair<environment::CylindricalGrid, double> load_global(const std::filesyste
     global.zero_sample = global_file.zero_sample;
     const double radius = global_file.sphere_radius_m;
     global.grid = grid_of(global_file);
-    return {std::move(global), radius};
+    return {std::make_shared<const environment::CylindricalGrid>(std::move(global)), radius};
+}
+
+// One immutable copy of the global grid (LDEM_64: 531 MB) for every site's terrain and every window search: the
+// terrains hold it by shared_ptr, this cache by weak_ptr (it is freed with the last terrain). Keyed by the header's
+// path, size and time (a replaced file is read again).
+GlobalGrid load_global(const std::filesystem::path& config_dir, const std::filesystem::path& data_dir) {
+    static std::mutex mutex;
+    static std::map<std::string, std::pair<std::weak_ptr<const environment::CylindricalGrid>, double>> cache;
+    const auto header = data_dir / "terrain" / (config::load_lunar_global_grid_name(config_dir) + ".toml");
+    std::error_code ec;
+    const auto time = std::filesystem::last_write_time(header, ec).time_since_epoch().count();
+    const auto size = std::filesystem::file_size(header, ec);
+    const std::string key = header.string() + "|" + std::to_string(time) + "|" + std::to_string(size);
+    std::lock_guard lock(mutex);  // also serialises two first loads: the second finds the first's grid
+    if (const auto it = cache.find(key); it != cache.end()) {
+        if (auto grid = it->second.first.lock()) return {std::move(grid), it->second.second};
+    }
+    auto loaded = read_global(config_dir, data_dir);
+    for (auto it = cache.begin(); it != cache.end();) {  // drop expired entries
+        it = it->second.first.expired() ? cache.erase(it) : std::next(it);
+    }
+    cache[key] = {loaded.grid, loaded.sphere_radius_m};
+    return loaded;
 }
 
 std::filesystem::path site_tile_path(const std::filesystem::path& data_dir, const config::LunarSiteConfig& site) {

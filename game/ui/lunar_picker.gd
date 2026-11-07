@@ -117,7 +117,7 @@ func read_fields() -> Dictionary:
 		return {"ok": false, "key": "ui.lunar_site.invalid_latitude"}
 	if not lon_text.is_valid_float() or lon_text.to_float() < -180.0 or lon_text.to_float() > 360.0:
 		return {"ok": false, "key": "ui.lunar_site.invalid_longitude"}
-	if not stay_text.is_valid_float() or stay_text.to_float() <= 0.0 or stay_text.to_float() > MAX_STAY_H:
+	if not stay_text.is_valid_float() or stay_text.to_float() < 0.0 or stay_text.to_float() > MAX_STAY_H:
 		return {"ok": false, "key": "ui.lunar_site.invalid_stay"}
 	return {"ok": true, "lat_deg": lat_text.to_float(), "lon_deg": lon_text.to_float(), "stay_s": stay_text.to_float() * 3600.0}
 

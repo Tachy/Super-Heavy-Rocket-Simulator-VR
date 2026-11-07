@@ -3,7 +3,7 @@
 // ~100 m, LunarSiteService.read_albedo): it multiplies the global albedo input only, the Hapke photometry stays the one
 // lighting law (no baked shading). Over `site_albedo_blend_m` at the tile edge the factor fades to 1.0 (no seam).
 //
-// Mapping (uniforms set by LunarSiteService.albedo_uniforms; grid coordinates have the pixel centres at integers, the
+// Mapping (uniforms set by LunarSiteService.apply_albedo; grid coordinates have the pixel centres at integers, the
 // texture's texel k covers [k - 0.5, k + 0.5]):
 //   site_albedo_grid.w = 1 simple cylindrical: line = grid.x - grid.z * lat_deg, sample = grid.y + grid.z * lon_deg
 //                        (lon in 0 .. 360, taken at the copy nearest to the tile; grid.z = pixels per degree);
@@ -27,9 +27,9 @@ const float SITE_ALBEDO_PI = 3.14159265358979;
 // The factor at the equirectangular (u, v) of the terrain (u = (lon + 180) / 360, possibly outside 0 .. 1 across the
 // antimeridian; v = (90 - lat) / 180).
 // The albedo with the site factor applied, the product kept in the physical range: a relative factor above 1 on an already
-// bright global texel must not push the albedo past 1 (or past what the global map held).
+// bright global texel must not push the albedo past 1: the product is clamped to [0, 1].
 vec3 site_albedo_apply(vec3 albedo, float factor) {
-	return clamp(albedo * factor, vec3(0.0), max(albedo, vec3(1.0)));
+	return clamp(albedo * factor, vec3(0.0), vec3(1.0));
 }
 
 float site_albedo_factor(vec2 uv) {

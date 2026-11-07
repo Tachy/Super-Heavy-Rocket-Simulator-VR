@@ -111,10 +111,12 @@ func _test_invalid_latitude() -> void:
 	_check((h["service"] as FakeService).prepared.is_empty() and (h["sim"] as FakeSim).requests.is_empty(),
 			"invalid latitude 95 is rejected before any request")
 	_check(picker.status_text() == I18n.text("ui.lunar_site.invalid_latitude"), "the latitude refusal is shown")
-	picker.set_fields("10", "10", "0")
+	picker.set_fields("10", "10", "-1")
 	picker.search()
 	_check((h["service"] as FakeService).prepared.is_empty() and picker.status_text() == I18n.text("ui.lunar_site.invalid_stay"),
-			"a stay of 0 h is rejected")
+			"a negative stay is rejected")
+	picker.set_fields("10", "10", "0")
+	_check(picker.read_fields()["ok"] and is_zero_approx(picker.read_fields()["stay_s"]), "a stay of 0 h is accepted (touch and go)")
 	picker.set_fields("abc", "10", "24")
 	picker.search()
 	_check((h["service"] as FakeService).prepared.is_empty(), "a non-number is rejected")

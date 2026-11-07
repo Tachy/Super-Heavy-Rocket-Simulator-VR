@@ -842,6 +842,23 @@ func _check_lunar_sites(config_dir: String, tdb: float) -> void:
 	_check(sim.wait_idle(180.0) and sim.result(started_id).get("ok", false),
 			"start_mission with the window: %s" % I18n.report_text(sim.result(started_id).get("report", {})))
 	_check(absf(sim.mission_start_tdb_s() - float(w["mission_start_tdb_s"])) < 1.0, "the mission starts at the window")
+	# final review I1: a search still running while the sim is set up again and then freed ends cleanly (no thread joins
+	# itself, no crash): the process surviving this block is the check
+	var busy := FlightSim.new()
+	busy.setup(config_dir)
+	var busy_id: int = busy.find_lunar_windows("hls_lunar_llo", lat, lon, 53.1 * 3600.0, tdb)
+	_check(busy_id > 0, "a second search posts")
+	for _i in 20:
+		busy.advance_to(tdb)
+		OS.delay_msec(5)
+	busy.setup(config_dir)  # teardown during the running search
+	_check(not busy.result(busy_id).get("ok", false), "setup during a running search returns; the old search is gone")
+	var busy_again: int = busy.find_lunar_windows("hls_lunar_llo", lat, lon, 61.7 * 3600.0, tdb)
+	for _i in 20:
+		busy.advance_to(tdb)
+		OS.delay_msec(5)
+	busy = null  # destructor during the running search
+	_check(busy_again > 0, "freed with a search running")
 
 
 # ISS missions (i6): the three kinds start, ISS / rendezvous / docking telemetry, station geometry, commands.

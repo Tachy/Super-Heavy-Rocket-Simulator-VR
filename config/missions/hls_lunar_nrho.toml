@@ -3,7 +3,9 @@
 # TLI on the vacuum Raptors, mid-course corrections, powered lunar swing-by and insertion into the 9:2 NRHO
 # (in-direct transfer, Kikuchi et al. ISSFD 2024). [orbit] is the scenario start.
 # Does NOT close with the 120 t HLS (l4 Task 9, user 2026-10-16): the start refuses it ("Mission nicht durchführbar") -
-# the flown legs ([budget]) leave ~2 t short of the NRHO before the 10 t reserve.
+# the flown legs ([budget]) leave 29.3 t short (Mons Mouton, 2026-11-13; measured 2026-11-07 with
+# nrho_to_llo 1245 m/s, test "The NRHO budget charges the plane change to the site"; 21 t with the earlier 956 m/s) before
+# the 10 t reserve; the window search's lower-bound screen (site-free) is 11.4 t short.
 
 [mission]
 # where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
@@ -64,7 +66,9 @@ aposelene_km = 100.0                     # the LLO (spec)
 [budget]                            # legs not planned at the start (nominal); the outbound legs come from its plan
 descent_delta_v_mps = 2100.0        # [D] l4 C2/C3 flights: DOI 18 + PDI->touchdown 2062-2068 m/s
 ascent_delta_v_mps = 1900.0         # [E] spec ~1.9 km/s (Apollo LM ~1.85)
-nrho_to_llo_delta_v_mps = 956.0     # [D] l4 Task 9 mission flight (l3 test case: 876 m/s)
+nrho_to_llo_delta_v_mps = 1245.0    # [D] what nrho_to_llo plans from this mission's first perilune after the insertion: 969 + 276 m/s
+                                    # (full model, polar plane 35.5 deg from the NRHO plane; user 2026-11-07, lunar sites plan Task 7
+                                    # measurement, docs/subsystems/lunar.md; was 956 from the l4 Task 9 flight, the l3 case had 876)
 llo_to_nrho_delta_v_mps = 990.0     # [D] l4 Task 9 flight: 986 m/s 5.3 d after the LLO arrival (site wait ~4 d + stay;
                                     # the cheap ~725 m/s window closes ~2.5 d after the arrival, l3)
 reserve_kg = 10000.0                # [E] residuals, unusable propellant

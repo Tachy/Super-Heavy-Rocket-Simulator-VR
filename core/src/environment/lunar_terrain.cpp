@@ -12,10 +12,14 @@ using math::Vec3;
 
 LunarTerrain::LunarTerrain(CylindricalGrid global, std::vector<std::shared_ptr<const LunarTile>> tiles,
                            double sphere_radius_m)
+    : LunarTerrain(std::make_shared<const CylindricalGrid>(std::move(global)), std::move(tiles), sphere_radius_m) {}
+
+LunarTerrain::LunarTerrain(std::shared_ptr<const CylindricalGrid> global,
+                           std::vector<std::shared_ptr<const LunarTile>> tiles, double sphere_radius_m)
     : global_(std::move(global)), tiles_(std::move(tiles)), sphere_radius_m_(sphere_radius_m) {
-    max_height_m_ = global_.grid.dn.empty() ? 0.0
-                                            : global_.grid.dn_scale_m *
-                                                  *std::max_element(global_.grid.dn.begin(), global_.grid.dn.end());
+    max_height_m_ = global_->grid.dn.empty() ? 0.0
+                                             : global_->grid.dn_scale_m *
+                                                   *std::max_element(global_->grid.dn.begin(), global_->grid.dn.end());
     for (const auto& tile : tiles_) max_height_m_ = std::max(max_height_m_, tile->max_height_m());
 }
 
@@ -44,9 +48,9 @@ double LunarTerrain::height_m(double latitude_rad, double longitude_rad) const {
         if (!(edge_m >= 0.0)) continue;
         const double tile_h = tile->height_m(unit);
         const double w = smoothstep(edge_m / blend_m);  // the tile's core exactly, the grid at its edge
-        return w == 1.0 ? tile_h : w * tile_h + (1.0 - w) * global_.height_m(latitude_rad, longitude_rad);
+        return w == 1.0 ? tile_h : w * tile_h + (1.0 - w) * global_->height_m(latitude_rad, longitude_rad);
     }
-    return global_.height_m(latitude_rad, longitude_rad);
+    return global_->height_m(latitude_rad, longitude_rad);
 }
 
 double LunarTerrain::height_at_direction_m(const Vec3& unit) const {
@@ -57,9 +61,9 @@ double LunarTerrain::height_at_direction_m(const Vec3& unit) const {
         const double x = edge_m / blend_m;
         if (x >= 1.0) return tile_h;  // the tile's core: no global lookup
         const double w = smoothstep(x);
-        return w * tile_h + (1.0 - w) * global_.height_at_direction(unit);
+        return w * tile_h + (1.0 - w) * global_->height_at_direction(unit);
     }
-    return global_.height_at_direction(unit);
+    return global_->height_at_direction(unit);
 }
 
 double LunarTerrain::resolution_m(double latitude_rad, double longitude_rad) const {
@@ -97,7 +101,7 @@ LunarTerrain::TileBlend LunarTerrain::tile_blend(const Vec3& unit) const {
 }
 
 double LunarTerrain::global_resolution_m() const {
-    return sphere_radius_m_ * constants::deg_to_rad / global_.pixels_per_degree;
+    return sphere_radius_m_ * constants::deg_to_rad / global_->pixels_per_degree;
 }
 
 double LunarTerrain::finest_resolution_m() const {

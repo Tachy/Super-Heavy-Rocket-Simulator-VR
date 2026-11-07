@@ -261,7 +261,7 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
     die Terminsuche (Fortschritt), und die Liste zeigt je Landetermin: Landung in UTC, Sonnenhöhe / Azimut, Tageslicht
     danach in Stunden, Treibstoffreserve. Gibt es keinen Termin (oder ist die Stelle gesperrt, z. B. beim NRHO), steht
     der Grund als Text statt der Liste. Ungültige Eingaben (Breite außerhalb -90..90, Länge außerhalb -180..360,
-    Aufenthalt <= 0) werden vor jeder Anfrage abgewiesen. "Mit diesem Termin starten" bereitet das Gelände vor (einige
+    Aufenthalt < 0 oder über 8760 h; 0 h ist erlaubt) werden vor jeder Anfrage abgewiesen. "Mit diesem Termin starten" bereitet das Gelände vor (einige
     Sekunden, die Anzeige steht dabei) und startet die Mission mit der Landestelle, dem Aufenthalt und dem gewählten
     Termin. Wechsel von Stelle, Mission oder Ort bricht Ladevorgang und Suche ab.
   - "Freier Flug": das Fahrzeug steht auf der Rampe, der Countdown läuft 60 s als T-

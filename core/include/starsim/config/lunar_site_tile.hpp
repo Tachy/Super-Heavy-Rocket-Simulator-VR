@@ -107,8 +107,8 @@ SiteTileRequest plan_site_tile(const std::vector<LunarTerrainProduct>& products,
 
 // Decodes the downloaded range bodies (one per request.ranges entry, in order) into the tile file. Heights: int16 DN
 // with dn_scale_m 0.5 and 9 check points. Albedo (kind "albedo", ledger ruling R3): the same int16 format with
-// dn_scale_m 1/16384, relative albedo = tile / its own 10 km box low-pass, scaled to a tile mean of exactly 1 (1.0 =
-// 16384); no-data pixels are 1.0. Geographic grids keep the source grid (no reprojection).
+// dn_scale_m 1/16384, relative albedo = tile / its low-pass at the global map's pixel footprint (2665 m, ruling R21), scaled
+// to a tile mean of exactly 1 (1.0 = 16384); no-data pixels are 1.0. Geographic grids keep the source grid (no reprojection).
 TerrainGridFile assemble_site_tile(const SiteTileRequest& request, const std::vector<std::vector<std::uint8_t>>& bodies);
 
 }  // namespace starsim::config

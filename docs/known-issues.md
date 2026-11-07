@@ -358,10 +358,10 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   `docs/subsystems/lunar.md`), but the flight still flies the polar transfer from the NRHO and waits for the pass;
   flying the budgeted plane change (departure burn or LLO) is open. No shipped mission is affected (the NRHO refuses
   at 120 t).
-- NRHO `[budget] nrho_to_llo_delta_v_mps = 956` [D] is below what `nrho_to_llo` plans from the 2026-11-13 mission's
-  first perilune after the insertion (969 + 276 = 1,245 m/s: the polar plane through a perilune at 73.1 N is turned
-  35.5 deg from the NRHO plane; the l3 case had 660 + 216). The leg is mission config: re-measure needs the user's
-  decision.
+- NRHO `[budget] nrho_to_llo_delta_v_mps` is 1245 m/s [D] (user 2026-11-07; what `nrho_to_llo` plans from the 2026-11-13
+  mission's first perilune after the insertion: 969 + 276, the polar plane through a perilune at 73.1 N is turned
+  35.5 deg from the NRHO plane; the l3 case had 660 + 216; it was 956 before). The NRHO stays infeasible at 120 t
+  (29.3 t short at Mons Mouton).
 
 ## Lunar sites plan, Task 8 fix round 1 (2026-11-07)
 

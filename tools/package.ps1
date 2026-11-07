@@ -8,7 +8,7 @@
 #      ...-data-terrain.zip, ...-data-imagery.zip, ...-data-ldem.zip, ...-data-diviner.zip (each unpacks into the game folder); none may reach 2 GB
 #   6. build/Super-Heavy-Rocket-Simulator-VR-<version>-setup.exe (Inno Setup, everything; installed once if missing)
 #
-#   powershell -ExecutionPolicy Bypass -File tools/package.ps1 [-Version 1.2.3] [-SkipTests] [-NoInstaller]
+#   powershell -ExecutionPolicy Bypass -File tools/package.ps1 [-Version 1.2.3] [-SkipTests] [-NoInstaller] [-ListSiteTiles]
 #
 # /build (.claude/commands/build.md) publishes these files as the release, /build-local builds a test installer.
 # The Godot editor comes from start.cfg (GODOT=...) or external/godot, as for the start scripts. -Version defaults to
@@ -18,7 +18,8 @@
 param(
     [string]$Version = "",
     [switch]$SkipTests,
-    [switch]$NoInstaller
+    [switch]$NoInstaller,
+    [switch]$ListSiteTiles   # dry run: print the preset site tile files the base package would carry, then stop
 )
 
 $ErrorActionPreference = "Stop"
@@ -72,6 +73,52 @@ function Zip([string]$dir, [string]$zip) {
     $size = (Get-Item $zip).Length
     Write-Host ("zip: {0} ({1:N1} MB)" -f $zip, ($size / 1MB))
     if ($size -ge $AssetLimit) { throw "$zip is $([math]::Round($size / 1GB, 2)) GB: GitHub release assets must stay below 2 GB" }
+}
+
+# The cache keys (height + albedo tile) of the preset sites of config/lunar_sites.toml, from the core CLI's plan (the one
+# place a key is built, config::cache_key_of). Only these tiles ride in the base package: no free-site or test-site tile
+# a developer cache holds, no .work / .parts / temp leftovers.
+function Get-PresetSiteTileKeys {
+    $cli = Join-Path $Build "core\lunar_site_tile.exe"
+    if (-not (Test-Path $cli)) { throw "$cli is missing: build the core first (tools/build.ps1 -NoTests)" }
+    $configDir = Join-Path $Root "config"
+    $sites = @(); $site = $null
+    foreach ($line in Get-Content (Join-Path $configDir "lunar_sites.toml")) {
+        if ($line -match '^\s*\[\[site\]\]') { $site = @{}; $sites += , $site }
+        elseif ($site -and $line -match '^\s*(id|latitude_deg|longitude_deg)\s*=\s*"?([^"\s#]+)') { $site[$Matches[1]] = $Matches[2] }
+    }
+    if ($sites.Count -eq 0) { throw "No [[site]] in config/lunar_sites.toml" }
+    $keys = @()
+    foreach ($s in $sites) {
+        foreach ($kind in @("height", "albedo")) {
+            $json = Run $cli @("plan", $configDir, $kind, $s["latitude_deg"], $s["longitude_deg"])
+            if ($LASTEXITCODE -eq 2 -and $kind -eq "albedo") { continue }  # no albedo product there (ruling R6): height only
+            if ($LASTEXITCODE -ne 0) { throw "lunar_site_tile plan failed for $($s['id']) $kind" }
+            $key = ($json -join "`n" | ConvertFrom-Json).cache_key
+            if (-not $key) { throw "lunar_site_tile plan gave no cache_key for $($s['id']) $kind" }
+            $keys += $key
+        }
+    }
+    return $keys
+}
+function Copy-PresetSiteTiles([string[]]$keys, [string]$to) {
+    New-Item -ItemType Directory -Force $to | Out-Null
+    foreach ($key in $keys) {
+        foreach ($ext in @("toml", "i16")) {
+            $src = Join-Path $Data "terrain\sites\$key.$ext"
+            if (-not (Test-Path $src)) { throw "Preset site tile $key.$ext is missing in data/terrain/sites (python tools/data_pipeline/fetch.py lunar_sites)" }
+            Copy-Item $src (Join-Path $to "$key.$ext")
+        }
+    }
+}
+if ($ListSiteTiles) {
+    foreach ($key in (Get-PresetSiteTileKeys)) {
+        foreach ($ext in @("toml", "i16")) {
+            $present = Test-Path (Join-Path $Data "terrain\sites\$key.$ext")
+            Write-Host ("{0}.{1} {2}" -f $key, $ext, $(if ($present) { "present" } else { "MISSING" }))
+        }
+    }
+    exit 0
 }
 
 # --- Godot -------------------------------------------------------------------------------------------------------
@@ -183,13 +230,15 @@ foreach ($notice in @("Copyright (c) 2017 Eric Bruneton", "Copyright (c) 2011-20
 Copy-Item (Join-Path $Root "CREDITS.md"), (Join-Path $Root "README.md"), (Join-Path $Root "README.de.md") $package
 Mirror (Join-Path $Root "config") (Join-Path $package "config") @()
 # base data: everything the game reads except the large parts; never the raw downloads, webcasts or validation. The
-# preset lunar site tiles (data/terrain/sites, Apollo 11/15/17 + Mons Mouton) ride in the base; the opt-in test sites of
-# sources.toml (lunar_test_sites: Tsiolkovskiy -20.4/129.1, 75 N 30 E; cache keys *_-2040_12910_* and *_7500_3000_*, see
-# config/lunar_site_tile.hpp) do not, even when a dev cache holds them. LDEM_64 is the ldem part below.
+# preset lunar site tiles ride in the base, and ONLY those named in config/lunar_sites.toml (their cache keys, height +
+# albedo; Get-PresetSiteTileKeys): never free-site or opt-in test-site tiles, nor .work / .parts leftovers a developer
+# cache holds. LDEM_64 is the ldem part below.
 Mirror $Data (Join-Path $package "data") @("/XD", (Join-Path $Data "raw"), (Join-Path $Data "webcasts"),
     (Join-Path $Data "validation"), (Join-Path $Data "imagery"), (Join-Path $Data "terrain\earth"),
-    (Join-Path $Data "weather"), "/XF", "README.md", "diviner_rock_abundance.toml", "diviner_rock_abundance.i16",
-    "ldem_64.toml", "ldem_64.i16", "*_-2040_12910_*", "*_7500_3000_*")
+    (Join-Path $Data "weather"), (Join-Path $Data "terrain\sites"), "/XF", "README.md", "diviner_rock_abundance.toml",
+    "diviner_rock_abundance.i16", "ldem_64.toml", "ldem_64.i16")
+$presetKeys = Get-PresetSiteTileKeys
+Copy-PresetSiteTiles $presetKeys (Join-Path $package "data	errain\sites")
 # the offline weather analog set (M8: 48 ERA5 hours downsampled to 1 deg, a few hundred MB) rides in the base data so the
 # typical-weather fallback works on a first start without internet; downloaded weather caches (data/weather/cache) do not
 $analog = Join-Path $Data "weather\analog"

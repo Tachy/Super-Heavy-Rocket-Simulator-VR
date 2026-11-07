@@ -205,6 +205,21 @@ TEST_CASE("terrain for Apollo 11 uses its 60 m tile", "[sim][lunar][terrain][dat
     CHECK(terrain->finest_resolution_within_m(a15.latitude_rad, a15.longitude_rad, 100.0) > 400.0);
 }
 
+// Final review M1: the terrains of different sites share ONE copy of the global grid (LDEM_64: 531 MB), not one each.
+TEST_CASE("the terrains of two sites share one global grid", "[sim][lunar][terrain][data]") {
+    const auto a11 = config::load_lunar_site(STARSIM_CONFIG_DIR, "apollo_11");
+    const auto a15 = config::load_lunar_site(STARSIM_CONFIG_DIR, "apollo_15");
+    if (!sim::lunar_site_tiles_present(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, a11) ||
+        !sim::lunar_site_tiles_present(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, a15)) {
+        SKIP("Apollo 11 / 15 tiles not installed");
+    }
+    const auto t11 = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, a11);
+    const auto t15 = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, a15);
+    const auto none = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);
+    CHECK(t11->global_grid().get() == t15->global_grid().get());
+    CHECK(t11->global_grid().get() == none->global_grid().get());
+}
+
 TEST_CASE("a tile is accepted for any site of its cache key (R19: exact user coordinates)", "[sim][lunar][terrain][data]") {
     // The Apollo 17 tile was built for (20.19089, 30.77168); its key 2019_3077 holds every coordinate that rounds to it.
     const auto exact = config::lunar_site_at(STARSIM_CONFIG_DIR, 20.19089 * deg, 30.77168 * deg);

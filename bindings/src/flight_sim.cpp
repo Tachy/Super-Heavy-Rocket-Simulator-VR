@@ -66,16 +66,21 @@ struct FlightSim::WindowJob {
     }
 };
 
-FlightSim::~FlightSim() {
+// Cancels every window search, stops the runner (its simulation thread may poll or join a job) and then joins the
+// search threads here, on the owning thread: a search thread never holds the last reference to its own job.
+void FlightSim::stop_window_jobs() {
     for (auto& job : window_jobs_) job.second->cancel = true;  // so the joins below do not wait for a full search
-    runner_.reset();
+    runner_.reset();  // joins the simulation thread before its session and context go
+    for (auto& job : window_jobs_) {
+        if (job.second->thread.joinable()) job.second->thread.join();
+    }
     window_jobs_.clear();
 }
 
+FlightSim::~FlightSim() { stop_window_jobs(); }
+
 void FlightSim::setup(const godot::String& config_dir) {
-    for (auto& job : window_jobs_) job.second->cancel = true;
-    runner_.reset();  // joins the old thread before its session and context go
-    window_jobs_.clear();  // cancels and joins the window searches
+    stop_window_jobs();
     config_dir_ = std::filesystem::path(config_dir.utf8().get_data());
     context_ = {};
     commands_.clear();
@@ -239,10 +244,14 @@ int64_t FlightSim::find_lunar_windows(const godot::String& mission_id, double la
         request.start = epoch(start_tdb_s);
         // The snapshot of the session's sources and flags is taken here, on its thread; the search reads only that.
         auto environment = sim::lunar_window_environment(session);
-        job->thread = std::thread([job, environment = std::move(environment), config_dir = config_dir_,
+        // A raw pointer: the thread must not own the job (its destructor would then join the thread on itself); the
+        // job outlives the thread because every owner joins it (poll, stop_window_jobs).
+        WindowJob* const raw = job.get();
+        raw->thread = std::thread([raw, environment = std::move(environment), config_dir = config_dir_,
                                    request = std::move(request)]() {
+            auto* const job = raw;
             try {
-                job->result = sim::find_lunar_landing_windows(environment, config_dir, request, [&job](double p) {
+                job->result = sim::find_lunar_landing_windows(environment, config_dir, request, [job](double p) {
                     job->progress = p;
                     return !job->cancel.load();
                 });

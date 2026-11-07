@@ -263,6 +263,13 @@ private:
     // window.
     ChainResult finish(const Candidate& c, const config::LunarLandingMission& m, time::Epoch start,
                        time::Epoch touchdown, double margin_kg, double inclination_rad, bool missed) const {
+        // the reserve of the flight that is actually taken (the start budgeted the planned pass): a negative one would
+        // be refused by start_mission, so it is never listed
+        if (margin_kg < 0.0) {
+            return {std::nullopt, report::make(report::Code::lunar_budget_short,
+                                               {report::ref("leg", "phase.lunar_leg.stay_plane_change"),
+                                                report::mass("missing", -margin_kg)})};
+        }
         const auto& day = c.daylight;
         if (touchdown < day.sunrise || touchdown + m.surface_stay_s + lunar_window_ascent_lead_s > day.sunset) {
             if (debug_enabled()) {

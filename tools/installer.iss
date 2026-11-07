@@ -107,6 +107,9 @@ Type: files; Name: "{app}\data\terrain\diviner_rock_abundance.toml"
 Type: files; Name: "{app}\data\terrain\diviner_rock_abundance.i16"
 Type: files; Name: "{app}\data\terrain\ldem_64.toml"
 Type: files; Name: "{app}\data\terrain\ldem_64.i16"
+; the earlier global lunar grid (LDEM_16, 32 MB) of upgraded installations
+Type: files; Name: "{app}\data\terrain\ldem_16.toml"
+Type: files; Name: "{app}\data\terrain\ldem_16.i16"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Components: main; Flags: ignoreversion recursesubdirs

@@ -28,5 +28,5 @@ longitude_deg = 3.63386               # [S:lroc_nac] east
 
 [[site]]
 id = "apollo_17"
-latitude_deg = 20.19089               # [S:lroc_nac] Taurus-Littow valley
+latitude_deg = 20.19089               # [S:lroc_nac] Taurus-Littrow valley
 longitude_deg = 30.77168              # [S:lroc_nac] east

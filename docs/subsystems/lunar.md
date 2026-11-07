@@ -20,7 +20,7 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   `lunar_terrain_products.toml` via `plan_site_tile`, `LunarSiteConfig::height_tile_key`). `fetch.py lola_ldem_64` fetches the
   global LOLA `LDEM_64` (473 m) whole into `data/terrain/`; `fetch.py lunar_sites` runs the core CLI `lunar_site_tile`
   for every site (height + albedo; an albedo refusal is not fatal, the global albedo is used) into
-  `data/terrain/sites/<cache key>.{toml,i16}`; `sim::load_lunar_terrain(config, data, site)` reads the global grid and the
+  `data/terrain/sites/<cache key>.{toml,i16}`; `sim::load_lunar_terrain(config, data, site)` takes the global grid (ONE shared immutable copy, 531 MB, a weak cache keyed by header path/size/time: every site's terrain and every window search share it) and reads the
   height tile of the ACTIVE site by its key (polar and simple-cylindrical tiles; a missing tile is
   `data.lunar_site_tile_missing(latitude, longitude)`, a missing global grid `data.lunar_terrain_missing`; the
   overload without a site gives the global grid alone, for orbit-only sessions; `lunar_site_tiles_present` checks
@@ -195,7 +195,7 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   approach cannot be planned): Arrest (climb) then PEG once a fresh solve steers below 0.85 radial or the ballistic
   apex reaches the insertion radius; refused when the propellant cannot reach orbit ("Abbruch nicht möglich").
   Budget (`mission::lunar_budget`, `[budget]` [D]): 120 t LLO closes; 204 t LLO refused (9.3 t short); NRHO variant
-  refused at 120 t (2.2 t short).
+  refused at 120 t (29.3 t short at Mons Mouton with `nrho_to_llo` 1,245 m/s, user 2026-11-07; 21 t with the earlier 956).
 - l5 return to Earth (plan `docs/superpowers/archive/plans/2026-10-16-lunar-l5-return.md`): mission 2 - a Block 3 ship in the
   LLO or NRHO flies TEI -> MCCs -> braking burn -> direct entry and catch at Starbase (`ship_lunar_return_llo`,
   `_nrho`), or an aerocapture ("Aircatch") into a ~400 km orbit -> perigee raise -> circularisation -> b4
@@ -306,7 +306,7 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   60.73 -> 58.60 t. NRHO screen (ruling R16): before the candidates the budget is bounded from below once - the outbound
   at `[windows] nrho_outbound_floor_mps` (3,500 m/s [D]: the planner's least 3,562 m/s over 60 d of 6-hourly starts, nightly
   check), the legs after the arrival nominal, the site's legs at 0; not closing refuses every candidate with
-  `lunar.nrho_site_unreachable` (120 t: 1.56 t short). Search time 2026-11-07 (start 2026-11-06, 24 h stay, wall incl.
+  `lunar.nrho_site_unreachable` (120 t: 11.4 t short with `nrho_to_llo` 1,245 m/s; 1.56 t with the earlier 956). Search time 2026-11-07 (start 2026-11-06, 24 h stay, wall incl.
   the site surface load): `hls_lunar_llo` Apollo 11 2.1 s, Apollo 15 1.7 s, Tsiolkovskiy 3.1 s; `hls_lunar_nrho` to
   Apollo 11 refused in < 0.1 s after the daylight scan (was 488 s).
 
@@ -401,7 +401,7 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   again; flags changed on the prototype during a search change neither the result nor its cache key; the stay plane
   change matches the site turned rigidly about the pole within 3 % (Apollo 11 / 15, 0 N 0 E, Mons Mouton); the shipped
   Mons Mouton mission closes with it (58.6 t). NRHO to Apollo 11: refused by the screen, `lunar.nrho_site_unreachable`
-  (1.56 t short at the floor). `[nightly]` the NRHO outbound over 60 d of 6-hourly starts never below the floor.
+  (11.4 t short at the floor). `[nightly]` the NRHO outbound over 60 d of 6-hourly starts never below the floor.
 
 ## Diagnostics
 - Lunar: `STARSIM_DEBUG_NRHO`, `STARSIM_DEBUG_OUTBOUND`, `STARSIM_DEBUG_LUNAR_TRANSFER`,

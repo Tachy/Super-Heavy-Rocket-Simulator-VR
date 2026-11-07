@@ -70,7 +70,7 @@ public:
     // thread of its own; the simulation goes on). result(id): {done, ok, report, progress (0..1), windows: [{
     // mission_start_tdb_s, touchdown_tdb_s, liftoff_tdb_s, sun_elevation_deg, sun_azimuth_deg, daylight_after_touchdown_s,
     // propellant_reserve_kg, llo_inclination_deg, orbit ("llo" | "nrho")}]}. Not ok: report (lunar.no_window ...,
-    // lunar.window_search_cancelled with the windows found until then). Needs the site's tile (lunar.site_tile_missing).
+    // lunar.window_search_cancelled with the windows found until then). Needs the site's tile (data.lunar_site_tile_missing).
     int64_t find_lunar_windows(const godot::String& mission_id, double latitude_deg, double longitude_deg, double stay_s,
                                double start_tdb_s);
     // Stops a running window search (its result becomes lunar.window_search_cancelled); false when `id` is none.
@@ -356,6 +356,7 @@ private:
     std::optional<bool> realtime_planning_;  // last posted value
     std::uint64_t realtime_planning_id_ = 0;
     struct WindowJob;  // a window search's thread (flight_sim.cpp)
+    void stop_window_jobs();  // cancels, stops the runner, joins every search thread (destructor, setup)
     // Main thread only. Declared before runner_ and after the ephemeris / orientations: destroyed (joined) after the runner
     // and before those sources the search reads.
     std::map<std::uint64_t, std::shared_ptr<WindowJob>> window_jobs_;

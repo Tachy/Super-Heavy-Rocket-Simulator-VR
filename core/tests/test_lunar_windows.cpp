@@ -369,6 +369,35 @@ TEST_CASE("a candidate that cannot start earlier is re-run at its later pass or 
     CHECK(listed_later >= 1);
 }
 
+// Final review I2: the reserve is recomputed from the touchdown the descent takes (later pass, stay plane change), and
+// a window whose reserve is negative would be refused by start_mission - so none is listed; a candidate that comes out
+// short is refused lunar.budget_short with the missing mass. Swept over stays and starts (the seam cannot force a
+// negative reserve without a tuned mission file; the invariant must hold wherever the chain lands).
+TEST_CASE("no window is listed with a negative reserve", "[sim][lunar][lunar_windows][terrain][data]") {
+    test::spice_session();
+    Fixture fx;
+    const auto site = config::load_lunar_site(STARSIM_CONFIG_DIR, "apollo_15");
+    if (!site_tile(site)) SKIP("Apollo 15 tile not installed");
+    const auto m = config::load_lunar_landing_mission(STARSIM_CONFIG_DIR, "hls_lunar_llo");
+    const auto env = sim::lunar_window_environment(fx.prototype);
+    const double gm = fx.ephemeris.gm_m3ps2(ephemeris::Body::Moon);
+    const double lead_s = m.flight_time_s + sim::lunar_first_pass_after_arrival_s(m, gm);
+    int evaluated = 0;
+    for (const double stay_s : {2.0 * 3600.0, 24.0 * 3600.0, 96.0 * 3600.0})
+    for (int k = 0; k < 6; ++k) {
+        const sim::LunarWindowRequest request{"hls_lunar_llo", site, stay_s, fx.utc(2026, 11, 11) + k * 4.0 * 3600.0};
+        const auto r = sim::evaluate_lunar_window_candidate(env, STARSIM_CONFIG_DIR, request, request.start + lead_s);
+        ++evaluated;
+        if (r.window) {
+            CHECK(r.window->propellant_reserve_kg >= 0.0);
+        } else if (r.cause.code == report::Code::lunar_budget_short) {
+            REQUIRE(r.cause.params.size() == 2);
+            CHECK(r.cause.params.back().value_si > 0.0);  // the missing mass
+        }
+    }
+    CHECK(evaluated == 18);
+}
+
 // Review I2: a refusal from missing data is not cached - after the download the same request searches again.
 TEST_CASE("a refusal from a missing site tile is not cached", "[sim][lunar][lunar_windows]") {
     test::spice_session();

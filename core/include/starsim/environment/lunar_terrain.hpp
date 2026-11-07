@@ -19,6 +19,9 @@ public:
     static constexpr double normal_step_m = 10.0;  // central differences for the normal (half a 20 m pixel)
 
     LunarTerrain(CylindricalGrid global, std::vector<std::shared_ptr<const LunarTile>> tiles, double sphere_radius_m);
+    // The global grid shared between terrains (one immutable copy of LDEM_64's 531 MB for every site's terrain).
+    LunarTerrain(std::shared_ptr<const CylindricalGrid> global, std::vector<std::shared_ptr<const LunarTile>> tiles,
+                 double sphere_radius_m);
     // South polar crops (the site tiles of lunar_sites.toml).
     LunarTerrain(CylindricalGrid global, std::vector<PolarStereographicTile> south_tiles, double sphere_radius_m);
 
@@ -45,11 +48,12 @@ public:
     double global_resolution_m() const;  // the global grid's spacing at the equator
     double finest_resolution_m() const;  // the smallest of the tiles' pixel scales and the global spacing
     double sphere_radius_m() const { return sphere_radius_m_; }
+    const std::shared_ptr<const CylindricalGrid>& global_grid() const { return global_; }  // shared, immutable
 
 private:
     math::Vec3 surface_point(double latitude_rad, double longitude_rad) const;
 
-    CylindricalGrid global_;
+    std::shared_ptr<const CylindricalGrid> global_;
     std::vector<std::shared_ptr<const LunarTile>> tiles_;
     double sphere_radius_m_;
     double max_height_m_ = 0.0;
