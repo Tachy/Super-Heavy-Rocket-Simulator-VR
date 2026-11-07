@@ -551,3 +551,35 @@ TEST_CASE("the shipped LLO mission budgets the stay's plane change", "[sim][luna
     CHECK(*day.lunar_budget_margin_kg < *none.lunar_budget_margin_kg);
     CHECK(*day.lunar_budget_margin_kg > 0.0);
 }
+
+// Ruling R4 (moved from Task 8): the mission started through the start options at window 1 plans the descent for the
+// listed touchdown.
+TEST_CASE("every listed Apollo 15 window flies: start the mission at window 1 and the descent plan's touchdown is within 1 h of the listed one",
+          "[sim][lunar][lunar_windows][terrain][data]") {
+    test::spice_session();
+    Fixture fx;
+    const auto site = config::load_lunar_site(STARSIM_CONFIG_DIR, "apollo_15");
+    if (!site_tile(site)) SKIP("Apollo 15 tile not installed");
+    const sim::LunarWindowRequest request{"hls_lunar_llo", site, 24.0 * 3600.0, fx.utc(2026, 11, 6)};
+    const auto t = search(fx, request);
+    REQUIRE_FALSE(t.result.windows.empty());
+    const auto& w = t.result.windows.front();
+    sim::FlightSession session{fx.ephemeris, fx.earth, STARSIM_CONFIG_DIR, {}, &fx.moon};
+    sim::StartOptions options;
+    options.lunar = sim::LunarStartOverride{site, request.stay_s, w.mission_start, w.touchdown};
+    const auto started = sim::start_mission(session, STARSIM_CONFIG_DIR, "hls_lunar_llo", {}, fx.time, options);
+    INFO(report::describe(started.refusal));
+    REQUIRE(started.return_planned);
+    CHECK(started.epoch == w.mission_start);
+    // fly until the descent is planned in the LLO
+    for (time::Epoch e = w.mission_start; !session.lunar_descent_plan() && e < w.touchdown; e += 1800.0) {
+        session.advance_to(e, 200'000'000);
+    }
+    const auto* plan = session.lunar_descent_plan();
+    REQUIRE(plan);
+    INFO(report::describe(plan->reason));
+    REQUIRE(plan->feasible);
+    std::printf("[lunar_windows]   start options: descent touchdown %+.3f h from the listed\n",
+                (plan->site_pass_epoch - w.touchdown) / 3600.0);
+    CHECK(std::abs(plan->site_pass_epoch - w.touchdown) < 3600.0);
+}

@@ -71,8 +71,16 @@ DeferredMissionStart start_mission_deferred(FlightSession& session, const std::f
             break;
         }
         case config::MissionKind::LunarLanding: {
-            const auto m = config::load_lunar_landing_mission(config_dir, mission_id);
-            auto pending = begin_lunar_landing_mission(session, config_dir, m, time.from_utc(m.epoch_utc));
+            auto m = config::load_lunar_landing_mission(config_dir, mission_id);
+            time::Epoch start = time.from_utc(m.epoch_utc);
+            const config::LunarSiteConfig* site = nullptr;
+            if (options.lunar) {
+                start = options.lunar->mission_start;
+                m.surface_stay_s = options.lunar->stay_s;
+                if (options.lunar->touchdown) m.touchdown_after_epoch_s = *options.lunar->touchdown - start;
+                site = &options.lunar->site;
+            }
+            auto pending = begin_lunar_landing_mission(session, config_dir, m, start, nullptr, site);
             if (pending.done) return {decided(session, std::move(*pending.done))};
             DeferredMissionStart d;
             d.status = pending.status;

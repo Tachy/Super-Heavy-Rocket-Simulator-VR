@@ -33,6 +33,17 @@ struct MissionStart {
     std::optional<double> lunar_stay_plane_change_mps;  // the budgeted turn back after the stay (ruling R15)
 };
 
+// A lunar landing at a chosen site, stay and window (the window search's LunarLandingWindow): replaces the mission's
+// [mission] site, [surface] stay_hours and [orbit] epoch_utc. `touchdown` (the window's): the landing the outbound
+// flight is planned for - the LLO plane is chosen through the site then ([descent] touchdown_after_epoch_h =
+// touchdown - mission_start); without it the mission file's own value (or the first pass after arrival) applies.
+struct LunarStartOverride {
+    config::LunarSiteConfig site;
+    double stay_s = 0.0;
+    time::Epoch mission_start;
+    std::optional<time::Epoch> touchdown;
+};
+
 struct StartOptions {
     // Launch missions (ascent, iss_launch, depot_launch, and tanker_flight / hls_refuel from the pad) stand on the pad
     // from `requested` and lift off at their scheduled T-0 (FlightSession::schedule_liftoff): the window's liftoff, the
@@ -44,6 +55,8 @@ struct StartOptions {
     // missions are placed at the session epoch. false: placed at the liftoff, lifting off at once (the default).
     bool wait_on_pad = false;
     double countdown_s = 0.0;
+    // lunar_landing only (other kinds ignore it): site, stay and start epoch as chosen
+    std::optional<LunarStartOverride> lunar;
 };
 
 // Starts mission `mission_id` of config/missions on `session` by its [mission] kind:

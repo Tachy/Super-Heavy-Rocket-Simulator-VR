@@ -20,6 +20,8 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/mission/lunar_orbit_transfer.hpp"
 #include "starsim/sim/lunar_landing_mission.hpp"
+#include "starsim/sim/lunar_site.hpp"
+#include "starsim/sim/lunar_windows.hpp"
 #include "starsim/sim/mission_start.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
@@ -382,6 +384,50 @@ void fly_mission_1(const char* id, double span_days, sim::LunarStep end_step) {
 
 TEST_CASE("Mission 1, LLO variant: LEO to the lunar surface and back to the LLO", "[sim][lunar][lunar_mission_flight][terrain][data][slow]") {
     fly_mission_1("hls_lunar_llo", 40.0, sim::LunarStep::InLlo);
+}
+
+// Task 9 (lunar sites): the start options carry site, stay and window; the flight lands at the site, rests for the
+// chosen stay (not the mission file's) and lifts off into the LLO.
+TEST_CASE("Apollo 17 window 1 with a 72 h stay flies to touchdown, stays 72 h and lifts off into the LLO",
+          "[sim][lunar][lunar_mission_flight][terrain][data][slow]") {
+    test::spice_session();
+    spice::SpiceEphemeris ephemeris;
+    auto earth = spice::SpiceOrientation::earth();
+    auto moon_me = spice::SpiceOrientation::moon_mean_earth();
+    spice::SpiceTimeConverter time;
+    const auto site = config::load_lunar_site(STARSIM_CONFIG_DIR, "apollo_17");
+    if (!sim::lunar_site_tiles_present(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, site)) SKIP("Apollo 17 tile not installed");
+    sim::FlightSession session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon_me};
+    const double stay_s = 72.0 * 3600.0;
+    const sim::LunarWindowRequest request{"hls_lunar_llo", site, stay_s, time.from_utc({2026, 11, 6, 0, 0, 0.0})};
+    const auto found = sim::find_lunar_landing_windows(session, STARSIM_CONFIG_DIR, request, [](double) { return true; });
+    if (found.refusal) INFO(report::describe(*found.refusal));
+    REQUIRE_FALSE(found.windows.empty());
+    const auto& w = found.windows.front();
+    sim::StartOptions options;
+    options.lunar = sim::LunarStartOverride{site, stay_s, w.mission_start, w.touchdown};
+    const auto s = sim::start_mission(session, STARSIM_CONFIG_DIR, "hls_lunar_llo", {}, time, options);
+    INFO(report::describe(s.refusal));
+    REQUIRE(s.return_planned);
+    CHECK(s.epoch == w.mission_start);
+    const auto* placed = session.lunar_landing_site();
+    REQUIRE(placed);
+    CHECK_THAT(placed->config.latitude_rad, WithinAbs(site.latitude_rad, 1e-12));
+    std::optional<time::Epoch> landed, lifted;
+    for (time::Epoch t = w.mission_start; t < w.liftoff + 2.0 * 86400.0 && !(lifted && session.lunar_step() == sim::LunarStep::InLlo);
+         t += 1200.0) {
+        session.advance_to(t, 200'000'000);
+        const auto step = session.lunar_step();
+        if (!landed && (step == sim::LunarStep::Landed || step == sim::LunarStep::SurfaceStay)) landed = session.epoch();
+        if (landed && !lifted && step == sim::LunarStep::Ascent) lifted = session.epoch();
+    }
+    INFO(report::describe(session.lunar_status()));
+    REQUIRE(landed);
+    REQUIRE(lifted);
+    CHECK(std::abs(*landed - w.touchdown) < 3600.0);
+    CHECK(std::abs((*lifted - *landed) - stay_s) < 1800.0);  // sampled every 20 min
+    CHECK(session.lunar_touchdown()->outcome == sim::LegTouchdown::Landed);
+    CHECK(session.lunar_step() == sim::LunarStep::InLlo);
 }
 
 // Probe for the mission epochs (plan l4 Task 9): STARSIM_LUNAR_MISSION=<id>, STARSIM_LUNAR_EPOCH_SHIFT_D=<days added
