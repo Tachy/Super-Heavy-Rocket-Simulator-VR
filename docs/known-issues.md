@@ -149,8 +149,6 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - Planned (user 2026-10-27): milestone M11 (after M7 cockpit and M10 sound design) holds the rest of the weather - part
   2 rain / snow / fog / lightning / weather-dependent haze (small variant: climatology AOD plus humidity growth, a few
   precomputed table sets) / city light on clouds; part 3 GOES patterns; part 4 wind / density and launch rules.
-- `tools/package.ps1` packs `data/models` unchecked: a stale or missing local model would ship in the installer. Open (review
-  2026-11-01 F5; fix: stop packaging when the manifest hash does not match `build_models.input_hash`).
 
 - Dorsal raceway vs transfer connectors (plan 2026-11-04, Tasks 3 / 4; USER DECISION OPEN): the Block 3 raceway tube lies on the
   dorsal centreline and the configs put both connectors on y = 0 (stations 8 and 24 m), so the tube would run into the connector

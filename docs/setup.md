@@ -52,7 +52,9 @@ powershell -ExecutionPolicy Bypass -File tools/build.ps1 -NoBindings -TestFilter
 external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --path game --script res://tests/smoke_test.gd
 ```
 - Run `smoke_test.gd` alone, not beside a parallel ctest run: its Falcon 9 ASDS planning waits on a 120 s wall-clock `wait_idle` and overruns under CPU load (the 5 ASDS checks then fail).
-- Release build (sibling pattern): `tools/package.ps1 [-Version x.y.z] [-SkipTests] [-NoInstaller]` builds the
+- Release build (sibling pattern): `tools/package.ps1 [-Version x.y.z] [-SkipTests] [-NoInstaller]` first stops when
+  `python tools/structures/build_models.py --check` finds a stale or incomplete set in `data/models` (manifest input
+  hash recomputed with the recorded Blender version, every output present; no Blender needed), then builds the
   double-precision release template once (`python -m SCons platform=windows target=template_release precision=double
   production=yes` in external/godot, ~5 min), core + extension, smoke test, exports `game/export_presets.cfg`, lays out
   `build/package` (exe next to `config/` + base `data/`; `Paths` uses the executable's folder in exported builds),

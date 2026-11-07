@@ -148,6 +148,11 @@ if (-not (Test-Path (Join-Path $Data "spice"))) { throw "data/ is missing: run p
 foreach ($part in @("terrain\earth", "imagery\earth\index.toml", "timezones\zone_grid.bin", "timezones\zones.json")) {
     if (-not (Test-Path (Join-Path $Data $part))) { throw "data/$part is missing: run python tools/data_pipeline/fetch.py first" }
 }
+# data/models ships as it is: every model set must match its sources (manifest input hash, all output files), or a stale
+# or missing model would go into the installer.
+$out = Run "python" @((Join-Path $Root "tools\structures\build_models.py"), "--check")
+$out | ForEach-Object { Write-Host "  $_" }
+if ($LASTEXITCODE -ne 0) { throw "data/models is stale or incomplete (see above): rebuild with python tools/structures/build_models.py [--vehicle <id>]" }
 
 # --- 1. export template ------------------------------------------------------------------------------------------
 Step "Export template"

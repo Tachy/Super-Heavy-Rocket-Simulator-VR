@@ -21,6 +21,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -402,14 +403,70 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
     return 0
 
 
+PAD_SET = DEFAULT_OUT.name  # the Pad B model set's directory under data/models
+
+
+def model_sets(generators: Path = vehicle_spec.GENERATORS_TOML) -> list:
+    """The model sets the game ships: Pad B and every vehicle of generators.toml that has generators."""
+    with open(generators, "rb") as f:
+        table = tomllib.load(f)
+    return [PAD_SET, *sorted(v for v, row in table.items() if row.get("generators"))]
+
+
+def expected_set(set_id: str, version: str, vehicles_dir: Path = vehicle_spec.VEHICLES) -> tuple:
+    """(input hash, output files) a model set built with Blender `version` from the current sources has."""
+    if set_id == PAD_SET:
+        return input_hash(DEFAULT_CONFIG, version), OUTPUTS
+    table = vehicle_spec.generator_table(set_id)
+    spec = vehicle_spec.load(set_id, vehicles_dir)
+    return vehicle_hash(vehicle_spec.dumps(spec), version, table), vehicle_outputs(spec, table)
+
+
+def stale_models(models_dir: Path = ROOT / "data" / "models", sets: list | None = None,
+                 vehicles_dir: Path = vehicle_spec.VEHICLES) -> list:
+    """One line per model set in `models_dir` that does not match its sources: no manifest, a missing output file, or
+    an input hash that differs from the one recomputed with the Blender version the manifest records (so no Blender is
+    needed; a Blender upgrade alone does not count). Empty when every set is current (the packaging gate)."""
+    problems = []
+    for set_id in sets if sets is not None else model_sets():
+        out = models_dir / set_id
+        try:
+            manifest = json.loads((out / MANIFEST).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            problems.append(f"{set_id}: no readable {MANIFEST} in {out}")
+            continue
+        digest, outputs = expected_set(set_id, str(manifest.get("blender", "")), vehicles_dir)
+        missing = [f for f in outputs if not (out / f).is_file()]
+        if manifest.get("input_hash") != digest:
+            problems.append(f"{set_id}: built from older sources (input hash differs)")
+        if missing:
+            problems.append(f"{set_id}: missing {', '.join(missing)}")
+    return problems
+
+
+def check(models_dir: Path = ROOT / "data" / "models") -> int:
+    problems = stale_models(models_dir)
+    for p in problems:
+        print(f"build_models --check: {p}")
+    if problems:
+        print("build_models --check: rebuild with python tools/structures/build_models.py [--vehicle <id>]")
+        return 1
+    print(f"build_models --check: all {len(model_sets())} model sets current ({models_dir})")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--check", action="store_true",
+                    help="only verify that data/models matches the sources (exit 1 if a set is stale or missing)")
     ap.add_argument("--force", action="store_true", help="regenerate even when the manifest hash matches")
     ap.add_argument("--vehicle", default=None, help="vehicle id: build its models instead of the Pad B ones")
     ap.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--blender", default=None)
     a = ap.parse_args(argv)
+    if a.check:
+        return check(a.out or ROOT / "data" / "models")
     if a.vehicle:
         return build_vehicle(a.vehicle, a.out, a.force, a.blender)
     return build(a.config, a.out or DEFAULT_OUT, a.force, a.blender)

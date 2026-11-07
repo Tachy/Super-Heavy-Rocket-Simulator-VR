@@ -108,3 +108,7 @@ Resolved or superseded by later entries (trim margin green since 2026-11-06, ent
   since the preferred 5 deg touchdown slope (2026-11-07);
 - First sentence of the `cloud_far_check.gd` entry (2026-10-27), replaced 2026-11-07 (`dbe01c3b`): the Moon-view case needs `data/weather/cache/era5_1089330.wthr`, which the cache
   eviction removed; it prints a SKIP line (environmental; refetch it or pick a cached epoch).
+
+- (fixed 2026-11-07: `package.ps1` runs `build_models.py --check` first)
+- `tools/package.ps1` packs `data/models` unchecked: a stale or missing local model would ship in the installer. Open (review
+  2026-11-01 F5; fix: stop packaging when the manifest hash does not match `build_models.input_hash`).
