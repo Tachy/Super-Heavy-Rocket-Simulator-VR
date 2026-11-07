@@ -102,11 +102,12 @@ on top; it replaced the interim `GroundPatch`.
   - Open ocean (look fixes T3, `earth_albedo.water_optics_sea`, `OCEAN_RRS_SR`, `BMNG_OCEAN_FILL_COUNTS`): the Blue
     Marble's sea is a flat fill colour (counts (2, 5, 20) in 85 % of the 9.61 M sea pixels), not a measurement; the
     sea pixels take the water-leaving reflectance pi Rrs of open oligotrophic Case-1 water (chlorophyll ~0.1 mg m^-3,
-    Morel & Maritorena 2001 model spectra [S], Rrs 443 nm 0.0095 sr^-1 = the SeaWiFS clear-water nLw 1.76-1.83 / F0
+    values read off the Morel & Maritorena 2001 model spectra [E], Rrs 443 nm 0.0095 sr^-1 = the SeaWiFS clear-water nLw 1.76-1.83 / F0
     [S], the OC3M band ratio of the set gives chlorophyll 0.10 [S: O'Reilly & Werdell 2019]) at the channels' MODIS
     band centres (645 / 555 / 469 nm): [0.00079, 0.00597, 0.0251], luminance 0.0063 - plus the pixel's brightness
-    above the fill through the same tables (shallow banks, sediment plumes, sea ice keep their excess; JPEG ringing
-    below the fill is clear water). Shipped texture: sea median [0.0006, 0.0061, 0.0252] (8-bit sRGB), luminance
+    above the fill through the same tables (shallow banks, sediment plumes keep their excess; JPEG ringing below the fill is clear
+    water). Sea ice (luminance excess over the fill > 0.15, `SEA_ICE_EXCESS` [E]: pack ice reads 0.3-0.9, the brightest
+    banks 0.08-0.12) keeps the imagery and is not water in `earth_water.png` (Lambertian, no Fresnel sky / glint). Shipped texture: sea median [0.0006, 0.0061, 0.0252] (8-bit sRGB), luminance
     median 0.0063, 95th percentile 0.0105, 99th 0.035. The body colour is the water's nadir reflectance; the sea model
     adds the surface (Fresnel sky, glint). Land is unchanged except the JPEG's ringing within ~8 texels of a coast
     (luminance p5-p95 -7..+6 %, the JPEG's own error there is ~9 %). The tiles need no retile: their water pixels
@@ -202,8 +203,11 @@ on top; it replaced the interim `GroundPatch`.
   Earth (`earth_surface.gdshaderinc`, beyond 1.5e7 m; with the far-field clouds the terrain's cloud light: Sun x
   cloud.x, sky light and reflected sky x cloud.z plus the deck's glow) and of the sky's model ground (`sky.gdshader`:
   the radiance cube's ground bounce and earthshine), where the global water fraction says sea
-  (`data/textures/earth_water.png`, 8-bit, 1 - `land_fraction` on the day texture's grid, written by `prepare.py`;
-  missing: those two draw the sea as land, with a warning). So the ocean keeps the same body, sky reflection and glint
+  (`data/textures/earth_water.png`, 8-bit, 1 - `land_fraction` on the day texture's grid, 0 where the day texture takes
+  land (the same 0.5 rule) and on sea ice, written by `prepare.py` (fails without the ETOPO relief + geoid;
+  `tools/package.ps1` refuses a package without it); missing at run time: those two draw the sea as land, with a
+  warning). The L2A sea inside a Sentinel-2 box embedded in the day texture also carries its own sky reflection (counted
+  twice, as on the terrain). So the ocean keeps the same body, sky reflection and glint
   from the pad to the start view (before T3 the scaled-space Earth drew the sea as a Lambertian body only, no glint).
 - **Clouds** (Task 9, `weather-clouds.md` "Light"): `terrain_earth.gdshader` includes `clouds.gdshaderinc` and
   `cloud_light.gdshaderinc` inside `CLOUD_LIGHT_BEGIN` / `_END` blocks (active only while `cloud_enabled`): the Sun

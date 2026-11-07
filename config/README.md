@@ -481,7 +481,7 @@ map the Blue Marble Next Generation (Dec 2004) day texture's 8-bit counts to sur
 to MODIS MCD43A4 NBAR of 2004-12-16; fit errors in the file's header). `prepare.py` writes `data/textures/earth_day.jpg` as
 reflectance, sRGB-encoded: land from the MODIS NBAR monthly-median climatology (`fetch.py earth_albedo`,
 `data/raw/earth_albedo_modis_2025.npz`), the tables wherever it has no samples (sea, sea ice); on the sea the
-open-ocean water-leaving reflectance (`earth_albedo.OCEAN_RRS_SR` [S]) replaces the Blue Marble's fill. It also writes
+open-ocean water-leaving reflectance (`earth_albedo.OCEAN_RRS_SR` [E], read off Morel & Maritorena 2001, J. Geophys. Res. 106(C4); cross-checked with O'Reilly & Werdell 2019 OC3M and SeaWiFS nLw) replaces the Blue Marble's fill. It also writes
 `data/textures/earth_water.png` (water fraction). The shaders decode every
 Earth ground texture once, with the GPU's sRGB decode (`source_color`).
 

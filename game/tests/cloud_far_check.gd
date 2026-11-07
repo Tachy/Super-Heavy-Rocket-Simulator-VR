@@ -11,9 +11,11 @@
 #      outside 1.5e7 m: the game's cloud pass (the baked volume: every cloud there in its flat levels) against the far
 #      field, the 5 x 5 block luminance at seven Earth points (Sun 20-75 deg up) within 5 %, a broken layer (cf 0.4) as
 #      21 x 21 block means within 5 %; points where the ground itself steps across the limit by more than the
-#      tolerance are listed, not asserted - and the cloudless ground itself is asserted within the same tolerance at
-#      all seven points (look fixes T3: the scaled-space sea has the terrain's sea model, glint included); the volume pass draws only inside (cloud_enabled), the far field only outside
-#      (earth_clouds.gdshader); the CPU light factors are (1, 0, 1) outside;
+#      tolerance are listed, not asserted - and, weather off, the cloudless ground itself is asserted within the same
+#      tolerance at all seven points (look fixes T3: the scaled-space sea has the terrain's sea model, glint included);
+#      the volume pass draws only inside (cloud_enabled), the far field only outside (earth_clouds.gdshader); the
+#      CPU light factors are (1, 0, 1) outside; the ground is measured in the runs that get a snapshot, with the
+#      weather cleared first;
 #   4. from the Moon's distance (3.844e8 m) with an ERA5 snapshot (cached 2024-04-08 18:00 UTC, else the
 #      service fetches the epoch's pair, 14:00 UTC, see _era5_file): five cells the snapshot
 #      has cloudy are brighter with the weather on than off (ratio >= 1.3), five clear cells unchanged (2 %);

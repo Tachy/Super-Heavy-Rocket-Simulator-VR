@@ -38,7 +38,9 @@ def prepare_textures() -> None:
 
         earth_albedo.write_day_texture(REPO_ROOT, TEXTURES / "earth_day.jpg")
         if not earth_albedo.write_water_texture(REPO_ROOT, TEXTURES / "earth_water.png"):
-            print("earth_water: no ETOPO relief / geoid, skipped (the scaled-space sea is drawn as land)")
+            # the scaled-space sea needs it (world.gd draws the sea as land without it, tools/package.ps1 refuses to package)
+            raise SystemExit("earth_water: no ETOPO relief / geoid (python tools/data_pipeline/fetch.py earth_terrain "
+                             "geoid_egm2008), data/textures/earth_water.png cannot be written")
     else:
         print("earth_day: raw file missing (fetch.py earth_day), skipped")
     if (RAW / "moon_color_4k.tif").exists():

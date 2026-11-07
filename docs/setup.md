@@ -25,7 +25,9 @@ One-time setup:
 python tools/data_pipeline/fetch.py        # a bare fetch also bakes data/textures/moon_detail (procedural Moon regolith / rock textures, 4.4 MB,
                                            # ~10 s, no download; `fetch.py --force moon_detail` rebakes; tests: python -m pytest tools/moon_textures).
                                            # tools/package.ps1 ships them with the base data (data/textures is mirrored whole)
-python tools/data_pipeline/prepare.py      # converts data/raw -> data/textures, data/stars (needs Pillow)
+python tools/data_pipeline/prepare.py      # converts data/raw -> data/textures, data/stars (needs Pillow); also writes data/textures/earth_day.jpg
+                                           # and earth_water.png (the scaled-space sea mask, needs the ETOPO relief + EGM2008 geoid:
+                                           # fetch.py earth_terrain geoid_egm2008; prepare.py fails without them, package.ps1 gates on it)
 
 # Engine sources (git-ignored, pinned)
 git clone --depth 1 --branch 4.7.2-stable https://github.com/godotengine/godot.git external/godot   # ed1daf0

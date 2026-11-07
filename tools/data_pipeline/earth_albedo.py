@@ -77,8 +77,8 @@ CLIMATOLOGY_FILE = REPO_ROOT / "data" / "raw" / f"earth_albedo_modis_{CLIMATOLOG
 # water-leaving reflectance of open Case-1 water instead (`water_optics_sea`); the renderer adds the surface's Fresnel
 # sky reflection and the sun glint (water.gdshaderinc).
 # [E] Remote-sensing reflectance Rrs (sr^-1) of oligotrophic Case-1 water, chlorophyll ~0.1 mg m^-3 (the subtropical gyres,
-# most of the open-ocean area): read from the Case-1 model spectra of Morel & Maritorena 2001 (J. Geophys. Res. 106(C4),
-# 7163-7180) [S]; consistent with the SeaWiFS clear-water normalised water-leaving radiance at 443 nm, 1.76-1.83
+# most of the open-ocean area): the values are read off the Case-1 model spectra of Morel & Maritorena 2001 (J. Geophys.
+# Res. 106(C4), 7163-7180), not tabulated there (hence [E], the publication is the source); consistent with the SeaWiFS clear-water normalised water-leaving radiance at 443 nm, 1.76-1.83
 # uW cm^-2 nm^-1 sr^-1 / F0 189.9 = 0.0093-0.0096 sr^-1 (NASA OBPG vicarious calibration, Gordon & Clark 1981
 # definition) [S]; the NASA OC3M band ratio of these values gives chlorophyll 0.10 mg m^-3 (test_earth_albedo).
 OCEAN_RRS_WAVELENGTHS_NM = (443.0, 469.0, 488.0, 547.0, 555.0, 645.0, 667.0)
@@ -90,6 +90,11 @@ OC3M_COEFFICIENTS = (0.2424, -2.7423, 1.8017, 0.0015, -1.2280)
 # [D] The Blue Marble Next Generation's ocean fill: the counts of 85 % of the sea pixels (8.21 M of 9.61 M, ETOPO water
 # rule); brighter sea pixels (shallow banks, sediment, sea ice) keep their brightness above it.
 BMNG_OCEAN_FILL_COUNTS = (2, 5, 20)
+# [E] Sea ice: a Blue Marble sea pixel whose luminance exceeds the fill's by more than this (reflectance). Pack ice and
+# snow-covered floes read 0.3-0.9, the brightest shallow banks / sediment plumes 0.08-0.12 (Bahamas 0.079, Amazon 0.019),
+# so 0.15 separates a Lambertian ice surface from water with a bright body. Ice keeps the imagery's reflectance and is
+# not water in earth_water.png (no Fresnel sky, no glint on ice).
+SEA_ICE_EXCESS = 0.15
 
 
 # ----------------------------------------------------------------------------------------------- transfer
@@ -653,24 +658,51 @@ def oc3m_chlorophyll(rrs443: float, rrs488: float, rrs547: float) -> float:
 def water_optics_sea(rho: np.ndarray, sea: np.ndarray, luts: np.ndarray) -> np.ndarray:
     """The sea pixels (`sea`, h x w) of a tabled Blue Marble reflectance: the open-ocean water-leaving reflectance plus
     the pixel's brightness above the Blue Marble's ocean fill (through the same tables), per channel - the fill becomes
-    clear water, shallow banks, sediment plumes and sea ice keep their excess (a darker pixel - JPEG ringing at the fill
-    - is clear water). In place; returns rho."""
+    clear water, shallow banks and sediment plumes keep their excess (a darker pixel - JPEG ringing at the fill - is
+    clear water). Sea ice (`sea_ice`) is not water: it keeps the imagery. In place; returns rho."""
+    sea = sea & ~sea_ice(rho, luts)
     fill = apply_lut(np.array([[BMNG_OCEAN_FILL_COUNTS]], dtype=np.uint8), luts)[0, 0]
     rho[sea] = open_ocean_reflectance() + np.maximum(rho[sea] - fill, 0.0)
     return rho
 
 
-def write_water_texture(repo_root: Path, out_path: Path, shape: tuple[int, int] = (2700, 5400)) -> bool:
-    """The global water fraction (8-bit PNG, 255 = all water) on the day texture's grid: 1 - `land_fraction`, the
-    renderer's sea rule. The scaled-space Earth and the sky's ground draw the sea model with it (the terrain has its own
-    per-node mask from the core). False without the relief / geoid."""
-    from PIL import Image
+def sea_ice(rho: np.ndarray, luts: np.ndarray) -> np.ndarray:
+    """Pixels (h x w) of a tabled Blue Marble reflectance whose luminance exceeds the ocean fill's by `SEA_ICE_EXCESS`."""
+    fill = apply_lut(np.array([[BMNG_OCEAN_FILL_COUNTS]], dtype=np.uint8), luts)[0, 0]
+    return (rho - fill) @ LUMA_WEIGHTS > SEA_ICE_EXCESS
 
+
+def water_fraction(repo_root: Path, shape: tuple[int, int] = (2700, 5400)) -> np.ndarray | None:
+    """The water fraction per day-texture pixel (0..1) the shaders draw the sea model with: 1 - `land_fraction`, but 0
+    where the day texture takes land (the same 0.5 rule as the sea replacement, so no sea model on a land albedo) and on
+    sea ice (`sea_ice` of the Blue Marble, when its raw file exists). None without the relief / geoid."""
     frac = land_fraction(repo_root, *shape)
     if frac is None:
+        return None
+    water = np.where(frac >= CLIMATOLOGY_MIN_LAND_FRACTION, 0.0, 1.0 - frac)
+    raw = repo_root / "data" / "raw" / "earth_day_5400.jpg"
+    if raw.exists():
+        from PIL import Image
+
+        with Image.open(raw) as img:
+            counts = np.asarray(img.convert("RGB"))
+        if counts.shape[:2] == water.shape:
+            luts = load_luts(repo_root / "config" / "earth_albedo.toml")
+            water[sea_ice(apply_lut(counts, luts), luts)] = 0.0
+    return water
+
+
+def write_water_texture(repo_root: Path, out_path: Path, shape: tuple[int, int] = (2700, 5400)) -> bool:
+    """The global water fraction (8-bit PNG, 255 = all water) on the day texture's grid (`water_fraction`). The
+    scaled-space Earth and the sky's ground draw the sea model with it (the terrain has its own per-node mask from the
+    core). False without the relief / geoid."""
+    from PIL import Image
+
+    water = water_fraction(repo_root, shape)
+    if water is None:
         return False
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(np.rint((1.0 - frac) * 255.0).astype(np.uint8), "L").save(out_path, "PNG", optimize=True)
+    Image.fromarray(np.rint(water * 255.0).astype(np.uint8), "L").save(out_path, "PNG", optimize=True)
     return True
 
 

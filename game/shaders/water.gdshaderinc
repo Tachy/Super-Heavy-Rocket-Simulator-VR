@@ -50,9 +50,14 @@ float water_coverage(float mask) {
 	return smoothstep(WATER_MASK_THRESHOLD - WATER_MASK_HALF_WIDTH, WATER_MASK_THRESHOLD + WATER_MASK_HALF_WIDTH, mask);
 }
 
+// Fresnel reflectance of the flat surface at normal incidence, ((n - 1) / (n + 1))^2 (0.0201).
+float water_nadir_fresnel() {
+	float amplitude = (WATER_REFRACTIVE_INDEX - 1.0) / (WATER_REFRACTIVE_INDEX + 1.0);
+	return amplitude * amplitude;
+}
+
 float water_fresnel(float cos_theta) {
-	float r0 = (WATER_REFRACTIVE_INDEX - 1.0) / (WATER_REFRACTIVE_INDEX + 1.0);
-	r0 *= r0;
+	float r0 = water_nadir_fresnel();
 	return r0 + (1.0 - r0) * pow(1.0 - clamp(cos_theta, 0.0, 1.0), 5.0);
 }
 
@@ -61,8 +66,7 @@ float water_fresnel(float cos_theta) {
 // (1 + 22.7 s^1.5)], with Schlick's r0 kept so that sigma_v = 0 gives water_fresnel. At grazing view a rough sea
 // reflects ~1/2, not all, of the sky: the far sea is darker than the sky above the horizon (a visible sea horizon).
 float water_mean_fresnel(float cos_theta, float sigma_v) {
-	float r0 = (WATER_REFRACTIVE_INDEX - 1.0) / (WATER_REFRACTIVE_INDEX + 1.0);
-	r0 *= r0;
+	float r0 = water_nadir_fresnel();
 	float mean = pow(1.0 - clamp(cos_theta, 0.0, 1.0), 5.0 * exp(-2.69 * sigma_v)) / (1.0 + 22.7 * pow(sigma_v, 1.5));
 	return r0 + (1.0 - r0) * mean;
 }
@@ -126,9 +130,9 @@ vec3 water_radiance(vec3 body, vec3 n, vec3 wave_n, float resolved_variance, vec
 			GLINT_MIN_SIGMA2);
 	float fresnel_view = water_mean_fresnel(dot(wave_n, to_camera), sqrt(0.5 * sigma2));
 	// The water-leaving radiance through the surface: L_w = L_u (1 - F(theta')) / n^2 [S: A. Morel, IOCCG-6 meeting 2001,
-	// "Normalized water-leaving radiance"] - the body colour is the nadir value, hence (1 - F) / (1 - r0).
-	float r0 = (WATER_REFRACTIVE_INDEX - 1.0) / (WATER_REFRACTIVE_INDEX + 1.0);
-	vec3 diffuse = body * (sun_normal * max(sun_up, 0.0) * sunlit + sky_light) * ((1.0 - fresnel_view) / (1.0 - r0 * r0));
+	// "Normalized water-leaving radiance"] - the body colour is the nadir value, hence (1 - F) / (1 - F_nadir).
+	vec3 diffuse = body * (sun_normal * max(sun_up, 0.0) * sunlit + sky_light) *
+			((1.0 - fresnel_view) / (1.0 - water_nadir_fresnel()));
 	vec3 sky = sky_reflected * fresnel_view;
 
 	// Cox-Munk glint: BRDF F p(tan beta) G / (4 cos_s cos_v cos^4 beta), p = exp(-tan^2 beta / s2) / (pi s2), G the

@@ -123,23 +123,28 @@ def test_embed_sentinel2_takes_the_box_and_feathers_outside(tmp_path):
     assert out[px(26.0, -90.0)] == pytest.approx([0.1] * 3)  # beyond the feather: untouched
 
 
+def _write_relief(root: Path, h: int, w: int) -> None:
+    """West half 20 m ellipsoidal (land over a 10 m geoid), east half -100 m (sea)."""
+    (root / "data" / "terrain" / "earth").mkdir(parents=True)
+    (root / "data" / "geoid").mkdir(parents=True)
+    relief = np.full((2 * h + 1, 2 * w), -100, dtype="<i2")
+    relief[:, :w] = 20
+    relief.tofile(root / "data" / "terrain" / "earth" / "r.i16")
+    geoid = np.full((5, 10), 1000, dtype="<i2")  # 10 m undulation (dn 0.01 m)
+    geoid.tofile(root / "data" / "geoid" / "g.i16")
+
+    def header(name, lines, samples):
+        return (f'[grid]\nheights = "{name}"\nlines = {lines}\nsamples = {samples}\n'
+                f'dn_scale_m = {1.0 if name == "r.i16" else 0.01}\nnorth_latitude_deg = 90.0\nwest_longitude_deg = -180.0\n'
+                f'step_latitude_deg = {180.0 / (lines - 1)}\nstep_longitude_deg = {360.0 / samples}\n')
+    (root / "data" / "terrain" / "earth" / "global_relief.toml").write_text(header("r.i16", 2 * h + 1, 2 * w))
+    (root / "data" / "geoid" / "egm2008_25.toml").write_text(header("g.i16", 5, 10))
+
+
 def test_land_fraction_from_relief_above_the_geoid(tmp_path):
     """3 x 3 relief nodes per pixel; land = ellipsoidal height minus the geoid above the core's water threshold."""
     h, w = 4, 8
-    (tmp_path / "data" / "terrain" / "earth").mkdir(parents=True)
-    (tmp_path / "data" / "geoid").mkdir(parents=True)
-    relief = np.full((2 * h + 1, 2 * w), -100, dtype="<i2")
-    relief[:, :w] = 20  # west half: 20 m ellipsoidal
-    relief.tofile(tmp_path / "data" / "terrain" / "earth" / "r.i16")
-    geoid = np.full((5, 10), 1000, dtype="<i2")  # 10 m undulation (dn 0.01 m)
-    geoid.tofile(tmp_path / "data" / "geoid" / "g.i16")
-
-    def header(name, lines, samples):
-        return (f'[grid]\nheights = "{name}"\nlines = {lines}\nsamples = {samples}\ndn_scale_m = {1.0 if name == "r.i16" else 0.01}\n'
-                f'north_latitude_deg = 90.0\nwest_longitude_deg = -180.0\nstep_latitude_deg = {180.0 / (lines - 1)}\n'
-                f'step_longitude_deg = {360.0 / samples}\n')
-    (tmp_path / "data" / "terrain" / "earth" / "global_relief.toml").write_text(header("r.i16", 2 * h + 1, 2 * w))
-    (tmp_path / "data" / "geoid" / "egm2008_25.toml").write_text(header("g.i16", 5, 10))
+    _write_relief(tmp_path, h, w)
     frac = ea.land_fraction(tmp_path, h, w)
     assert frac[:, 1].tolist() == pytest.approx([1.0] * h)  # 20 m - 10 m: land
     assert frac[:, 5].tolist() == pytest.approx([0.0] * h)
@@ -368,3 +373,38 @@ def test_shader_fallback_is_the_open_ocean():
     m = re.search(r"uniform vec3 deep_water = vec3\(([^)]*)\);", text)
     values = [float(v) for v in m.group(1).split(",")]
     assert values == pytest.approx(ea.open_ocean_reflectance().tolist(), rel=5e-3)
+
+
+def test_sea_ice_is_not_open_ocean_water():
+    """Pack ice (excess 0.3+) keeps the imagery and has water fraction 0; a bright bank (excess ~0.08) stays water."""
+    luts = np.tile(np.linspace(0.0, 1.0, 256), (3, 1))
+    counts = np.array([[ea.BMNG_OCEAN_FILL_COUNTS, (10, 30, 90), (200, 210, 220)]], dtype=np.uint8)
+    rho = ea.apply_lut(counts, luts)
+    assert ea.sea_ice(rho, luts).tolist() == [[False, False, True]]
+    sea = np.array([[True, True, True]])
+    out = ea.water_optics_sea(rho.copy(), sea, luts)
+    assert out[0, 2].tolist() == pytest.approx(rho[0, 2].tolist())  # ice: untouched
+    assert out[0, 1, 2] > ea.open_ocean_reflectance()[2]  # bank: water body plus its excess
+
+
+def test_water_texture_masks_land_and_ice(tmp_path):
+    """255 = ocean, land pixels (>= 0.5 land) 0, ice 0; no relief -> False and no file."""
+    from PIL import Image
+
+    h, w = 4, 8
+    _write_relief(tmp_path, h, w)
+    ice = np.full((h, w, 3), 8, dtype=np.uint8)
+    ice[:] = ea.BMNG_OCEAN_FILL_COUNTS
+    ice[0, 5] = (230, 235, 240)
+    (tmp_path / "data" / "raw").mkdir(parents=True)
+    Image.fromarray(ice, "RGB").save(tmp_path / "data" / "raw" / "earth_day_5400.jpg", quality=100, subsampling=0)
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "earth_albedo.toml").write_text(ea.CONFIG_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+    out = tmp_path / "t" / "water.png"
+    assert ea.write_water_texture(tmp_path, out, (h, w))
+    mask = np.asarray(Image.open(out))
+    assert mask[:, 1].tolist() == [0] * h  # land
+    assert mask[1:, 5].tolist() == [255] * (h - 1)  # ocean
+    assert mask[0, 5] == 0  # ice
+    assert not ea.write_water_texture(tmp_path / "none", tmp_path / "x.png", (h, w))
+    assert not (tmp_path / "x.png").exists()
