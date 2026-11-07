@@ -27,3 +27,6 @@ entry_interface_km = 120.0
 entry_flight_path_deg = -2.0    # [E] d3: inside the crew's 4 g at L/D 0.2
 nominal_bank_deg = 30.0         # [E] d3
 search_window_h = 48.0
+
+[crew]
+count = 4   # [S] Crew Dragon seats four (Crew-n flights fly 4; the cockpit has seats s1..s4)

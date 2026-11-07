@@ -22,3 +22,6 @@ launch = "falcon9_crew_dragon_iss"  # the launch whose separation state starts t
 [phasing]
 mission_limit_h = 28.0              # [S] crew missions dock 24-28 h after the launch
 earliest_arrival_h = 0.0            # 0: the earliest window (cheapest, i3 correction 3)
+
+[crew]
+count = 4   # [S] Crew Dragon seats four (Crew-n flights fly 4; the cockpit has seats s1..s4)

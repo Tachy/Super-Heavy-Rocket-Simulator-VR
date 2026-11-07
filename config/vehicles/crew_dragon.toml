@@ -13,6 +13,7 @@ splashdown_speed = "Crew-7 coverage (Spectrum News 2024-03-11): ~16 mph at splas
 id = "crew_dragon"
 propellant = "mmh_nto"
 stages_bottom_to_top = ["trunk", "capsule"]
+cockpit = "crew_dragon"   # [D] cabin definition config/cockpits/crew_dragon.toml (game only; the core ignores it)
 
 [[stage]]
 id = "trunk"

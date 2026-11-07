@@ -24,3 +24,6 @@ periapsis_km = 200.0                    # [S] Crew Dragon insertion ~200 x 210 k
 apoapsis_km = 210.0
 inclination_deg = 51.6                  # ISS plane
 northerly = true
+
+[crew]
+count = 4   # [S] Crew Dragon seats four (Crew-n flights fly 4; the cockpit has seats s1..s4)

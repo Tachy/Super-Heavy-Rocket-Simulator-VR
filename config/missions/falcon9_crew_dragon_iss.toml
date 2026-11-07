@@ -27,3 +27,6 @@ insertion_arc_deg = 15.01           # [D] pad at liftoff -> separation point, in
 [phasing]
 mission_limit_h = 28.0              # [S] from the launch
 earliest_arrival_h = 0.0
+
+[crew]
+count = 4   # [S] Crew Dragon seats four (Crew-n flights fly 4; the cockpit has seats s1..s4)

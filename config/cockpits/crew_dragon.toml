@@ -10,6 +10,9 @@
 # Known sizes used: seat pitch from the Wikimedia seat-back width, iPad mini 134.8 x 203.2 mm (Apple spec), index finger ~0.072 m,
 # helmet ~0.30 m, exterior profile / windows / hatch of config/vehicles/detail/crew_dragon.toml (capsule D 4.0 m).
 
+[cockpit]
+capsule_stage = "capsule"          # [D] stage id of the Dragon capsule in config/vehicles/crew_dragon.toml (the cabin frame is this stage's body frame)
+
 [cabin]
 wall_m = 0.18                  # [E] side wall normal thickness (backshell TPS + pressure shell + liner): crew1_1 window wells ~0.15-0.25 deep; crew1_1 window spacing gives inner r 1.43 +-0.1 at x 2.38 (exterior 1.62)
 floor_x_m = 1.15               # [E] floor panels: Wikimedia photo, cargo C5-C7 (bags ~0.45 m) under the seat pans; 0.5 m below the hatch sill (x 1.70 exterior); +-0.15

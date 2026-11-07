@@ -20,3 +20,6 @@ epoch_utc = "2026-10-16T00:00:00"   # the earliest undocking
 rcs_propellant_kg = 2000.0          # [E] after the ISS mission (as crew_dragon_return)
 undock_to_deorbit_h = 16.1          # [S: Crew-9 2025-03-18, undock 05:05 UTC, deorbit burn 21:11 UTC]
 search_window_h = 168.0             # [E] a week of passes (the 48 h of crew_dragon_return found none for some planes)
+
+[crew]
+count = 4   # [S] Crew Dragon seats four (Crew-n flights fly 4; the cockpit has seats s1..s4)

@@ -74,6 +74,17 @@ func stay_hours(mission_id: String) -> float:
 	return float(_stay_hours.get(mission_id, 0.0))
 
 
+## Crew of a mission ([crew] count of its file). A missing key = the seat count of the mission's vehicle cockpit, else 0.
+static func crew_count(mission_id: String) -> int:
+	var file: Dictionary = TomlLite.load_file(Paths.config_dir().path_join("missions").path_join(mission_id + ".toml"))
+	var crew: Dictionary = file.get("crew", {})
+	if crew.has("count"):
+		return int(crew["count"])
+	var mission: Dictionary = file.get("mission", {})
+	var cockpit := CockpitConfig.for_vehicle(str(mission.get("start_vehicle", mission.get("vehicle", ""))))
+	return cockpit.seats.size() if cockpit != null else 0
+
+
 func _load(config_dir: String) -> void:
 	for file_name in _sorted_files(config_dir.path_join("vehicles")):
 		_vehicle_ids.append(file_name.get_basename())

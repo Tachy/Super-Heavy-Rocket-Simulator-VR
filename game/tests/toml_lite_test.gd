@@ -13,6 +13,14 @@ func _initialize() -> void:
 	_check(d["e"] == ["a,b", "c"], "comma inside a string")
 	_check(d["f"] == [true, false, "z"], "mixed array")
 	_check(d["t"]["d"] == "q # not a comment", "hash inside a string")
+	var n := TomlLite.parse('p = [[1.0, 2.5], [3, 4]]
+w = [[1, 2], [3, 4],]
+s = [["a,b", "]"], ["c"]]
+z = [[]]')
+	_check(n["p"] == [[1.0, 2.5], [3.0, 4.0]], "nested numeric array")
+	_check(n["w"] == [[1.0, 2.0], [3.0, 4.0]], "nested array with trailing comma")
+	_check(n["s"] == [["a,b", "]"], ["c"]], "brackets and commas inside strings")
+	_check(n["z"] == [[]], "nested empty array")
 	print("TOML LITE TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
 
