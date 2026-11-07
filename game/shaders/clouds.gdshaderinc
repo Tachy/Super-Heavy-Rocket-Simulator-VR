@@ -462,6 +462,19 @@ vec3 cloud_type_shape_coordinates(int type, vec3 offset_local, float height_m) {
 	return cloud_shape_coordinates(offset_local, height_m);
 }
 
+// The shape coordinates of the type at the Earth-local point p_m (from the Earth's centre, height_m its height),
+// unwrapped: cloud_type_shape_coordinates plus the whole tiles its origin's wrap (cloud_layer.gd _shape_origin) took
+// off - the same shape (the noise tiles are periodic), but a reading that turns or scales the coordinates (the flat
+// bake's turned taps and tile breaking, cloud_baked_shape) stays world-fixed: turned, a whole-tile shift is no longer
+// one, so those readings changed with the camera's tile - the flat levels' pattern jumped at re-bakes on a climb (look
+// fixes T8). float32: |p_m| / tile ~ 200 tiles, 1.5e-5 of a tile (0.5 m) - for footprints of tens of metres and up.
+vec3 cloud_type_shape_coordinates_world(int type, vec3 p_m, float height_m) {
+	float tile_h_m = type == CLOUD_TYPE_STRATIFORM ? CLOUD_SHAPE_TILE_H_M * CLOUD_STRATIFORM_STRETCH
+			: CLOUD_SHAPE_TILE_H_M;
+	float tile_v_m = type == CLOUD_TYPE_CIRRUS ? CLOUD_ICE_TILE_V_M : CLOUD_SHAPE_TILE_V_M;
+	return p_m / tile_h_m + (1.0 / tile_v_m - 1.0 / tile_h_m) * normalize(p_m) * height_m;
+}
+
 // The table texel of a cloud fraction (columns: codes) and a detail state (rows), linear between both.
 vec2 cloud_table_uv(float fraction, float state) {
 	return vec2((fraction * 255.0 + 0.5) / 256.0, (state + 0.5) / CLOUD_DETAIL_STATES);

@@ -163,7 +163,6 @@ void main() {
 	imageStore(baked_t_out, texel, vec4(1.0, 5000.0, 0.0, 0.0));
 	return;
 #endif
-	vec3 camera = atmosphere_camera_hi + atmosphere_camera_lo;
 	int fp = c <= CLOUD_BAKED_FLAT_TAP_CELLS_M.y ? 1 : 2;  // field points per axis
 	// The column over the field points: the grid-mean depth, the largest fraction; the far field's heights (each
 	// weighted by its point's depth: continuous where a point has no cloud); the pattern's types (the layers' depth-
@@ -235,12 +234,13 @@ void main() {
 						sin(6.2832 * (ph.y - 0.53 * ph.x) + 1.7));
 				vec3 radial = cloud_baked_flat_radial(si, g + ((vec2(tx, ty) + jitter) / float(taps) - 0.5) * c)
 						/ ATM_STRETCH;
-				vec3 offset = (CLOUD_A_M + h_pattern) * radial - camera;
+				vec3 p_tap = (CLOUD_A_M + h_pattern) * radial;
 				bool turned = unaligned && ((tx + ty) & 1) == 1;
 				float covered = 0.0;
 				for (int type = 0; type < 3; type++) {
 					if (types[type] > 0.0) {
-						vec3 q = cloud_type_shape_coordinates(type, offset, h_pattern);
+						// (unwrapped: the turned readings below are world-fixed, not the camera's tile's; look fixes T8)
+						vec3 q = cloud_type_shape_coordinates_world(type, p_tap, h_pattern);
 						if (turned) {
 							q = CLOUD_BAKED_FLAT_UNALIGNED_ROTATION * q / CLOUD_BAKED_FLAT_UNALIGNED_SCALE;
 						}

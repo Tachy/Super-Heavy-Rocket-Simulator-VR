@@ -19,8 +19,13 @@
 #   4. from the Moon's distance (3.844e8 m) with an ERA5 snapshot (cached 2024-04-08 18:00 UTC, else the
 #      service fetches the epoch's pair, 14:00 UTC, see _era5_file): five cells the snapshot
 #      has cloudy are brighter with the weather on than off (ratio >= 1.3), five clear cells unchanged (2 %);
+#   5. the flat levels across a re-bake (look fixes T8): the broken layer (cf 0.4) straight down from 400 m below and
+#      above the first shape-tile edge over 63 km (the wrapped shape origin steps by a whole tile there), each with a
+#      new flat geometry (a detour to 200 km first): 25 ground points' 21 x 21 block luminance the same within 3 % (the
+#      flat bake's turned / tile-breaking readings followed the camera's tile: the pattern jumped at the geometry's
+#      re-bakes on a climb, 27 % here);
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_far_check.gd [-- --save=<dir>] (PNGs of
-# the renders) [--no_3d_light] (CloudLayer.far_3d_light off). Exit code 1 on failure.
+# the renders) [--no_3d_light] (CloudLayer.far_3d_light off) [--only_rebake] (section 5 alone). Exit code 1 on failure.
 extends SceneTree
 
 const EPOCH_UTC := "2024-04-08T14:00:00"  ## no eclipse; the Sun over the Atlantic
@@ -45,6 +50,17 @@ const PROBE_TOLERANCE := 0.03
 const PROBE_FLOOR := 1.0e-3  ## /sr: below it the absolute difference counts
 const HANDOVER_TOLERANCE := 0.05
 const CLOUDY_RATIO_MIN := 1.3
+## Section 5 (look fixes T8): the first height (above the 40-60 km takeover and the volume's 62 km top: the flat levels
+## alone), how far up the next shape tile edge is searched and how far below / above it the two cameras are, the
+## ground points' grid step (deg; 5 x 5 about SUB_CAMERA), the block radius (px), the detour height that forces a new
+## flat geometry and the tolerance [E] (the mean relative block step; 2026-11-07: 1.42 % with the fix, 27.4 % before).
+const REBAKE_HEIGHT_M := 63000.0
+const REBAKE_SEARCH_M := 60000.0
+const REBAKE_EDGE_M := 400.0
+const REBAKE_DETOUR_M := 200000.0
+const REBAKE_GRID_DEG := 0.12
+const REBAKE_BLOCK_RADIUS := 10
+const REBAKE_TOLERANCE := 0.03
 const CLEAR_TOLERANCE := 0.02
 const EARTH_CLOUDS_SHADER := "res://shaders/earth_clouds.gdshader"
 const EARTH_SURFACE_INCLUDE := "res://shaders/earth_surface.gdshaderinc"
@@ -57,6 +73,7 @@ var _failures := 0
 var _samples := 0
 var _save_dir := ""
 var _no_3d_light := false  ## --no_3d_light: CloudLayer.far_3d_light off (the plane-parallel slab alone)
+var _only_rebake := false  ## --only_rebake: section 5 alone
 var _files: Array[String] = []
 var _probe_viewport := SubViewport.new()
 var _probe_material := ShaderMaterial.new()
@@ -68,6 +85,8 @@ func _initialize() -> void:
 			_save_dir = arg.trim_prefix("--save=")
 		elif arg == "--no_3d_light":
 			_no_3d_light = true
+		elif arg == "--only_rebake":
+			_only_rebake = true
 	_run.call_deferred()
 
 
@@ -96,6 +115,12 @@ func _run() -> void:
 	_world.clock.set_time(_world.core.utc_to_tdb_s(EPOCH_UTC))
 	_world.set_focus(World.FOCUS_EARTH)
 	_world.camera.fov = 60.0
+	var broken := _slab("broken", BROKEN_LIQUID_KG_M3, BROKEN_FRACTION)
+	if _only_rebake:
+		_show(broken)
+		await _rebake_tile_sample()
+		_finish()
+		return
 
 	# 1. The far field's slab radiance vs the core.
 	await _probe_samples()
@@ -107,12 +132,17 @@ func _run() -> void:
 		var snapshot := _slab(deck[0], deck[1], 1.0)
 		_show(snapshot)
 		await _handover_sample(deck[0] + ", the cloud pass", 2, HANDOVER_TOLERANCE, snapshot)
-	var broken := _slab("broken", BROKEN_LIQUID_KG_M3, BROKEN_FRACTION)
 	_show(broken)
 	await _handover_sample("broken cf 0.4, the cloud pass", 10, HANDOVER_TOLERANCE, broken)
 	# 4. From the Moon.
 	await _moon_samples()
+	# 5. The flat levels across a re-bake whose camera is in another shape tile (look fixes T8).
+	_show(broken)
+	await _rebake_tile_sample()
+	_finish()
 
+
+func _finish() -> void:
 	for f in _files:
 		DirAccess.remove_absolute(f)
 	print("cloud_far_check: %s (%d samples, %d failures)" % ["PASS" if _failures == 0 else "FAIL", _samples, _failures])
@@ -378,6 +408,69 @@ static func _far_from(points: Array[Vector3], p: Vector3) -> bool:
 		if q.normalized().dot(p.normalized()) > cos(deg_to_rad(6.0)):
 			return false
 	return true
+
+
+## 5. The flat levels across a re-bake (look fixes T8): the broken layer seen straight down from just below and above
+## the first shape-tile edge over REBAKE_HEIGHT_M (CloudLayer._shape_origin's wrap steps by a whole tile there), each
+## with a new flat geometry about the camera; the ground points' block luminance the same within REBAKE_TOLERANCE
+## (the mean over the points, relative; the worst point reported). Both heights above the takeover (60 km: the flat
+## levels draw every cloud).
+func _rebake_tile_sample() -> void:
+	# the first tile edge above REBAKE_HEIGHT_M; the heights REBAKE_EDGE_M below and above it (nearly the same view)
+	var edge := REBAKE_HEIGHT_M
+	var tile0 := _shape_tile(edge)
+	while _shape_tile(edge) == tile0 and edge < REBAKE_HEIGHT_M + REBAKE_SEARCH_M:
+		edge += 10.0
+	var h1 := edge - REBAKE_EDGE_M
+	var h2 := edge + REBAKE_EDGE_M
+	var points: Array[Vector3] = []
+	for i in range(-2, 3):
+		for j in range(-2, 3):
+			points.append(_itrf(SUB_CAMERA.x + REBAKE_GRID_DEG * i, SUB_CAMERA.y + REBAKE_GRID_DEG * j))
+	var lums := {}
+	var tiles := {}
+	for h: float in [h1, h2]:
+		# a new flat geometry about this camera (a re-bake keeps the shown one while it holds the height range): from
+		# REBAKE_DETOUR_M, outside that range, back down
+		await _place(SUB_CAMERA, WGS84_A_M + REBAKE_DETOUR_M)
+		await _place(SUB_CAMERA, WGS84_A_M + h)
+		var camera_fixed := _world.earth.fixed_to_gcrf.transposed() * _world.camera.position_gcrf_m
+		tiles[h] = _shape_tile_of(camera_fixed)
+		var image := _frame()
+		_save(image, "t8check_rebake_%.0f" % h)
+		var values: Array[float] = []
+		for p in points:
+			values.append(_block_luminance(image, _pixel_of(p), REBAKE_BLOCK_RADIUS))
+		lums[h] = values
+	_check("re-bake: the heights %.1f / %.1f km put the camera in different shape tiles" % [h1 * 1e-3, h2 * 1e-3],
+			tiles[h1] != tiles[h2], "tiles %s / %s" % [tiles[h1], tiles[h2]])
+	var sum_diff := 0.0
+	var sum := 0.0
+	var worst := 0.0
+	for i in range(points.size()):
+		var a: float = lums[h1][i]
+		var b: float = lums[h2][i]
+		sum_diff += absf(b - a)
+		sum += a
+		worst = maxf(worst, absf(b - a) / maxf(a, 1.0e-6))
+	var mean := sum_diff / maxf(sum, 1.0e-6)
+	_check("re-bake across a shape tile, broken cf 0.4: the %d ground points' %d x %d block luminance within %.1f %%" % [
+			points.size(), 2 * REBAKE_BLOCK_RADIUS + 1, 2 * REBAKE_BLOCK_RADIUS + 1, REBAKE_TOLERANCE * 100.0],
+			mean <= REBAKE_TOLERANCE, "mean %.2f %%, worst point %.2f %%" % [mean * 100.0, worst * 100.0])
+
+
+## The cumulus shape tile (the unwrapped origin's integer part, CloudLayer._shape_origin) of a camera straight above
+## SUB_CAMERA at this height.
+func _shape_tile(height_m: float) -> Vector3:
+	return _shape_tile_of(_itrf(SUB_CAMERA.x, SUB_CAMERA.y).normalized() * (WGS84_A_M + height_m))
+
+
+static func _shape_tile_of(camera_fixed: Vector3) -> Vector3:
+	var render := Frames.to_render(camera_fixed)
+	var stretched := Vector3(camera_fixed.x, camera_fixed.y, camera_fixed.z * CloudLayer.POLAR_STRETCH)
+	var height := stretched.length() - CloudLayer.WGS84_A_M
+	var k := 1.0 / CloudLayer.SHAPE_TILE_V_M - 1.0 / CloudLayer.SHAPE_TILE_H_M
+	return (render / CloudLayer.SHAPE_TILE_H_M + render.normalized() * (height * k)).floor()
 
 
 ## The orbit camera over (lat, lon) at distance_m from the Earth's centre; waits until the terrain and the clouds have

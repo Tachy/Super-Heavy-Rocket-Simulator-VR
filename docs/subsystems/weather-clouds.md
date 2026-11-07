@@ -528,7 +528,12 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   and the light for their mean depth. (e) Tile breaking: the shape read twice (as is and turned) and blended by a
   large-scale weight, histogram-preserving (`cloud_baked_shape`; step 4's domain warp sheared the shapes into marbled
   streaks). Numbers, images: `.superpowers/sdd/2026-10-28-cloud-world-volume/baked-outer3-report.md` (step 4),
-  `baked-outer4-report.md` (step 5).
+  `baked-outer4-report.md` (step 5). The bake's pattern taps read the shapes at world-fixed, unwrapped coordinates
+  (`cloud_type_shape_coordinates_world`: the point from the Earth's centre / the tile, as the per-pixel pattern's): the
+  turned readings and the tile breaking's weight are not invariant to the whole-tile wrap of the camera's shape origin,
+  so with the wrapped origin a new flat geometry baked after the camera had crossed a tile edge drew another pattern - a
+  jump of the cover in place on a climb (look fixes T8, user report: at ~55 km; the geometry re-bakes at 40, ~52 and
+  ~67 km on a climb, the analog nadir view at 26 N 97 W 10 % mean block luminance between 56 and 57 km, now 0.7 %).
 - **Baked volume step 6: beyond the cap, the terminator (2026-10-30)**: (a) beyond the shown flat geometry's cap
   the far field's column draws the clouds (`cloud_baked_flat_far_weight` / `_layer`: `cloud_far_layer` at the ray's
   ground point, blended in over 0.5 deg up to 3 of the last level's cells inside the cap, the flat levels faded out by
@@ -722,6 +727,9 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
 - GPU `cloud_far_check.gd` (2026-10-30, sections 1-4, 14 checks PASS): the far field's slab radiance vs Monte Carlo
   (72 geometries), weather off bit-identical, the scaled-space hand-over against the baked volume's flat levels: deck
   tau 10 / tau 2 worst 0.26 / 0.51 %, broken cf 0.4 (21 x 21 blocks) 2.27 % (tolerance 5 %), the Moon's distance.
+  Section 5 (look fixes T8, 2026-11-07; `-- --only_rebake` alone): the flat levels across a new flat geometry baked
+  400 m below / above a shape-tile edge (68.9 / 69.7 km, cf 0.4): 25 ground points' 21 x 21 block luminance mean step
+  1.42 % (tolerance 3 %; 27.4 % with the wrapped coordinates before the fix).
 - Visual set (Task 11, `render_check.gd --weather=online --cloud_quality=vr`, ERA5 hours downloaded at run time; PNGs
   `tmp/weather_t11_*.png`, read by eye): overcast vs clear at Starbase (Pad 2, 2 m eye, 2025-08-15 18:00 UTC: a thick
   anvil deck, the Sun hidden, vertical T_s 0.05 on the 1-degree analog / 2025-03-15 18:00 UTC: clear, deep blue sky);
@@ -886,4 +894,12 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
 - **Above 62 km the volume levels are baked for S only** (shape and S, not the light): a re-bake in orbit (every
   ~19 km of flight at 400 km, ~2.4 s) runs the density / occupancy / S phases of the kept levels (3 levels from
   400 km at the desktop's pixel angle) - more bake dispatches than before (only the flat geometry), each <= ~2 ms GPU.
-
+- **The volume's cover below the column's (look fixes T8, 2026-11-07; open, needs a ruling)**: at nadir the volume
+  levels draw less cloud than the column's beam cover that the flat levels and the far field follow (the user's
+  reference, ruling 2026-10-29). Mean alpha over the view (`CLOUD_BAKED_VOLUME_ONLY` / `CLOUD_BAKED_FLAT_ONLY` /
+  `CLOUD_BAKED_FAR_REFERENCE`, render_check `--centre_dump`, analog weather 2025-11-07 15:00 UTC, six sites over the
+  Gulf at 50 km): volume 0.357, flat levels 0.435, column 0.438 (volume / column 0.50-1.05 per site, 0.82 overall; at
+  15 / 30 km three sites 0.38-0.87). So the 40-60 km takeover raises the cover by ~20 % region by region (the analog
+  nadir view at 26 N 97 W: 0.445 -> 0.516 share of bright pixels from 45 to 55 km) - gradual, no jump, but the two
+  renders do not match. Whether the volume's shapes (the low-altitude look) or the column's beam cover should move is
+  a model decision; numbers: `.superpowers/sdd/2026-11-07-look-fixes/t8-report.md`.
