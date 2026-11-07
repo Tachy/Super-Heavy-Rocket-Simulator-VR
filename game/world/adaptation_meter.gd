@@ -35,8 +35,9 @@ const LOG_MAX := 6.0
 ## eye's projection centre is off the image centre (asymmetric frustum) and wide-angle pixels subtend less solid angle
 ## (the corners over-sampled ~cos^3); both are small against this Gaussian and not corrected.
 const CENTRE_SIGMA := 0.5
-## [E] Share of the weight dropped from the bright end before averaging: the Sun's disc and specular highlights must not
-## set the adaptation (the 98th percentile, as the usual auto-exposure high cut).
+## [E] Share of the lit weight (bins above black) dropped from the bright end before averaging: the Sun's disc and
+## specular highlights must not set the adaptation (the 98th percentile of the lit field, as the usual auto-exposure
+## high cut). Of the lit weight only, so that black sky does not enlarge the cut (user 2026-11-07).
 const HIGHLIGHT_SHARE := 0.02
 ## [S: Kunkel & Reinhard 2010, "A reassessment of the simultaneous dynamic range of the human visual system", APGV
 ## 2010: ~3.7 log units at a fixed adaptation] luminances further below the field's highlights carry no signal at that
@@ -198,8 +199,8 @@ func take_result(epoch: int, after_serial: int) -> Array:
 ## The field luminance of one histogram (counts[offset .. offset + HISTOGRAM_BINS)): the weighted geometric mean of the
 ## bins' centre luminances after the highlight cut and without the bins more than SIMULTANEOUS_RANGE_DECADES below the
 ## highest bin left. -1: no samples; 0: nothing above black (a dark field).
-static func field_log_average(counts: PackedInt32Array, offset := 0) -> float:
-	var field := _field_bins(counts, offset)
+static func field_log_average(counts: PackedInt32Array, offset := 0, cut_of_whole := false) -> float:
+	var field := _field_bins(counts, offset, cut_of_whole)
 	if field.is_empty():
 		return -1.0
 	var weights: PackedFloat64Array = field[0]
@@ -244,8 +245,10 @@ static func field_anchor(counts: PackedInt32Array, offset := 0) -> float:
 
 
 ## The field both statistics share: [weights after the highlight cut, lowest bin inside the simultaneous range, highest
-## bin left (<= 0: nothing above black)]; [] without samples.
-static func _field_bins(counts: PackedInt32Array, offset: int) -> Array:
+## bin left (<= 0: nothing above black)]; [] without samples. cut_of_whole: the cut is HIGHLIGHT_SHARE of the whole weight
+## (black included) - AdaptationSurround's visibility statistic, which must not see a small lit object only one of the
+## two fields has (the Earth's disc in a lunar sky, absent from the surround model) as a disagreement.
+static func _field_bins(counts: PackedInt32Array, offset: int, cut_of_whole := false) -> Array:
 	var total := 0.0
 	for k in range(HISTOGRAM_BINS):
 		total += float(counts[offset + k])
@@ -255,8 +258,10 @@ static func _field_bins(counts: PackedInt32Array, offset: int) -> Array:
 	weights.resize(HISTOGRAM_BINS)
 	for k in range(HISTOGRAM_BINS):
 		weights[k] = float(counts[offset + k])
-	# The highlight cut, from the top.
-	var cut := HIGHLIGHT_SHARE * total
+	# The highlight cut, from the top: HIGHLIGHT_SHARE of the lit weight (bins above black), not of the whole field
+	# (user 2026-11-07): a lit surround that is a small share of a mostly black field must not be cut whole.
+	var lit := total - weights[0]
+	var cut := HIGHLIGHT_SHARE * (total if cut_of_whole else lit)
 	var top := HISTOGRAM_BINS - 1
 	while top > 0 and cut > 0.0:
 		var take := minf(cut, weights[top])

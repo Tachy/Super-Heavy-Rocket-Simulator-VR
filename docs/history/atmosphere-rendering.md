@@ -512,3 +512,8 @@ frame-only measurements.
 - Moon light white (until T5 fix round 1): `moon_sun_scene` lit the regolith (moon, terrain, rocks, the radiance
   map's Moon) with a D65-white Sun while the post step's white balance adopts the TOA Sun's colour: a grey regolith
   came out ~9 % blue (Moon day ground displayed B/R 1.15 pre-T5, 1.30 with T5's kept chroma). Now `moon_sun_color`.
+
+## Highlight cut of the whole field weight (until 2026-11-07)
+The meter cut the brightest 2 % of the whole histogram weight (black bin included); a lit surround of less than 2 % of a
+mostly black field (lunar day looking up 60 deg: 2.4 %, fragile) was removed whole. Now 2 % of the lit weight
+(`eye-adaptation.md`, Standing decisions).

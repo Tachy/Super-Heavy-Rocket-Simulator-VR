@@ -58,6 +58,13 @@ func _initialize() -> void:
 	_near("inside the simultaneous range", AdaptationMeter.field_log_average(_histogram({k_shade: 980, k500: 980, BINS - 1: 40})),
 			sqrt(_centre(k500) * _centre(k_shade)), 1e-9)
 	# No samples: -1; nothing above black: 0 (a dark field).
+	# The cut is 2 % of the lit weight (user 2026-11-07): a lit area of 2.4 % of a mostly black field stays the field, the
+	# Sun disc (1 % of the lit weight) in it is still cut.
+	_near("1.5 % lit area stays the field (lit-weight cut)", AdaptationMeter.field_log_average(_histogram({0: 9850, k500: 150})), _centre(k500), 1e-9)
+	_near("lunar-like small lit share", AdaptationMeter.field_log_average(_histogram({0: 9760, k500: 240})), _centre(k500), 1e-9)
+	_near("lunar-like anchor", float(AdaptationMeter.bin_of(AdaptationMeter.field_anchor(_histogram({0: 9760, k500: 240})))), float(k500), 0.0)
+	_near("sun disc cut in a black field", AdaptationMeter.field_log_average(_histogram({0: 9000, BINS - 1: 10, k500: 990})), _centre(k500), 1e-9)
+	_near("cut of the whole weight: a small lit area is cut", AdaptationMeter.field_log_average(_histogram({0: 9850, k500: 150}), 0, true), 0.0, 0.0)
 	_near("no samples", AdaptationMeter.field_log_average(_histogram({})), -1.0, 0.0)
 	_near("dark field", AdaptationMeter.field_log_average(_histogram({0: 1000})), 0.0, 0.0)
 	# The scotopic histogram at its offset.

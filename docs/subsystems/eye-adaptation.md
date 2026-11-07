@@ -23,7 +23,7 @@ shaders:
   scotopic; 1e-6 .. 1e6 cd/m^2, bin 0 black). Both VR eyes go into one histogram (one adaptation, no eye difference).
   The directions beyond the frame are added before the statistics ("Field beyond the frame" below).
   The histograms come back asynchronously (`buffer_get_data_async`, every ~2-4 frames, no stall). The field luminance
-  L_f (`field_log_average`): the weighted geometric mean, the brightest 2 % of the weight cut (Sun disc, glints [E]),
+  L_f (`field_log_average`): the weighted geometric mean, the brightest 2 % of the lit weight (bins above black) cut (Sun disc, glints [E]; of the lit weight, not of the whole field, user 2026-11-07),
   bins more than 3.7 decades below the highest bin left excluded (no signal at that adaptation [S: Kunkel & Reinhard
   2010, simultaneous range ~3.7 log units]; a black sky beside lit ground does not pull it down; a field with nothing
   above black gives 0, the dark-adapted floor). The field is taken as its scene's mid grey [E: a convention with two
@@ -377,6 +377,17 @@ shaders:
   Sun's plate); the aureole inside 8-14 deg is under-weighted by the fade (a smoothstep, not a glare model).
 
 ## Standing decisions
+- Highlight cut of the lit weight (user 2026-11-07): `AdaptationMeter._field_bins` cuts HIGHLIGHT_SHARE (2 %) of the weight
+  above black (bins >= 1), not of the whole field including the black bin; applies to the field mean and the anchor (rule
+  D). Purpose kept: a Sun disc or glints of up to 2 % of the lit weight never set the field (`adaptation_meter_test`: a
+  1 % Sun disc in a 90 % black field is cut; a 2.4 % lit area in a black field is the field; `adaptation_surround_test`:
+  lunar el 60).
+  Side effects (renders `screenshots/look_fixes/t5b/`): the visibility V keeps the old cut of the whole weight
+  (`field_log_average(.., cut_of_whole)`), else a small lit object only the frame has (the Earth's disc in the lunar
+  sky, absent from the model) closes V (first render: gain 12.99). A lone small lit object now enters the combined field
+  (lunar day el 60: the Earth disc, near the view centre, field 2617 -> 4048 cd/m^2, gain 2.98 -> 1.93); a Sun disc
+  with lit ground or surround in view is still cut (Moon, looking at the Sun: gain 8.34 -> 8.30). A Sun disc alone in a
+  fully black field is not cut any more (not rendered, open).
 
 - Eye model: Ferwerda 1996 cone/rod t.v.i. with Jensen 2000 rod saturation, CIECAM02 brightness / chroma terms,
   Schaefer 1990 star threshold (user decision 2026-10-25, "like the eye").
@@ -421,8 +432,8 @@ shaders:
   (only the cube's uniform cloud factors) or the Earth's disc in the lunar sky; an open view next to a tower or a hull
   counts open sky / ground there. The model's regolith is ~2x the rendered one (Apollo 11 view: model 4375 against frame
   2169 cd/m^2 over the same directions, the open point of the Moon shading below; still inside the visibility's x2), so
-  on the Moon the surround brightens the field. A lit surround of less than the 2 % highlight share is cut whole (lunar
-  day 60 deg up: 2.4 % of the weight is regolith, just above the cut; a narrower lit rim would leave the black field).
+  on the Moon the surround brightens the field. Since 2026-11-07 the 2 % cut is of the lit weight only, so a lit surround that is a
+  small share of a mostly black field (lunar day 60 deg up: 2.4 % of the weight) is no longer cut whole.
   The store's state (Sun, cloud factors, eye, local vertical) is frozen at the start of each rebuild, so the swapped-in
   store is up to 0.8 s old (a view jump's: a few frames, a penumbra's ~0.2 s): fine on the ground, in an ascent or an
   orbit (altitude and Sun angle changing fast) the surround lags by that much; not refreshed on large changes.

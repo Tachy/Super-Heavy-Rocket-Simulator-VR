@@ -49,6 +49,11 @@ func _black_world(_direction: Vector3, _state: Variant) -> Vector3:
 	return Vector3.ZERO
 
 
+## Lunar day: bright ground, black sky.
+func _lunar_world(direction: Vector3, _state: Variant) -> Vector3:
+	return Vector3.ONE * 2600.0 if direction.y < 0.0 else Vector3.ZERO
+
+
 func _filled(world: Callable) -> AdaptationSurround:
 	var s := AdaptationSurround.new()
 	s.refresh(Vector3.UP, func() -> Variant: return null, world, AdaptationSurround.STORE_BANDS * AdaptationSurround.STORE_AZIMUTHS)
@@ -95,6 +100,15 @@ func _initialize() -> void:
 	_check("looking up: field rises", up_field > 1.1 * AdaptationMeter.field_log_average(up_frame, 0), str(up_field))
 	_check("level: field falls", level_field < 0.95 * AdaptationMeter.field_log_average(level_frame, 0), str(level_field))
 	_check("the fields converge", level_field / up_field < 4500.0 / 2100.0, "%s / %s" % [level_field, up_field])
+
+	# Lunar day looking up 60 deg: a black frame, the lit ground a small share (~2 %) of the field's weight. The highlight
+	# cut is taken of the lit weight only (user 2026-11-07), so that surround is not removed as a highlight.
+	var lunar := _filled(_lunar_world)
+	var lunar_combined := lunar.combine(_frame(0.0, 100000), _desktop(Vector3(0.0, sin(deg_to_rad(60.0)),
+			-cos(deg_to_rad(60.0)))))
+	_check("lunar el 60: ground share small", lunar.last_out_share > 0.0 and lunar.last_out_share < 0.1, str(lunar.last_out_share))
+	_near("lunar el 60: field is the ground", AdaptationMeter.field_log_average(lunar_combined, 0), 2600.0, 0.1)
+	_near("lunar el 60: anchor is the ground", AdaptationMeter.field_anchor(lunar_combined, 0), 2600.0, 0.1)
 
 	# An enclosed view (a cabin at 16 cd/m^2 under an open-sky model): visibility 0, the frame alone.
 	var cabin := _frame(16.0, 100000)

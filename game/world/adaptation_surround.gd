@@ -19,7 +19,7 @@ extends RefCounted
 ## Enclosed views (the cabin, under a hull): the model knows no walls. The out-of-frame part is weighted by a visibility V
 ## from how well the model agrees with the frame where both look: V = 1 while the frame's field and the model's field over
 ## the in-frame directions agree within VISIBILITY_FULL_DECADES, 0 beyond VISIBILITY_NONE_DECADES (smoothstep). Both fields
-## are the same statistic (AdaptationMeter.field_log_average: the 2 % highlight cut, the 3.7-decade exclusion; the model's
+## are the same statistic (AdaptationMeter.field_log_average with the cut of the whole weight, black included, so a small lit object only one field has - the Earth's disc in a lunar sky - is no disagreement; the 3.7-decade exclusion; the model's
 ## in-frame directions as a histogram with the frame's black bin). The disagreement in decades is low-passed in time
 ## (VISIBILITY_TIME_S; a view jump restarts it), so panning across a structure does not fade the surround in and out; a black
 ## field counts as the histogram's floor (LOG_MIN), so the measure is continuous. In the cabin (field 16 cd/m^2 against
@@ -198,7 +198,7 @@ func _combine(counts: PackedInt32Array, view: Dictionary, dt_s: float) -> Packed
 	last_visibility = 0.0
 	last_out_share = 0.0
 	last_model_in_cd_m2 = -1.0
-	last_frame_field_cd_m2 = AdaptationMeter.field_log_average(counts, 0)
+	last_frame_field_cd_m2 = AdaptationMeter.field_log_average(counts, 0, true)
 	if not enabled or not _valid or view.is_empty() or counts.size() != 2 * bins:
 		return counts
 	var frame_total := 0.0
@@ -268,7 +268,7 @@ func _look_up(to_store: Basis) -> Array:
 		counts.resize(bins)
 		for k in range(bins):
 			counts[k] = int(round(in_bins[k] / weight_in * MODEL_COUNTS))
-		model_in = AdaptationMeter.field_log_average(counts, 0)
+		model_in = AdaptationMeter.field_log_average(counts, 0, true)  # as the frame's, for the visibility
 	return [weight_in, model_in, outside]
 
 
