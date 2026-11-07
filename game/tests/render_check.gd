@@ -331,6 +331,8 @@ func _process(_delta: float) -> bool:
 		if _args.has("azimuth"): cam.azimuth = deg_to_rad(float(_args["azimuth"]))
 		if _args.has("elevation"): cam.elevation = deg_to_rad(float(_args["elevation"]))
 		if _args.has("fov"): cam.fov = float(_args["fov"])
+		if _args.has("start_view"):  # the game's first view at this instant (World.aim_start_view)
+			world.aim_start_view()
 		if _args.has("look_at_sun"):
 			_aim_at_sun(world)
 		if _args.has("azimuth_from_sun"):  # the view azimuth relative to the Sun's (deg; 180: down-Sun), --elevation kept
@@ -452,7 +454,7 @@ func _process(_delta: float) -> bool:
 				a.adaptation_cd_m2, a.last_adaptation_down_cd_m2, a.last_adaptation_visible_fraction,
 				a.last_adaptation_up_cd_m2, a.last_adaptation_moon_cd_m2, a.last_earthshine_lux])
 		print("render_check: adaptation rule %s: field %s cd/m^2 (scotopic %s), anchor %s (scotopic %s), field key %s, from the field %s" % [
-				"analytic" if not a.scene_referred_adaptation else ("anchor" if a.field_rule == Atmosphere.FieldRule.ANCHOR else "field"),
+				"analytic" if not a.scene_referred_adaptation else a.field_rule_name(),
 				a.last_field_cd_m2, a.last_field_scotopic_cd_m2, a.last_anchor_cd_m2, a.last_anchor_scotopic_cd_m2,
 				a.field_key, a.adaptation_from_field])
 		print("render_check: night vision: twilight glow %s cd/m^2, scotopic %s cd/m^2, rod scale %s, moonlight %s of the Sun (%s), vehicle Moon light %s, brightness %.4f, chroma %.4f" % [

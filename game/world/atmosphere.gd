@@ -212,9 +212,35 @@ var scene_referred_adaptation := not OS.get_cmdline_user_args().has("--analytic_
 ## MEAN_GREY - the game's rule: the centre-weighted log average taken as the scene's grey, L_a = L_f / field_key;
 ## ANCHOR - under evaluation (not the default; user argument --anchored_adaptation): the field's
 ## AdaptationMeter.ANCHOR_PERCENTILE-th percentile taken as a white, L_a = L_anchor / EyeAdaptation.ANCHOR_WHITE
-## (field_key not used). Everything downstream (gains, pacing, clamps, fallbacks) is the same.
-enum FieldRule { MEAN_GREY, ANCHOR }
-var field_rule := FieldRule.ANCHOR if OS.get_cmdline_user_args().has("--anchored_adaptation") else FieldRule.MEAN_GREY
+## (field_key not used);
+## PROTECT - under evaluation (user argument --protected_adaptation): highlight protection, the stricter (darker) of the
+## two exposures, L_a = max(L_f / field_key, L_anchor / EyeAdaptation.ANCHOR_WHITE) (scotopic: the same max on the pair).
+## Everything downstream (gains, pacing, clamps, fallbacks) is the same.
+enum FieldRule { MEAN_GREY, ANCHOR, PROTECT }
+var field_rule := _field_rule_from_arguments(OS.get_cmdline_user_args())
+func field_rule_name() -> String:
+	return ["field", "anchor", "protect"][field_rule]
+
+
+static func _field_rule_from_arguments(arguments: PackedStringArray) -> FieldRule:
+	if arguments.has("--protected_adaptation"):
+		return FieldRule.PROTECT
+	return FieldRule.ANCHOR if arguments.has("--anchored_adaptation") else FieldRule.MEAN_GREY
+
+
+## The adaptation luminance a field rule takes from the measured field (L_f) and anchor (L_anchor), cd/m^2 (photopic or
+## scotopic alike): MEAN_GREY L_f / key; ANCHOR L_anchor / ANCHOR_WHITE; PROTECT the larger (darker exposure) of the two.
+static func field_adaptation_luminance(rule: FieldRule, field_cd_m2: float, anchor_cd_m2: float, key: float) -> float:
+	var grey := field_cd_m2 / key
+	var white := anchor_cd_m2 / EyeAdaptation.ANCHOR_WHITE
+	match rule:
+		FieldRule.ANCHOR:
+			return white
+		FieldRule.PROTECT:
+			return maxf(grey, white)
+	return grey
+
+
 ## The view is still streaming in (World: terrain nodes loading): a snapped view stays snapped to the field until the
 ## meter has seen it settled.
 var view_loading := false
@@ -402,12 +428,10 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 			adaptation_from_field = true
 			if _field_snap:
 				_eye.snap()
-			if field_rule == FieldRule.ANCHOR:
-				_eye.advance(last_anchor_cd_m2 / EyeAdaptation.ANCHOR_WHITE,
-						last_anchor_scotopic_cd_m2 / EyeAdaptation.ANCHOR_WHITE, reference_luminance(d_au), adaptation_dt_s)
-			else:
-				_eye.advance(last_field_cd_m2 / field_key,
-						last_field_scotopic_cd_m2 / field_key, reference_luminance(d_au), adaptation_dt_s)
+			var rule_cd_m2 := field_adaptation_luminance(field_rule, last_field_cd_m2, last_anchor_cd_m2, field_key)
+			var rule_scotopic_cd_m2 := field_adaptation_luminance(field_rule, last_field_scotopic_cd_m2,
+					last_anchor_scotopic_cd_m2, field_key)
+			_eye.advance(rule_cd_m2, rule_scotopic_cd_m2, reference_luminance(d_au), adaptation_dt_s)
 			# A new view stays snapped while it is still streaming in, and at least FIELD_SNAP_MIN_S after the jump
 			# (the streaming may not have started on its first frames).
 			_field_snap = _field_snap and (_field_loading

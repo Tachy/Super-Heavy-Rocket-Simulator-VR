@@ -104,6 +104,30 @@ func _initialize() -> void:
 			1e-12)
 	_near("Apollo 11 field", EyeAdaptation.cone_gain(660.0 / grey, reference), reference * grey / 660.0, 1e-9)
 
+	# Highlight protection (Atmosphere.FieldRule.PROTECT, under evaluation): the larger (darker exposure) of the mean-grey
+	# and the anchor adaptation luminances, photopic or scotopic alike.
+	var key := EyeAdaptation.FIELD_MID_GREY
+	var white := EyeAdaptation.ANCHOR_WHITE
+	_near("rule field", Atmosphere.field_adaptation_luminance(Atmosphere.FieldRule.MEAN_GREY, 100.0, 1000.0, key), 100.0 / key, 1e-9)
+	_near("rule anchor", Atmosphere.field_adaptation_luminance(Atmosphere.FieldRule.ANCHOR, 100.0, 1000.0, key), 1000.0 / white, 1e-9)
+	# A bright anchor (sky beside ground): the anchor exposure is the stricter one.
+	_near("rule protect, anchor stricter", Atmosphere.field_adaptation_luminance(Atmosphere.FieldRule.PROTECT, 100.0, 1000.0, key),
+			1000.0 / white, 1e-9)
+	# An anchor close to the field (a uniform grey scene): the mean-grey exposure is the stricter one.
+	_near("rule protect, field stricter", Atmosphere.field_adaptation_luminance(Atmosphere.FieldRule.PROTECT, 100.0, 120.0, key),
+			100.0 / key, 1e-9)
+	_near("rule protect, scotopic pair", Atmosphere.field_adaptation_luminance(Atmosphere.FieldRule.PROTECT, 0.01, 0.2, key),
+			0.2 / white, 1e-9)
+	_near("rule protect, dark field", Atmosphere.field_adaptation_luminance(Atmosphere.FieldRule.PROTECT, 0.0, 0.0, key), 0.0, 0.0)
+
+	# The start view (World.start_view_angles): the camera sits 60 deg from the Sun as seen from the Earth's centre
+	# (75 % lit), north stays up, for Suns of any declination and right ascension.
+	for sun in [Vector3(1.4e11, 0, 0), Vector3(-1.0e11, 9.0e10, 5.0e10), Vector3(0, -1.5e11, -6.0e10), Vector3(2.0e10, 1.4e11, 5.8e10)]:
+		var angles := World.start_view_angles(sun, 0.6)
+		var c := Frames.from_render(CameraMath.orbit_offset(Basis.IDENTITY, angles.x, angles.y, 1.0))
+		_near("start view phase angle", rad_to_deg(c.angle_to(sun)), World.START_VIEW_PHASE_DEG, 1e-9)
+		_near("start view lit fraction", (1.0 + cos(c.angle_to(sun))) / 2.0, 0.75, 1e-12)
+
 	# The compute's sizes follow the constants (review M-1): the shared histogram holds both histograms, no placeholder
 	# is left, and the placement is before the transparent pass (review I-1: display-referred emitters not counted).
 	var source := AdaptationMeter.shader_source()

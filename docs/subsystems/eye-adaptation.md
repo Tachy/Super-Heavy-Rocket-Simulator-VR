@@ -81,6 +81,12 @@ shaders:
   move the anchor, a larger bright area sets it (`adaptation_meter_test.gd`). Both statistics are measured under either
   rule (`last_field_cd_m2`, `last_anchor_cd_m2`; render_check and cockpit_shots log them). Comparison A field / B
   white plate / C anchored: `screenshots/eye_adaptation/anchored/` (values in the open points).
+- **Highlight-protection rule D (option under evaluation, not the default)** [2026-11-07, `FieldRule.PROTECT`, user argument
+  `--protected_adaptation`, `Atmosphere.field_adaptation_luminance`]: L_a = max(L_f / `field_key`, L_anchor /
+  `ANCHOR_WHITE`) - the stricter (darker) of the mean-grey and the anchor exposures, the scotopic pair likewise; everything
+  downstream unchanged. Intent: the anchored white where a bright area would clip, the mean grey elsewhere (dark scenes).
+  Test: `adaptation_meter_test.gd`. Comparison A field / C anchored / D protected:
+  `screenshots/eye_adaptation/protected/` (results in the open points).
 - **White-plate rule** (the fallback and the GPU check's / headless tests' rule; formerly the only one):
   [call 2026-10-25, `eye_adaptation.gd`, fidelity flag `Atmosphere.eye_adaptation_enabled`, on in
   the game, off in the GPU check's comparisons]: cone gain on every physical luminance (tables, Sun light, Moon, Sun
