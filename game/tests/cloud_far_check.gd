@@ -14,7 +14,8 @@
 #      tolerance (weather off: the terrain's sea glint at the sub-camera point, which the scaled-space Earth lacks) are
 #      listed, not asserted; the volume pass draws only inside (cloud_enabled), the far field only outside
 #      (earth_clouds.gdshader); the CPU light factors are (1, 0, 1) outside;
-#   4. from the Moon's distance (3.844e8 m) with the ERA5 snapshot of 2024-04-08 18:00 UTC: five cells the snapshot
+#   4. from the Moon's distance (3.844e8 m) with an ERA5 snapshot (cached 2024-04-08 18:00 UTC, else the
+#      service fetches the epoch's pair, 14:00 UTC, see _era5_file): five cells the snapshot
 #      has cloudy are brighter with the weather on than off (ratio >= 1.3), five clear cells unchanged (2 %);
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_far_check.gd [-- --save=<dir>] (PNGs of
 # the renders) [--no_3d_light] (CloudLayer.far_3d_light off). Exit code 1 on failure.
@@ -27,7 +28,8 @@ const OUTSIDE_M := HANDOVER_M * 1.001
 const MOON_DISTANCE_M := 3.844e8
 const SUB_CAMERA := Vector2(0.0, -45.0)  ## (lat, lon) deg under the hand-over camera
 const MOON_SUB_CAMERA := Vector2(10.0, -40.0)
-const ERA5_FILE := "weather/cache/era5_1089330.wthr"  ## under Paths.data_dir()
+const ERA5_FILE := "weather/cache/era5_1089330.wthr"  ## under Paths.data_dir(); fetched when missing (_era5_file)
+const ERA5_WAIT_S := 600  ## [E] the download and build of one ERA5 pair, generous
 const SLAB_BOTTOM_M := 1000.0
 const SLAB_TOP_M := 2000.0
 ## Liquid water of vertical optical depth tau over 1 km: beta = 3 LWC / (2 rho_w r_l) = 150 LWC [1/m].
@@ -256,9 +258,10 @@ func _handover_sample(label: String, radius: int, tolerance: float, snapshot := 
 
 ## 4. The Moon's distance: cloudy and clear cells of the ERA5 snapshot, weather off then on.
 func _moon_samples() -> void:
-	var file := Paths.data_dir().path_join(ERA5_FILE)
-	if not FileAccess.file_exists(file):
-		print("  SKIP  Moon view: ERA5 snapshot %s missing (fetch it to run section 4)" % file)
+	var file: String = await _era5_file()
+	if file == "":
+		print("  SKIP  Moon view: no ERA5 snapshot for %s (not cached, download failed or > %d s)" % [EPOCH_UTC,
+				ERA5_WAIT_S])
 		return
 	var snapshot: Dictionary = _world.core.weather_load_snapshot(file)
 	_world.core.weather_set_active(file, file, 0.0)
@@ -286,6 +289,33 @@ func _moon_samples() -> void:
 				_check("from the Moon: clear cell (%.1f, %.1f) unchanged" % [ll.x, ll.y],
 						absf(ratio - 1.0) <= CLEAR_TOLERANCE, "on / off %.4f" % ratio)
 	_world.camera.fov = 60.0
+
+
+## The ERA5 snapshot of the Moon view: the cached ERA5_FILE, else the one the weather service downloads and builds for
+## the clock's epoch (EPOCH_UTC, the "before" file of its ERA5 pair; online, ~1-3 min). "" when there is none within
+## ERA5_WAIT_S. The service is switched off again (a few frames, so that it clears the core's pair) before the check
+## sets its own.
+func _era5_file() -> String:
+	var cached := Paths.data_dir().path_join(ERA5_FILE)
+	if FileAccess.file_exists(cached):
+		return cached
+	print("  ERA5 snapshot %s missing: fetching the epoch's ERA5 pair through the weather service" % cached)
+	_world.weather.enabled = true
+	var start_ms := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - start_ms < ERA5_WAIT_S * 1000:
+		await process_frame
+		if _world.weather.settled() and _world.weather.active_kind() != "analog" and _world.weather.active_kind() != "":
+			break
+	var kind: String = _world.weather.active_kind()
+	var files: Array = _world.weather.active_files()
+	_world.weather.enabled = false
+	for i in range(SETTLE_FRAMES):
+		await process_frame
+	if kind != "era5" or files.is_empty():
+		print("  ERA5 fetch: active source '%s' after %.0f s" % [kind, (Time.get_ticks_msec() - start_ms) / 1000.0])
+		return ""
+	print("  ERA5 fetch: %s after %.0f s" % [String(files[0]).get_file(), (Time.get_ticks_msec() - start_ms) / 1000.0])
+	return files[0]
 
 
 static func _luminance(c: Color) -> float:

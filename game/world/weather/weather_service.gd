@@ -206,6 +206,16 @@ func reload_into_core_cache(file: String) -> void:
 		_start_load(file)
 
 
+## The active pair's files [before, after] and their source ("era5", "gfs", "analog"; empty while none is active):
+## checks that need the snapshot the service fetched.
+func active_files() -> Array:
+	return _active.get("files", []).duplicate()
+
+
+func active_kind() -> String:
+	return String(_active.get("kind", ""))
+
+
 ## True while a download, build or load is running (tests, UI).
 func busy() -> bool:
 	return not _current.is_empty() or not _queue.is_empty() or not _loading.is_empty() or not _pending.is_empty()
