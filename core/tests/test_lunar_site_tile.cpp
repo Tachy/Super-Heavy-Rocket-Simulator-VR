@@ -5,12 +5,15 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <set>
+#include <thread>
 
 #include "starsim/config/lunar_site_tile.hpp"
 #include "starsim/environment/lunar_tile.hpp"
@@ -255,6 +258,57 @@ TEST_CASE("Lunar site tile: assemble then load_terrain_grid_file round-trips hei
             }
         }
     }
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("Lunar site tile: the tile write is atomic (temp files are not the tile, concurrent writers both complete)",
+          "[config][lunar_site_tile]") {
+    const auto dir = unique_dir("starsim_site_tile_atomic");
+    std::filesystem::create_directories(dir);
+    config::TerrainGridFile file;
+    file.product = "synthetic";
+    file.kind = "height";
+    file.projection = "simple_cylindrical";
+    file.sphere_radius_m = 1737400.0;
+    file.dn_scale_m = 0.5;
+    file.lines = 40;
+    file.samples = 30;
+    file.pixels_per_degree = 128.0;
+    file.zero_line = 20.0;
+    file.zero_sample = 15.0;
+    file.dn.resize(1200);
+    for (std::size_t i = 0; i < file.dn.size(); ++i) file.dn[i] = static_cast<std::int16_t>(i % 977);
+    const auto path = dir / "tile.toml";
+
+    // A crashed writer leaves temp files (a partial grid, a partial toml): the tile is not there, only the .toml counts.
+    {
+        std::ofstream(dir / "tile.i16.123.1.1.tmp", std::ios::binary) << "partial";
+        std::ofstream(dir / "tile.toml.123.1.1.tmp", std::ios::binary) << "[grid]\nprod";
+    }
+    CHECK_FALSE(std::filesystem::exists(path));
+
+    // Two workers on one tile: both finish without an error, the result is complete and readable.
+    std::atomic<int> failures{0};
+    std::vector<std::thread> workers;
+    for (int w = 0; w < 4; ++w) {
+        workers.emplace_back([&] {
+            try {
+                for (int k = 0; k < 10; ++k) config::write_terrain_grid_file(file, path);
+            } catch (const std::exception&) {
+                ++failures;
+            }
+        });
+    }
+    for (auto& t : workers) t.join();
+    CHECK(failures == 0);
+    const auto back = config::load_terrain_grid_file(path);
+    CHECK(back.dn == file.dn);
+    // only the final pair and the crashed writer's leftovers remain: this call's temp files are gone
+    int leftovers = 0;
+    for (const auto& e : std::filesystem::directory_iterator(dir)) {
+        if (e.path().extension() == ".tmp" && e.path().filename().string().find(".123.1.1.") == std::string::npos) ++leftovers;
+    }
+    CHECK(leftovers == 0);
     std::filesystem::remove_all(dir);
 }
 

@@ -1,10 +1,13 @@
 #include "starsim/config/lunar_site_config.hpp"
 
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
+#include <thread>
 #include <utility>
 
 #include "starsim/config/data_missing.hpp"
@@ -202,14 +205,57 @@ void write_terrain_grid_file(const TerrainGridFile& f, const std::filesystem::pa
         t << "longitude_deg = " << toml_number(c.longitude_rad / constants::deg_to_rad) << "\n";
         t << "height_m = " << toml_number(c.height_m) << "\n";
     }
-    if (toml_path.has_parent_path()) std::filesystem::create_directories(toml_path.parent_path());
-    std::ofstream grid(toml_path.parent_path() / heights_name, std::ios::binary);
-    grid.write(reinterpret_cast<const char*>(f.dn.data()), static_cast<std::streamsize>(2 * f.dn.size()));
-    if (!grid) throw ConfigError("cannot write " + (toml_path.parent_path() / heights_name).string());
-    grid.close();
-    std::ofstream out(toml_path, std::ios::binary);
-    out << t.str();
-    if (!out) throw ConfigError("cannot write " + toml_path.string());
+    // Atomic: both files go to temp names unique to this call, then are renamed into place, the .toml (the "present"
+    // marker) last. A crash leaves only temp files; two writers of one tile both complete (last rename wins).
+    namespace fs = std::filesystem;
+    static std::atomic<unsigned long long> counter{0};
+    const auto unique = std::to_string(counter.fetch_add(1)) + "." +
+                        std::to_string(std::hash<std::thread::id>{}(std::this_thread::get_id())) + "." +
+                        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".tmp";
+    const fs::path dir = toml_path.has_parent_path() ? toml_path.parent_path() : fs::path(".");
+    fs::create_directories(dir);
+    const fs::path grid_final = dir / heights_name;
+    const fs::path grid_tmp = dir / (heights_name + "." + unique);
+    const fs::path toml_tmp = dir / (toml_path.filename().string() + "." + unique);
+    const auto cleanup = [&] {
+        std::error_code ec;
+        fs::remove(grid_tmp, ec);
+        fs::remove(toml_tmp, ec);
+    };
+    try {
+        {
+            std::ofstream grid(grid_tmp, std::ios::binary);
+            grid.write(reinterpret_cast<const char*>(f.dn.data()), static_cast<std::streamsize>(2 * f.dn.size()));
+            grid.close();
+            if (!grid) throw ConfigError("cannot write " + grid_final.string());
+        }
+        {
+            std::ofstream out(toml_tmp, std::ios::binary);
+            out << t.str();
+            out.close();
+            if (!out) throw ConfigError("cannot write " + toml_path.string());
+        }
+        // Windows refuses to replace a file another writer is replacing (or a reader has open) at that moment: retry.
+        const auto move_into_place = [](const fs::path& from, const fs::path& to) {
+            for (int attempt = 0;; ++attempt) {
+                try {
+                    fs::rename(from, to);
+                    return;
+                } catch (const fs::filesystem_error&) {
+                    if (attempt >= 200) throw;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                }
+            }
+        };
+        move_into_place(grid_tmp, grid_final);
+        move_into_place(toml_tmp, toml_path);
+    } catch (const fs::filesystem_error& e) {
+        cleanup();
+        throw ConfigError(std::string("cannot move the tile into place: ") + e.what());
+    } catch (...) {
+        cleanup();
+        throw;
+    }
 }
 
 }  // namespace starsim::config

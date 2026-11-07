@@ -108,7 +108,9 @@ public:
     bool lunar_site_tiles_present(double latitude_deg, double longitude_deg) const;
     // Makes this site the active one: rebuilds the Moon terrain and composed surface with its 60 m tile (R9: until the
     // first call only the global grid is loaded) and swaps them atomically; readers keep the state they took. {ok, report}
-    // (lunar.site_no_product, data.lunar_site_tile_missing). Heavy (a rebuild): call it on a worker.
+    // (lunar.site_no_product, data.lunar_site_tile_missing). Heavy (a rebuild): call it on a worker. Contract:
+    // load_terrain has returned first (it writes the config / data dirs read here and by assemble_lunar_site_tile,
+    // unlocked); one site switch at a time.
     godot::Dictionary set_lunar_site(double latitude_deg, double longitude_deg);
 
     // Terrain heights and water flags at latitude / longitude points (degrees; body "earth" or "moon"):
@@ -354,7 +356,14 @@ private:
     struct MoonState {
         std::shared_ptr<const environment::LunarTerrain> terrain;          // nullptr when absent
         std::shared_ptr<const environment::DetailedLunarTerrain> surface;  // nullptr when absent
-        std::unique_ptr<environment::UnresolvedShadingModel> unresolved;   // moon_unresolved_shading()
+        // moon_unresolved_shading() builds it lazily; unresolved_mutex guards the pointer (the model is immutable once
+        // set), readers on other threads go through unresolved_model().
+        mutable std::mutex unresolved_mutex;
+        std::unique_ptr<environment::UnresolvedShadingModel> unresolved;
+        const environment::UnresolvedShadingModel* unresolved_model() const {
+            std::lock_guard lock(unresolved_mutex);
+            return unresolved.get();
+        }
     };
     std::shared_ptr<MoonState> moon_state() const;
     void publish_moon_state(std::shared_ptr<MoonState> state);
@@ -366,7 +375,6 @@ private:
     std::filesystem::path moon_config_dir_, moon_data_dir_;  // load_terrain()
     config::HapkeParameters moon_hapke_;  // load_moon_hapke()
     bool moon_hapke_loaded_ = false;
-    std::unique_ptr<environment::UnresolvedShadingModel> moon_unresolved_;  // moon_unresolved_shading()
     std::filesystem::path moon_cache_dir_;  // data/cache (load_terrain): the rock view tables' file cache
     std::atomic<bool> moon_detail_on_{true}, moon_rocks_on_{true};
     std::shared_ptr<const environment::Geoid> coarse_geoid_;  // load_terrain(): config's 1-degree grid; nullptr if unreadable

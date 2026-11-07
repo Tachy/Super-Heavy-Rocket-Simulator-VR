@@ -489,7 +489,7 @@ godot::Dictionary StarsimCore::assemble_lunar_site_tile(const godot::Dictionary&
             const godot::PackedByteArray body = bodies[i];
             raw.emplace_back(body.ptr(), body.ptr() + body.size());
         }
-        // The grid first, the .toml last: the toml is what lunar_site_tiles_present looks for.
+        // Atomic (temp names, the .toml renamed last: it is what lunar_site_tiles_present looks for).
         config::write_terrain_grid_file(config::assemble_site_tile(planned, raw),
                                         moon_data_dir_ / "terrain" / "sites" / (planned.cache_key + ".toml"));
         result["ok"] = true;
@@ -764,17 +764,22 @@ godot::Dictionary StarsimCore::moon_unresolved_shading() {
     godot::Dictionary result;
     result["present"] = false;
     if (moon->surface == nullptr) return result;
-    if (!moon->unresolved) {
-        try {
-            moon->unresolved = std::make_unique<environment::UnresolvedShadingModel>(
-                environment::make_unresolved_shading_model(moon->surface->detail(), moon->surface->rocks_shared().get(),
-                                                          moon_cache_dir_));
-        } catch (const std::exception& e) {
-            godot::UtilityFunctions::push_warning(godot::String::utf8(e.what()));
-            return result;
+    const environment::UnresolvedShadingModel* model = nullptr;
+    {
+        std::lock_guard lock(moon->unresolved_mutex);
+        if (!moon->unresolved) {
+            try {
+                moon->unresolved = std::make_unique<environment::UnresolvedShadingModel>(
+                    environment::make_unresolved_shading_model(moon->surface->detail(),
+                                                              moon->surface->rocks_shared().get(), moon_cache_dir_));
+            } catch (const std::exception& e) {
+                godot::UtilityFunctions::push_warning(godot::String::utf8(e.what()));
+                return result;
+            }
         }
+        model = moon->unresolved.get();
     }
-    const auto& m = *moon->unresolved;
+    const auto& m = *model;
     const auto packed = [](const std::vector<double>& v) {
         godot::PackedFloat64Array a;
         a.resize(static_cast<int64_t>(v.size()));
@@ -824,14 +829,15 @@ godot::Vector2 StarsimCore::moon_unresolved_light_factors(double abundance, doub
                                                           double sun_view_azimuth_rad, double earth_view_azimuth_rad,
                                                           bool sun_shadow_map, double shadow_map_resolved_m) const {
     const auto moon = moon_state();
-    if (!moon->unresolved) return {1.0, 1.0};
+    const auto* model = moon->unresolved_model();
+    if (!model) return {1.0, 1.0};
     environment::UnresolvedView view;
     view.elevation_rad = view_elevation_rad;
     view.sun_azimuth_difference_rad = sun_view_azimuth_rad;
     view.earth_azimuth_difference_rad = earth_view_azimuth_rad;
     view.sun_shadow_map = sun_shadow_map;
     view.shadow_map_resolved_m = shadow_map_resolved_m;
-    const auto f = environment::unresolved_light_factors(*moon->unresolved, abundance, geometry_min_diameter_m,
+    const auto f = environment::unresolved_light_factors(*model, abundance, geometry_min_diameter_m,
                                                          spacing_m, horizon_spacing_m, sun_elevation_rad,
                                                          earth_elevation_rad, true, view);
     return {static_cast<real_t>(f.sun), static_cast<real_t>(f.earth)};
@@ -839,8 +845,9 @@ godot::Vector2 StarsimCore::moon_unresolved_light_factors(double abundance, doub
 
 double StarsimCore::moon_residual_theta_bar(double spacing_m) const {
     const auto moon = moon_state();
-    if (!moon->unresolved) return moon->surface ? moon->surface->detail().config().hapke.theta_bar_rad : 0.0;
-    return environment::residual_theta_bar(*moon->unresolved, spacing_m);
+    const auto* model = moon->unresolved_model();
+    if (!model) return moon->surface ? moon->surface->detail().config().hapke.theta_bar_rad : 0.0;
+    return environment::residual_theta_bar(*model, spacing_m);
 }
 
 godot::PackedFloat32Array StarsimCore::moon_rock_abundance_grid(int width, int height) const {
@@ -936,8 +943,10 @@ double StarsimCore::surface_finest_resolution_m(const godot::String& body,
                                                 const godot::PackedFloat64Array& latitudes_deg,
                                                 const godot::PackedFloat64Array& longitudes_deg) const {
     const auto moon = moon_state();
-    std::shared_ptr<const environment::Terrain> terrain = terrain_of(body);
-    if (terrain != nullptr && body.to_lower() == "moon" && moon->surface != nullptr && moon_detail_on_) {
+    const bool is_moon = body.to_lower() == "moon";
+    std::shared_ptr<const environment::Terrain> terrain = is_moon ? std::shared_ptr<const environment::Terrain>(moon->terrain)
+                                                                  : terrain_of(body);
+    if (terrain != nullptr && is_moon && moon->surface != nullptr && moon_detail_on_) {
         terrain = moon->surface;  // the procedural limit
     }
     return finest_resolution_of(terrain.get(), latitudes_deg, longitudes_deg, "surface_finest_resolution_m");

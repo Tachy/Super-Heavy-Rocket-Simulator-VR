@@ -825,10 +825,17 @@ func _check_lunar_sites(config_dir: String, tdb: float) -> void:
 			and float(w["sun_elevation_deg"]) > 0.0 and str(w["orbit"]) == "llo" and w.has("propellant_reserve_kg")
 			and w.has("sun_azimuth_deg") and w.has("daylight_after_touchdown_s") and w.has("llo_inclination_deg"),
 			"window dictionary fields")
-	# cancel: a second search for another stay is stopped right away
-	var cid: int = sim.find_lunar_windows("hls_lunar_llo", lat, lon, 36.0 * 3600.0, tdb)
-	sim.cancel(cid)
-	_check(sim.wait_idle(120.0) and sim.result(cid).get("done", false), "cancelled search ends")
+	# cancel: a search for a stay not searched before (no cache hit) is stopped right after posting; wait for the
+	# command's own done flag, then the cancelled code is expected (the search checks the flag before anything is cached)
+	var cid: int = sim.find_lunar_windows("hls_lunar_llo", lat, lon, 47.3 * 3600.0, tdb)
+	_check(sim.cancel(cid), "cancel finds the running search")
+	var cancel_started := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - cancel_started < 120000 and not sim.result(cid).get("done", false):
+		sim.advance_to(tdb)
+		OS.delay_msec(5)
+	var cancelled: Dictionary = sim.result(cid)
+	_check(cancelled.get("done", false) and str(cancelled.get("report", {}).get("code", "")) == "lunar.window_search_cancelled",
+			"cancelled search ends with lunar.window_search_cancelled (%s)" % str(cancelled.get("report", {}).get("code", "")))
 	# start the mission with the window
 	var started_id: int = sim.start_mission("hls_lunar_llo", tdb, false, 0.0, {"lunar": {"lat_deg": lat, "lon_deg": lon,
 			"stay_s": 24.0 * 3600.0, "mission_start_tdb_s": w["mission_start_tdb_s"], "touchdown_tdb_s": w["touchdown_tdb_s"]}})

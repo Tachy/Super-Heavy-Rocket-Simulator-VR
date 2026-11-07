@@ -67,11 +67,13 @@ struct FlightSim::WindowJob {
 };
 
 FlightSim::~FlightSim() {
+    for (auto& job : window_jobs_) job.second->cancel = true;  // so the joins below do not wait for a full search
     runner_.reset();
     window_jobs_.clear();
 }
 
 void FlightSim::setup(const godot::String& config_dir) {
+    for (auto& job : window_jobs_) job.second->cancel = true;
     runner_.reset();  // joins the old thread before its session and context go
     window_jobs_.clear();  // cancels and joins the window searches
     config_dir_ = std::filesystem::path(config_dir.utf8().get_data());
