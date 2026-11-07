@@ -253,8 +253,11 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   config_dir, {mission_id, site, stay_s, start}, progress)` -> `LunarWindowResult{windows, refusal}`; each
   `LunarLandingWindow` = mission start, touchdown, liftoff (touchdown + stay), Sun elevation / azimuth at touchdown,
   daylight after it, propellant reserve (the start budget's margin above `reserve_kg`, after every leg incl. the stay's
-  plane change), LLO inclination, orbit kind. To fly a window: start at its mission start with `touchdown_after_epoch` =
-  touchdown - mission start (the Apollo 15 test does). NRHO windows carry the NRHO departure's planned pass (no descent
+  plane change), LLO inclination, orbit kind. To fly a window: `StartOptions::lunar = LunarStartOverride{site, stay_s, mission_start, touchdown}` on
+  `start_mission` / `start_mission_deferred` (lunar_landing only; replaces [mission] site, [surface] stay_hours, [orbit]
+  epoch_utc; `touchdown` -> `touchdown_after_epoch` = touchdown - mission start, so the LLO plane is the one the
+  window was found for; without it the mission file's own value applies). Tests: Apollo 15 window 1 descent plan within
+  0.012 h of the listed touchdown; Apollo 17 72 h stay flown to the LLO. NRHO windows carry the NRHO departure's planned pass (no descent
   prediction) and the polar default inclination.
   Mission `[windows]` (`horizon_days` 90, `count` 5, `sun_preferred_min/max_deg` 5 / 20). Algorithm: daylight intervals
   (`mission::daylight_intervals`) over the horizon plus the stay -> touchdown candidates every 6 h (centred in the slot)
