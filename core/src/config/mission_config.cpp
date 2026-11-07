@@ -276,6 +276,8 @@ LunarLandingMission load_lunar_landing_mission(const std::filesystem::path& conf
     m.braking_range_m = doc.positive(descent, "braking_range_km") * 1000.0;
     m.max_crossrange_m = doc.positive(descent, "max_crossrange_km") * 1000.0;
     m.slope_limit_rad = doc.positive(descent, "slope_limit_deg") * deg;
+    m.preferred_slope_rad = doc.positive(descent, "preferred_slope_deg") * deg;
+    if (m.preferred_slope_rad > m.slope_limit_rad) doc.fail("descent: preferred_slope_deg above slope_limit_deg");
     m.touchdown_search_radius_m = doc.positive(descent, "touchdown_search_radius_m");
     if (descent.contains("touchdown_after_epoch_h")) {
         m.touchdown_after_epoch_s = doc.positive(descent, "touchdown_after_epoch_h") * 3600.0;

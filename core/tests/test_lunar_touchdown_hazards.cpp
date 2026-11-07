@@ -23,6 +23,7 @@
 #include "starsim/environment/lunar_rocks.hpp"
 #include "starsim/environment/lunar_surface_detail.hpp"
 #include "starsim/environment/lunar_terrain.hpp"
+#include "starsim/environment/lunar_tile.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/mission/lunar_descent.hpp"
 #include "starsim/mission/touchdown_search.hpp"
@@ -484,5 +485,159 @@ TEST_CASE("Worst-case time of a refused site at IM-2", "[.touchdown_worst]") {
             std::fflush(stdout);
             CHECK_FALSE(point);
         }
+    }
+}
+
+// Flat touchdown point plan, Task 1: the search prefers a point within preferred_slope_rad anywhere in the radius.
+namespace {
+
+constexpr double tilt_lat = 0.7 * deg, tilt_lon = 23.5 * deg;  // an equatorial mare-like site
+
+// An analytic LOLA tile around (tilt_lat, tilt_lon): a plane rising east at `slope_deg` up to `terrace_m` east of the
+// site, level beyond it (the terrace). Constant along north (the approach's uprange stays level).
+class TerraceTile final : public environment::LunarTile {
+public:
+    TerraceTile(double slope_deg, double terrace_m) : grade_(std::tan(slope_deg * deg)), terrace_m_(terrace_m) {}
+    bool contains(const Vec3& u) const override { return distance_m(u) < radius_m; }
+    double height_m(const Vec3& u) const override {
+        const auto [e, n] = east_north(tilt_lat, tilt_lon, u);
+        (void)n;
+        return grade_ * std::min(e, terrace_m_);
+    }
+    double edge_distance_m(const Vec3& u) const override { return radius_m - distance_m(u); }
+    double scale_m() const override { return 20.0; }
+    double outside_distance_m(const Vec3& u) const override { return std::max(distance_m(u) - radius_m, 0.0); }
+    double max_height_m() const override { return grade_ * std::min(radius_m, terrace_m_); }
+
+private:
+    static constexpr double radius_m = 6000.0;
+    static double distance_m(const Vec3& u) {
+        const auto [e, n] = east_north(tilt_lat, tilt_lon, u);
+        return std::hypot(e, n);
+    }
+    double grade_, terrace_m_;
+};
+
+std::shared_ptr<const environment::LunarTerrain> terrace_lola(double slope_deg, double terrace_m) {
+    environment::CylindricalGrid g;  // a coarse flat global grid (the tile carries the structure)
+    g.grid = {180, 360, 0.5, std::vector<std::int16_t>(180 * 360, 0)};
+    g.pixels_per_degree = 1.0;
+    g.zero_line = 89.5;
+    g.zero_sample = -0.5;
+    return std::make_shared<const environment::LunarTerrain>(
+        std::move(g), std::vector<std::shared_ptr<const environment::LunarTile>>{
+                          std::make_shared<const TerraceTile>(slope_deg, terrace_m)}, R);
+}
+
+std::shared_ptr<const DetailedLunarTerrain> terrace_surface(double slope_deg, double terrace_m) {
+    auto lola = terrace_lola(slope_deg, terrace_m);
+    auto cfg = config::load_moon_surface_config(std::filesystem::path(STARSIM_CONFIG_DIR) / "moon_surface.toml");
+    cfg.rocks.abundance_source = "uniform";
+    auto detail = std::make_shared<const environment::LunarSurfaceDetail>(cfg, lola);
+    auto rocks = std::make_shared<const environment::LunarRocks>(detail);
+    return std::make_shared<const DetailedLunarTerrain>(lola, detail, rocks, environment::SurfaceDetailOptions{});
+}
+
+constexpr double terrace_east_m = 300.0;
+
+}  // namespace
+
+TEST_CASE("A flatter point farther out beats a steeper near one", "[moon_surface][lunar][mission]") {
+    mission::LunarDescentParameters p;
+    mission::LunarDescentParameters nearest = p;
+    nearest.preferred_slope_rad = p.slope_limit_rad;  // every admissible point preferred: the old choice
+    SECTION("LOLA only") {
+        const auto lola = terrace_lola(7.0, terrace_east_m);
+        const auto point = mission::select_touchdown_point(*lola, tilt_lat, tilt_lon, 0.0, footprint_m, p);
+        const auto near = mission::select_touchdown_point(*lola, tilt_lat, tilt_lon, 0.0, footprint_m, nearest);
+        REQUIRE(point);
+        REQUIRE(near);
+        std::printf("[touchdown_hazards] terrace LOLA: preferred %.0f m off at %.2f deg, nearest %.0f m off at %.2f deg\n",
+                    point->offset_m, point->slope_rad / deg, near->offset_m, near->slope_rad / deg);
+        CHECK(point->within_preferred_slope);
+        CHECK(point->slope_rad <= p.preferred_slope_rad);
+        CHECK(point->offset_m >= terrace_east_m - footprint_m - p.touchdown_grid_m);
+        CHECK(near->offset_m == 0.0);
+        CHECK(near->slope_rad > p.preferred_slope_rad);
+        CHECK(near->within_preferred_slope);  // within its own (8 deg) preferred slope
+        // No preferred candidate nearer than the result: the search limited to just inside its offset falls back.
+        auto inside = p;
+        inside.touchdown_search_radius_m = point->offset_m - 1e-6;
+        const auto fallback = mission::select_touchdown_point(*lola, tilt_lat, tilt_lon, 0.0, footprint_m, inside);
+        REQUIRE(fallback);
+        CHECK_FALSE(fallback->within_preferred_slope);
+        CHECK(fallback->offset_m == 0.0);
+    }
+    SECTION("composed surface with the hazard check") {
+        const auto s = terrace_surface(6.5, terrace_east_m);
+        const auto h = mission::touchdown_hazard_limits(hls_stage());
+        const auto point = mission::select_touchdown_point(*s, tilt_lat, tilt_lon, 0.0, footprint_m, p, h);
+        const auto near = mission::select_touchdown_point(*s, tilt_lat, tilt_lon, 0.0, footprint_m, nearest, h);
+        REQUIRE(point);
+        REQUIRE(near);
+        std::printf("[touchdown_hazards] terrace detail: preferred %.0f m off at %.2f deg, nearest %.0f m off at %.2f deg\n",
+                    point->offset_m, point->slope_rad / deg, near->offset_m, near->slope_rad / deg);
+        CHECK(point->within_preferred_slope);
+        CHECK(point->slope_rad <= p.preferred_slope_rad);
+        CHECK(point->offset_m >= terrace_east_m - footprint_m - p.touchdown_grid_m);
+        CHECK(near->offset_m < terrace_east_m - footprint_m - p.touchdown_grid_m);
+        CHECK(near->slope_rad > p.preferred_slope_rad);
+        // Independent check of the preferred point at rolls between the sampled ones.
+        for (const double roll : {0.0, 7.0 * deg, 23.0 * deg, 41.0 * deg}) {
+            CAPTURE(roll);
+            CHECK(feet_at_roll(*s, *point, roll, h).slope_rad <= p.preferred_slope_rad + 0.5 * deg);
+        }
+    }
+}
+
+TEST_CASE("No point within the preferred slope falls back to the nearest admissible one",
+          "[moon_surface][lunar][mission]") {
+    const auto lola = terrace_lola(7.0, 1.0e9);  // 7 deg everywhere
+    mission::LunarDescentParameters p;
+    mission::LunarDescentParameters nearest = p;
+    nearest.preferred_slope_rad = p.slope_limit_rad;
+    const auto point = mission::select_touchdown_point(*lola, tilt_lat, tilt_lon, 0.0, footprint_m, p);
+    const auto near = mission::select_touchdown_point(*lola, tilt_lat, tilt_lon, 0.0, footprint_m, nearest);
+    REQUIRE(point);
+    REQUIRE(near);
+    CHECK_FALSE(point->within_preferred_slope);
+    CHECK(point->slope_rad > p.preferred_slope_rad);
+    CHECK(point->slope_rad <= p.slope_limit_rad);
+    CHECK(point->latitude_rad == near->latitude_rad);
+    CHECK(point->longitude_rad == near->longitude_rad);
+    CHECK(point->offset_m == near->offset_m);
+    // Steeper than the hard limit everywhere: refused as before.
+    const auto steep = terrace_lola(9.0, 1.0e9);
+    CHECK_FALSE(mission::select_touchdown_point(*steep, tilt_lat, tilt_lon, 0.0, footprint_m, p));
+}
+
+// Review Focus 4: the preferred point lies rings beyond the fallback; the parallel search must take the serial one.
+TEST_CASE("The parallel search takes the serial preferred point on a terrace", "[moon_surface][lunar][mission]") {
+    const auto s = terrace_surface(6.5, terrace_east_m);
+    const auto h = mission::touchdown_hazard_limits(hls_stage());
+    const auto run = [&](int threads) {
+        auto other = h;
+        other.base_radius_m += 1e-3;  // a fresh memo context: every candidate is checked on the threads
+        mission::LunarDescentParameters tiny;
+        tiny.touchdown_search_radius_m = 0.0;
+        (void)mission::select_touchdown_point(*s, tilt_lat, tilt_lon, 0.0, footprint_m, tiny, other);
+        mission::LunarDescentParameters p;
+        p.touchdown_search_radius_m = 500.0;
+        p.touchdown_search_threads = threads;
+        return mission::select_touchdown_point(*s, tilt_lat, tilt_lon, 0.0, footprint_m, p, h);
+    };
+    const auto serial = run(1);
+    REQUIRE(serial);
+    CHECK(serial->within_preferred_slope);
+    for (const int threads : {3, 0}) {
+        CAPTURE(threads);
+        const auto parallel = run(threads);
+        REQUIRE(parallel);
+        CHECK(std::bit_cast<std::uint64_t>(parallel->latitude_rad) == std::bit_cast<std::uint64_t>(serial->latitude_rad));
+        CHECK(std::bit_cast<std::uint64_t>(parallel->longitude_rad) == std::bit_cast<std::uint64_t>(serial->longitude_rad));
+        CHECK(std::bit_cast<std::uint64_t>(parallel->height_m) == std::bit_cast<std::uint64_t>(serial->height_m));
+        CHECK(std::bit_cast<std::uint64_t>(parallel->slope_rad) == std::bit_cast<std::uint64_t>(serial->slope_rad));
+        CHECK(parallel->offset_m == serial->offset_m);
+        CHECK(parallel->within_preferred_slope == serial->within_preferred_slope);
     }
 }

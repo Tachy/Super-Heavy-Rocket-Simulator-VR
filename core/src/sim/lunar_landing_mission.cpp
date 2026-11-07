@@ -220,6 +220,7 @@ LunarLandingSetup lunar_landing_setup(const config::LunarLandingMission& m) {
     setup.descent.braking_range_m = m.braking_range_m;
     setup.descent.max_crossrange_m = m.max_crossrange_m;
     setup.descent.slope_limit_rad = m.slope_limit_rad;
+    setup.descent.preferred_slope_rad = m.preferred_slope_rad;
     setup.descent.touchdown_search_radius_m = m.touchdown_search_radius_m;
     setup.surface_stay_s = m.surface_stay_s;
     setup.descent_delta_v_mps = m.descent_delta_v_mps;

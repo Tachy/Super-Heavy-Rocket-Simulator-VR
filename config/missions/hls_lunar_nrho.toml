@@ -44,6 +44,7 @@ pdi_altitude_above_site_km = 15.0   # [S] Apollo: PDI at ~50,000 ft above the la
 braking_range_km = 450.0            # [E] spec 400-500 km
 max_crossrange_km = 20.0            # [E] user 2026-10-15: wait for a pass within this, plane trim removes it
 slope_limit_deg = 8.0               # [E] NASA Artemis ~8-10 deg; the 12 m stance lands >= 9 deg
+preferred_slope_deg = 5.0           # [E] user 2026-11-07: the nearest point within 5 deg anywhere in the radius first (6-8 deg rock 1.5-2.4 m off)
 touchdown_search_radius_m = 1000.0  # [E]
 
 [surface]

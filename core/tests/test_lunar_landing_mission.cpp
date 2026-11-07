@@ -6,7 +6,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <optional>
+#include <string>
 #include <thread>
 
 #include <catch2/catch_test_macros.hpp>
@@ -176,6 +180,32 @@ TEST_CASE("Lunar landing missions load their descent, surface, ascent and budget
     CHECK(m.insertion_altitude_above_site_m == 15e3);
     CHECK(m.descent_delta_v_mps == 2100.0);
     CHECK(m.reserve_kg == 10000.0);
+}
+
+// Flat touchdown point plan, Task 1: the preferred slope reaches the descent parameters; above the hard limit it is
+// refused.
+TEST_CASE("Lunar landing missions load the preferred touchdown slope", "[config][lunar]") {
+    constexpr double deg = constants::deg_to_rad;
+    for (const char* id : {"hls_lunar_llo", "hls_lunar_llo_depot", "hls_lunar_nrho"}) {
+        CAPTURE(id);
+        const auto m = config::load_lunar_landing_mission(STARSIM_CONFIG_DIR, id);
+        CHECK_THAT(m.preferred_slope_rad, WithinAbs(5.0 * deg, 1e-12));
+        CHECK(m.preferred_slope_rad <= m.slope_limit_rad);
+        CHECK(sim::lunar_landing_setup(m).descent.preferred_slope_rad == m.preferred_slope_rad);
+    }
+    const std::filesystem::path src = std::filesystem::path(STARSIM_CONFIG_DIR) / "missions" / "hls_lunar_llo.toml";
+    std::ifstream in(src);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto at = text.find("preferred_slope_deg = 5.0");
+    REQUIRE(at != std::string::npos);
+    text.replace(at, std::string("preferred_slope_deg = 5.0").size(), "preferred_slope_deg = 9.0");
+    const auto dir = std::filesystem::temp_directory_path() / "starsim_flat_touchdown_preferred_above_limit";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir / "missions");
+    std::ofstream(dir / "missions" / "hls_lunar_llo.toml") << text;
+    CHECK_THROWS_WITH(config::load_lunar_landing_mission(dir, "hls_lunar_llo"),
+                      ContainsSubstring("preferred_slope_deg above slope_limit_deg"));
+    std::filesystem::remove_all(dir);
 }
 
 // The LLO variant closes with the 120 t HLS; the NRHO variant does not (user 2026-10-16, l4 Task 9: its flight ran dry

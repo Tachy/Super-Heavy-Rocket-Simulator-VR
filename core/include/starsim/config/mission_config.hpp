@@ -108,6 +108,7 @@ struct LunarLandingMission {
     double braking_range_m = 450.0e3;
     double max_crossrange_m = 20.0e3;
     double slope_limit_rad = 8.0 * constants::deg_to_rad;
+    double preferred_slope_rad = 5.0 * constants::deg_to_rad;  // [descent] preferred_slope_deg (<= slope_limit_deg)
     double touchdown_search_radius_m = 1000.0;
     // [descent] touchdown_after_epoch_h: the landing the mission is planned for (its Sun, its stay), as a duration from
     // the mission's start epoch; the LLO plane holds the site then and the descent takes that pass. Absent: the first

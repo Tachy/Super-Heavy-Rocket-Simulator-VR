@@ -244,8 +244,10 @@ on top of that relief.
 - `mission::select_touchdown_point(const DetailedLunarTerrain&, lat, lon, approach_azimuth, footprint_radius, p,
   TouchdownHazardLimits)`: the candidates of the LOLA selection (20 m grid, nearest first, within
   `touchdown_search_radius_m`) pass the LOLA checks first (footprint plane slope, roughness 0.5 m, glide cone - the
-  cheap pre-check); the first that also passes the hazard check on the composed surface is the target. Detail off:
-  the LOLA selection on `lola()` bit for bit (diagnostics NaN).
+  cheap pre-check); of those that also pass the hazard check on the composed surface the first whose slope (the
+  steepest rest plane over the rolls) is within `preferred_slope_rad` (5 deg) is the target, the first admissible one
+  only when none in the radius is that flat (flat touchdown point plan 2026-11-07, `lunar.md` Touchdown point).
+  Detail off: the LOLA selection on `lola()` bit for bit (diagnostics NaN).
 - Hazard check, for every roll (the roll at touchdown is not controlled): the feet stand on `support_under_disc` (the
   pivoting pad the legs feel; frame as `contact::TerrainField`: verticals through the candidate's tangent-plane
   points, heights along its up), sampled on the footprint circle at <= 0.5 pad radius ([E]
@@ -264,9 +266,11 @@ on top of that relief.
 - Parallel search (Task 5 fix round 2): with detail on, the candidates are checked ring by ring (`touchdown_grid_m`
   wide, nearest ring first) on `LunarDescentParameters::touchdown_search_threads` threads (0: hardware threads less
   two, as the weather builds; 1: serial), taken in azimuth order so that the candidates in flight share surface cells.
-  The first admissible candidate of the first ring that has one, in the serial (offset, grid) order, is taken: the
-  same point as the serial search bit for bit (test "The parallel touchdown search picks the serial point bit for
-  bit": serial against 3 and 22 threads, each on a fresh memo, point 60 m off / refused). `check_hazards` is pure;
+  The first preferred candidate of the first ring that has one, in the serial (offset, grid) order, is taken (else the
+  first admissible one overall): the same point as the serial search bit for bit (tests "The parallel touchdown
+  search picks the serial point bit for bit": serial against 3 and 22 threads, each on a fresh memo, point 60 m off /
+  refused; "The parallel search takes the serial preferred point on a terrace": preferred point 321 m off, rings
+  beyond the 72 m fallback). `check_hazards` is pure;
   the contact cache copies node values under its lock, computes missing nodes outside it and keeps rock cells alive by
   `shared_ptr`, the crater memos are per thread - no shared mutable state outside the locks.
 - Asynchronous search (follow-up U-7, 2026-11-06): `mission::select_touchdown_point_async(shared surface, lat, lon,

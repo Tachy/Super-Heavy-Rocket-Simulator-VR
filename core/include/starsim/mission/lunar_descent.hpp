@@ -29,6 +29,10 @@ struct LunarDescentParameters {
     double trim_tolerance_m = 50.0;             // [E] predicted cross-track miss after the trim
     double doi_tolerance_m = 50.0;              // [E] predicted periselene radius after the DOI
     double slope_limit_rad = 8.0 * constants::deg_to_rad;  // [E] NASA ~8-10 deg; the 12 m stance lands >= 9 deg (l2)
+    // Preferred slope (user 2026-11-07): the search takes the nearest admissible point within this slope anywhere in
+    // the search radius, the nearest admissible one (slope_limit_rad) only when none is this flat. [E] the HLS rocks
+    // 1.5-2.4 m off its touchdown point on 6-8 deg after the engine cut (lunar sites Task 13).
+    double preferred_slope_rad = 5.0 * constants::deg_to_rad;
     double roughness_limit_m = 0.5;             // [E] terrain off the footprint's plane (leg stroke 0.6 m)
     double touchdown_search_radius_m = 1000.0;  // [E]
     double touchdown_grid_m = 20.0;             // the LOLA tile's pixel
@@ -66,6 +70,7 @@ struct TouchdownPoint {
     double height_m = 0.0;
     double slope_rad = 0.0;  // of the footprint's plane (with the hazard check: the steepest rest plane of any roll)
     double offset_m = 0.0;   // from the mission's site
+    bool within_preferred_slope = false;  // slope_rad <= LunarDescentParameters::preferred_slope_rad
     // Diagnostics of the hazard check (NaN where it did not run: LOLA only or detail off). The deepest foot hanging
     // below the rest plane over the rolls, and the smallest gap between the highest ground or rock under the hull base
     // and the lowest engine exit with the legs fully stroked (>= 0 when admissible).
@@ -113,23 +118,25 @@ struct TouchdownRestPlane {
 };
 std::vector<TouchdownRestPlane> touchdown_rest_planes(const std::vector<math::Vec3>& feet_enz);
 
-// Nearest admissible touchdown point to (latitude, longitude) for an approach towards `approach_azimuth_rad`
-// (clockwise from north): footprint (the leg circle and its centre) fits a plane within the slope and roughness limits,
-// and the terrain uprange stays below the glide cone. Candidates on a grid in the site's east/north plane, nearest
-// first; empty when none lies within the search radius.
+// Touchdown point near (latitude, longitude) for an approach towards `approach_azimuth_rad` (clockwise from north):
+// admissible when the footprint (the leg circle and its centre) fits a plane within the slope and roughness limits and
+// the terrain uprange stays below the glide cone. Candidates on a grid in the site's east/north plane, nearest first:
+// the nearest admissible one whose slope is within preferred_slope_rad anywhere in the search radius, else the nearest
+// admissible one (within slope_limit_rad); empty when none lies within the search radius.
 std::optional<TouchdownPoint> select_touchdown_point(const environment::LunarTerrain& terrain, double latitude_rad,
                                                      double longitude_rad, double approach_azimuth_rad,
                                                      double footprint_radius_m, const LunarDescentParameters& p);
 
 // The same on the composed physics surface, with the hazard check of the detailed surface on top (detail on): of the
-// candidates that pass the LOLA checks above (nearest first) the first whose footprint is admissible for every roll of
+// candidates that pass the LOLA checks above (nearest first, the preferred slope as above, judged on the steepest
+// rest plane) the first whose footprint is admissible for every roll of
 // the lander about its axis (the roll at touchdown is not controlled): the six feet stand on the pivoting-pad support
 // the leg contact uses (support_under_disc), sampled on the footprint circle at hazard_roll_spacing_per_pad_radius x
 // the pad radius; per roll the rest planes over the feet (touchdown_rest_planes) are within the slope limit, the deepest
 // hanging foot within max_foot_step_m, and the ground and rock tops under the hull base disc rise above each rest plane
 // by at most bell_clearance_m. The hazard results are memoised per candidate for the surface / footprint / limits
 // (they do not depend on the approach azimuth). The candidates are checked ring by ring (touchdown_grid_m wide,
-// nearest ring first) on touchdown_search_threads threads and the first admissible one in the serial order is taken:
+// nearest ring first) on touchdown_search_threads threads and the point the serial order chooses is taken:
 // the same point as the serial search, bit for bit. Detail off: the LOLA-only selection above on surface.lola(), bit
 // for bit.
 std::optional<TouchdownPoint> select_touchdown_point(const environment::DetailedLunarTerrain& surface,

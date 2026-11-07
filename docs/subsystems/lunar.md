@@ -133,8 +133,16 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   `...-lunar-l4-mass-correction.md`):
   mission 1 (`hls_lunar_llo`) flies LEO -> LLO -> descent -> surface stay -> ascent -> LLO
   (`sim::start_lunar_landing_mission`).
-  Touchdown point (`mission::select_touchdown_point`): nearest admissible point on a 20 m grid within 1 km (LOLA:
-  footprint slope <= 8 deg, roughness 0.5 m, glide cone clear); on the composed surface (session `moon_surface()`
+  Touchdown point (`mission::select_touchdown_point`): admissible points on a 20 m grid within 1 km (LOLA:
+  footprint slope <= 8 deg `slope_limit_deg`, roughness 0.5 m, glide cone clear); of them the nearest within the
+  preferred slope (`[descent] preferred_slope_deg = 5.0`, [E] user 2026-11-07: anywhere in the radius, so a 5 deg
+  point 900 m off beats a 7 deg one 30 m off), the nearest admissible one only when none is that flat
+  (`TouchdownPoint::within_preferred_slope` false; sites are not refused for it). Tests: "A flatter point farther out
+  beats a steeper near one" (analytic terrace: LOLA 300 m off at 3.5 deg instead of 0 m at 7.0 deg; composed 321 m at
+  2.3 deg instead of 72 m at 6.9 deg), "No point within the preferred slope falls back to the nearest admissible one".
+  Cost: a site whose nearest admissible point is steeper than 5 deg is searched on past it, at worst through the whole
+  radius (as a refused site, 16-30 s at IM-2's candidate count, background thread); IM-2 unchanged (28.3 m, 3.12 deg,
+  59 ms); on the composed surface (session `moon_surface()`
   with detail on, the `lunar_landing` mission) also the hazard check of `moon-surface.md` (Touchdown hazard check: feet
   step <= stroke 0.6 m, slope over the six pads, ground and rocks under the hull base <= 0.9 m, every roll; limits
   from the vehicle config by `touchdown_hazard_limits`; the hull's rest plane over the feet, every roll). IM-2: the

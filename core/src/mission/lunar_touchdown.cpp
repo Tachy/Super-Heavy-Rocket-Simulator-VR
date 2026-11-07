@@ -362,18 +362,24 @@ void parallel_for(int count, int threads, Fn&& fn) {
 }
 
 // The nearest candidate for which `evaluate` (a pure, thread-safe function of the candidate returning the point or
-// nothing) gives a point. Serial (threads 1): candidates in order, stops at the first point. Parallel: ring by ring of
-// touchdown_grid_m width (nearest ring first), every candidate of a ring evaluated, the first point in candidate order
-// taken - the same candidate as the serial order, so the same point bit for bit.
-template <typename Evaluate>
+// nothing) gives a point that is `preferred`; when none is, the nearest that gives a point at all (the fallback).
+// Serial (threads 1): candidates in order, stops at the first preferred point. Parallel: ring by ring of
+// touchdown_grid_m width (nearest ring first), every candidate of a ring evaluated, the first preferred point in
+// candidate order taken - the same candidate as the serial order, so the same point bit for bit (the fallback too:
+// the first point in candidate order).
+template <typename Evaluate, typename Preferred>
 std::optional<TouchdownPoint> nearest_admissible(const std::vector<Candidate>& candidates, double ring_m, int threads,
-                                                 Evaluate&& evaluate) {
+                                                 Evaluate&& evaluate, Preferred&& preferred) {
     const int count = static_cast<int>(candidates.size());
+    std::optional<TouchdownPoint> fallback;
     if (threads <= 1) {
         for (int i = 0; i < count; ++i) {
-            if (auto point = evaluate(candidates[static_cast<size_t>(i)])) return point;
+            auto point = evaluate(candidates[static_cast<size_t>(i)]);
+            if (!point) continue;
+            if (preferred(*point)) return point;
+            if (!fallback) fallback = std::move(point);
         }
-        return std::nullopt;
+        return fallback;
     }
     std::vector<std::optional<TouchdownPoint>> results;
     std::vector<int> order;  // evaluation order within the ring: by azimuth
@@ -400,15 +406,18 @@ std::optional<TouchdownPoint> nearest_admissible(const std::vector<Candidate>& c
             results[static_cast<size_t>(i)] = evaluate(candidates[static_cast<size_t>(first + i)]);
         });
         for (auto& r : results) {
-            if (r) return r;
+            if (!r) continue;
+            if (preferred(*r)) return r;
+            if (!fallback) fallback = std::move(r);
         }
         first = end;
     }
-    return std::nullopt;
+    return fallback;
 }
 
-// Candidates on the grid, nearest first; the nearest that passes the LOLA checks and `accept` (filling the point's
-// remaining fields; pure and thread-safe when threads > 1) is returned.
+// Candidates on the grid, nearest first; of those that pass the LOLA checks and `accept` (filling the point's
+// remaining fields; pure and thread-safe when threads > 1) the nearest within p.preferred_slope_rad is returned, else
+// the nearest.
 template <typename Accept>
 std::optional<TouchdownPoint> search(const environment::LunarTerrain& terrain, double latitude_rad,
                                      double longitude_rad, double approach_azimuth_rad, double footprint_radius_m,
@@ -427,8 +436,9 @@ std::optional<TouchdownPoint> search(const environment::LunarTerrain& terrain, d
         TouchdownPoint point{centre.latitude_rad, centre.longitude_rad, fit.centre_height_m, fit.slope_rad,
                              c.offset_m};
         if (!accept(centre, point)) return std::nullopt;
+        point.within_preferred_slope = point.slope_rad <= p.preferred_slope_rad;
         return point;
-    });
+    }, [](const TouchdownPoint& point) { return point.within_preferred_slope; });
 }
 }  // namespace
 

@@ -42,3 +42,6 @@ Superseded states of `docs/subsystems/lunar.md` (older lunar history: `docs/hist
   (`moon_color.png`, 2.67 km/px) already holds the 2.7-10 km band, so that band entered twice: at Apollo 17 the km-scale
   log contrast rose from 0.287 (global) to 0.377 (x1.09 at 1 sigma, +31 % in std). Now the low-pass has the footprint of
   one global pixel (2665 m) and the albedo cache key carries `_lp2665`.
+
+## Touchdown point before the preferred slope (to 2026-11-07)
+- `select_touchdown_point` took the nearest admissible point (slope <= 8 deg, roughness, glide cone, hazard check). On 6-8 deg the HLS rocked 1.5-2.4 m off after the engine cut (Apollo 11 nightly 4/7, Mons Mouton seed 14); the user chose the touchdown-point choice over a lower hard limit or a new terminal procedure (2026-11-07), so the flat touchdown point plan added the 5 deg preference.
