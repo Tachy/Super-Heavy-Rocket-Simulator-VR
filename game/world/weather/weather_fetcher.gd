@@ -15,10 +15,16 @@ extends Node
 ## id: the request's id; ok: complete success; http_code: the HTTP status (0: no response); body: the text bytes when
 ## the request had no destination file.
 signal finished(id: int, ok: bool, http_code: int, body: PackedByteArray)
+## Bytes received so far of a running request (emitted from the per-frame stall check whenever the count changed; large
+## transfers show progress with it). Optional for a fetcher double: a consumer connects only when the signal exists.
+signal progress(id: int, bytes: int)
 
 const STALL_TIMEOUT_S := 30.0  ## [call] a transfer without a single new byte for this long is given up
 const DOWNLOAD_CHUNK_BYTES := 1 << 20  ## [call]
 
+## id -> seconds of the answer's Retry-After header (HTTP 429 / 503), set just before `finished` of that id; a consumer
+## reads and erases it (a fetcher double without the member simply never rate limits).
+var retry_after_s := {}
 var _next_id := 1
 var _active := {}  ## id -> {http: HTTPRequest, dest: String, ranged: bool, bytes: int, progress_s: float}
 
@@ -83,6 +89,30 @@ static func settle_file(result: int, code: int, ranged: bool, dest: String) -> b
 	return ok
 
 
+## Gives a running request up: its transfer stops, its `.part` file is removed, `finished` is NOT emitted. Unknown id: no-op.
+func cancel(id: int) -> void:
+	var entry: Dictionary = _active.get(id, {})
+	if entry.is_empty():
+		return
+	_active.erase(id)
+	var http: HTTPRequest = entry["http"]
+	http.cancel_request()
+	var dest: String = entry["dest"]
+	if dest != "" and FileAccess.file_exists(dest + ".part"):
+		DirAccess.remove_absolute(dest + ".part")
+	http.queue_free()
+
+
+## The Retry-After value (seconds) of a header list, 0 without a numeric one (an HTTP date is not interpreted).
+static func parse_retry_after(headers: PackedStringArray) -> float:
+	for line in headers:
+		var colon := line.find(":")
+		if colon > 0 and line.substr(0, colon).strip_edges().to_lower() == "retry-after":
+			var value := line.substr(colon + 1).strip_edges()
+			return float(value) if value.is_valid_float() else 0.0
+	return 0.0
+
+
 func _process(_delta: float) -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	for id: int in _active.keys():
@@ -92,12 +122,13 @@ func _process(_delta: float) -> void:
 		if bytes != int(entry["bytes"]):
 			entry["bytes"] = bytes
 			entry["progress_s"] = now
+			progress.emit(id, bytes)
 		elif now - float(entry["progress_s"]) >= STALL_TIMEOUT_S:
 			http.cancel_request()  # closes the part file; request_completed is not emitted
 			_on_completed(HTTPRequest.RESULT_TIMEOUT, 0, PackedStringArray(), PackedByteArray(), id)
 
 
-func _on_completed(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray, id: int) -> void:
+func _on_completed(result: int, code: int, headers: PackedStringArray, body: PackedByteArray, id: int) -> void:
 	var entry: Dictionary = _active.get(id, {})
 	if entry.is_empty():
 		return
@@ -111,4 +142,6 @@ func _on_completed(result: int, code: int, _headers: PackedStringArray, body: Pa
 	else:
 		ok = accepts(result, code, ranged)
 	http.queue_free()
+	if not ok and (code == 429 or code == 503):
+		retry_after_s[id] = parse_retry_after(headers)
 	finished.emit(id, ok, code, body if dest == "" and ok else PackedByteArray())

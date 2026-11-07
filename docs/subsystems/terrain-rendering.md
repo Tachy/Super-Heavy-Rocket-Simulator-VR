@@ -270,6 +270,37 @@ on top; it replaced the interim `GroundPatch`.
 - Imagery pipeline: `tools/data_pipeline/imagery.py`, `config/imagery.toml`; surface albedo
   `tools/data_pipeline/earth_albedo.py`, `config/earth_albedo.toml` (tests `test_imagery.py`, `test_earth_albedo.py`).
 - Performance run: `game/tests/terrain_perf.gd` (GPU).
+- Lunar landing sites (any latitude / longitude, plan `docs/superpowers/plans/2026-11-06-lunar-sites.md`):
+  `game/world/terrain/lunar_site_service.gd` (`LunarSiteService`, node `World.lunar_sites`) and `World.switch_lunar_site`.
+  - Service: `setup(core, fetcher, parallel = 8)`, `prepare(lat, lon)` (coordinates snapped to hundredths of a degree,
+    `snap_deg`: the core's tile key and site id have that granularity but the tile is centred on the exact coordinate, so
+    one key must come from one coordinate), signals `progress(fraction)` (bytes of finished + running ranges / bytes to
+    fetch), `site_ready(lat, lon)` (the snapped site; `ready` is a Node signal), `failed(report)`; `cancel()`. Cached tiles:
+    no request. Missing ranges (`StarsimCore.lunar_site_tile_requests`) download `parallel` at a time, each into its own file
+    `data/terrain/sites/<key>.parts/<n>.range` (the fetcher's `.part` is renamed only for a complete answer; a complete range
+    survives an interruption and is not fetched again); then `assemble_lunar_site_tile` runs on a worker thread and the
+    range files are removed. A new `prepare` / `cancel` cancels the requests and bumps a generation counter: late answers and
+    a late assembly are ignored. Height range failures: retried 3 x, a 403 (PDS: too many connections) halves the parallel
+    requests, a 429 (LROC CloudFront, Retry-After ~ 1 h) is never retried (`data.lunar_site_rate_limited`), no answer at all
+    gives `data.lunar_site_tile_missing`, other statuses `data.lunar_site_download_failed` (game-side codes with texts in
+    `[report]`, not in `codes.def`). The albedo is look only: a refused, failed or unassemblable albedo is dropped, the site
+    is `ready` with the global albedo (`site_albedo_toml()` = "").
+  - `World.switch_lunar_site(lat, lon)` (after `site_ready`; coordinates as given, not snapped): a worker thread runs
+    `core.set_lunar_site` (atomic swap), `core.moon_unresolved_shading()` (~1 s) and reads the albedo tile; the main thread
+    then frees the Moon quadtree (its builds are waited for, the rock pools freed) and builds a new one with a new rock
+    layer on the new site (the six roots are built synchronously, as at start); `lunar_site_switched` /
+    `lunar_site_switch_failed(report)`. A newer switch discards an older one; a failed core switch keeps the old terrain.
+  - Site albedo: `moon_site_albedo.gdshaderinc`, included by `terrain_moon.gdshader` and `moon_rock.gdshader`: the tile is a
+    RELATIVE albedo (R3: `TerrainGridFile` int16, `kind = "albedo"`, value x `dn_scale_m` (1/16384), tile mean 1) read by
+    `LunarSiteService.read_albedo` into an RF image; uniforms `site_albedo_texture`, `site_albedo_bounds` (lat / lon min /
+    max, rad), `site_albedo_grid` (cylindrical: zero_line, zero_sample, pixels per degree, 1; polar: pole - first line /
+    sample, scale_m, 2 north / 3 south; w = 0 off), `site_albedo_blend_m = 5000`. The factor `mix(1, relative, smoothstep(edge
+    distance / blend))` multiplies the albedo input only (Hapke stays the one lighting law; no baked shading). Rocks copy
+    the uniforms (`COPIED_TEMPLATE_PARAMETERS`).
+  - Fetcher additions (`weather_fetcher.gd`): `progress(id, bytes)`, `cancel(id)`, `retry_after_s[id]` (Retry-After seconds
+    of a 429 / 503 answer).
+  - Diagnostics: `render_check --lunar_site=<lat>,<lon> [--site_albedo=off]` (tiles on disk; a 25 km view at Apollo 17 with and
+    without the albedo differs in 17 % of the pixels by > 3 grey levels, max 35). Tests: `lunar_site_service_test.gd`.
 - Moon procedural detail checks and cost runs: `game/tests/moon_surface_check.gd` (headless).
 
 ## Standing decisions
@@ -361,6 +392,12 @@ on top; it replaced the interim `GroundPatch`.
   `class_name` terrain scripts.
 
 ## Open points and known limits
+
+- Lunar site tiles are centred on the exact coordinate while key and id round to hundredths of a degree: a tile built for
+  (20.19089, 30.77168) (preset / CLI) fails `set_lunar_site(20.19, 30.77)` with "does not match the products description".
+  The game avoids it by snapping before every prepare; the core should snap the site itself (`lunar_site_at`).
+- A site switch rebuilds the Moon quadtree on the main thread (roots, rock layer prewarm); it is a one-off hitch, not a
+  streamed change.
 
 - Moon quadtree main thread after a camera jump (Task 13 run of `moon_surface_check`, 10 km jump at 2 m, rock layer
   attached): the update's selection phase (the recursion over the new nodes) takes up to 21 ms at IM-2 and 52 ms in the

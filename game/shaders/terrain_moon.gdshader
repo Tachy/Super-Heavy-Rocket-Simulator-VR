@@ -22,6 +22,7 @@ render_mode cull_back, ambient_light_disabled, specular_disabled;
 #include "res://shaders/moon_horizon.gdshaderinc"
 #include "res://shaders/moon_near_shadow.gdshaderinc"
 #include "res://shaders/moon_fill.gdshaderinc"
+#include "res://shaders/moon_site_albedo.gdshaderinc"
 
 // CUSTOM1.u runs past 1 on nodes across the antimeridian (continuous inside the node), hence repeat.
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
@@ -156,6 +157,7 @@ void fragment() {
 	// v stays half a texel inside the map (repeat would bleed the opposite pole into the polar rows).
 	float half_texel_v = 0.5 / float(textureSize(albedo_texture, 0).y);
 	vec3 albedo = texture(albedo_texture, vec2(global_uv.x, clamp(global_uv.y, half_texel_v, 1.0 - half_texel_v))).rgb;
+	albedo *= site_albedo_factor(global_uv);  // the active landing site's relative albedo (moon_site_albedo.gdshaderinc)
 	float light;
 	float near_radiance = 0.0;  // the Sun's part the near-field shadow map gates (light())
 	if (detail_shading) {

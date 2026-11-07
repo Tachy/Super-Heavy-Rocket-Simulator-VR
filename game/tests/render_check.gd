@@ -3,6 +3,7 @@
 # Vehicle: --vehicle=starship_block3 --site=starbase_pad2 [--fly=40] (ignite, liftoff at 3 s, fly N s)
 #          [--autopilot] (ascent autopilot instead of manual) [--circularize] (plan node afterwards)
 #          [--watch_from_site[=2000]] (afterwards: seen from the ground 2000 m east of the site, aimed at the vehicle)
+# Lunar site: --lunar_site=<lat>,<lon> (tiles on disk; core + Moon terrain switched first) [--site_albedo=off]
 # Ground view: --lat= --lon= [--height=] [--body=moon] (selenographic, MOON_ME; --height defaults to the core's
 #          surface there, the Earth's or the Moon's, --eye_height=2 above it) with --azimuth / --elevation / --fov
 #          [--moon_detail=off] (the fidelity flag moon_surface_detail off: the LOLA-only Moon as before the detail)
@@ -118,6 +119,8 @@ var _approach_move_frame := 0
 var _approach_finished := false
 var _sweep_frame := -1  ## --rock_scale_sweep: the next frame (-1: not started)
 var _crawl_frame := -1  ## --shadow_crawl: the next frame (-1: not started)
+var _site_started := false  ## --lunar_site: the switch was started / has finished
+var _site_done := false
 var _approach_target := {}  ## --approach: the ground site of the first placement (the target point)
 var _stereo: StereoMockXr  ## --stereo: the stand-in headset
 var _stereo_capture_frames := 0
@@ -165,6 +168,7 @@ func _initialize() -> void:
 	if _args.has("stereo") and not _start_stereo(String(_args["stereo"])):
 		return
 	World.moon_surface_detail = _args.get("moon_detail", "on") != "off"  # read at the Moon terrain's setup
+	World.site_albedo_enabled = _args.get("site_albedo", "on") != "off"
 	World.moon_brdf = String(_args.get("moon_brdf", "hapke"))  # read in World._ready
 	MoonDetailShading.enabled = _args.get("moon_detail_shading", "on") != "off"  # read at the Moon terrain's setup
 	MoonRockLayer.geometry_enabled = _args.get("rocks", "on") != "off"
@@ -275,6 +279,15 @@ func _process(_delta: float) -> bool:
 	world.clock.warp = 0.0
 	# Weather downloads only on request (--weather): a render check must not fetch gigabytes of cloud data.
 	world.weather.enabled = _weather_online()
+	if _args.has("lunar_site") and not _site_done:  # --lunar_site=<lat>,<lon>: the core's / terrain's site switch first
+		if not _site_started:
+			_site_started = true
+			var place := String(_args["lunar_site"]).split(",")
+			world.lunar_site_switched.connect(func(_lat: float, _lon: float) -> void: _site_done = true)
+			world.lunar_site_switch_failed.connect(func(report: Dictionary) -> void:
+				_refuse("render_check: lunar site switch failed: " + I18n.report_text(report)))
+			world.switch_lunar_site(float(place[0]), float(place[1]))
+		return false
 	if _frames == 0:
 		var quality: String = _args.get("cloud_quality", "vr" if _stereo != null else "")  # stereo: the VR preset
 		if quality != "":

@@ -165,7 +165,8 @@ const COPIED_TEMPLATE_PARAMETERS: Array[StringName] = [&"detail_shading", &"deta
 		&"detail_drawn_table", &"detail_drawn_axis", &"detail_rock_law", &"detail_rock_shape", &"detail_rock_lit_gain",
 		&"detail_rock_shadow", &"detail_rock_view", &"detail_rock_view_present", &"detail_view_step",
 		&"detail_hemispherical_albedo_mu",
-		&"detail_rock_abundance", &"albedo_texture", &"sun_radius_m", &"earth_radius_m"]
+		&"detail_rock_abundance", &"albedo_texture", &"sun_radius_m", &"earth_radius_m", &"site_albedo_texture",
+		&"site_albedo_bounds", &"site_albedo_grid", &"site_albedo_blend_m"]
 
 ## Diagnostics switches (render_check): rocks drawn at all (false: every rock statistical, no lists built) and the
 ## budget control (false: rock_threshold_scale stays where it is - deterministic images).

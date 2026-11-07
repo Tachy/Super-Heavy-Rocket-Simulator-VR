@@ -15,6 +15,7 @@ func _initialize() -> void:
 	_test_settle_success()
 	_test_settle_failures()
 	_test_timeout_constants()
+	_test_retry_after()
 	for name: String in DirAccess.get_files_at(_dir):
 		DirAccess.remove_absolute(_dir.path_join(name))
 	DirAccess.remove_absolute(_dir)
@@ -26,6 +27,19 @@ func _write(path: String, bytes: PackedByteArray) -> void:
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	f.store_buffer(bytes)
 	f.close()
+
+
+func _test_retry_after() -> void:
+	_check(WeatherFetcher.parse_retry_after(PackedStringArray(["Content-Type: text/html", "Retry-After: 3600"])) == 3600.0,
+			"Retry-After seconds parsed")
+	_check(WeatherFetcher.parse_retry_after(PackedStringArray(["retry-after:  120 "])) == 120.0, "header name case-insensitive")
+	_check(WeatherFetcher.parse_retry_after(PackedStringArray(["Retry-After: Wed, 21 Oct 2026 07:28:00 GMT"])) == 0.0,
+			"an HTTP date is not interpreted")
+	_check(WeatherFetcher.parse_retry_after(PackedStringArray()) == 0.0, "no header: 0")
+	var fetcher := WeatherFetcher.new()
+	fetcher.cancel(12345)  # unknown id: no-op
+	_check(fetcher.retry_after_s.is_empty(), "cancel of an unknown id is a no-op")
+	fetcher.free()
 
 
 func _test_range_header() -> void:

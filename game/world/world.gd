@@ -46,6 +46,8 @@ var moon_rocks: MoonRockLayer = null
 ## Fidelity flag moon_surface_detail for the world created next (read at the Moon terrain's setup; the core and the
 ## flight follow it): off draws the LOLA-only surface as before the procedural detail (render_check --moon_detail=off).
 static var moon_surface_detail := true
+## Diagnostics (render_check --site_albedo=off): false leaves the active lunar site's albedo tile unused (the global albedo only).
+static var site_albedo_enabled := true
 ## Game setting moon_brdf for the world created next: "hapke" (default; Hapke 2012 with the Sato et al. 2014
 ## parameters, config/moon_surface.toml) or "lommel_seeliger" (the former law; render_check --moon_brdf=lommel_seeliger).
 ## Read in _ready (Atmosphere.configure_moon_brdf).
@@ -76,6 +78,9 @@ var atmosphere := Atmosphere.new()  ## the precomputed atmosphere's tables and g
 var refraction := Refraction.new()  ## astronomical refraction of Sun, Moon and stars for the camera
 var weather := WeatherService.new()  ## ERA5 / GFS / analog snapshots for the clouds (M8 weather, Task 7)
 var weather_fetcher := WeatherFetcher.new()  ## the service's HTTP requests (a node: HTTPRequest children)
+## Downloads / caches the terrain and albedo tile of a lunar landing site (Task 12's picker calls prepare, then
+## switch_lunar_site on site_ready).
+var lunar_sites := LunarSiteService.new()
 var clouds := CloudLayer.new()  ## the volumetric clouds near the camera from the weather snapshots (M8 weather, Task 8)
 
 ## Per-frame state, readable by UI and tests.
@@ -84,6 +89,9 @@ var moon_gcrf_m := Vector3.ZERO
 var _camera_terrain_sun_fraction := NAN
 var _earth_heights: HeightSource  ## the terrains' height sources (SurfaceClearance)
 var _moon_heights: HeightSource
+var _site_albedo := {}  ## LunarSiteService.read_albedo of the active lunar site ({}: the global albedo only)
+var _switch_serial := 0
+var _switch_worker_busy := false
 var sun_apparent_from_earth_m := Vector3.ZERO
 var moon_apparent_from_earth_m := Vector3.ZERO
 
@@ -118,6 +126,11 @@ const EARTH_HIGHEST_GROUND_MARGIN_M := 9000.0
 ## loading-screen steps) in the VR start, where Main waits for this signal; everywhere else it runs synchronously.
 signal boot_finished
 
+## A lunar site switch finished: the core, the Moon terrain, the rocks and the site albedo now show the site / failed
+## (the report of the core's refusal; the previous site stays).
+signal lunar_site_switched(lat_deg: float, lon_deg: float)
+signal lunar_site_switch_failed(report: Dictionary)
+
 var booted := false  ## the whole setup of `_ready` is done (the per-frame update waits for it)
 
 
@@ -147,6 +160,8 @@ func _ready() -> void:
 	weather.enabled = WeatherService.load_enabled_setting()
 	weather.setup(core, Paths.config_dir(), data_dir.path_join("weather/cache"), data_dir.path_join("weather/analog"),
 			weather_fetcher)
+	add_child(lunar_sites)
+	lunar_sites.setup(core, weather_fetcher)
 	add_child(clouds)
 	clouds.setup(core)
 	var xr := get_node_or_null("/root/XrManager")
@@ -893,6 +908,7 @@ func _setup_moon_terrain() -> void:
 	material.set_shader_parameter("albedo_texture", _moon_material.get_shader_parameter("albedo_texture"))
 	material.set_shader_parameter("earth_radius_m", EARTH_MEAN_RADIUS_M)
 	material.set_shader_parameter("sun_radius_m", SUN_RADIUS_M)
+	LunarSiteService.apply_albedo(material, _site_albedo)
 	# Regolith detail textures and the unresolved-surface statistics (moon_detail.gdshaderinc; detail on only).
 	var detail: Dictionary = MoonDetailShading.configure(core, material, moon_surface_detail)
 	if not detail.is_empty():
@@ -907,6 +923,58 @@ func _setup_moon_terrain() -> void:
 	moon_terrain.cast_shadows = MoonNearShadow.terrain_casts  # the near-field Sun shadow's casters (MoonNearShadow)
 	moon.add_child(moon_terrain)
 	moon_terrain.setup(heights, null, MOON_RADIUS_M, material)
+
+
+## Switches the lunar terrain to the site at (lat_deg, lon_deg) whose tiles are on disk (LunarSiteService.prepare): the core
+## swaps its terrain on a worker thread together with the unresolved-surface statistics (~1 s) and the albedo tile is read
+## there; then (main thread) the Moon quadtree, the rock layer and the site albedo are rebuilt and the near-shadow's ground
+## height is re-sampled. A newer switch discards an older one still running (the terrain never mixes two sites); a failed
+## core switch keeps the old terrain. Emits lunar_site_switched / lunar_site_switch_failed.
+func switch_lunar_site(lat_deg: float, lon_deg: float) -> void:
+	_switch_serial += 1
+	var serial := _switch_serial
+	while _switch_worker_busy:  # the core's swaps stay in order: one worker at a time
+		await get_tree().process_frame
+	if serial != _switch_serial:
+		return
+	_switch_worker_busy = true
+	var out := {}
+	var albedo_path := LunarSiteService.albedo_toml_path(core, lunar_sites.sites_dir, lat_deg, lon_deg)
+	var task := WorkerThreadPool.add_task(_switch_worker.bind(lat_deg, lon_deg, albedo_path, out))
+	while not WorkerThreadPool.is_task_completed(task):
+		await get_tree().process_frame
+	WorkerThreadPool.wait_for_task_completion(task)
+	_switch_worker_busy = false
+	if serial != _switch_serial:
+		return
+	var result: Dictionary = out["result"]
+	if not bool(result.get("ok", false)):
+		lunar_site_switch_failed.emit(result.get("report", {}))
+		return
+	_rebuild_moon_terrain(out["albedo"])
+	lunar_site_switched.emit(lat_deg, lon_deg)
+
+
+func _switch_worker(lat_deg: float, lon_deg: float, albedo_path: String, out: Dictionary) -> void:
+	var result: Dictionary = core.set_lunar_site(lat_deg, lon_deg)
+	var albedo := {}
+	if bool(result.get("ok", false)):
+		core.moon_unresolved_shading()  # the statistics follow the site's terrain: rebuilt here, not on the frame
+		albedo = LunarSiteService.read_albedo(albedo_path)
+	out["albedo"] = albedo
+	out["result"] = result
+
+
+## Replaces the Moon's quadtree (and with it the rock layer and the nodes' materials) by one built on the core's current
+## site and the site albedo (empty: the global albedo only).
+func _rebuild_moon_terrain(albedo: Dictionary) -> void:
+	moon.remove_child(moon_terrain)  # _exit_tree: running builds are waited for, the rock pools are freed
+	moon_terrain.free()
+	moon_terrain = TerrainQuadtree.new()
+	moon_rocks = null
+	_site_albedo = albedo if site_albedo_enabled else {}
+	_earth_horizon_eye_fixed_m = Vector3.INF  # the cached ground height under the eye belongs to the old terrain
+	_setup_moon_terrain()
 
 
 ## Creates, re-poses or removes the drone ship for the flight's landing zone (FlightSim.landing_zone; {}: no flight).
