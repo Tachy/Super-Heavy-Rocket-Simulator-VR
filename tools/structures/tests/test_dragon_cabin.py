@@ -271,6 +271,20 @@ def test_every_button_stands_proud_of_the_housing(spec, nodes):
     assert worst[0] >= BUTTON_PROUD_MIN_M, f"button {worst[1]} stands only {worst[0] * 1000:.1f} mm proud of the housing"
 
 
+def test_three_screens_are_coplanar_when_the_console_is_straight(spec):
+    """fold_deg 0 (user decision 2026-11-07): same normal within 0.1 deg, centres on one plane within 1 mm."""
+    cockpit = spec["cockpit"]
+    assert cockpit["console"]["fold_deg"] == 0.0
+    screens = {s["id"]: s for s in cockpit["screen"]}
+    n0 = screens["centre"]["normal"]
+    dot = lambda u, v: sum(x * y for x, y in zip(u, v))
+    for sid in ("left", "right"):
+        s = screens[sid]
+        assert math.degrees(math.acos(min(1.0, dot(n0, s["normal"])))) < 0.1, sid
+        off = dot(n0, [a - b for a, b in zip(s["centre_m"], screens["centre"]["centre_m"])])
+        assert abs(off) < 1e-3, f"{sid} centre {off * 1000:.2f} mm off the centre screen's plane"
+
+
 def test_manifest_buttons_carry_their_node_names(spec):
     block = cl.cockpit_manifest(spec["cockpit"])
     assert block["buttons"]["handle"]["node"] == "handle" and block["buttons"]["cam1"]["node"] == "button_cam1"

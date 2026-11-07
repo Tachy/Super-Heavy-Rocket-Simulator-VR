@@ -6,8 +6,8 @@ Z = az +90 = the crew's left). Silhouette only: panel lines, labels and placards
 
 Nodes: `cabin_shell` (inner wall of revolution with the ceiling ring, the forward tunnel and the top plate; normals into the cabin; cut at the window
 reveals and the hatch), `floor`, `hatch_frame` (white trim, the recessed hatch inner face and its reveal), `window_<i>` (funnel from the round interior
-reveal to the exterior pane, bezel ring; i = exterior table row, +az then -az) with `window_glass_<i>`, `seat_s1..s4`, `console_housing` (centre box,
-two folded wings, lower shelf under each screen, two struts to the ceiling), `screen_left|centre|right` (one quad, UV 0..1 over the active area,
+reveal to the exterior pane, bezel ring; i = exterior table row, +az then -az) with `window_glass_<i>`, `seat_s1..s4`, `console_housing` (one straight box across the three screens,
+one straight lower shelf under the screens, two struts to the ceiling), `screen_left|centre|right` (one quad, UV 0..1 over the active area,
 (0, 0) top left, +normal toward the crew), `tablet_l|r`, `button_<id>` (one node per button; the centre handle is the node `handle`), `light_<i>`
 ([[light]] rows in file order), `hotas_stick`, `hotas_throttle`.
 The cabin layout helpers (apertures, node names, manifest block) live in cabin_layout.py; the wall is the exterior meridian offset along its normal.
@@ -268,58 +268,25 @@ def build_seat(seat, floor_x):
     return mesh
 
 
-SHELF_CLEAR_M = 0.01  # [D] a wing shelf ends this far before a neighbouring panel's button
-
-
 def build_console(cockpit):
+    """One straight housing and one straight shelf across all three screens (fold_deg 0, user decision 2026-11-07)."""
     con = cockpit["console"]
-    scr = screens_by_id(cockpit)
-    cen, left, right = Panel(scr["centre"]), Panel(scr["left"]), Panel(scr["right"])
+    if con["fold_deg"] != 0.0:
+        raise ValueError("console: only the straight console (fold_deg 0) is built")
+    cen = Panel(screens_by_id(cockpit)["centre"])
     shift = (cen.o - V(con["centre_m"])).dot(cen.up)  # the screens' centre stands this far above the housing's front-plane centre
-    gap = (cen.o - left.o).dot(cen.right) - cen.w / 2.0 - left.w / 2.0 * math.cos(math.radians(con["fold_deg"]))
-    seam = cen.w / 2.0 + gap / 2.0
     half_w, depth = con["width_m"] / 2.0, con["depth_m"]
     u0, u1 = -shift - con["height_m"] / 2.0, -shift + con["height_m"] / 2.0
     mesh = vc.VMesh()
-    cen.box(mesh, -seam, seam, u0, u1, -SCREEN_PROUD_M, -depth)
-    def wing_range(p):
-        """Lateral range (p.right coordinate) of a wing's housing: from the seam to the outer edge where the housing reaches width/2 in Z."""
-        o_out = (half_w - abs(p.o.z)) / abs(p.right.z)
-        inner = p.w / 2.0 + gap / 2.0
-        return (-o_out, inner) if p.o.z * p.right.z < 0.0 else (-inner, o_out)
-
-    for p in (left, right):
-        lo, hi = wing_range(p)
-        p.box(mesh, lo, hi, u0, u1, -SCREEN_PROUD_M, -depth)
-    # lower shelf under each screen carrying the buttons: front plane at the buttons' faces minus their height
-    panels = {"left": left, "centre": cen, "right": right}
-    for pid, p in panels.items():
-        mine = [b for b in cockpit["button"] if b["panel"] == pid and b["kind"] != "handle"]
-        if not mine:
-            continue
-        offs = [(V(b["centre_m"]) - p.o).dot(p.n) for b in mine]
-        lats = [(V(b["centre_m"]) - p.o).dot(p.right) for b in mine]
-        if pid == "centre":
-            lo, hi = min(-seam, min(lats) - 0.03), max(seam, max(lats) + 0.03)
-        else:
-            lo, hi = wing_range(p)
-            inner_is_hi = p.o.z * p.right.z < 0.0
-            mid = 0.5 * (min(lats) + max(lats))
-            for b in cockpit["button"]:  # the wing shelf stops before a neighbouring panel's buttons (cluster C, r_led_3) that lie under it
-                if b["panel"] == pid or b["kind"] == "handle":
-                    continue
-                lat_b = (V(b["centre_m"]) - p.o).dot(p.right)
-                half = b["size_m"][0] / 2.0 + SHELF_CLEAR_M
-                if inner_is_hi and mid < lat_b < hi + 0.1:
-                    hi = min(hi, lat_b - half)
-                elif not inner_is_hi and lo - 0.1 < lat_b < mid:
-                    lo = max(lo, lat_b + half)
-        p.box(mesh, lo, hi, u0, -p.h / 2.0 - SHELF_TOP_GAP_M, min(offs) - BUTTON_PROUD_M, -SCREEN_PROUD_M)
+    cen.box(mesh, -half_w, half_w, u0, u1, -SCREEN_PROUD_M, -depth)
+    # lower shelf under the screens carrying the buttons: front plane at the buttons' faces minus their height
+    mine = [b for b in cockpit["button"] if b["kind"] != "handle"]
+    front = min((V(b["centre_m"]) - cen.o).dot(cen.n) for b in mine) - BUTTON_PROUD_M
+    cen.box(mesh, -half_w, half_w, u0, -cen.h / 2.0 - SHELF_TOP_GAP_M, front, -SCREEN_PROUD_M)
     # two struts from the housing top up to the ceiling ring
     for z_strut in con["strut_z_m"]:
-        p = left if z_strut > 0 else right
-        lat = (z_strut - p.o.z - p.n.z * (-depth / 2.0)) / p.right.z
-        top = p.at(lat, u1, -depth / 2.0)
+        lat = (z_strut - cen.o.z) / cen.right.z
+        top = cen.at(lat, u1, -depth / 2.0)
         vc.tube(mesh, top - V((0.01, 0.0, 0.0)), V((cockpit["cabin"]["ceiling_x_m"], top.y, top.z)), STRUT_RADIUS_M, SIDES, ("strut", z_strut))
     return mesh
 
