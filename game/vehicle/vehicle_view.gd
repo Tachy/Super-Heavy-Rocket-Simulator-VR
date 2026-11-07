@@ -55,6 +55,7 @@ var _leg_nodes: Array[Dictionary] = []  # per leg: {"azimuth_deg", "main", "push
 ## snapshot's binary nose_cone_open at 1 / open_time_s per second: a view easing, no state of the simulation.
 var _nose := {}
 var docking_mechanism: DockingMechanismView = null  # the capsule's, null on any other vehicle; rebuilt with the stage nodes
+var cockpit: CockpitView = null  # the Crew Dragon's cabin (child of the capsule stage node), null on any other vehicle; rebuilt with the stage nodes
 var probe_drogue: ProbeDrogueView = null  # the tanker's dorsal probes and connectors, null on any other vehicle; rebuilt with the stage nodes
 var _nose_fraction := 0.0
 var _nose_target := 0.0
@@ -263,6 +264,7 @@ func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array, legs:
 	_hls_legs.clear()
 	_nose = {}
 	docking_mechanism = null
+	cockpit = null
 	probe_drogue = null
 	_nose_settled = false
 	var axis_rotation := Basis(Vector3.RIGHT, PI / 2.0)  # CylinderMesh +Y -> render +Z (= body +x)
@@ -289,6 +291,7 @@ func _build(stages: Array, engines: Array, flaps: Array, grid_fins: Array, legs:
 	if not stage_nodes.is_empty():
 		_build_legs(legs, stage_nodes[0], _stage_models[0])
 	_build_nose(stages, stage_nodes)
+	_build_cockpit(stages, stage_nodes)
 	_build_dorsal(stages, stage_nodes)
 	_build_hls_parts(stages, stage_nodes)
 	_build_joints(stages, stage_nodes)
@@ -458,6 +461,25 @@ func _build_nose(stages: Array, stage_nodes: Array[Node3D]) -> void:
 		_nose = {"node": node, "nose": ms["manifest"]["nose"]}
 		_apply_nose()
 		_build_docking_mechanism(stages[i], stage_nodes[i], ms)
+		return
+
+
+## The Crew Dragon's cabin on the capsule stage (CockpitConfig.capsule_stage_id). The exterior hull casts shadows double-sided,
+## so the Sun enters the cabin only through the windows (the hull's back faces would otherwise be culled out of the shadow map).
+func _build_cockpit(stages: Array, stage_nodes: Array[Node3D]) -> void:
+	var config := CockpitConfig.for_vehicle(_vehicle_id(stages))
+	if config == null:
+		return
+	for i in stages.size():
+		var ms: Dictionary = _stage_models[i]
+		if stage_nodes[i] == null or not ms.has("cabin") or String(stages[i]["id"]) != config.capsule_stage_id:
+			continue
+		for child in stage_nodes[i].get_children():
+			if child is MeshInstance3D:
+				(child as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_DOUBLE_SIDED
+		cockpit = CockpitView.new()
+		stage_nodes[i].add_child(cockpit)
+		cockpit.build(ms, config)
 		return
 
 

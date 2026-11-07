@@ -1,7 +1,7 @@
 # Cockpit (M7): Crew Dragon cabin
 
 Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
-`docs/superpowers/plans/2026-11-07-m7-cockpit-crew-dragon.md`. State after plan Task 4: typed tables (Task 1), config loader (Task 2), Blender cabin and console generator (Task 3), crew figure (Task 4).
+`docs/superpowers/plans/2026-11-07-m7-cockpit-crew-dragon.md`. State after plan Task 5 (cabin in the game): typed tables (Task 1), config loader (Task 2), Blender cabin and console generator (Task 3), crew figure (Task 4).
 
 ## Model
 - `config/cockpits/crew_dragon.toml`: `[cabin]` (inner wall of revolution, floor, ceiling, forward tunnel, windows /
@@ -99,6 +99,20 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   boxes (back, headrest, pan, lower-leg support, armrests) at the tabled hips, pan along the chest normal, shin support not measured; the HOTAS props
   are a base, shaft and grip at the grip offsets (calibrated in Task 9). `test_dragon_cabin.py` compares the windows with the exterior table (glass
   centre carried back along the normal: 2.5 cm / 0.55 deg, the Task 1 gate).
+
+### Cabin in the game (Task 5)
+- `game/cockpit/cockpit_view.gd` (`CockpitView`): child of the capsule stage node (`VehicleView._build_cockpit`, rebuilt with the stage nodes, `VehicleView.cockpit`;
+  exists in every view). Cabin meshes by node name from `VehicleModels.load_for("crew_dragon")["cabin"]`; `eye_node` at `CockpitConfig.eye`; `screen_surface(id)`,
+  `button_node(id)`, `set_crew(n)` (seats s2, s3, s1, s4; s2 = player body), `set_hotas_props(b)`, `set_player_head_hidden(b)` (collapses the head bone: the camera sits in
+  that helmet), `figure_skeleton(seat)` (Task 8 poses the arm bones). Figures load through `VehicleModels.scene_for` (keeps Skeleton3D / skin; `_meshes_of` does not).
+  Default crew = seat count; the mission's crew count is not wired to the view yet.
+- Exterior hull parts of the capsule stage cast shadows double-sided (sun enters only through the windows).
+- Look: `shaders/cabin.gdshader` (lit_aerial look + `ambient_visibility` as AO so the sky does not light the closed cabin, procedural panel seams on the shell),
+  `cabin_glass.gdshader` (windows), screens through `display_colour.gdshader` (dark Dragon blue placeholder, display-referred). Lamps: `OmniLight3D` at the `[[light]]` rows
+  plus two fill lights standing in for bounced light ([call], flux constants in the class), energy = `TowerLights.energy_of(cd, scene_per_cd_m2)` every frame. Seats are one
+  black surface (the mesh has no white shell split yet); housing dark grey; walls white matte.
+- Shots: `game/tests/cockpit_shots.gd` (GPU) writes `pilot_eye`, `gopro_discovery2` (camera between the s2 / s3 eye points, 0.15 m behind, eye direction), `hatch_crew1_1` and
+  side-by-side / overlay PNGs with the photos to `screenshots/m7-cockpit/look/`. Test: `cockpit_view_test.gd` (needs models; in `$needsGpuOrModels`).
 
 ## Validation
 - Wall check (scratch script, Task 1): inner profile >= 0.094 m from the exterior meridian and the neck well everywhere.

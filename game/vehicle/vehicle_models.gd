@@ -511,6 +511,19 @@ static func _meshes_of(path: String) -> Dictionary:
 	return meshes
 
 
+## The glTF `file` (without extension) of a vehicle's model set as an instantiated scene, skeleton and skin kept (the crew
+## figure: `_meshes_of` keeps only meshes). Null when the file is missing or unreadable; the caller owns the scene.
+static func scene_for(vehicle_id: String, file: String) -> Node:
+	var path := _repo_dir().path_join("data/models").path_join(vehicle_id).path_join(file + ".gltf")
+	if not FileAccess.file_exists(path):
+		return null
+	var document := GLTFDocument.new()
+	var state := GLTFState.new()
+	if document.append_from_file(path, state) != OK:
+		return null
+	return document.generate_scene(state)
+
+
 ## One multi-surface mesh from several (a MultiMesh draws one mesh); the engine nodes sit at the origin.
 static func _merged(parts: Dictionary) -> ArrayMesh:
 	var merged := ArrayMesh.new()
