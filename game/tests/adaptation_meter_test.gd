@@ -64,7 +64,7 @@ func _initialize() -> void:
 	var both := _histogram({k500: 10, BINS + k50: 10})
 	_near("scotopic offset", AdaptationMeter.field_log_average(both, BINS), _centre(k50), 1e-9)
 
-	# The anchored rule (AdaptationMeter.field_anchor, under evaluation): the ANCHOR_PERCENTILE-th percentile, each bin's
+	# The anchored rule (AdaptationMeter.field_anchor): the ANCHOR_PERCENTILE-th percentile, each bin's
 	# weight spread evenly in log across the bin. A uniform field: the anchor inside its bin (at the percentile's place
 	# in it), so L_a = L / ANCHOR_WHITE to within the bin's resolution.
 	var width := (AdaptationMeter.LOG_MAX - AdaptationMeter.LOG_MIN) / float(BINS - 1)
@@ -104,7 +104,7 @@ func _initialize() -> void:
 			1e-12)
 	_near("Apollo 11 field", EyeAdaptation.cone_gain(660.0 / grey, reference), reference * grey / 660.0, 1e-9)
 
-	# Highlight protection (Atmosphere.FieldRule.PROTECT, under evaluation): the larger (darker exposure) of the mean-grey
+	# Highlight protection (Atmosphere.FieldRule.PROTECT, the game default): the larger (darker exposure) of the mean-grey
 	# and the anchor adaptation luminances, photopic or scotopic alike.
 	var key := EyeAdaptation.FIELD_MID_GREY
 	var white := EyeAdaptation.ANCHOR_WHITE

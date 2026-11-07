@@ -209,12 +209,12 @@ var adaptation_meter := AdaptationMeter.new()
 ## --analytic_adaptation switches it off at start (before / after comparisons).
 var scene_referred_adaptation := not OS.get_cmdline_user_args().has("--analytic_adaptation")
 ## Which statistic of the measured field sets the white (with scene_referred_adaptation; eye-adaptation.md):
-## MEAN_GREY - the game's rule: the centre-weighted log average taken as the scene's grey, L_a = L_f / field_key;
-## ANCHOR - under evaluation (not the default; user argument --anchored_adaptation): the field's
-## AdaptationMeter.ANCHOR_PERCENTILE-th percentile taken as a white, L_a = L_anchor / EyeAdaptation.ANCHOR_WHITE
-## (field_key not used);
-## PROTECT - under evaluation (user argument --protected_adaptation): highlight protection, the stricter (darker) of the
-## two exposures, L_a = max(L_f / field_key, L_anchor / EyeAdaptation.ANCHOR_WHITE) (scotopic: the same max on the pair).
+## MEAN_GREY - the centre-weighted log average taken as the scene's grey, L_a = L_f / field_key (the game's rule until
+## 2026-11-07; user argument --mean_grey_adaptation);
+## ANCHOR - the field's AdaptationMeter.ANCHOR_PERCENTILE-th percentile taken as a white, L_a = L_anchor /
+## EyeAdaptation.ANCHOR_WHITE (field_key not used; user argument --anchored_adaptation);
+## PROTECT - the game's rule (user 2026-11-07): highlight protection, the stricter (darker) of the two exposures,
+## L_a = max(L_f / field_key, L_anchor / EyeAdaptation.ANCHOR_WHITE) (scotopic: the same max on the pair).
 ## Everything downstream (gains, pacing, clamps, fallbacks) is the same.
 enum FieldRule { MEAN_GREY, ANCHOR, PROTECT }
 var field_rule := _field_rule_from_arguments(OS.get_cmdline_user_args())
@@ -223,9 +223,9 @@ func field_rule_name() -> String:
 
 
 static func _field_rule_from_arguments(arguments: PackedStringArray) -> FieldRule:
-	if arguments.has("--protected_adaptation"):
-		return FieldRule.PROTECT
-	return FieldRule.ANCHOR if arguments.has("--anchored_adaptation") else FieldRule.MEAN_GREY
+	if arguments.has("--mean_grey_adaptation"):
+		return FieldRule.MEAN_GREY
+	return FieldRule.ANCHOR if arguments.has("--anchored_adaptation") else FieldRule.PROTECT
 
 
 ## The adaptation luminance a field rule takes from the measured field (L_f) and anchor (L_anchor), cd/m^2 (photopic or

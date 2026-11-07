@@ -42,7 +42,7 @@ const HIGHLIGHT_SHARE := 0.02
 ## 2010: ~3.7 log units at a fixed adaptation] luminances further below the field's highlights carry no signal at that
 ## adaptation state and do not pull it down (a black sky beside sunlit ground; the dark beyond a lamp-lit pad).
 const SIMULTANEOUS_RANGE_DECADES := 3.7
-## [call] The anchored rule (under evaluation, Atmosphere.FieldRule.ANCHOR; Gilchrist et al. 1999, "An anchoring theory
+## [call] The anchored rule (Atmosphere.FieldRule.ANCHOR, and the anchor half of the default PROTECT rule; Gilchrist et al. 1999, "An anchoring theory
 ## of lightness perception", Psychol. Rev. 106, 795: the highest luminance of a sufficiently large area is seen as white):
 ## the anchor is this weighted percentile of the field left after the highlight cut - an area of more than ~5 % of the
 ## centre-weighted field (after the 2 % cut) sets white; a smaller bright spot does not.
@@ -206,7 +206,7 @@ static func field_log_average(counts: PackedInt32Array, offset := 0) -> float:
 	return pow(10.0, sum_log / sum_w)
 
 
-## The anchor luminance of one histogram (the anchored rule under evaluation, Atmosphere.FieldRule.ANCHOR): the
+## The anchor luminance of one histogram (Atmosphere.FieldRule.ANCHOR and the default PROTECT): the
 ## ANCHOR_PERCENTILE-th weighted percentile of the same field as field_log_average (after the highlight cut, inside the
 ## simultaneous range below the highest bin left), each bin's weight spread evenly in log10 across the bin (no step when
 ## the percentile crosses a bin edge). -1: no samples; 0: nothing above black (a dark field).
