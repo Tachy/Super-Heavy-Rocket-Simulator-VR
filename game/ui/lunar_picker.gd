@@ -28,6 +28,8 @@ var _request := {}  ## the running request {lat_deg, lon_deg, stay_s}
 var _request_kept := {}  ## the request of the listed windows (site and stay of the start)
 var _search_id := 0
 var _chosen := -1
+var _start_pending := false  ## STARTING before the mission was handed over: a mission change or hide aborts it
+var _start_serial := 0
 
 var _preset_box := OptionButton.new()
 var _lat_edit := LineEdit.new()
@@ -63,6 +65,9 @@ func setup(core: Object, service: Object, sim: Object, clock: Object, starter: C
 	_service.progress.connect(_on_prepare_progress)
 	_service.site_ready.connect(_on_site_ready)
 	_service.failed.connect(_on_prepare_failed)
+	visibility_changed.connect(func() -> void:
+		if not is_visible_in_tree():
+			cancel())
 	I18n.events.language_changed.connect(func(_code: String) -> void: _refresh_texts())
 	visible = false
 
@@ -89,6 +94,10 @@ func cancel() -> void:
 		_sim.cancel(_search_id)
 	_search_id = 0
 	_request = {}
+	if state == State.STARTING and _start_pending:
+		_start_serial += 1  # the awaiting start_chosen ends without starting anything
+		_start_pending = false
+		state = State.IDLE
 	if state != State.STARTING:
 		state = State.IDLE
 		_progress.visible = false
@@ -174,6 +183,28 @@ func poll() -> void:
 		_finish_search({"report": report if not report.is_empty() else {"code": "command.internal_error"}})
 
 
+## Waits for the outcome of a terrain switch: `start` begins it, `ok_signal` / `fail_signal` of `source` end it. A superseded
+## switch emits nothing, so the wait also ends (false) when `serial_of` (the source's switch counter) changes.
+static func await_switch(tree: SceneTree, source: Object, ok_signal: StringName, fail_signal: StringName,
+		serial_of: Callable, start: Callable) -> bool:
+	var outcome := {"done": false, "ok": false}
+	var on_ok := func(_lat: float, _lon: float) -> void:
+		outcome["done"] = true
+		outcome["ok"] = true
+	var on_failed := func(_report: Dictionary) -> void: outcome["done"] = true
+	source.connect(ok_signal, on_ok, CONNECT_ONE_SHOT)
+	source.connect(fail_signal, on_failed, CONNECT_ONE_SHOT)
+	start.call()
+	var serial: int = serial_of.call()
+	while not outcome["done"] and int(serial_of.call()) == serial:
+		await tree.process_frame
+	if source.is_connected(ok_signal, on_ok):
+		source.disconnect(ok_signal, on_ok)
+	if source.is_connected(fail_signal, on_failed):
+		source.disconnect(fail_signal, on_failed)
+	return outcome["ok"]
+
+
 func _process(_delta: float) -> void:
 	poll()
 
@@ -207,12 +238,21 @@ func start_chosen() -> void:
 		return
 	var window: Dictionary = windows[index]
 	var site := _request_kept
+	var mission_id := _mission_id  # the snapshot: mission, site and window are started together or not at all
+	_start_serial += 1
+	var serial := _start_serial
+	_start_pending = true
 	state = State.STARTING
 	_set_status("ui.lunar_site.preparing_terrain", {})
 	_update_buttons()
 	if is_inside_tree():
 		await get_tree().process_frame  # the frame with the status text, before the main thread blocks
+	if serial != _start_serial:
+		return
 	var switched: bool = await _switcher.call(site["lat_deg"], site["lon_deg"])
+	if serial != _start_serial:
+		return  # the mission changed or the picker was hidden meanwhile: nothing is started
+	_start_pending = false
 	if not switched:
 		state = State.LISTED
 		_set_status("ui.lunar_site.terrain_failed", {})
@@ -221,7 +261,7 @@ func start_chosen() -> void:
 		return
 	var options := {"lunar": {"lat_deg": site["lat_deg"], "lon_deg": site["lon_deg"], "stay_s": site["stay_s"],
 			"mission_start_tdb_s": window["mission_start_tdb_s"], "touchdown_tdb_s": window["touchdown_tdb_s"]}}
-	var accepted: bool = _starter.call(_mission_id, options)
+	var accepted: bool = _starter.call(mission_id, options)
 	if not accepted:
 		state = State.LISTED
 		_set_status("ui.lunar_site.start_not_accepted", {})
@@ -269,7 +309,7 @@ func _build() -> void:
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.custom_minimum_size.x = 460
 	add_child(_status)
-	_list.custom_minimum_size = Vector2(460, 120)
+	_list.custom_minimum_size = Vector2(460, 190)  # five rows
 	_list.item_selected.connect(func(_index: int) -> void: _update_buttons())
 	add_child(_list)
 	I18n.bind_text(_start_button, &"text", "ui.lunar_site.start")
@@ -284,8 +324,8 @@ func _on_preset_selected(index: int) -> void:
 	_lat_edit.editable = custom
 	_lon_edit.editable = custom
 	if not custom:
-		_lat_edit.text = "%.5f" % _presets[index]["latitude_deg"]
-		_lon_edit.text = "%.5f" % _presets[index]["longitude_deg"]
+		_lat_edit.text = I18n.number(_presets[index]["latitude_deg"], 5)
+		_lon_edit.text = I18n.number(_presets[index]["longitude_deg"], 5)
 	cancel()
 	_clear_list()
 	_set_status("", {})

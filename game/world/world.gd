@@ -929,6 +929,11 @@ func _setup_moon_terrain() -> void:
 	moon_terrain.setup(heights, null, MOON_RADIUS_M, material)
 
 
+## Counter of switch_lunar_site calls: a changed value while waiting means the awaited switch was superseded (no signal).
+func switch_serial() -> int:
+	return _switch_serial
+
+
 ## Switches the lunar terrain to the site at (lat_deg, lon_deg) whose tiles are on disk (LunarSiteService.prepare): the core
 ## swaps its terrain on a worker thread together with the unresolved-surface statistics (~1 s) and the albedo tile is read
 ## there; then (main thread) the Moon quadtree, the rock layer and the site albedo are rebuilt and the near-shadow's ground

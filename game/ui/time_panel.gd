@@ -320,21 +320,8 @@ func _update_lunar_picker() -> void:
 
 ## World.switch_lunar_site and its outcome (lunar_site_switched / lunar_site_switch_failed) as a bool.
 func _switch_lunar_site(lat_deg: float, lon_deg: float) -> bool:
-	var outcome := {"done": false, "ok": false}
-	var on_ok := func(_lat: float, _lon: float) -> void:
-		outcome["done"] = true
-		outcome["ok"] = true
-	var on_failed := func(_report: Dictionary) -> void: outcome["done"] = true
-	world.lunar_site_switched.connect(on_ok, CONNECT_ONE_SHOT)
-	world.lunar_site_switch_failed.connect(on_failed, CONNECT_ONE_SHOT)
-	world.switch_lunar_site(lat_deg, lon_deg)
-	while not outcome["done"]:
-		await get_tree().process_frame
-	if world.lunar_site_switched.is_connected(on_ok):
-		world.lunar_site_switched.disconnect(on_ok)
-	if world.lunar_site_switch_failed.is_connected(on_failed):
-		world.lunar_site_switch_failed.disconnect(on_failed)
-	return outcome["ok"]
+	return await LunarPicker.await_switch(get_tree(), world, &"lunar_site_switched", &"lunar_site_switch_failed",
+			world.switch_serial, world.switch_lunar_site.bind(lat_deg, lon_deg))
 
 
 static func _fill(option: OptionButton, list: Array[Dictionary], keep_id: String) -> void:
