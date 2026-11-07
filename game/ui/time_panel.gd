@@ -38,6 +38,7 @@ var _place_list: Array[Dictionary] = []
 var _vehicle_list: Array[Dictionary] = []
 var _mission_list: Array[Dictionary] = []
 var _start_button: Button
+var _lunar_picker := LunarPicker.new()  ## site / stay / window of a lunar landing mission (replaces the start button)
 var _start_status := Label.new()
 var _start_key := ""  ## table key of the start status text ("" none); a refusal (_start_refusal) takes precedence
 var _start_refusal: Dictionary = {}  ## report of a refused start; resolved at draw time so a language switch re-renders it
@@ -121,14 +122,23 @@ func _ready() -> void:
 		_places.add_item(place["name"])
 	_places.item_selected.connect(func(_index: int) -> void: _refill_vehicles())
 	_vehicles.item_selected.connect(func(_index: int) -> void: _refill_missions())
+	_missions.item_selected.connect(func(_index: int) -> void: _update_lunar_picker())
 	for option: OptionButton in [_places, _vehicles, _missions]:
 		box.add_child(option)
 	_start_button = _button("ui.panel.start", _on_start_pressed)
 	box.add_child(_start_button)
+	_lunar_picker.setup(world.core, world.lunar_sites, world.flight.sim, world.clock,
+			func(mission_id: String, options: Dictionary) -> bool: return world.start_mission(mission_id, false, options),
+			_switch_lunar_site, LunarPicker.load_presets(Paths.config_dir()))
+	box.add_child(_lunar_picker)
 	_start_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_start_status.custom_minimum_size.x = 300
 	box.add_child(_start_status)
 	world.flight.mission_started.connect(_on_start_finished)
+	world.flight.mission_started.connect(_lunar_picker.on_mission_started)
+	_lunar_picker.start_finished.connect(func(ok: bool) -> void:
+		if ok:
+			_focus.select(VEHICLE_FOCUS_INDEX))
 	world.flight.sim.command_finished.connect(_on_command_finished)
 	I18n.events.language_changed.connect(_on_language_changed)
 	_refill_vehicles()
@@ -296,6 +306,35 @@ func _refill_missions() -> void:
 	var previous := _selected_id(_mission_list, _missions)
 	_mission_list = _catalogue.missions_for(_selected_id(_place_list, _places), _selected_id(_vehicle_list, _vehicles))
 	_fill(_missions, _mission_list, previous)
+	_update_lunar_picker()
+
+
+## A lunar landing mission shows the picker instead of the start button; any other mission hides it (cancelling a
+## running search / preparation).
+func _update_lunar_picker() -> void:
+	var mission_id := _selected_id(_mission_list, _missions)
+	var lunar := mission_id != "" and _catalogue.is_lunar_landing(mission_id)
+	_lunar_picker.set_mission(mission_id if lunar else "", _catalogue.stay_hours(mission_id))
+	_start_button.visible = not lunar
+
+
+## World.switch_lunar_site and its outcome (lunar_site_switched / lunar_site_switch_failed) as a bool.
+func _switch_lunar_site(lat_deg: float, lon_deg: float) -> bool:
+	var outcome := {"done": false, "ok": false}
+	var on_ok := func(_lat: float, _lon: float) -> void:
+		outcome["done"] = true
+		outcome["ok"] = true
+	var on_failed := func(_report: Dictionary) -> void: outcome["done"] = true
+	world.lunar_site_switched.connect(on_ok, CONNECT_ONE_SHOT)
+	world.lunar_site_switch_failed.connect(on_failed, CONNECT_ONE_SHOT)
+	world.switch_lunar_site(lat_deg, lon_deg)
+	while not outcome["done"]:
+		await get_tree().process_frame
+	if world.lunar_site_switched.is_connected(on_ok):
+		world.lunar_site_switched.disconnect(on_ok)
+	if world.lunar_site_switch_failed.is_connected(on_failed):
+		world.lunar_site_switch_failed.disconnect(on_failed)
+	return outcome["ok"]
 
 
 static func _fill(option: OptionButton, list: Array[Dictionary], keep_id: String) -> void:

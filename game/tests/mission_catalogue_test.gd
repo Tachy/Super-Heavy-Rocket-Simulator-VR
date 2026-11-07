@@ -47,6 +47,10 @@ func _initialize() -> void:
 	_check(catalogue.vehicles_at("ccsfs_slc40")[0]["name_key"] == "vehicle.falcon9_block5.display_name", "vehicle name key")
 	_check(MissionCatalogue.index_of([{"id": "a"}, {"id": "b"}], "b") == 1, "index_of found")
 	_check(MissionCatalogue.index_of([], "x") == -1, "index_of absent")
+	_check(catalogue.is_lunar_landing("hls_lunar_llo"), "hls_lunar_llo is a lunar landing")
+	_check(not catalogue.is_lunar_landing("lunar_ascent") and not catalogue.is_lunar_landing("falcon9_rtls")
+			and not catalogue.is_lunar_landing(MissionCatalogue.FREE_FLIGHT), "ascent and free flight are not")
+	_check(is_equal_approx(catalogue.stay_hours("hls_lunar_llo"), 24.0), "stay_hours of hls_lunar_llo")
 	print("MISSION CATALOGUE TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
 

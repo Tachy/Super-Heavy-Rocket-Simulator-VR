@@ -393,12 +393,13 @@ func launch_vehicle(vehicle_id: String, site: Dictionary, countdown_s := FlightC
 ## Starts a mission of config/missions at the current instant (FlightController.start_mission). On success the clock
 ## goes to the mission's start epoch (a return mission starts at its own, possibly earlier one) at warp 1 and the camera
 ## follows the vehicle; a refused start that placed a vehicle anyway puts the clock at that vehicle's epoch
-## (take_clock_resync). `on_pad`: the mission starts from a pad. Outcome: flight.mission_started.
-func start_mission(mission_id: String, on_pad := false) -> bool:
+## (take_clock_resync). `on_pad`: the mission starts from a pad. `options`: see FlightController.start_mission.
+## Outcome: flight.mission_started.
+func start_mission(mission_id: String, on_pad := false, options := {}) -> bool:
 	if not flight.mission_started.is_connected(_on_mission_started):
 		flight.mission_started.connect(_on_mission_started)
 	_mission_press_tdb_s = clock.tdb_s
-	return flight.start_mission(mission_id, clock.tdb_s, on_pad)
+	return flight.start_mission(mission_id, clock.tdb_s, on_pad, options)
 
 
 func _on_mission_started(ok: bool, _report: Dictionary) -> void:

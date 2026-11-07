@@ -253,6 +253,17 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   **Mission** (an einer Rampe zuerst "Freier Flug", dann die Missionen mit diesem `[mission] start_place` und
   `start_vehicle`, nach Namen). Ort füllt Fahrzeug neu, Fahrzeug füllt Mission neu; die bisherige Wahl bleibt, wenn
   sie dort noch angeboten wird. Die Auswahl liest `game/ui/mission_catalogue.gd` nur aus `config/`.
+  - **Mondlandung** (Missionen mit `kind = "lunar_landing"`, z. B. "Mondlandung (LLO)") [Übergangslösung, 2026-11-07; die
+    grafische Mondansicht kommt mit M7]: Statt "Starten" erscheint die Landestellenwahl (`game/ui/lunar_picker.gd`):
+    **Landestelle** (Liste aus `config/lunar_sites.toml`, Namen aus `[lunar_site]`, oder "Koordinaten" mit freien
+    Feldern Breite / Länge in Grad, N und O positiv), **Aufenthalt** in Stunden (Vorgabe `[surface] stay_hours` der
+    Mission) und "Termine suchen". Dann lädt der Dienst die Geländekachel der Stelle (Fortschrittsbalken), danach läuft
+    die Terminsuche (Fortschritt), und die Liste zeigt je Landetermin: Landung in UTC, Sonnenhöhe / Azimut, Tageslicht
+    danach in Stunden, Treibstoffreserve. Gibt es keinen Termin (oder ist die Stelle gesperrt, z. B. beim NRHO), steht
+    der Grund als Text statt der Liste. Ungültige Eingaben (Breite außerhalb -90..90, Länge außerhalb -180..360,
+    Aufenthalt <= 0) werden vor jeder Anfrage abgewiesen. "Mit diesem Termin starten" bereitet das Gelände vor (einige
+    Sekunden, die Anzeige steht dabei) und startet die Mission mit der Landestelle, dem Aufenthalt und dem gewählten
+    Termin. Wechsel von Stelle, Mission oder Ort bricht Ladevorgang und Suche ab.
   - "Freier Flug": das Fahrzeug steht auf der Rampe, der Countdown läuft 60 s als T-
     (`FlightController.LAUNCH_COUNTDOWN_S`), und der Aufstiegs-Autopilot hebt zum T-0 ab. Ohne Abheben bleibt die Uhr
     bei T-0 stehen (wie ein Startabbruch auf der Rampe), statt auf der Rampe T+ zu zählen.

@@ -11,6 +11,8 @@ var _places: Array[Dictionary] = []  # {id, name_key, name, site}
 var _vehicle_ids := []  # vehicle file ids
 var _pad_vehicles := {}  # pad id -> vehicle ids
 var _missions: Array[Dictionary] = []  # {id, name_key, place, vehicle}
+var _kinds := {}  # mission id -> [mission] kind ("" = ascent), of every mission file
+var _stay_hours := {}  # mission id -> [surface] stay_hours of a lunar landing
 
 
 static func load_from(config_dir: String) -> MissionCatalogue:
@@ -61,11 +63,26 @@ func missions_for(place_id: String, vehicle_id: String) -> Array[Dictionary]:
 	return result
 
 
+## The mission lands on the Moon at a free site (config/missions [mission] kind = "lunar_landing"): the panel offers the
+## site / stay / window picker for it (LunarPicker).
+func is_lunar_landing(mission_id: String) -> bool:
+	return _kinds.get(mission_id, "") == "lunar_landing"
+
+
+## The mission's default stay on the surface in hours ([surface] stay_hours), 0 when it has none.
+func stay_hours(mission_id: String) -> float:
+	return float(_stay_hours.get(mission_id, 0.0))
+
+
 func _load(config_dir: String) -> void:
 	for file_name in _sorted_files(config_dir.path_join("vehicles")):
 		_vehicle_ids.append(file_name.get_basename())
 	for file_name in _sorted_files(config_dir.path_join("missions")):
-		var mission: Dictionary = TomlLite.load_file(config_dir.path_join("missions").path_join(file_name)).get("mission", {})
+		var file: Dictionary = TomlLite.load_file(config_dir.path_join("missions").path_join(file_name))
+		var mission: Dictionary = file.get("mission", {})
+		_kinds[file_name.get_basename()] = mission.get("kind", "")
+		if file.has("surface"):
+			_stay_hours[file_name.get_basename()] = float((file["surface"] as Dictionary).get("stay_hours", 0.0))
 		if not mission.has("start_place") or not mission.has("start_vehicle"):
 			continue  # not offered by the panel
 		_missions.append({

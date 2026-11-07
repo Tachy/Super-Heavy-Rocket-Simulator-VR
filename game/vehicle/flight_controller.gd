@@ -89,10 +89,11 @@ func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 9
 ## Starts a mission of config/missions (FlightSim.start_mission): pad missions stand on the pad with the free launch's
 ## countdown (a mission's own [mission] countdown_s wins in the core) and wait there for a launch window; other missions
 ## start at their own epoch. `on_pad`: the mission starts from a pad (the onboard computer plans its ascent first).
-## Outcome: signal mission_started.
-func start_mission(mission_id: String, tdb_s: float, on_pad := false) -> bool:
+## `options`: FlightSim.start_mission's (a lunar landing: `lunar = {lat_deg, lon_deg, stay_s, mission_start_tdb_s,
+## touchdown_tdb_s}`, the site and window the LunarPicker chose). Outcome: signal mission_started.
+func start_mission(mission_id: String, tdb_s: float, on_pad := false, options := {}) -> bool:
 	_clear_views()
-	var id := sim.start_mission(mission_id, tdb_s, true, LAUNCH_COUNTDOWN_S)
+	var id := sim.start_mission(mission_id, tdb_s, true, LAUNCH_COUNTDOWN_S, options)
 	launch_site_id = ""
 	if id <= 0:
 		last_event_report = {"key": "event.start_failed"}
