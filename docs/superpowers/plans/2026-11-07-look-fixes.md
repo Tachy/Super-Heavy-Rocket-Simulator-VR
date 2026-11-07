@@ -14,6 +14,8 @@ the previous state into `screenshots/look_fixes/<task>/`, affected tests only, c
 | T3 | F5: ocean reflectance from water optics (open-ocean water-leaving reflectance ~0.002/0.006/0.025 R/G/B plus Fresnel sky reflection and sun glint) instead of the imagery's ocean colour; land keeps the imagery | physics/data | Opus |
 | T4 | F4: the metering field wider than the frame (~60 deg around the view direction, e.g. from the sky radiance cube + frame), so looking up at the sky does not brighten it by a stop; rule D otherwise unchanged | perception | Opus |
 | T5 | F2 + F3 colour package: daylight Hunt effect (CIECAM02 colourfulness above 1e4 cd/m^2, no cap at 1) and a chroma-preserving tone curve in place of plain AgX (hue-stable: no blue -> violet shift) | perception/display | Opus |
+| T7 | Cloud cover from space too closed / smeared vs DSCOVR EPIC (user 2026-11-07): typical-weather monthly means on a 1 deg grid give a near-overcast veil; find what makes real broken cloud fields (snapshot data at 0.25 deg / satellite cloud imagery / sub-grid cloud structure from cover + cloud type) and make the Earth from space read like EPIC | data/model | Opus |
+| T8 | Bug (user 2026-11-07): a jump in cloud cover at ~55 km altitude - the two cloud representations on either side do not match (tier / level-of-detail hand-over) | bug | Opus |
 | T6 | F1: DAY_EXPOSURE out of the field rule (the field lands at 0.18, not 0.27); compare against T5, user verdict on brightness (lunar day must stay bright enough - user prefers the bright Moon) | bug fix | Sonnet |
 
 After T6: Opus final review over the whole range, then the M7 cockpit plan continues (look follow-up: helmet shell
