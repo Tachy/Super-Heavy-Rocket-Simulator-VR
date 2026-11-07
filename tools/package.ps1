@@ -238,7 +238,7 @@ Mirror $Data (Join-Path $package "data") @("/XD", (Join-Path $Data "raw"), (Join
     (Join-Path $Data "weather"), (Join-Path $Data "terrain\sites"), "/XF", "README.md", "diviner_rock_abundance.toml",
     "diviner_rock_abundance.i16", "ldem_64.toml", "ldem_64.i16")
 $presetKeys = Get-PresetSiteTileKeys
-Copy-PresetSiteTiles $presetKeys (Join-Path $package "data	errain\sites")
+Copy-PresetSiteTiles $presetKeys (Join-Path $package "data\terrain\sites")
 # the offline weather analog set (M8: 48 ERA5 hours downsampled to 1 deg, a few hundred MB) rides in the base data so the
 # typical-weather fallback works on a first start without internet; downloaded weather caches (data/weather/cache) do not
 $analog = Join-Path $Data "weather\analog"
@@ -288,8 +288,11 @@ if (-not $SkipTests) {
     }
     if (-not (Test-Path (Join-Path $full "data\terrain\ldem_64.i16"))) { throw "Full package lacks the LDEM part under data\terrain" }
     if (Test-Path (Join-Path $package "data\terrain\ldem_64.i16")) { throw "The base package must not carry LDEM_64" }
-    if (Get-ChildItem (Join-Path $package "data\terrain\sites") -Filter "*_7500_3000_*" -ErrorAction SilentlyContinue) {
-        throw "The base package carries an opt-in test-site tile"
+    # the base sites/ folder holds exactly the preset tiles (height + albedo, .toml + .i16), nothing else
+    $expected = @($presetKeys | ForEach-Object { "$_.toml"; "$_.i16" } | Sort-Object)
+    $actual = @(Get-ChildItem (Join-Path $package "data\terrain\sites") -Force | ForEach-Object { $_.Name } | Sort-Object)
+    if (($expected -join "|") -ne ($actual -join "|")) {
+        throw "Base data/terrain/sites must hold exactly the preset tiles. Expected: $($expected -join ', ') Actual: $($actual -join ', ')"
     }
     Remove-Item $full -Recurse -Force
 }
