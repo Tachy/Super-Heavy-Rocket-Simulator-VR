@@ -43,13 +43,12 @@ STRUT_RADIUS_M = 0.02  # [E] console strut
 SEAT_BACK_HALF_M = (0.05, 0.40)  # [E] seat back half thickness / half height (a 0.8 m back, crew1_1 / Wikimedia)
 SEAT_THIGH_M, SEAT_SHIN_M = 0.44, 0.40  # [E] pan length / lower-leg support length (seated adult, 5th percentile hip to knee 0.5)
 SIDES = 16  # [E] sides of round parts
-FOOT_PLATE_M = (0.32, 0.34, 0.02)  # [E] foot frame: length along the foot, width across, (thickness unused) (crew1_1: a plate-wide carbon frame under both boots)
-FOOT_FRAME_TUBE_M = 0.012  # [E] carbon tube radius of the foot frame
+FOOT_PLATE_M = (0.32, 0.34, 0.02)  # [E] foot tray: length along the foot, width across, thickness (crew1_1: a plate-wide carbon tray under both boots)
 FOOT_RAIL_Z_M = 0.17  # [E] leg-rest rails stand this far either side of the seat centre (outside the shins: hip joint 0.088 + boot half width 0.05)
 FOOT_RAIL_RADIUS_M = 0.014  # [E] carbon rail radius (crew1_1 frame tubes ~30 mm)
 LIGHT_PROUD_M = 0.006  # [E] lamp panel height over the console front
 BACK_PLATE_M = 0.003  # [E] the light grey skin of the console's back / underside, outside the dark housing
-RING_LIFT_M = 0.004  # [E] the ring light stands this far under the ceiling plane
+RING_LIFT_M = 0.015  # [E] the ring light stands this far under the ceiling plane (0.004 z-fought with the ceiling: concentric banding in pilot_eye)
 RING_STEP_DEG = 3.0  # [E] segments of the ring light
 
 V = Vector
@@ -264,9 +263,11 @@ class Panel:
         vc.box(mesh, centre, self.n, self.up, self.right, (0.5 * abs(off_front - off_back), 0.5 * (up1 - up0), 0.5 * (lat1 - lat0)))
 
 
-def build_seat(seat, floor_x):
+def build_seat(seat, floor_x, pan_raise_deg=0.0):
     """(shell, pad, rest): white shell, black pads, black carbon leg-rest frame + foot plate (crew1_1: white shells, black pads, carbon frames)."""
     n, b, z = seat_axes(seat["back_angle_deg"])
+    r = math.radians(pan_raise_deg)  # the pan follows the thighs (crew_figure.toml thigh_raise_deg, negative = the knees lower than the seat-back normal)
+    pn, pb = n * math.cos(r) + b * math.sin(r), b * math.cos(r) - n * math.sin(r)
     hip, w = V(seat["hip_m"]), seat["width_m"]
     shell, pad, rest = vc.VMesh(), vc.VMesh(), vc.VMesh()
     half_back = SEAT_BACK_HALF_M[1]
@@ -278,22 +279,24 @@ def build_seat(seat, floor_x):
     vc.box(shell, hip + b * (2.0 * half_back + 0.06) - n * 0.06, n, b, z, (0.03, 0.09, 0.15))  # headrest shell
     vc.box(pad, hip + b * (2.0 * half_back + 0.06) - n * 0.02, n, b, z, (0.01, 0.08, 0.13))  # headrest pad
     # pan: shell below (b -0.09 .. -0.04), pad on top (-0.04 .. -0.01)
-    vc.box(shell, hip + n * 0.5 * SEAT_THIGH_M - b * 0.065, n, b, z, (0.5 * SEAT_THIGH_M, 0.025, 0.5 * w * 0.95))
-    vc.box(pad, hip + n * 0.5 * SEAT_THIGH_M - b * 0.025, n, b, z, (0.5 * SEAT_THIGH_M * 0.95, 0.015, 0.5 * w * 0.78))
+    vc.box(shell, hip + pn * 0.5 * SEAT_THIGH_M - pb * 0.065, pn, pb, z, (0.5 * SEAT_THIGH_M, 0.025, 0.5 * w * 0.95))
+    vc.box(pad, hip + pn * 0.5 * SEAT_THIGH_M - pb * 0.025, pn, pb, z, (0.5 * SEAT_THIGH_M * 0.95, 0.015, 0.5 * w * 0.78))
     for side in (-1.0, 1.0):  # armrests (black)
         vc.box(rest, hip + n * 0.2 + b * 0.2 + z * (side * (0.5 * w + 0.03)), n, b, z, (0.2, 0.025, 0.03))
     # leg rest: two carbon rails from the pan's front end to the foot plate, the plate under the boots (foot_rest_m / foot_rest_normal)
     plate_n, plate_c = V(seat["foot_rest_normal"]), V(seat["foot_rest_m"])
     plate_f = z.cross(plate_n)  # along the foot
-    # the foot plate is a carbon tube frame (outline + one cross bar) whose front face lies in the plane through foot_rest_m: the boots stay visible through it
-    half_l, half_w, tube_r = 0.5 * FOOT_PLATE_M[0], 0.5 * FOOT_PLATE_M[1], FOOT_FRAME_TUBE_M
-    corner = lambda a, c: plate_c - plate_n * tube_r + plate_f * (a * half_l) + z * (c * half_w)
-    for (a0, c0), (a1, c1) in (((-1, -1), (1, -1)), ((1, -1), (1, 1)), ((1, 1), (-1, 1)), ((-1, 1), (-1, -1)), ((0, -1), (0, 1))):
-        vc.tube(rest, corner(a0, c0), corner(a1, c1), tube_r, 10, ("foot_frame", seat["id"], a0, c0, a1, c1))
-    pan_end = hip + n * SEAT_THIGH_M - b * 0.065
+    # the foot rest is a TRAY under the soles (round 3, crew1_1: seen nearly edge-on from the hatch): a flat carbon plate whose top face lies in the
+    # plane through foot_rest_m (normal = up the shin), with a low lip at the toe end and a heel stop
+    half_l, half_w = 0.5 * FOOT_PLATE_M[0], 0.5 * FOOT_PLATE_M[1]
+    thick = FOOT_PLATE_M[2]
+    vc.box(rest, plate_c - plate_n * (0.5 * thick), plate_f, plate_n, z, (half_l, 0.5 * thick, half_w))
+    for end_sign in (-1.0, 1.0):  # heel stop and toe lip
+        vc.box(rest, plate_c + plate_f * (end_sign * (half_l - 0.01)) + plate_n * 0.015, plate_f, plate_n, z, (0.01, 0.015, half_w))
+    pan_end = hip + pn * SEAT_THIGH_M - pb * 0.065
     for side in (-1.0, 1.0):
         start = pan_end + z * (side * FOOT_RAIL_Z_M)
-        end = plate_c - plate_f * half_l - plate_n * tube_r
+        end = plate_c - plate_f * half_l - plate_n * thick
         end.z = hip.z + side * FOOT_RAIL_Z_M
         vc.tube(rest, start, end, FOOT_RAIL_RADIUS_M, SIDES, ("rail", seat["id"], side))
     return shell, pad, rest
@@ -447,7 +450,7 @@ def main():
     for ap in cl.window_apertures(cabin):
         parts[f"window_{ap['index']}"], parts[f"window_glass_{ap['index']}"] = build_window(cabin, profile, ap)
     for seat in cockpit["seat"]:
-        for part, mesh in zip(cl.SEAT_PARTS, build_seat(seat, cabin["floor_x_m"])):
+        for part, mesh in zip(cl.SEAT_PARTS, build_seat(seat, cabin["floor_x_m"], spec["crew_figure"]["figure"]["thigh_raise_deg"])):
             parts[f"seat_{part}_{seat['id']}"] = mesh
     parts["console_housing"], parts["console_back"], parts["console_shelf"], parts["console_lockers"] = build_console(cockpit)
     parts["ceiling_ring_light"] = build_ring_light(cabin)

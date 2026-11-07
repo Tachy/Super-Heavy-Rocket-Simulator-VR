@@ -15,8 +15,8 @@ stature_m = 1.78                 # [E] adult male, ~50th percentile (the ~1.75-1
 hip_joint_up_m = 0.10            # [E] hip joint (trochanter) above the seat pan surface: seated anthropometry, buttock thickness ~0.09-0.10
 hip_joint_forward_m = 0.12       # [E] hip joint ahead of the seat-back plane: back-to-trochanter depth ~0.11-0.13 (suit on)
 hip_joint_half_spacing_m = 0.088  # [E] hip joint centres 0.176 apart (pelvis breadth 0.19 * stature 0.55 of a seated adult; the suit adds to the surface, not to the joints)
-knee_angle_deg = 110.0           # [E] interior knee angle (thigh to shin; 180 = straight leg): crew1_1 shows the shins sloping only gently, feet on the leg rests at about knee height (review 2026-11-07: 110-120); +-10
-thigh_raise_deg = 15.0           # [E] thighs rise above the pan plane toward the knees: crew1_1 knees above the hips; with the seat back at 35 deg the thighs stand 50 deg and the shins -20 deg from the hatch axis (review item 5: -15..-25); +-10
+knee_angle_deg = 105.0           # [E] interior knee angle (thigh to shin; 180 = straight leg): crew1_1 (fix round 3, reviewer fit) shows a recliner posture, thigh 10-20 deg above the hatch axis and shin ~60-65 deg below it = 95-105; +-10
+thigh_raise_deg = -25.0          # [E] thigh angle above the SEAT PAN plane (the pan is 35 deg above the hatch axis with the seat back at 35 deg): -25 puts the thighs 10 deg above the hatch axis (crew1_1 fit: 10-20), the shins 65 deg below it; +-10
 arm_reach_fraction = 0.44        # [S] Drillis and Contini: shoulder (acromion) to the tip of the middle finger, fraction of stature (0.78 m at 1.78); tested against the bone chain, +-0.05 m
 
 [proportion]
@@ -73,19 +73,20 @@ boot_heel_m = 0.065              # [E] heel behind the ankle joint
 neck_radius_m = 0.080            # [E] neck ring (suit collar) radius under the helmet
 
 [helmet]
-# Shape after eva_suit_newatlas / eva_suit_detail1-2 / demo1_1: a narrower, elongated white shell over the top and back (depth > width), a LARGE
-# forward-domed visor shell wrapping the face and the forehead (copper coated, closed), a white rim ring around the visor opening, a wider collar (neck ring).
+# Shape after eva_suit_newatlas / eva_suit_detail1-2 / demo1_1: a narrower, elongated white shell over the top and back (depth > width), a white shell around the face opening (brow band, cheeks / ears, chin piece) with the closed copper visor seated in the opening, a white rim bead around it, a wider collar (neck ring).
 half_width_m = 0.150             # [E] helmet shell half width (z): eva_suit_detail2, the shell is ~0.30 across at the temples (the ~0.30 m helmet of crew_dragon.toml's size list)
 half_depth_m = 0.170             # [E] helmet half depth (y): eva_suit_detail2 / demo1_1 side views, the shell is deeper than wide (ratio 1.13); +-0.02
 half_below_m = 0.17              # [E] helmet centre to the neck ring
 half_above_m = 0.20              # [E] helmet centre to the crown
-visor_half_angle_deg = 72.0      # [E] visor half width as azimuth about the forward axis: eva_suit_detail2 (the visor wraps nearly to the ears, the white shell shows behind it)
-visor_up_deg = 58.0              # [E] visor top, elevation above the centre plane: detail2 / newatlas, the copper dome reaches over the forehead
-visor_down_deg = -28.0           # [E] visor bottom, elevation (the white chin shell below the face opening)
-visor_proud_m = 0.045            # [E] visor dome bulge over the helmet shell at its centre (detail2 side/three-quarter view: the dome stands clearly ahead of the shell)
-visor_edge_m = 0.006             # [E] visor outer surface over the shell at its edge (it meets the rim ring)
+visor_half_angle_deg = 58.0      # [E] opening half width as azimuth about the forward axis: eva_suit_detail2 / detail1 / demo1_2, the face opening is ~+-55-60 deg, the white cheek / ear shell stands beside it (round 3, user finding)
+visor_up_deg = 42.0             # [E] opening top, elevation above the centre plane: detail2, the white brow band (35-45 mm) lies above it, top at ~+40-45 deg
+visor_down_deg = -30.0          # [E] opening bottom, elevation: the white chin piece lies below it (detail2)
+visor_proud_m = 0.030            # [E] closed copper visor bulge over the shell at its centre (detail2: the visor is seated in the opening, only slightly domed)
+visor_edge_m = 0.004             # [E] visor outer surface over the shell at its edge (it sits in the brow band's inner lip)
 visor_thickness_m = 0.006        # [E] visor shell thickness (closed solid)
-rim_radius_m = 0.013             # [E] white rim ring (brow band) around the visor opening, detail2: 25-30 mm wide band
+rim_radius_m = 0.020             # [E] white brow band / rim bead around the opening: detail2 band ~35-45 mm wide = 2 x 0.020 (smooth, densely sampled bead)
+pivot_housing_m = [0.012, 0.035, 0.025]  # [E] dark visor-pivot housings on the cheek sides (half sizes along the shell normal, up, across): detail2 / detail1
+pivot_el_deg = 8.0               # [E] pivot housing elevation, just behind the opening's side edge (detail2)
 collar_radius_m = 0.112          # [E] neck collar half width: detail2, the collar ring is wider than the neck (suit neck 0.08) and carries the helmet's lower rim
 collar_height_m = 0.07           # [E] neck collar height: detail2, ~70 mm ring under the helmet shell
 
@@ -107,5 +108,5 @@ roughness = 0.5                  # [E] semi-gloss printed shell, the lamp reflec
 metallic = 0.0                   # [E] composite
 [material.visor]
 albedo = [0.30, 0.12, 0.05]      # [E] dark copper-tinted coating (eva_suit_detail2: the dome reads brown-bronze, not pale)
-roughness = 0.22                 # [E] coated glass: the lamp reflections stay soft blobs, not sparkles
+roughness = 0.38                 # [E] coated glass, softer lamp reflections (round 3: smaller hot spots)
 metallic = 0.8                   # [E] mostly metallic: the copper stays visible in the diffuse part

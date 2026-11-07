@@ -363,7 +363,7 @@ def test_ring_light_is_an_annulus_at_the_ceiling(spec, nodes):
     pos = nodes["ceiling_ring_light"]["pos"]
     radii = [math.hypot(p[1], p[2]) for p in pos]
     assert min(radii) == pytest.approx(r0, abs=1e-3) and max(radii) == pytest.approx(r1, abs=1e-3)
-    assert {round(p[0], 3) for p in pos} == {round(c["cabin"]["ceiling_x_m"] - 0.004, 3)}
+    assert {round(p[0], 3) for p in pos} == {round(c["cabin"]["ceiling_x_m"] - 0.015, 3)}
 
 
 def test_seats_are_split_into_white_shell_and_black_pads(spec, nodes):
@@ -392,14 +392,27 @@ def test_foot_rest_lies_under_the_boots_of_every_seat(spec, nodes):
         assert len(on_plate) >= 8  # the plate's front face lies in the plane through foot_rest_m
 
 
-def test_knee_and_shin_follow_the_review(spec):
-    """Interior knee 110-120 deg, shins -15..-25 deg from the hatch axis (crew1_1, review item 5)."""
+def test_knee_and_shin_follow_the_hatch_photo(spec):
+    """Recliner posture of crew1_1 (fix round 3): interior knee 95-105 deg, thigh 10-20 deg above the hatch axis, shin 60-65 deg below it."""
     import figure_layout as fl
     cfg = spec["crew_figure"]
-    assert 110.0 <= cfg["figure"]["knee_angle_deg"] <= 120.0
+    assert 95.0 <= cfg["figure"]["knee_angle_deg"] <= 105.0
     seat = next(s for s in spec["cockpit"]["seat"] if s["id"] == "s2")
     b = fl.bones(cfg)
+    hip = fl.to_capsule(b["thigh_l"]["head"], seat["hip_m"], seat["back_angle_deg"])
     knee = fl.to_capsule(b["shin_l"]["head"], seat["hip_m"], seat["back_angle_deg"])
     ankle = fl.to_capsule(b["shin_l"]["tail"], seat["hip_m"], seat["back_angle_deg"])
-    angle = math.degrees(math.atan2(ankle[0] - knee[0], ankle[1] - knee[1]))  # from +Y (the hatch side) toward +X
-    assert -25.0 <= angle <= -15.0, angle
+    thigh = math.degrees(math.atan2(knee[0] - hip[0], knee[1] - hip[1]))  # from +Y (the hatch side) toward +X
+    shin = math.degrees(math.atan2(ankle[0] - knee[0], ankle[1] - knee[1]))
+    assert 10.0 <= thigh <= 20.0, thigh
+    assert -65.5 <= shin <= -60.0, shin
+    assert 1.4 <= ankle[0] <= 1.8 and knee[0] > ankle[0] + 0.3  # shins steep toward the floor
+
+
+def test_foot_rest_is_a_tray_facing_up_the_shin(spec):
+    """The plate normal is up the shin (mostly +X), not an upright wall facing the hatch camera, and the centre sits in the photo's band."""
+    for seat in spec["cockpit"]["seat"]:
+        n, c = seat["foot_rest_normal"], seat["foot_rest_m"]
+        assert n[0] > 0.8 and -0.6 < n[1] < -0.3 and n[2] == 0.0, n
+        low = 0.08 if seat["id"] in ("s1", "s4") else 0.0  # outer seats 0.08 lower
+        assert 1.50 - low - 0.1 <= c[0] <= 1.60 + 0.1 and 0.5 <= c[1] <= 0.85, (seat["id"], c)

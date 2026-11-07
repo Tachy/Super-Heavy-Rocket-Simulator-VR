@@ -141,11 +141,18 @@ def test_left_is_plus_z_and_the_sides_mirror(cfg):
     assert b["thumb_1_l"]["head"][2] < b["fingers_l"]["head"][2] + 0.05  # the thumb root lies on the inner side (toward the body centre)
 
 
+def _pan_coords(cfg, p):
+    """(along the pan, above the pan surface) of a figure-frame point: the seat pan follows the thighs (thigh_raise_deg about the hip point)."""
+    r = math.radians(cfg["figure"]["thigh_raise_deg"])
+    return p[0] * math.sin(r) + p[1] * math.cos(r), p[0] * math.cos(r) - p[1] * math.sin(r)
+
+
 def test_bones_stay_inside_the_seat_envelope(cfg):
     for name, bone in fl.bones(cfg).items():
         for p in (bone["head"], bone["tail"]):
-            on_pan = 0.0 <= p[1] <= SEAT_PAN_LENGTH_M and abs(p[2]) <= 0.29
-            assert not on_pan or p[0] >= SEAT_PAN_SURFACE_M, (name, p)
+            along, up = _pan_coords(cfg, p)
+            on_pan = 0.0 <= along <= SEAT_PAN_LENGTH_M and abs(p[2]) <= 0.29
+            assert not on_pan or up >= SEAT_PAN_SURFACE_M, (name, p)
             assert p[1] >= SEAT_BACK_SURFACE_M or p[0] > SEAT_BACK_HEIGHT_M, (name, p)
 
 
@@ -218,13 +225,14 @@ def test_visor_is_in_front_of_the_head_and_copper(cfg, mesh):
     assert cfg["material"]["visor"]["albedo"][0] > cfg["material"]["visor"]["albedo"][2] * 2.0  # copper: red over blue
 
 
-def test_mesh_fits_the_seat_envelope_on_the_hip_point(mesh):
+def test_mesh_fits_the_seat_envelope_on_the_hip_point(cfg, mesh):
     _, _, prims = mesh
     worst_pan, worst_back = 0.0, 0.0
     for _, pos, _ in prims:
         for x, y, z in pos:
-            if 0.0 <= y <= SEAT_PAN_LENGTH_M and abs(z) <= 0.29:
-                worst_pan = min(worst_pan, x - SEAT_PAN_SURFACE_M)
+            along, up = _pan_coords(cfg, (x, y, z))
+            if 0.0 <= along <= SEAT_PAN_LENGTH_M and abs(z) <= 0.29:
+                worst_pan = min(worst_pan, up - SEAT_PAN_SURFACE_M)
             if 0.0 <= x <= SEAT_BACK_HEIGHT_M and abs(z) <= 0.29:
                 worst_back = min(worst_back, y - SEAT_BACK_SURFACE_M)
     assert worst_pan >= -ENVELOPE_TOL_M, worst_pan
@@ -239,19 +247,20 @@ def test_stature_and_triangle_budget(cfg, mesh):
     assert 0.85 < top < 1.1  # crown of the helmet above the seat's hip point
 
 
-def test_visor_is_a_large_forward_dome_and_the_collar_is_wider_than_the_neck(cfg, mesh):
-    """Helmet shape (USER 2026-11-07): the visor wraps face and forehead (>= 140 deg wide, >= 80 deg tall), stands clearly ahead of the shell,
-    and the neck collar is a distinct ring wider than the neck."""
+def test_visor_sits_in_a_face_opening_with_a_white_shell_around_it(cfg, mesh):
+    """Helmet shape (USER 2026-11-07, round 3): the opening is +-55-60 deg wide with its top at +40-45 deg, a brow band of 35-45 mm (rim bead),
+    the closed visor seated in it (slightly domed), dark pivot housings on the cheeks, and the neck collar is a distinct ring wider than the neck."""
     h = cfg["helmet"]
-    assert 2.0 * h["visor_half_angle_deg"] >= 140.0 and h["visor_up_deg"] - h["visor_down_deg"] >= 80.0
-    assert h["visor_proud_m"] >= 0.03 > h["visor_edge_m"] and h["half_depth_m"] > h["half_width_m"]
+    assert 55.0 <= h["visor_half_angle_deg"] <= 60.0 and 40.0 <= h["visor_up_deg"] <= 45.0 and h["visor_down_deg"] < -20.0
+    assert 0.035 <= 2.0 * h["rim_radius_m"] <= 0.045
+    assert h["visor_proud_m"] > h["visor_edge_m"] and h["half_depth_m"] > h["half_width_m"]
     assert h["collar_radius_m"] > cfg["suit"]["neck_radius_m"] * 1.25
     _, _, prims = mesh
     _, pos, _ = next(p for p in prims if p[0] == "visor")
     front = max(p[1] for p in pos) - cfg["pose"]["head_centre_forward_m"]
     assert front >= h["half_depth_m"] + 0.5 * h["visor_proud_m"]  # the dome leaves the shell's front
     zs = [p[2] for p in pos]
-    assert max(zs) - min(zs) >= 1.5 * h["half_width_m"]  # wraps round the sides
+    assert max(zs) - min(zs) <= 2.0 * h["half_width_m"] * 0.95  # the visor does not wrap to the ears: white cheeks stay beside it
 
 
 def test_visor_is_its_own_surface_and_the_helmet_is_neutral_white(cfg, mesh):

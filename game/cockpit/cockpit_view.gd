@@ -136,14 +136,17 @@ func _build_lights() -> void:
 	for i in config.lights.size():
 		var row: Dictionary = config.lights[i]
 		var p: Vector3 = CockpitConfig._vec(row.get("position_m"))
-		_add_omni("light_%s" % row.get("id", i), p + _console_normal() * LAMP_DROP_M, LAMP_LUMENS).shadow_enabled = true  # two lamps: cheap shadows
+		var lamp := _add_omni("light_%s" % row.get("id", i), p + _console_normal() * LAMP_DROP_M, LAMP_LUMENS)
+		lamp.shadow_enabled = true  # two lamps: cheap shadows
+		lamp.shadow_bias = 0.12  # the ceiling is lit at a grazing angle: the default bias showed radial shadow acne (pilot_eye, round 3)
+		lamp.shadow_normal_bias = 3.0
 	var ceiling_x := float(config.cabin.get("ceiling_x_m", 3.35))
 	var radii: Array = config.cabin.get("ring_light_radii_m", [])
 	var ring_r := 0.5 * (float(radii[0]) + float(radii[1])) if radii.size() == 2 else RING_RADIUS_FALLBACK_M
 	for k in RING_LAMPS:
 		var az := TAU * float(k) / RING_LAMPS
 		_add_omni("ring_%d" % k, Vector3(ceiling_x - RING_DROP_M, ring_r * cos(az), ring_r * sin(az)), RING_LUMENS / RING_LAMPS)
-	_add_omni("fill_ceiling", Vector3(3.1, 0.0, 0.0), FILL_LUMENS)
+	_add_omni("fill_ceiling", Vector3(ceiling_x - 0.25, 0.0, 0.0), FILL_LUMENS)  # 0.25 m under the ceiling plane (was 3.1 for the ceiling at 3.35)
 	_add_omni("fill_seats", Vector3(2.0, 0.55, 0.0), FILL_LUMENS)
 
 
@@ -216,18 +219,18 @@ func _material_of(part: String) -> Material:
 	if part == "console_housing":
 		return _cabin_material(Color(0.028, 0.028, 0.032), 0.9, 0.0, 0.03, 0.0, 0.1)
 	if part == "console_shelf":
-		return _cabin_material(Color(0.32, 0.32, 0.34), 0.7, 0.0, 0.03, 0.0, 0.15)
+		return _cabin_material(Color(0.07, 0.07, 0.075), 0.8, 0.0, 0.03, 0.0, 0.05)  # discovery2: dark grey modules, ~0.05-0.09 linear
 	if part == "console_back":
 		return _cabin_material(Color(0.76, 0.77, 0.79), 0.45, 0.3, 0.03, 0.0)
 	if part == "console_lockers":
-		return _cabin_material(Color(0.035, 0.035, 0.04), 0.6, 0.0, 0.03, 0.0, 0.12)
+		return _cabin_material(Color(0.02, 0.02, 0.024), 0.85, 0.0, 0.03, 0.0, 0.03)
 	## [E] Seats (review item 4, crew1_1): white shells, black pads and black carbon leg-rest frames.
 	if part.begins_with("seat_shell_"):
 		return _cabin_material(Color(0.82, 0.82, 0.81), 0.5, 0.0, 0.03, 0.0)
 	if part.begins_with("seat_"):
 		return _cabin_material(Color(0.03, 0.03, 0.032), 0.7, 0.0, 0.03, 0.0, 0.2)
 	if part.begins_with("tablet_"):
-		return _cabin_material(Color(0.06, 0.06, 0.07), 0.6, 0.0, 0.03, 0.0, 0.12)  # glass front: dark, no metal sheen under the lamps
+		return _cabin_material(Color(0.03, 0.03, 0.036), 0.85, 0.0, 0.03, 0.0, 0.03)  # glass front: dark, no metal sheen under the lamps
 	if part.begins_with("hotas_"):
 		return _cabin_material(Color(0.06, 0.06, 0.065), 0.5, 0.4, 0.03, 0.0)
 	return _cabin_material(Color(0.09, 0.09, 0.1), 0.45, 0.3, 0.03, 0.0)  # buttons, handle

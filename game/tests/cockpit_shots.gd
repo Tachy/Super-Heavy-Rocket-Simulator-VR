@@ -16,7 +16,7 @@ const SHOT_SETTLE_FRAMES := 40
 const NEAR_M := 0.04
 ## GoPro fit (docs/subsystems/cockpit.md "Shot cameras"): position, forward and right (capsule frame), equidistant fisheye focal
 ## length in px / rad on the 4128 x 2322 photo (the output scales it by 1600 / 4128).
-const GOPRO_POS := Vector3(2.6545, -0.4837, -0.0251)
+const GOPRO_POS := Vector3(2.3045, -0.4837, -0.0251)  # fix round 3: the screen corners moved 0.35 m down X, so the fit moved with them
 const GOPRO_FORWARD := Vector3(0.48568, 0.87422, 0.00729)
 const GOPRO_RIGHT := Vector3(-0.02094, 0.01996, -0.99958)
 const GOPRO_F_PX := 2085.47
@@ -124,12 +124,17 @@ func _shoot() -> bool:
 	for part: String in ["seat_rest_", "seat_shell_s1", "seat_shell_s2", "seat_shell_s4", "seat_pad_s1", "seat_pad_s2", "seat_pad_s4", "console_", "screen_", "tablet_", "button_", "handle"]:
 		for node in _cockpit.find_children(part + "*" if part.ends_with("_") else part, "MeshInstance3D", false, false):
 			(node as Node3D).visible = not isolate
+	if _args.has("hide"):  # debugging: hide cabin parts by name (comma separated)
+		for hidden_name: String in String(_args["hide"]).split(","):
+			var hidden_node := _cockpit.cabin_node(hidden_name)
+			if hidden_node != null:
+				hidden_node.visible = false
 	for label in _world.find_children("*", "Label3D", true, false):
 		(label as Label3D).visible = false  # the stale-structure-models notice is no part of the cabin
 	var fov_deg := float(shot.get("fov", _args.get("fov", 100.0)))
 	_world.camera.keep_aspect = Camera3D.KEEP_HEIGHT if shot.get("keep_height", false) else Camera3D.KEEP_WIDTH
 	_world.camera.fov = fov_deg
-	_set_exterior_visible(not shot.get("hide_exterior", false))
+	_set_exterior_visible(not (shot.get("hide_exterior", _args.has("hide_exterior"))))
 	# the pose in the capsule frame -> render axes of this frame; converge: the view is placed relative to the camera
 	var stage := _cockpit.get_parent() as Node3D
 	var local: Transform3D = shot["local"]
@@ -172,15 +177,21 @@ func _define_shots() -> void:
 	var up_back := Vector3(cos(back), -sin(back), 0.0)
 	var chest := Vector3(sin(back), cos(back), 0.0)
 	var helmet_c: Vector3 = s3["hip"] + up_back * 0.80 + chest * 0.17
-	var helmet_cam := helmet_c + chest * 0.62 + Vector3(0.0, 0.0, 0.30) - up_back * 0.02
-	_shots = [
-		{"name": "helmet_closeup", "local": Transform3D(Basis.looking_at(helmet_c - helmet_cam, up_back), helmet_cam), "fov": 36.0, "hide_exterior": false, "isolate": true},
+	var helmet_cam := helmet_c + chest * 0.75 + Vector3(0.0, 0.0, 0.30) - up_back * 0.02
+	var helmet_views: Array = []
+	for view: Array in [["helmet_34", 38.0, 0.75, 48.0], ["helmet_side", 62.0, 0.75, 48.0]]:  # like-for-like with eva_suit_detail2 (three-quarter), detail1 / demo1_2 (more from the side)
+		var az := deg_to_rad(float(view[1]))
+		var cam := helmet_c + (chest * cos(az) + Vector3(0.0, 0.0, 1.0) * sin(az)) * float(view[2])
+		helmet_views.append({"name": view[0], "local": Transform3D(Basis.looking_at(helmet_c - cam, up_back), cam), "fov": float(view[3]), "hide_exterior": false, "isolate": true})
+	var rest: Array = [
+		{"name": "helmet_closeup", "local": Transform3D(Basis.looking_at(helmet_c - helmet_cam, up_back), helmet_cam), "fov": 48.0, "hide_exterior": false, "isolate": true},
 		{"name": "pilot_eye", "local": eye},
 		{"name": "gopro_discovery2", "local": Transform3D(gopro_basis, GOPRO_POS), "fov": GOPRO_RENDER_FOV, "fisheye": true},
 		# [E] crew1_1 (docs/subsystems/cockpit.md): in the open hatch, level, 3:2 at ~87 deg = 65 deg vertical
-		{"name": "hatch_crew1_1", "local": Transform3D(hatch_basis, Vector3(2.05, 1.7, 0.0)), "fov": HATCH_VFOV, "keep_height": true,
+		{"name": "hatch_crew1_1", "local": Transform3D(hatch_basis, Vector3(2.11, 1.7, 0.0)), "fov": HATCH_VFOV, "keep_height": true,
 				"crop_aspect": 1.5, "hide_exterior": false, "hide_head": false},
 	]
+	_shots.assign(helmet_views + rest)
 
 
 ## The hatch frame and the exterior hull (every stage node child but the cockpit) are hidden for the shot from outside the inner wall.
@@ -243,6 +254,9 @@ func _compose() -> void:
 	_side_by_side("gopro_discovery2", "discovery2", "gopro_overlay_discovery2", true)
 	_side_by_side("gopro_discovery2", "discovery1", "gopro_vs_discovery1", false)  # same framing as discovery2
 	_side_by_side("hatch_crew1_1", "crew1_1", "hatch_vs_crew1_1", false)
+	_side_by_side("helmet_34", "../eva_suit_detail2", "helmet_vs_detail2", false)
+	_side_by_side("helmet_side", "../eva_suit_detail1", "helmet_vs_detail1", false)
+	_side_by_side("helmet_side", "demo1_2", "helmet_vs_demo1_2", false)
 
 
 ## Our shot and the photo (reference photos stay outside the repo) scaled to our height, next to each other or blended 50 %.

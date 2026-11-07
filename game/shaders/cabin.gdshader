@@ -44,6 +44,7 @@ void fragment() {
 	atm_fog(world_offset, fog, colour_factor);
 	FOG = fog;
 	float line = seam_depth > 0.0 ? seam(local_position, normalize(local_normal)) : 0.0;
+	line *= smoothstep(0.12, 0.45, abs(dot(normalize(NORMAL), normalize(VIEW))));  // the 1.5 mm seams alias to moire at grazing angles (pilot_eye ceiling): fade them out there
 	ALBEDO = albedo.rgb * (1.0 - seam_depth * 0.55 * line) * colour_factor;
 	ROUGHNESS = roughness;
 	METALLIC = metallic;

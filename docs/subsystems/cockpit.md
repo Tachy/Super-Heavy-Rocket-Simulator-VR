@@ -26,7 +26,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 | Side wall | 0.18 m normal | E | crew1_1 window wells 0.15-0.25 deep; window spacing in crew1_1 gives inner r 1.43 at x 2.38 (exterior 1.62) | +-0.05 |
 | Inner profile | exterior `profile_m` offset by the wall | D | closest exterior point 0.094 m (>= 0.02 required) | as wall |
 | Floor | x 1.15 | E | Wikimedia: cargo C5-C7 under the seat pans, 0.5 m below the hatch sill | +-0.15 |
-| Ceiling / tunnel | x 3.35 / r 0.45 to x 3.66 | E / D | crew1_1, Wikimedia flat ceiling ring; IDSS 0.8 m passage + trim; hatch face 0.08 under the recess floor 3.74 | +-0.1 |
+| Ceiling / tunnel | x 3.00 (round 3; was 3.35) / r 0.45 to x 3.66 | E / D | crew1_1, Wikimedia flat ceiling ring; IDSS 0.8 m passage + trim; hatch face 0.08 under the recess floor 3.74 | +-0.1 |
 | Seat pitch | 0.70 m (Z +-0.35, +-1.05) | E | Wikimedia: pitch / seat-back width 1.2, back 0.58 m | +-0.05 |
 | Seat hip (s2) | [1.80, -0.02, 0.35] | E | eye 0.70 m from the console (reach, crew2_1 / inspiration4_1); outer seats 0.08 lower (Wikimedia) | +-0.1 |
 | Back angle | 35 deg from +X toward -Y | E | crew1_1 torso foreshortening from the hatch, knees above the hips | +-10 deg |
@@ -49,7 +49,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   the capsule frame (a = `back_angle_deg`; `figure_layout.to_capsule` / `seat_basis`). The hip joint sits 0.10 above and 0.12 ahead of the origin.
 - One skinned mesh node `crew_figure` under the armature `crew_figure_rig`, rigid weights (one bone per segment), surfaces suit / boots / gloves / helmet /
   `visor` (closed copper solid, own surface and material). Bones: `hips, spine, chest, neck, head, shoulder / upper_arm / forearm / hand / index_1..3 /
-  thumb_1..2 / fingers (merged middle, ring, little) / thigh / shin / foot`, `_l` at +Z. Rest pose = seated (thighs 15 deg above the pan, interior knee 110 deg (shins -20 deg from the hatch axis; fix round 2),
+  thumb_1..2 / fingers (merged middle, ring, little) / thigh / shin / foot`, `_l` at +Z. Rest pose = seated (round 3: thighs 25 deg below the pan plane = 10 deg above the hatch axis, interior knee 105 deg = shins 65 deg below the hatch axis (crew1_1 recliner posture; was 15 deg / 110 deg),
   forearms along the armrests, hands palm down).
 - Tests (`test_crew_figure.py`): bone set, arm reach shoulder to index tip 0.778 m against 0.44 x stature = 0.783 (+-0.05), mesh inside the s2 seat envelope
   (nothing more than 1 cm below the pan or behind the back), visor a closed own surface, glTF skeleton = layout, figure eye within 0.20 m of the config eye.
@@ -136,13 +136,28 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 - Open: boots read grey (exposure of the high-key cabin), screens are still empty blue, visor shows the lamp blobs, the real visor opening above a dark face aperture is not modelled (closed by decision).
 
 ### Shot cameras (fit, fix round 1)
-- GoPro (discovery2 = discovery1 framing): least-squares fit (scipy, own equidistant fisheye r = f theta, principal point at the image centre) on the 12 active-area corners of the
+- GoPro (discovery2 = discovery1 framing; round 3: the console block moved 0.35 m down X, so the camera moved with it: X 2.6545 -> 2.3045, same fit): least-squares fit (scipy, own equidistant fisheye r = f theta, principal point at the image centre) on the 12 active-area corners of the
   three screens (TOML positions; pixels read by eye from the 4128 x 2322 photo, +-5 px), 7 parameters. Result in the capsule frame: position (2.6545, -0.4837, -0.0251),
   forward (0.4857, 0.8742, 0.0073), image right (-0.0209, 0.0200, -0.9996), f = 2085 px/rad (113.4 x 64 deg), reprojection error rms 20 px, max 36 px of 4128 (~0.5 %).
   The fit puts the camera 0.50 m from the screen plane, 0.2 m toward the hatch of the eye points (not the review's 0.64 m estimate; position and f are correlated, the fisheye
   distortion is tied by the three coplanar screens).
-- Hatch (crew1_1): not fitted (no measurable 3D points in the TOML beyond window / helmet estimates); review estimate: (2.05, 1.7, 0), level, looking -Y, image up +X, 3:2,
+- Hatch (crew1_1), round 3: pose (2.11, 1.70, 0), level, looking -Y, image up +X, 3:2, ~87 deg horizontal. Fitted by eye on four feature groups after the leg / console changes (windows, console underside slab, tunnel rim / ceiling dish, helmets / headrests; 5 points per group read on the 2576 px side-by-side): residual ~20-50 px of 1288 (< 4 %), X raised 0.06 m against the review's (2.05, 1.70). Earlier review estimate: (2.05, 1.7, 0), level, looking -Y, image up +X, 3:2,
   ~87 deg horizontal (65 deg vertical). Exterior hull is left visible (single-sided, culled from inside; hiding it would remove the window shadows and flood the floor with sun).
+
+### Fix round 3 (legs, console block, helmet)
+- Legs (crew1_1 fit of the review): `crew_figure.toml` `thigh_raise_deg` -25 (thigh 10 deg above the hatch axis; the seat pan is built along the thigh, `build_seat(pan_raise_deg)`), `knee_angle_deg` 105
+  (shin 65 deg below the hatch axis). `[[seat]]` `foot_rest_m` s2/s3 (1.615, 0.733, +-0.35), s1/s4 (1.535, 0.733, +-1.05), `foot_rest_normal` (0.9063, -0.4226, 0) = up the shin.
+  Residual against the photo: rest centre X inside 1.50-1.60 +-0.1, Y 0.13 above the 0.50-0.60 band (the Drillis-Contini thigh of 0.436 m ends 0.45 m ahead of the hip joint; closing it would move the hip joint, i.e. the seat, 0.1 m back: not done).
+  The foot rest is now a flat carbon tray (top face in the plane through `foot_rest_m`, heel stop and toe lip) with the two rails, not an upright frame; seen nearly edge-on from the hatch as in crew1_1.
+- Console block and ceiling: the whole console group (housing, screens, tablets, lockers, buttons, lamps) and the ceiling plane moved 0.35 m down X ([E], reviewer fit on crew1_1 / discovery10: console 0.35, tunnel rim 0.5 m too high
+  relative to windows and heads; ceiling taken with the console so the upper panel still ends 0.05 under it). `[cabin] profile_m` now ends the side wall at x 3.00. Eye to centre-screen distance is 0.44 m (was 0.70): the shoulder-to-index reach of 0.78 m
+  is still more than the shoulder-to-screen distance (arm bent, ~75 % extended), so the screens stay reachable; the commander eye / seats were not moved. The GoPro shot camera moved with the block (overlay stays aligned).
+- Helmet (user finding): opening +-58 deg x -30..+42 deg (rounded, square-to-disc map), closed copper visor seated in it (30 mm dome, roughness 0.38), one continuous 40 mm white rim bead swept around the opening (smooth, no segments),
+  white brow band / cheeks / chin from the shell, dark pivot housings on the cheeks (`pivot_housing_m`, `pivot_el_deg`), 36-sided shell. Like-for-like shots `helmet_34` / `helmet_side` (38 / 62 deg, 0.75 m, 48 deg fov) with `helmet_vs_detail2`, `helmet_vs_detail1`, `helmet_vs_demo1_2`.
+- Materials: shelf modules albedo 0.07 (was 0.32), lockers 0.02, tablets 0.03, speculars 0.03-0.05; `fill_ceiling` omni follows `ceiling_x_m` - 0.25; the two console lamps got shadow bias (shadow_bias 0.12, normal bias 3); ring light lifted 15 mm (was 4 mm);
+  seam lines fade at grazing view. `cockpit_shots.gd` debug options `--hide=<node,..>` and `--hide_exterior`.
+- Open: the radial moire stripes at the top edge of `pilot_eye` (above the dark upper panel, where the view runs up the forward tunnel) persist after the ring light lift, seam fade, lamp shadow bias and a coarse hatch-plate fan; they stay with the ring light, the
+  shell and the exterior hull hidden one after the other, so the cause is not found (suspect: the world / sky render seen through the tunnel). Not blocking.
 
 ## Validation
 - Wall check (scratch script, Task 1): inner profile >= 0.094 m from the exterior meridian and the neck well everywhere.
