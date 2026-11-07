@@ -1,0 +1,105 @@
+# Crew figure in the newer SpaceX EVA suit (M7 cockpit step 1): one adult, seated in a Dragon seat, rebuilt by us (nothing of any
+# photo or model is copied). Silhouette only; stripes, seams, patches and the flag come later by texture.
+# Figure frame (glTF origin = the seat's hip reference point of config/cockpits/crew_dragon.toml [[seat]] hip_m = the point where the
+# seat-back plane meets the pan surface; the figure's hip joint sits 0.10 above and 0.12 ahead of it):
+#   X = up the seat back (toward the head), Y = the seat's chest normal (forward, away from the back), Z = the crew's LEFT.
+# The game places the figure at a seat: origin = hip_m, basis columns (x, y, z) in the capsule frame = ((cos a, -sin a, 0), (sin a, cos a, 0), (0, 0, 1)),
+# a = back_angle_deg. Left parts (_l) are at +Z. Metres; angles degrees. Every value line carries [S] / [E] / [D] with its derivation.
+# Look references (git-ignored, screenshots/m7-cockpit-refs/): sheet_suit.jpg = eva_suit_newatlas (full suit, standing), eva_suit_detail1-4
+# (helmet, collar, shoulder stripes), mielke/discovery*, demo1_*, crew1_1 (seated crew in the cabin).
+# Proportions: Drillis and Contini, "Body segment parameters", 1966 (the standard fractions of stature; adult male, the same table
+# used by NASA-STD-3000 style anthropometry sketches). Tagged [E]: a mid-size adult, not a named crew member.
+
+[figure]
+stature_m = 1.78                 # [E] adult male, ~50th percentile (the ~1.75-1.80 m of the Discovery crew photos at the iPad / helmet scale of crew_dragon.toml); +-0.05
+hip_joint_up_m = 0.10            # [E] hip joint (trochanter) above the seat pan surface: seated anthropometry, buttock thickness ~0.09-0.10
+hip_joint_forward_m = 0.12       # [E] hip joint ahead of the seat-back plane: back-to-trochanter depth ~0.11-0.13 (suit on)
+hip_joint_half_spacing_m = 0.088  # [E] hip joint centres 0.176 apart (pelvis breadth 0.19 * stature 0.55 of a seated adult; the suit adds to the surface, not to the joints)
+knee_angle_deg = 90.0            # [E] relaxed seated knee, thigh to shin, crew1_1 / demo1 (shins hang from raised knees)
+thigh_raise_deg = 20.0           # [E] thighs rise above the pan plane toward the knees: crew1_1 knees above the hips; +-10
+arm_reach_fraction = 0.44        # [S] Drillis and Contini: shoulder (acromion) to the tip of the middle finger, fraction of stature (0.78 m at 1.78); tested against the bone chain, +-0.05 m
+
+[proportion]
+shoulder_height = 0.818          # [S] Drillis and Contini: acromion height / stature
+hip_height = 0.530               # [S] Drillis and Contini: trochanter height / stature
+knee_height = 0.285              # [S] Drillis and Contini: knee (centre) height / stature
+ankle_height = 0.039             # [S] Drillis and Contini: ankle height / stature
+upper_arm = 0.186                # [S] Drillis and Contini: shoulder to elbow / stature
+forearm = 0.146                  # [S] Drillis and Contini: elbow to wrist / stature
+hand = 0.108                     # [S] Drillis and Contini: wrist to the middle fingertip / stature
+shoulder_width = 0.259           # [S] Drillis and Contini: acromion to acromion / stature
+head_height = 0.130              # [S] Drillis and Contini: chin to vertex / stature
+foot_length = 0.152              # [S] Drillis and Contini: heel to toe / stature
+
+[pose]
+# Directions in the figure frame (x up the back, y forward, z toward the figure's OWN left; mirrored for the right side). Normalised in the layout.
+upper_arm_dir = [-1.0, 0.12, 0.17]    # [E] upper arm hangs down the torso, 10 deg out and a little forward: forearms rest on the armrests (crew1_1, demo1_1); +-10 deg
+forearm_dir = [0.0, 1.0, -0.12]       # [E] forearm forward along the armrest, 7 deg inward, hands palm down above the thighs; +-10 deg
+neck_lean_m = 0.04                    # [E] the head sits this far ahead of the neck base (helmet against the headrest, crew1_1)
+head_centre_up_m = 0.80               # [D] helmet centre above the origin: hip joint 0.10 + shoulder (0.818 - 0.530) * stature 0.51 + 0.19 (neck ring, helmet centre over the shoulders)
+head_centre_forward_m = 0.16          # [D] helmet rear at the seat-back plane (headrest front face 0.02 ahead): centre - helmet half depth 0.165
+
+[hand]
+palm_length_m = 0.105            # [E] wrist to the knuckle line, glove; hand 0.108 * 1.78 = 0.192 to the middle fingertip
+palm_half_width_m = 0.046        # [E] glove palm, half width (adult male hand breadth ~0.09 plus glove)
+palm_half_thick_m = 0.022        # [E] glove palm, half thickness
+index_m = [0.040, 0.024, 0.018]  # [E] index phalanges (proximal, middle, distal), glove; index tip 0.187 from the wrist, the finger scale 0.072 of crew_dragon.toml is the free finger
+index_radius_m = 0.011           # [E] glove finger radius
+index_offset_m = 0.030           # [E] index knuckle toward the thumb side from the palm centre line
+fingers_m = 0.085                # [E] the merged middle / ring / little fingers: one slab from the middle knuckle, length
+fingers_half_width_m = 0.027     # [E] merged finger slab half width (three fingers 0.054 across)
+fingers_radius_m = 0.011         # [E] merged finger slab half thickness
+fingers_offset_m = -0.012        # [E] slab centre line, toward the little finger from the palm centre
+thumb_m = [0.042, 0.032]         # [E] thumb proximal and distal, glove
+thumb_radius_m = 0.0125          # [E] glove thumb radius
+thumb_root_offset_m = 0.036      # [E] thumb root toward the thumb side, from the palm centre
+thumb_root_forward_m = 0.020     # [E] thumb root forward of the wrist
+thumb_spread_deg = 35.0          # [E] thumb direction away from the fingers, relaxed
+finger_curl_deg = 8.0            # [E] relaxed curl per finger joint (toward the palm side)
+
+[suit]
+# Cross-section half sizes with the soft suit on; hz = across the body (z), hn = depth (y). Torso rings: [height above the hip joint, hz, hn, forward offset of the ring centre].
+torso_rings_m = [[-0.09, 0.115, 0.075, 0.0], [-0.06, 0.175, 0.118, 0.0], [0.0, 0.190, 0.125, 0.0], [0.12, 0.170, 0.115, 0.01], [0.25, 0.185, 0.125, 0.015], [0.40, 0.205, 0.138, 0.02], [0.50, 0.212, 0.135, 0.02], [0.555, 0.17, 0.11, 0.02], [0.585, 0.09, 0.075, 0.03]]  # [E] sheet_suit eva_suit_newatlas: broad shoulders, narrow waist; depth 0.25-0.28 chest
+thigh_radius_m = [0.098, 0.074]  # [E] suit thigh radius at the hip and at the knee (the thigh in the photos is slim: about 0.20 across at the knee)
+shin_radius_m = [0.068, 0.056]   # [E] suit calf radius at the knee and at the boot
+upper_arm_radius_m = [0.056, 0.047]  # [E] suit sleeve at the shoulder and at the elbow
+forearm_radius_m = [0.047, 0.040]    # [E] suit sleeve at the elbow and the wrist
+cuff_radius_m = 0.050            # [E] wrist ring (glove lock), the white metal ring of eva_suit_detail1
+cuff_length_m = 0.025            # [E] wrist ring length along the forearm
+boot_shaft_fraction = 0.50       # [E] the black boot covers this fraction of the shin from the ankle up (sheet_suit: boots reach mid-calf)
+boot_foot_half_width_m = 0.050   # [E] boot half width at the ball
+boot_foot_half_height_m = 0.045  # [E] boot half height at the ankle (sole + upper)
+boot_heel_m = 0.065              # [E] heel behind the ankle joint
+neck_radius_m = 0.080            # [E] neck ring (suit collar) radius under the helmet
+
+[helmet]
+half_width_m = 0.155             # [E] helmet shell half width (z): ~0.31 across, the ~0.30 m helmet of crew_dragon.toml's size list + the shell; eva_suit_detail2
+half_depth_m = 0.165             # [E] helmet half depth (y): eva_suit_detail2, the shell is deeper than wide
+half_below_m = 0.17              # [E] helmet centre to the neck ring
+half_above_m = 0.20              # [E] helmet centre to the crown
+visor_half_angle_deg = 52.0      # [E] visor half width as azimuth about the forward axis: eva_suit_newatlas / detail2 (the visor takes most of the front)
+visor_up_deg = 38.0              # [E] visor top, elevation above the centre plane (detail1: the copper dome reaches up the forehead)
+visor_down_deg = -30.0           # [E] visor bottom, elevation (chin bar below)
+visor_proud_m = 0.012            # [E] visor outer surface over the helmet shell
+visor_thickness_m = 0.006        # [E] visor shell thickness (closed solid)
+
+[material.suit]
+albedo = [0.82, 0.82, 0.83]      # [E] white suit fabric (eva_suit_newatlas): bright, slightly grey under cabin light
+roughness = 0.65                 # [E] woven fabric
+metallic = 0.0                   # [E] fabric
+[material.boots]
+albedo = [0.05, 0.05, 0.055]     # [E] black boots (sheet_suit)
+roughness = 0.55                 # [E] leather / rubber
+metallic = 0.0                   # [E] not metal
+[material.gloves]
+albedo = [0.62, 0.62, 0.64]      # [E] light grey gloves with the white cuff ring (eva_suit_detail1)
+roughness = 0.7                  # [E] fabric
+metallic = 0.0                   # [E] fabric
+[material.helmet]
+albedo = [0.86, 0.86, 0.87]      # [E] white shell (eva_suit_detail1, detail2)
+roughness = 0.35                 # [E] glossy printed shell
+metallic = 0.0                   # [E] composite
+[material.visor]
+albedo = [0.55, 0.28, 0.14]      # [E] copper-tinted gold visor (eva_suit_detail1, detail2: orange-brown reflective)
+roughness = 0.08                 # [E] polished glass
+metallic = 0.9                   # [E] reflective gold coating

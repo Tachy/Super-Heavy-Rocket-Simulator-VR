@@ -357,6 +357,40 @@ def load_cockpit(cockpit_id: str, cockpits_dir: Path = COCKPITS) -> dict:
     return cockpit
 
 
+FIGURE_KEYS = {
+    "figure": ("stature_m", "hip_joint_up_m", "hip_joint_forward_m", "hip_joint_half_spacing_m", "knee_angle_deg", "thigh_raise_deg", "arm_reach_fraction"),
+    "proportion": ("shoulder_height", "hip_height", "knee_height", "ankle_height", "upper_arm", "forearm", "hand", "shoulder_width", "head_height", "foot_length"),
+    "pose": ("upper_arm_dir", "forearm_dir", "neck_lean_m", "head_centre_up_m", "head_centre_forward_m"),
+    "hand": ("palm_length_m", "palm_half_width_m", "palm_half_thick_m", "index_m", "index_radius_m", "index_offset_m", "fingers_m", "fingers_half_width_m",
+             "fingers_radius_m", "fingers_offset_m", "thumb_m", "thumb_radius_m", "thumb_root_offset_m", "thumb_root_forward_m", "thumb_spread_deg", "finger_curl_deg"),
+    "suit": ("torso_rings_m", "thigh_radius_m", "shin_radius_m", "upper_arm_radius_m", "forearm_radius_m", "cuff_radius_m", "cuff_length_m", "boot_shaft_fraction",
+             "boot_foot_half_width_m", "boot_foot_half_height_m", "boot_heel_m", "neck_radius_m"),
+    "helmet": ("half_width_m", "half_depth_m", "half_below_m", "half_above_m", "visor_half_angle_deg", "visor_up_deg", "visor_down_deg", "visor_proud_m", "visor_thickness_m"),
+}
+FIGURE_MATERIALS = ("suit", "boots", "gloves", "helmet", "visor")
+
+
+def validate_crew_figure(fig: dict) -> None:
+    """The crew figure tables gen_crew_figure.py reads: keys present, five materials."""
+    for table, keys in FIGURE_KEYS.items():
+        t = fig.get(table)
+        if not isinstance(t, dict):
+            raise VehicleSpecError(f"crew figure: missing table [{table}]")
+        for k in keys:
+            if k not in t:
+                raise VehicleSpecError(f"crew figure [{table}]: missing key '{k}'")
+    for m in FIGURE_MATERIALS:
+        if set(fig.get("material", {}).get(m, {})) != {"albedo", "roughness", "metallic"}:
+            raise VehicleSpecError(f"crew figure: [material.{m}] needs albedo, roughness, metallic")
+
+
+def load_crew_figure(figure_id: str = "crew_figure", cockpits_dir: Path = COCKPITS) -> dict:
+    with open(cockpits_dir / f"{figure_id}.toml", "rb") as f:
+        fig = tomllib.load(f)
+    validate_crew_figure(fig)
+    return fig
+
+
 def dragon_lobes(angles_deg: list) -> list:
     """Centres of the SuperDraco pods: the middle of each consecutive pair of the config's engine angles."""
     if len(angles_deg) % 2:
@@ -416,6 +450,7 @@ def load_dragon(vehicle_id: str, vehicles_dir: Path = VEHICLES) -> dict:
         spec["cockpit"] = load_cockpit(cockpit_id, vehicles_dir.parent / "cockpits")
         if spec["cockpit"]["cockpit"]["capsule_stage"] != "capsule":
             raise VehicleSpecError("cockpit: capsule_stage must name the Dragon's capsule stage")
+        spec["crew_figure"] = load_crew_figure("crew_figure", vehicles_dir.parent / "cockpits")  # the seated crew figure (gen_crew_figure.py)
     return spec
 
 

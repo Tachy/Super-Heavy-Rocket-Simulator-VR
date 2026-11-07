@@ -22,7 +22,7 @@ const MODEL_FILES := {
 	"starship_depot": ["booster", "ship", "grid_fin", "raptor", "rvac", "dorsal_hardware"],
 	"starship_hls": ["ship", "raptor", "rvac", "dorsal_hardware", "hls_parts"],
 	"falcon9_block5": ["falcon9_stage1", "falcon9_grid_fin", "falcon9_leg", "falcon9_stage2", "mvac", "merlin"],
-	"crew_dragon": ["dragon_capsule", "dragon_nose", "dragon_trunk", "idss_mechanism", "dragon_cabin"], "iss": ["iss_station", "iss_arrays", "iss_rings"],
+	"crew_dragon": ["dragon_capsule", "dragon_nose", "dragon_trunk", "idss_mechanism", "dragon_cabin", "crew_figure"], "iss": ["iss_station", "iss_arrays", "iss_rings"],
 }
 const SOURCE_SCRIPTS := {
 	"starship_block3": ["vehicle_common.py", "hull_profile.py", "gen_hull.py", "gen_flap.py", "gen_grid_fin.py", "gen_engine.py"],
@@ -30,7 +30,7 @@ const SOURCE_SCRIPTS := {
 	"starship_depot": ["vehicle_common.py", "hull_profile.py", "dorsal_layout.py", "gen_hull.py", "gen_grid_fin.py", "gen_engine.py", "gen_dorsal_hardware.py"],
 	"starship_hls": ["vehicle_common.py", "hull_profile.py", "dorsal_layout.py", "hls_layout.py", "hls_legs_layout.py", "gen_hull.py", "gen_engine.py", "gen_dorsal_hardware.py", "gen_hls_parts.py"],
 	"falcon9_block5": ["vehicle_common.py", "gen_falcon9_hull.py", "gen_falcon9_grid_fin.py", "gen_falcon9_leg.py", "falcon9_second_stage.py", "gen_engine.py"],
-	"crew_dragon": ["vehicle_common.py", "cabin_layout.py", "gen_dragon.py", "idss_mechanism.py", "gen_dragon_cabin.py"], "iss": ["vehicle_common.py", "idss_mechanism.py", "iss_station.py", "iss_arrays.py", "idss_passive_ring.py"],
+	"crew_dragon": ["vehicle_common.py", "cabin_layout.py", "figure_layout.py", "gen_dragon.py", "idss_mechanism.py", "gen_dragon_cabin.py", "gen_crew_figure.py"], "iss": ["vehicle_common.py", "idss_mechanism.py", "iss_station.py", "iss_arrays.py", "idss_passive_ring.py"],
 }
 const SOURCE_BAKERS := {"starship_block3": ["hull_textures.py", "hull_tiles.py"], "starship_tanker": ["hull_textures.py", "hull_tiles.py"],
 		"starship_depot": ["hull_textures.py", "hull_tiles.py"], "starship_hls": ["hull_textures.py", "hull_tiles.py"], "falcon9_block5": ["surface_textures.py"], "crew_dragon": ["surface_textures.py"], "iss": ["iss_textures.py"]}
@@ -178,6 +178,7 @@ static func _load(vehicle_id: String) -> Dictionary:
 			"hulls": {"trunk": parts["dragon_trunk"], "capsule": parts["dragon_capsule"]},
 			"nose": parts["dragon_nose"],  # origin = the hinge point, closed = identity (nose_transform)
 			"mechanism": parts["idss_mechanism"],  # DockingMechanismView: frames in idss_mechanism.py
+			"crew_figure": parts["crew_figure"],  # skinned mesh `crew_figure` (surfaces suit / boots / gloves / helmet / visor); frame and bones: manifest "crew_figure" (gen_crew_figure.py)
 			"cabin": parts["dragon_cabin"],  # capsule frame; node names and screen / button frames: manifest "cockpit" (gen_dragon_cabin.py)
 			"flap": {}, "grid_fin": {}, "engine": {},
 			"materials": _hull_materials(manifest.get("look", {}), model_dir, vehicle_id),
@@ -469,6 +470,7 @@ static func _missing_or_stale(vehicle_id: String, model_dir: String) -> String:
 		sources.append(_repo_dir().path_join("config/vehicles/detail/crew_dragon.toml"))
 	if vehicle_id == "crew_dragon":  # the cabin is drawn from config/cockpits/crew_dragon.toml (gen_dragon_cabin.py)
 		sources.append(_repo_dir().path_join("config/cockpits/crew_dragon.toml"))
+		sources.append(_repo_dir().path_join("config/cockpits/crew_figure.toml"))
 	if VARIANT_VEHICLES.has(vehicle_id):  # the rest of the detail tables and the taken-over stages
 		sources.append(_repo_dir().path_join("config/vehicles/detail/%s.toml" % VARIANT_BASE))
 		sources.append(_repo_dir().path_join("config/vehicles/%s.toml" % VARIANT_BASE))
