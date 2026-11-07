@@ -270,7 +270,7 @@ on top; it replaced the interim `GroundPatch`.
 - Imagery pipeline: `tools/data_pipeline/imagery.py`, `config/imagery.toml`; surface albedo
   `tools/data_pipeline/earth_albedo.py`, `config/earth_albedo.toml` (tests `test_imagery.py`, `test_earth_albedo.py`).
 - Performance run: `game/tests/terrain_perf.gd` (GPU).
-- Lunar landing sites (any latitude / longitude, plan `docs/superpowers/plans/2026-11-06-lunar-sites.md`):
+- Lunar landing sites (any latitude / longitude, plan `docs/superpowers/archive/plans/2026-11-06-lunar-sites.md`):
   `game/world/terrain/lunar_site_service.gd` (`LunarSiteService`, node `World.lunar_sites`) and `World.switch_lunar_site`.
   - Service: `setup(core, fetcher, parallel = 8)`, `prepare(lat, lon)` (the user's exact coordinates, never snapped; R19: the
     core accepts a tile of the site's cache key, see `load_site_tile`: centre tolerance = the key cell, 0.01 deg per axis

@@ -14,7 +14,7 @@ and adds a window search backed by the real planners; the interim UI lives in th
 
 **Tech Stack:** C++20 core (Catch2), godot-cpp bindings, Godot 4 GDScript, Python data pipeline (unittest).
 
-**Spec:** `docs/superpowers/specs/2026-11-06-lunar-sites-design.md` (approved 2026-11-06). Code facts for the
+**Spec:** `docs/superpowers/archive/specs/2026-11-06-lunar-sites-design.md` (approved 2026-11-06). Code facts for the
 implementer: the subsystem docs `docs/subsystems/lunar.md`, `moon-surface.md`, `terrain-rendering.md`.
 
 ## Global Constraints
