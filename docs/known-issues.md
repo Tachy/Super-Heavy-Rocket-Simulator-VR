@@ -368,3 +368,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - The stay's plane change (leg `stay_plane_change`, ruling R15: the Moon turns under the landing plane over the
   stay) is budgeted in the start, the window reserve and the refuelling demand, but not flown: the ascent ends in the
   plane through the liftoff point and no turn back onto the landing plane is commanded. Mons Mouton 24 h: 33.9 m/s.
+
+## Lunar sites plan, Task 11 (2026-11-07)
+
+- `World.switch_lunar_site` blocks the main thread for ~5.0 s (`TerrainQuadtree.setup` ~4.3 s, rock layer ~0.4 s, detail configure ~0.25 s; game start ~7.7 s for the same setup). Accepted while the switch happens in the mission wizard before a flight (ruling R20); moving the quadtree setup off the main thread is open. Measured value: `World.last_site_rebuild_ms` (printed by `render_check`).
