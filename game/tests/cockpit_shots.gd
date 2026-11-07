@@ -177,6 +177,9 @@ func _shoot() -> bool:
 	print("cockpit_shots: %s adaptation rule %s: gain %.3f, L_a %s cd/m^2, field %s, anchor %s, field key %s, from the field %s" % [
 			shot["name"], "analytic" if not a.scene_referred_adaptation else a.field_rule_name(),
 			a.exposure_gain, a.adaptation_cd_m2, a.last_field_cd_m2, a.last_anchor_cd_m2, a.field_key, a.adaptation_from_field])
+	print("cockpit_shots: %s adaptation surround: frame alone %s cd/m^2, model in frame %s, visibility %.3f, out-of-frame share %.3f" % [
+			shot["name"], a.adaptation_surround.last_frame_field_cd_m2, a.adaptation_surround.last_model_in_cd_m2,
+			a.adaptation_surround.last_visibility, a.adaptation_surround.last_out_share])
 	_index += 1
 	_wait = 0
 	return false

@@ -462,6 +462,13 @@ func _process(_delta: float) -> bool:
 				"analytic" if not a.scene_referred_adaptation else a.field_rule_name(),
 				a.last_field_cd_m2, a.last_field_scotopic_cd_m2, a.last_anchor_cd_m2, a.last_anchor_scotopic_cd_m2,
 				a.field_key, a.adaptation_from_field])
+		var s := a.adaptation_surround
+		print("render_check: adaptation surround %s: frame alone %s cd/m^2, model in frame %s, visibility %.3f, out-of-frame share %.3f" % [
+				"on" if AdaptationSurround.enabled else "off", s.last_frame_field_cd_m2, s.last_model_in_cd_m2,
+				s.last_visibility, s.last_out_share])
+		print("render_check: adaptation surround CPU: refresh %.3f ms per frame (%d), combine %.3f ms per measurement (%d)" % [
+				s.refresh_usec / 1000.0 / maxf(s.refresh_calls, 1), s.refresh_calls, s.combine_usec / 1000.0 / maxf(s.combine_calls, 1),
+				s.combine_calls])
 		print("render_check: night vision: twilight glow %s cd/m^2, scotopic %s cd/m^2, rod scale %s, moonlight %s of the Sun (%s), vehicle Moon light %s, brightness %.4f, chroma %.4f" % [
 				a.last_adaptation_glow_cd_m2, a.scotopic_cd_m2, a.rod_scale, a.moonlight_relative_value, "on" if a.moonlight_active else "off",
 				world.moon_light.light_energy if world.moon_light.visible else 0.0, a.brightness, a.chroma])

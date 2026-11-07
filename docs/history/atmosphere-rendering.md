@@ -480,3 +480,14 @@ itself and in a black field runs it to a clamp set by the emitter (review I-1). 
 before the transparent pass and composites the cloud pass itself; it measures every 4th frame (measuring every frame
 cost +0.25 ms in the stereo mock, the extra MSAA resolve). Before the fix the doc also listed the gains before -> after
 the switch to the field rule; those "before" values are the white-plate ones above.
+
+## Eye adaptation's field from the frame alone, superseded 2026-11-07 (look fixes T4)
+
+Task 14's meter (2026-11-05) and the rules after it (mean grey, anchored, highlight protection D) measured only the
+rendered frame. Looking up the field became the sky alone: pad noon (Sun 47.6 deg, view east) el 5 / 60 / 88: field
+4642 / 2354 / 2640 cd/m^2, gain 1.674 / 3.301 / 2.943; lunar day (Apollo 11, 2026-11-17T08:00) 60 deg up: a black field,
+gain 12 650 (dark adapted on a sunlit plain). Since T4 the field adds the directions within 70 deg of the view axis from
+the analytic surround model (eye-adaptation.md, "Field beyond the frame"); `--frame_only_adaptation` restores the old
+behaviour. The rule values listed with the anchored / protected comparisons (eye-adaptation.md open points) are
+frame-only measurements.
+

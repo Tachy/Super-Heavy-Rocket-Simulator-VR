@@ -21,6 +21,7 @@ shaders:
   [E: Moon & Spencer 1945, the surround's weight falls with eccentricity; call: from the image centre, no per-eye
   projection centre or solid-angle weight]), into two 128-bin log histograms (photopic,
   scotopic; 1e-6 .. 1e6 cd/m^2, bin 0 black). Both VR eyes go into one histogram (one adaptation, no eye difference).
+  The directions beyond the frame are added before the statistics ("Field beyond the frame" below).
   The histograms come back asynchronously (`buffer_get_data_async`, every ~2-4 frames, no stall). The field luminance
   L_f (`field_log_average`): the weighted geometric mean, the brightest 2 % of the weight cut (Sun disc, glints [E]),
   bins more than 3.7 decades below the highest bin left excluded (no signal at that adaptation [S: Kunkel & Reinhard
@@ -88,6 +89,45 @@ shaders:
   `screenshots/eye_adaptation/protected/`: D equals the mean-grey rule in every outdoor scene (Moon day, lunar night,
   pad noon, dusk, 400 km, start view: the anchor / 0.9 is 2-4x the field, the field / 0.18 5.5x) and the anchored rule
   in the cockpit (gain 157 against 480 at key 0.18: anchor 242 cd/m^2 = 15x the field), so no hand key is needed there.
+- **Field beyond the frame** [look fixes T4, 2026-11-07; `adaptation_surround.gd` `AdaptationSurround`, fidelity flag
+  `AdaptationSurround.enabled`, user argument `--frame_only_adaptation` switches it off]. The meter sees only the frame:
+  looking up into the noon sky the field was the sky alone and the gain doubled (pad noon el 5 / el 60: field 4642 /
+  2354 cd/m^2, gain 1.67 / 3.30), the sky read pale. The eye's adaptation state integrates a wider surround (the
+  periphery, eye movements). The field is now the frame plus the directions within `CAP_HALF_ANGLE_DEG` 70 deg of the
+  view axis that the frame does not show [E: the monocular field reaches ~60 deg up, ~75 down, ~60 nasal, ~100 temporal,
+  mean 74; 60 deg left the ground out of every view 60 deg up], weighted per solid angle by exp(-theta^2 / 2 sigma^2),
+  sigma 30 deg [E: the continuation of the frame's own centre weighting per steradian for the 50 deg desktop frame:
+  0.36 at its corner, 0.83 at its top edge against the Gaussian's 0.36 / 0.71; Moon & Spencer 1945's weight also falls
+  with eccentricity]. In-frame weights stay as they are; the out-of-frame directions (rings of 10 deg, ~150 query
+  directions, `in_view` against each rendered view's projection: in VR the union of both eyes) enter with the frame's
+  total weight x their share of the angular weight, sum_out / sum_in. Their luminance: Godot's sky radiance cube is
+  engine-internal (no script binding of `sky_get_radiance_texture_rd`), so the analytic model it is drawn from is
+  evaluated on the CPU (`Atmosphere._surround_luminance`) into a store of 24 x 24 directions about the local vertical
+  (7.5 deg bands, a band edge on the horizon; 8 cells per frame, a complete store swapped in every 0.8 s; a view jump
+  builds a new one at once): the core's sky luminance
+  along the ray (the Moon's penumbra segmented) or the model ground (Sun + sky, through the air) with the near
+  imagery's albedo profile (GroundAlbedoNear, faded to the tables' ground albedo 1.5-6 km out, as the cube), x the
+  cube's cloud factors (sky / ground half); near the Moon the regolith on the eye's ground sphere as the Moon-in-view
+  term (both lights, grey), the sky black. Directions the model shows black add no weight (no signal). Enclosed views:
+  the model knows no walls, so the out-of-frame part is weighted by a visibility V from the frame's field against the
+  model's field over the in-frame directions: 1 within 0.3 decades, 0 beyond 0.6 (smoothstep) [call]; both black: 1,
+  one black: 0. The highlight cut, the 3.7-decade range, the anchor percentile and rule D run on the combined field
+  unchanged; display-referred emitters stay out (the model has none). Test `game/tests/adaptation_surround_test.gd`
+  (headless): the query set integrates the cap's weight (1 %), a uniform world keeps its field (1e-9), looking up the
+  field rises and level it falls (they converge), an enclosed view and a black surround leave the histogram unchanged,
+  two VR eyes show more of the cap than one, the store's cells round-trip.
+  Values (render_check / cockpit_shots, gain frame alone -> with the surround, field cd/m^2; sheets and logs
+  `screenshots/look_fixes/t4/`, report `.superpowers/sdd/2026-11-07-look-fixes/t4-report.md`): pad noon view east el 5
+  1.674 -> 1.839 (4642 -> 4226), el 60 3.301 -> 2.729 (2354 -> 2847), el 88 2.943 -> 2.800 (2640 -> 2775): looking up
+  60 deg changes the gain x1.48 instead of x1.97; the model's field over the in-frame directions is within 1-13 % of
+  the frame's there (2370 / 2640 / 4047 against 2354 / 2640 / 4642). Dusk (Sun -3.6 deg, view 250 deg el 5) 300 -> 415
+  (the darker sky away from the glow). Apollo 11 lunar day down-Sun el 5 3.60 -> 2.98; el 60 12 650 (a black field)
+  -> 2.98. Start view 1.401 unchanged (space around the Earth adds nothing; V 0.25 with the drawn clouds). Cockpit
+  (`--field_key=0.18`): pilot_eye 157.39, hatch 58.43, GoPro 87.43, helmet 85.74 unchanged (V 0: frame 16-130 against
+  the model's 1600-2400 cd/m^2). Stereo mock (both eyes, 3534 x 2838): el 5 1.689 -> 1.732, el 60 2.657 -> 2.581 (the
+  headset's frame covers most of the cap: out-of-frame share 0.13 against the desktop's 0.46). Cost: no GPU work (pad
+  noon median GPU time desktop 1.876-1.880 -> 1.878-1.894 ms, stereo mock 5.805-6.084 -> 5.782-5.815 ms, noise); main
+  thread 0.09 ms per frame (store) + 0.12 ms per measurement (every 4th frame), ~6 ms once at a view jump.
 - **White-plate rule** (the fallback and the GPU check's / headless tests' rule; formerly the only one):
   [call 2026-10-25, `eye_adaptation.gd`, fidelity flag `Atmosphere.eye_adaptation_enabled`, on in
   the game, off in the GPU check's comparisons]: cone gain on every physical luminance (tables, Sun light, Moon, Sun
@@ -263,6 +303,9 @@ shaders:
   both VR eyes (formerly view-independent; the white-plate rule is the fallback). Earth-in-view stays physical (no
   display-side highlight treatment). Display-referred emitters never set the adaptation (the meter runs before the
   transparent pass; Task 14 fix round 1, review I-1).
+- The field is wider than the frame (look fixes plan, user 2026-11-07 "Alles wie vorgeschlagen umsetzen", proposal F4):
+  70 deg about the view axis from the analytic surround model, gated by its agreement with the frame (enclosed views
+  keep the frame alone). Rule D, the highlight cut and the anchor percentile unchanged.
 - City lights scene-referred with scale [E] (user ruling 2026-10-25).
 - White balance to the TOA Sun's white, fixed (not to the plate's current light: a sunset stays red) (look fixes plan,
   user 2026-11-07 "Alles wie vorgeschlagen umsetzen", proposal F7).
@@ -276,6 +319,14 @@ shaders:
   lunar night side the cloudy Earth is brighter than adapted to); the earthshine's Bond albedo 0.306 holds the clouds
   on average. Follow-up: the 13 directions through the cloud column.
 - Eclipsed-Moon corona not modelled; no per-pixel / foveal adaptation.
+- Field beyond the frame (T4): the surround model knows no structures, vehicles, terrain relief, drawn cloud shapes
+  (only the cube's uniform cloud factors) or the Earth's disc in the lunar sky; an open view next to a tower or a hull
+  counts open sky / ground there. The model's regolith is ~2x the rendered one (Apollo 11 view: model 4375 against frame
+  2169 cd/m^2 over the same directions, the open point of the Moon shading below; still inside the visibility's x2), so
+  on the Moon the surround brightens the field. A lit surround of less than the 2 % highlight share is cut whole (lunar
+  day 60 deg up: 2.4 % of the weight is regolith, just above the cut; a narrower lit rim would leave the black field).
+  The visibility's thresholds (x2 / x4) are a call, not a measurement; the desktop runs at a fixed head, the "saccade"
+  part of the eye's integration is the cap's Gaussian, not a temporal memory.
 - Scene-referred rule (Task 14): `moon_rock.gdshader` (unshaded) does not multiply by `atmosphere_exposure_gain`, so
   drawn rocks stay at gain 1 while the regolith follows the gain (dark rocks on the lunar day at gain 11-17, black at
   night); the rocks also bias the field measurement low (IM-2: 586 -> 456 cd/m^2). Fix: `ALBEDO *= atmosphere_exposure_gain`

@@ -103,7 +103,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25 (the per-session context is kept s
   `moon_rock_layer.gd` (`MoonRockLayer`: the drawn rocks, MultiMesh pools per LOD, shadow-only casters); in
   `game/world/`: `moon_near_shadow.gd` / `earth_near_shadow.gd` (`MoonNearShadow` / `EarthNearShadow`: the Sun's
   near-field shadow map on the Moon / the Earth), `adaptation_meter.gd` (`AdaptationMeter`: the scene-referred eye
-  adaptation's meter). Performance run (GPU): `res://tests/terrain_perf.gd`. Details: `docs/subsystems.md` "Terrain
+  adaptation's meter), `adaptation_surround.gd` (`AdaptationSurround`: its field beyond the frame). Performance run (GPU): `res://tests/terrain_perf.gd`. Details: `docs/subsystems.md` "Terrain
   rendering". A fresh checkout needs one `godot --headless --path game --import` before `--script` runs resolve new
   `class_name` scripts.
 - `game/shaders/`: Earth/Moon lighting in body-local metres; `eclipse.gdshaderinc` mirrors

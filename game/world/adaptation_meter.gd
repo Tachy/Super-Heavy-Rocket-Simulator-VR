@@ -148,12 +148,14 @@ var _cd_per_scene := 0.0
 var _epoch := 0
 var _loading := false
 var _in_flight := false
+var _view := {}
 ## Results (written on the render thread by the read-back callback, read on the main thread).
 var _mutex := Mutex.new()
 var _result := PackedInt32Array()
 var _result_epoch := -1
 var _result_loading := false
 var _result_serial := 0
+var _result_view := {}
 
 
 func _init() -> void:
@@ -164,8 +166,9 @@ func _init() -> void:
 
 ## Main thread, per frame: the scene value of 1 cd/m^2 this frame draws with (Atmosphere.scene_per_cd_m2; <= 0: measure
 ## nothing), the adaptation's epoch (a new view: results of older epochs are dropped) and whether the view is still
-## loading (streamed terrain: the result is not the settled view yet).
-func set_frame(scene_per_cd_m2: float, epoch: int, loading: bool) -> void:
+## loading (streamed terrain: the result is not the settled view yet). view: the frame's view for AdaptationSurround
+## (returned with its result: the out-of-frame part belongs to the view the histograms were measured in).
+func set_frame(scene_per_cd_m2: float, epoch: int, loading: bool, view := {}) -> void:
 	var cd_per_scene := 1.0 / scene_per_cd_m2 if scene_per_cd_m2 > 0.0 else 0.0
 	# Only every MEASURE_EVERY-th frame asks for the resolved colour (MSAA: an extra resolve before the transparent pass);
 	# the flag and this frame's state go through the same render-thread queue, so they belong to the same frame.
@@ -173,15 +176,16 @@ func set_frame(scene_per_cd_m2: float, epoch: int, loading: bool) -> void:
 	var measure := cd_per_scene > 0.0 and _frame % MEASURE_EVERY == 0
 	if access_resolved_color != measure:
 		access_resolved_color = measure
-	RenderingServer.call_on_render_thread(_set_on_render_thread.bind(cd_per_scene if measure else 0.0, epoch, loading))
+	RenderingServer.call_on_render_thread(_set_on_render_thread.bind(cd_per_scene if measure else 0.0, epoch, loading,
+			view))
 
 
-## Main thread: the newest histogram pair of that epoch not taken yet ([counts, loading]), else [].
+## Main thread: the newest histogram pair of that epoch not taken yet ([counts, loading, serial, view]), else [].
 func take_result(epoch: int, after_serial: int) -> Array:
 	_mutex.lock()
 	var out := []
 	if _result_epoch == epoch and _result_serial > after_serial and _result.size() == HISTOGRAM_BINS * 2:
-		out = [_result, _result_loading, _result_serial]
+		out = [_result, _result_loading, _result_serial, _result_view]
 	_mutex.unlock()
 	return out
 
@@ -284,10 +288,12 @@ static func shader_source() -> String:
 	return SHADER_CODE.replace("TOTAL_BINS", str(HISTOGRAM_BINS * 2)).replace("GROUP_EDGE", str(GROUP))
 
 
-func _set_on_render_thread(cd_per_scene: float, epoch: int, loading: bool) -> void:
+func _set_on_render_thread(cd_per_scene: float, epoch: int, loading: bool, view: Dictionary) -> void:
 	_cd_per_scene = cd_per_scene
 	_epoch = epoch
 	_loading = loading
+	if cd_per_scene > 0.0:
+		_view = view
 
 
 func _create_pipeline() -> void:
@@ -373,15 +379,16 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 	if CloudEffect.capture_timestamps:
 		_rd.capture_timestamp("transparent_and_post")
 	_in_flight = true
-	if _rd.buffer_get_data_async(_buffer, _on_data.bind(_epoch, _loading)) != OK:
+	if _rd.buffer_get_data_async(_buffer, _on_data.bind(_epoch, _loading, _view)) != OK:
 		_in_flight = false
 
 
-func _on_data(data: PackedByteArray, epoch: int, loading: bool) -> void:
+func _on_data(data: PackedByteArray, epoch: int, loading: bool, view: Dictionary) -> void:
 	_mutex.lock()
 	_result = data.to_int32_array()
 	_result_epoch = epoch
 	_result_loading = loading
+	_result_view = view
 	_result_serial += 1
 	_mutex.unlock()
 	_in_flight = false

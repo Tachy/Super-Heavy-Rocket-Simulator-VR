@@ -207,6 +207,13 @@ var vision_effect := VisionEffect.new()
 ## The field luminance meter (scene-referred adaptation, Task 14; attached before vision_effect in world.gd's
 ## Compositor; not in the GPU check's, which keeps the analytic rule).
 var adaptation_meter := AdaptationMeter.new()
+## The field beyond the frame (look fixes T4; AdaptationSurround, fidelity flag AdaptationSurround.enabled): the
+## out-of-frame directions within 70 deg of the view axis, from the analytic model (_surround_luminance).
+var adaptation_surround := AdaptationSurround.new()
+## Set by World every frame before update: the frame's view for the surround ({} = none: the frame alone) and the near
+## imagery's albedo profile around the eye (GroundAlbedoNear; empty: the tables' ground albedo).
+var adaptation_view := {}
+var surround_albedo_profile := PackedVector3Array()
 ## Fidelity flag (Task 14): the eye adapts to the field it sees (AdaptationMeter, EyeAdaptation.FIELD_MID_GREY); off,
 ## or until the meter has measured the view: the white-plate rule (adaptation_luminance). The user argument
 ## --analytic_adaptation switches it off at start (before / after comparisons).
@@ -275,6 +282,9 @@ var _field_loading := false
 var _field_age := 0
 var _log_adaptation := OS.get_cmdline_user_args().has("--adaptation_log")
 var _moon_direction_fixed := Vector3.ZERO
+## This update's inputs of the surround model (_surround_begin): [eye ITRF m, Sun unit ITRF, Sun from the Earth ITRF m,
+## d_AU, GCRF -> ITRF, Moon ITRF m (ZERO: none), eye from the Earth GCRF m, Moon from the Earth GCRF m].
+var _surround_inputs := []
 var _cloud_cache := {}  ## cloud_light_at per frame: [position, direction, probe, frame] -> Vector3
 ## The direct Sun through the clouds as drawn (World: CloudLayer.direct_sun_transmittance(key, position_itrf_m) -> T or
 ## NAN): replaces the grid mean's direct beam of the Sun light and the eye's plate where it has a value. Unset (checks):
@@ -428,6 +438,11 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 		luminance = maxf(luminance, lamp_adaptation_cd_m2)  # lamp-lit surfaces in view (white)
 		var scotopic := maxf(last_target_scotopic_cd_m2,
 				lamp_adaptation_cd_m2 * Vector3.ONE.dot(EyeAdaptation.SCOTOPIC_WEIGHTS))  # white lamps light the rods too
+		if scene_referred_adaptation and AdaptationSurround.enabled:
+			_surround_inputs = [camera_fixed, sun_fixed, gcrf_to_fixed * sun_from_earth, d_au, gcrf_to_fixed,
+					moon_fixed, camera_gcrf_m - earth_center_gcrf_m, moon_gcrf_m - earth_center_gcrf_m]
+			var up_gcrf := (camera_gcrf_m - moon_gcrf_m).normalized() if moon_gcrf_m != Vector3.ZERO 					and near_moon((camera_gcrf_m - earth_center_gcrf_m).length(), (camera_gcrf_m - moon_gcrf_m).length()) 					else earth_fixed_to_gcrf * _geodetic_up(camera_fixed)
+			adaptation_surround.refresh(Frames.to_render(up_gcrf), _surround_begin, _surround_luminance)
 		_take_field_measurement()
 		if scene_referred_adaptation and _field_valid:
 			# The scene-referred rule (EyeAdaptation.FIELD_MID_GREY): the white the measured field implies takes the
@@ -470,7 +485,8 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	ShaderGlobals.set_value(&"atmosphere_scene_per_cd_m2", scene_per_cd_m2)
 	ShaderGlobals.set_value(&"atmosphere_exposure_gain", display_gain)
 	# The field meter reads this frame back in true luminance (nothing measured with the adaptation off).
-	adaptation_meter.set_frame(scene_per_cd_m2 if eye_adaptation_enabled else 0.0, _field_epoch, view_loading)
+	adaptation_meter.set_frame(scene_per_cd_m2 if eye_adaptation_enabled else 0.0, _field_epoch, view_loading,
+			adaptation_view)
 	eclipse_segments = 0
 	if moon_apparent_gcrf_m != Vector3.ZERO:
 		var moon_from_earth := moon_apparent_gcrf_m - earth_center_gcrf_m
@@ -959,8 +975,110 @@ func _earth_in_view_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3) 
 	return total * (radius / r) * (radius / r)
 
 
+## [call] The surround model's eye stands at least this far above its model ground (the ellipsoid; the eye on terrain
+## below it, Starbase ~-20 m, would otherwise sit inside the model sphere): a person's eye height.
+const SURROUND_EYE_MIN_HEIGHT_M := 2.0
+## [E] The near imagery's albedo profile fades to the tables' ground albedo between these horizontal distances (m), as the
+## sky cube's (sky.gdshader radiance_local_albedo_near_m / _far_m defaults, GroundAlbedoNear.face_albedo).
+const SURROUND_ALBEDO_FADE_NEAR_M := 1500.0
+const SURROUND_ALBEDO_FADE_FAR_M := 6000.0
+
+
+## The surround model's state for one store (AdaptationSurround.refresh): this update's geometry, the ground's albedo
+## and the sky cube's cloud factors at the eye (cloud_radiance_factors: the light under the clouds over the clear sky's,
+## sky and ground halves; 1 without weather).
+func _surround_begin() -> Dictionary:
+	var eye_fixed: Vector3 = _surround_inputs[0]
+	var sun_fixed: Vector3 = _surround_inputs[1]
+	var moon_fixed: Vector3 = _surround_inputs[5]
+	var eye_gcrf: Vector3 = _surround_inputs[6]
+	var moon_gcrf: Vector3 = _surround_inputs[7]
+	var state := {"eye": eye_fixed, "sun": sun_fixed, "sun_m": _surround_inputs[2], "d_au": _surround_inputs[3],
+			"to_fixed": _surround_inputs[4], "profile": surround_albedo_profile,
+			"albedo": Vector3.ONE * float(parameters["ground_albedo"]), "near_moon": false}
+	if moon_fixed != Vector3.ZERO and near_moon(eye_gcrf.length(), (eye_gcrf - moon_gcrf).length()):
+		state["near_moon"] = true
+		state["moon"] = moon_fixed
+		var regolith := MOON_MEAN_TEXTURE_ALBEDO * regolith_scale(float(parameters["toa_solar_illuminance_lux"]))
+		state["sun_scale"] = regolith * reference_luminance(float(_surround_inputs[3]))
+		state["earth_scale"] = regolith * last_earthshine_lux / PI
+		return state
+	var radius := float(parameters["bottom_radius_m"])
+	var model := _stretch(eye_fixed)
+	model = model.normalized() * maxf(model.length(), radius + SURROUND_EYE_MIN_HEIGHT_M)
+	state["model_eye"] = model
+	state["eye"] = _unstretch(model)
+	var factors := cloud_radiance_factors(_unstretch(model), sun_fixed)
+	state["cloud_sky"] = factors[0]
+	state["cloud_ground"] = factors[1]
+	var up := _geodetic_up(_unstretch(model))
+	state["east"] = Vector3(0, 0, 1).cross(up).normalized()
+	state["north"] = up.cross(state["east"])
+	return state
+
+
+## What an open view shows along a render-world direction (RGB luminance channels, cd/m^2 at the true Sun distance), the
+## analytic content of the sky cube (sky.gdshader) for AdaptationSurround: from the Earth's air or space the sky along the
+## ray (core sky luminance, the Moon's penumbra segmented) or the model ground (lit by the Sun and the sky, through the
+## air; _view_luminance with the ground's albedo: the near imagery's profile by horizontal distance and azimuth, faded to
+## the tables' ground albedo, as the cube), times the cube's cloud factor of that half; near the Moon the regolith on the
+## eye's ground sphere as _moon_in_view_luminance draws it (both lights, grey), the sky black (the Earth's disc and the
+## stars left out). Not modelled [call]: structures, vehicles, terrain relief, the drawn clouds' shapes, city lights.
+func _surround_luminance(direction_render: Vector3, state: Dictionary) -> Vector3:
+	var v_fixed: Vector3 = ((state["to_fixed"] as Basis) * Frames.from_render(direction_render)).normalized()
+	if state["near_moon"]:
+		return Vector3.ONE * _surround_regolith(v_fixed, state)
+	var radius := float(parameters["bottom_radius_m"])
+	var eye: Vector3 = state["model_eye"]
+	var eye_fixed: Vector3 = state["eye"]
+	var v := _stretch(v_fixed).normalized()
+	var along := eye.dot(v)
+	var discriminant := along * along - (eye.length_squared() - radius * radius)
+	var ground := along < 0.0 and discriminant >= 0.0
+	var albedo: Vector3 = state["albedo"]
+	var profile: PackedVector3Array = state["profile"]
+	if ground and profile.size() == GroundAlbedoNear.profile_size():
+		var offset := _unstretch(eye + v * (-along - sqrt(discriminant))) - eye_fixed
+		var east: Vector3 = state["east"]
+		var north: Vector3 = state["north"]
+		var horizontal := Vector2(offset.dot(east), offset.dot(north))
+		var r_h := horizontal.length()
+		albedo = GroundAlbedoNear.profile_at(profile, r_h, atan2(horizontal.x, horizontal.y)).lerp(albedo,
+				smoothstep(SURROUND_ALBEDO_FADE_NEAR_M, SURROUND_ALBEDO_FADE_FAR_M, r_h))
+	var seen := _view_luminance(eye_fixed, eye, v, radius, state["sun"], albedo)
+	seen *= state["cloud_ground"] if ground else state["cloud_sky"]
+	var d_au := float(state["d_au"])
+	return seen / (d_au * d_au)
+
+
+## The regolith luminance (cd/m^2) along an Earth-fixed unit direction from an eye near the Moon (0: the ray misses the
+## eye's lunar ground sphere, moon_ground_radius).
+func _surround_regolith(v: Vector3, state: Dictionary) -> float:
+	var moon: Vector3 = state["moon"]
+	var eye: Vector3 = (state["eye"] as Vector3) - moon
+	var r := eye.length()
+	var radius := moon_ground_radius(r)
+	var along := eye.dot(v)
+	var discriminant := along * along - (r * r - radius * radius)
+	if along >= 0.0 or discriminant < 0.0:
+		return 0.0
+	var hit := eye + v * (-along - sqrt(discriminant))
+	var n := hit.normalized()
+	var ground := moon + hit
+	var sun_m: Vector3 = state["sun_m"]
+	var luminance := 0.0
+	var sunlit := regolith_reflectance(n, (sun_m - ground).normalized(), -v)
+	if sunlit > 0.0:
+		luminance += float(state["sun_scale"]) * sunlit * (1.0 - occulted_fraction(sun_m - ground, SUN_RADIUS_M,
+				-ground, EARTH_MEAN_RADIUS_M))
+	luminance += float(state["earth_scale"]) * regolith_reflectance(n, -ground.normalized(), -v)
+	return luminance
+
+
 ## One view direction of _earth_in_view_luminance (model-space unit vector v from the model-space eye), RGB.
-func _view_luminance(eye_itrf_m: Vector3, eye: Vector3, v: Vector3, radius: float, sun_itrf: Vector3) -> Vector3:
+## albedo: the ground's (RGB; ONE: the white plate's equivalent of the adaptation's up part).
+func _view_luminance(eye_itrf_m: Vector3, eye: Vector3, v: Vector3, radius: float, sun_itrf: Vector3,
+		albedo := Vector3.ONE) -> Vector3:
 	var along := eye.dot(v)
 	var discriminant := along * along - (eye.length_squared() - radius * radius)
 	if along < 0.0 and discriminant >= 0.0:
@@ -969,7 +1087,7 @@ func _view_luminance(eye_itrf_m: Vector3, eye: Vector3, v: Vector3, radius: floa
 		var to_point: Dictionary = _core.atmosphere_sky_luminance_to_point(eye_itrf_m, hit, sun_itrf)
 		var t: Vector3 = to_point["transmittance"]
 		var lit: Vector3 = lux["sun_lux"] + lux["sky_lux"]
-		var seen: Vector3 = lit / PI * t + to_point["luminance"]
+		var seen: Vector3 = lit * albedo / PI * t + to_point["luminance"]
 		return seen * _visible_at(hit)
 	var view := _unstretch(v).normalized()
 	if not is_nan(_tdb_s):
@@ -1170,6 +1288,7 @@ func snap_adaptation() -> void:
 	_field_valid = false
 	_field_snap = true
 	_field_snap_start_ms = Time.get_ticks_msec()
+	adaptation_surround.reset()  # the surround of the old place
 
 
 ## The newest field measurement of this view (AdaptationMeter): last_field_cd_m2 / last_field_scotopic_cd_m2 and
@@ -1185,6 +1304,8 @@ func _take_field_measurement() -> void:
 	_field_age = 0
 	_field_serial = result[2]
 	var counts: PackedInt32Array = result[0]
+	if scene_referred_adaptation:
+		counts = adaptation_surround.combine(counts, result[3])  # + the field beyond the frame (look fixes T4)
 	var photopic := AdaptationMeter.field_log_average(counts, 0)
 	if photopic < 0.0:
 		return
@@ -1195,9 +1316,11 @@ func _take_field_measurement() -> void:
 	_field_loading = result[1]
 	_field_valid = true
 	if _log_adaptation and _field_serial % ADAPTATION_LOG_EVERY == 0:
-		print("adaptation: field %s cd/m^2 (scotopic %s), anchor %s (scotopic %s), %s, white-plate rule %s cd/m^2" % [
+		print(("adaptation: field %s cd/m^2 (scotopic %s), anchor %s (scotopic %s), %s, white-plate rule %s cd/m^2; frame alone"
+				+ " %s, surround model in frame %s, visibility %.3f, out-of-frame share %.3f") % [
 				last_field_cd_m2, last_field_scotopic_cd_m2, last_anchor_cd_m2, last_anchor_scotopic_cd_m2,
-				"loading" if _field_loading else "settled", last_target_cd_m2])
+				"loading" if _field_loading else "settled", last_target_cd_m2, adaptation_surround.last_frame_field_cd_m2,
+				adaptation_surround.last_model_in_cd_m2, adaptation_surround.last_visibility, adaptation_surround.last_out_share])
 
 
 ## The Sun light of Godot's lit materials (vehicles, structures: world.gd's DirectionalLight3D) at an Earth-fixed point:

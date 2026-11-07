@@ -342,6 +342,7 @@ func update_world() -> void:
 	# A new view stays snapped to its field until the streamed terrain has loaded (scene-referred adaptation).
 	atmosphere.view_loading = int(earth_terrain.stats.get("nodes_loading", 0)) + int(moon_terrain.stats.get("nodes_loading", 0)) > 0
 	var camera_sun_fraction := 1.0 - core.solar_eclipse_fraction_gcrf(cam, t)
+	atmosphere.adaptation_view = _adaptation_view()
 	atmosphere.update(cam, Vector3.ZERO, earth.fixed_to_gcrf, sun_apparent_from_earth_m, adaptation_dt,
 			camera_sun_fraction, moon_apparent_from_earth_m, t, moon_gcrf_m)
 	_update_sky_radiance(cam, camera_sun_fraction)
@@ -765,6 +766,7 @@ func _update_sky_radiance(camera_gcrf_m: Vector3, sun_fraction: float) -> void:
 	# The imagery's ground albedo near the eye is read on a worker (GroundAlbedoNear): polled every frame, its arrival or a
 	# change of the value (a new place) counts as a change of the sky for the refresh rule, so the cube is drawn anew with it.
 	var local_albedo := _local_ground_albedo(camera_gcrf_m)
+	atmosphere.surround_albedo_profile = local_albedo  # the eye adaptation's surround model reads the same ground
 	var local_albedo_levels: Array = []  # the rings' components (always the same length: -1 without a profile)
 	for k in range(GroundAlbedoNear.profile_size()):
 		var ring := local_albedo[k] if local_albedo.size() > k else Vector3(-1.0, -1.0, -1.0)
@@ -814,6 +816,30 @@ func _local_ground_albedo(camera_gcrf_m: Vector3) -> PackedVector3Array:
 	if _ground_albedo_near == null:
 		_ground_albedo_near = GroundAlbedoNear.new(ImagerySource.new(Paths.data_dir().path_join("imagery/earth/index.toml")))
 	return _ground_albedo_near.at(geo.x, geo.y, maxf(geo.z, 0.0))
+
+
+## The eye adaptation's view for its surround (AdaptationSurround.combine): the head's orientation (render world) and each
+## rendered view's orientation in the head's axes with its projection - both eyes in VR (the XR interface's views about
+## the XROrigin), the viewport camera on the desktop. {} without a camera.
+func _adaptation_view() -> Dictionary:
+	var viewport := get_viewport()
+	var cam := viewport.get_camera_3d()
+	if cam == null:
+		return {}
+	var head := cam.global_transform.basis.orthonormalized()
+	var eyes := []
+	var interface := XRServer.primary_interface
+	if viewport.use_xr and interface != null and interface.is_initialized():
+		var size := interface.get_render_target_size()
+		var parent := cam.get_parent() as Node3D
+		var origin := parent.global_transform if parent != null else Transform3D.IDENTITY
+		for view in range(interface.get_view_count()):
+			var eye := interface.get_transform_for_view(view, origin).basis.orthonormalized()
+			eyes.append([head.transposed() * eye, interface.get_projection_for_view(view, size.x / maxf(size.y, 1.0),
+					0.05, 1000.0)])
+	else:
+		eyes.append([Basis.IDENTITY, cam.get_camera_projection()])
+	return {"head": head, "eyes": eyes}
 
 
 ## The part of the Earth's disc an eye near the Moon sees: the terrain's horizon where the core has it (marched anew only
