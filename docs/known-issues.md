@@ -378,11 +378,10 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - Landing on 6-8 deg slopes: the engines cut at the first leg contact with the hull vertical, the HLS falls onto its
   downhill feet and its footprint ends 1.5-2.4 m downhill of the touchdown point (upright, intact). Nightly site campaign
   Apollo 11 seeds 2 / 3 / 4: 1.71 / 2.38 / 1.69 m on 6.6 / 7.8 / 5.8 deg (`[nightly]` red, 4 / 7); Mons Mouton seed 14
-  1.51 m on 8.0 deg (the pre-existing `[slow]` red). Fix by the touchdown-point choice or the terminal phase:
-  `docs/subsystems/lunar.md` open points; needs a decision (guidance change).
-- Site albedo: the factor is the WAC tile over its own 10 km box mean, so features between the global map's 2.7 km
-  pixel and 10 km are in both the global albedo and the factor: at Apollo 17 the km-scale log contrast rises from 0.287
-  (global) to 0.377 (x1.09 at 1 sigma). The massifs' soft bright patches themselves are real albedo (`moon-surface.md` Validation).
+  1.51 m on 8.0 deg (the pre-existing `[slow]` red). Mechanism: after the engine cut the HLS rocks about a sticking foot
+  (U-8; CG moves ~4.3 m over ~30 s), not a simple fall onto the downhill feet (~0.1 m). U-8 was accepted at 8 deg, but
+  Apollo 11 misses at 5.8 deg (3 of 7): the slope limit and the 1 m gate disagree. Fix by the slope limit, the
+  touchdown-point choice or the terminal phase: `docs/subsystems/lunar.md` open points; USER DECISION.
 - Render checks: an eye placed by `--eye_height` over the site centre can stand next to a drawn boulder (Apollo 15
   LM-window view); the AS11/15/17 comparisons are at the photo azimuths only approximately (the camera stations are
   not reproduced).

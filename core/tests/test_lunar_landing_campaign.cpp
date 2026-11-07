@@ -280,7 +280,7 @@ void site_campaign(const config::LunarSiteConfig& site, unsigned first, unsigned
         CHECK(sw.refusal->causes.front().code == *refusal_cause);
         return;
     }
-    if (sw.refusal) INFO(report::describe(*sw.refusal));
+    if (sw.refusal) UNSCOPED_INFO(report::describe(*sw.refusal));
     REQUIRE(sw.window);
     CHECK(fly_seeds(first, last, &sw) == static_cast<int>(last - first + 1));
 }

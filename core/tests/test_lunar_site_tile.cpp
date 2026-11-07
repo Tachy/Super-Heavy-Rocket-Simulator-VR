@@ -351,6 +351,36 @@ TEST_CASE("Lunar site tile: albedo tile is relative: mean 1.0 within 1e-3 over t
     std::filesystem::remove_all(dir);
 }
 
+TEST_CASE("Lunar site tile: albedo factor keeps only detail below the global map's pixel footprint", "[config][lunar_site_tile]") {
+    auto products = config::load_lunar_terrain_products(STARSIM_CONFIG_DIR);
+    for (auto& p : products) {
+        if (p.kind == "albedo") p.tile_half_size_m = 20000.0;
+    }
+    const auto r = config::plan_site_tile(products, "albedo", 10.0 * deg, 100.0 * deg);
+    const auto& p = product_of(products, r.product_id);
+    // A smooth variation over ~40 km (wider than the global map's 2.67 km pixel) plus 1-pixel bright spots on a lattice.
+    const auto is_spot = [](long long l, long long s) { return l % 97 == 0 && s % 101 == 0; };
+    const PixelFunction albedo = [&](long long l, long long s) {
+        const double broad = 0.12 + 0.04 * std::sin(2.0 * 3.141592653589793 * static_cast<double>(s) / 400.0);
+        return is_spot(l, s) ? 2.0 * broad : broad;
+    };
+    const auto file = config::assemble_site_tile(r, synthetic_bodies(r, p, albedo));
+    // Away from the tile edge (where the low-pass is clipped) the smooth variation is divided out.
+    const int margin = 40;
+    double spread = 0.0, peak = 0.0;
+    for (int l = margin; l < file.lines - margin; ++l) {
+        for (int s = margin; s < file.samples - margin; ++s) {
+            const double v = file.dn[static_cast<size_t>(l) * static_cast<size_t>(file.samples) + static_cast<size_t>(s)] *
+                             file.dn_scale_m;
+            if (v > 1.5) peak = std::max(peak, v); else spread = std::max(spread, std::abs(v - 1.0));
+        }
+    }
+    CHECK(spread < 0.03);  // the 40 km variation is divided out (a 2.7 km box leaves its curvature only, ~0.003)
+    CHECK(peak > 1.8);     // the pixel-scale detail stays
+    // The low-pass width (2 pi R / 4096 px = 2665 m) is part of the cache key: a changed definition re-cuts cached tiles.
+    CHECK(r.cache_key.find("_lp2665") != std::string::npos);
+}
+
 TEST_CASE("Lunar site tile: no product for the site refuses with lunar.site_no_product", "[config][lunar_site_tile]") {
     const auto products = config::load_lunar_terrain_products(STARSIM_CONFIG_DIR);
     // An albedo tile across 60 deg would need the equatorial and the polar mosaic (two projections): refused.

@@ -45,8 +45,10 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   `assemble_site_tile` decodes the bodies into a `TerrainGridFile` (`write_terrain_grid_file`; the CLI
   `lunar_site_tile plan|assemble` wraps both). Height tiles: int16, `dn_scale_m` 0.5, 9 `[[check]]` points, geographic
   grid kept (`simple_cylindrical` with `zero_line = ppd * lat(0,0)`, `zero_sample = -ppd * lon(0,0)`, pixel centres).
-  Albedo tiles: `kind = "albedo"`, int16 with `dn_scale_m` 1/16384, value = tile / its own 10 km box low-pass scaled to
-  a tile mean of 1 (no-data pixels 1.0). Range merging (`RangePolicy`): height = exactly the crop rows (gap 0), albedo =
+  Albedo tiles: `kind = "albedo"`, int16 with `dn_scale_m` 1/16384, value = tile / its own box low-pass at the footprint of one pixel of the global albedo map
+  (`moon_color.png`, 4096 px around the globe: 2 pi R / 4096 = 2665 m; ruling R21) scaled to a tile mean of 1 (no-data
+  pixels 1.0), so the product with the global map adds only the detail it lacks; the width is part of the albedo cache
+  key (`..._lp2665`: a changed definition re-cuts cached tiles). Range merging (`RangePolicy`): height = exactly the crop rows (gap 0), albedo =
   rows joined across gaps up to 512 KiB in blocks of at most 24 MiB (~7 requests instead of ~1500 for a 150 km tile,
   ~165 MB). Polar half size in pixels = round(half / scale) (no conformal factor: the tile is 1-7 % smaller on the ground
   at 45-60 deg). The north polar line convention `line = pole_line + rho cos(lon) / s` was checked against LDEM_16 (superseded by LDEM_64) for
@@ -421,10 +423,13 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   saturates: 111 x 115 km); status at burn end shows osculating elements (95 x 100 km for a 100 km LLO); the sub-orbital
   cutoff guard is untested.
 - Landing on 6-8 deg: the engines cut at the first leg contact with the hull vertical; the uphill feet touch first and
-  the HLS falls ~6-8 deg onto the downhill feet, its footprint moving 1.5-2.4 m downhill (Apollo 11 nightly seed 3:
-  contact 0.27 m off, 2.38 m after settling at 6.8 deg; Mons Mouton seed 14 1.51 m on 8.0 deg). Upright and intact, but
-  outside the 1 m gate - open: the touchdown-point choice (flatter admissible spots first) or the terminal phase
-  (setting down slope-aligned / staying lit until the downhill feet touch); known-issues.
+  the HLS rocks about a sticking foot (the U-8 rocking / swing, `moon-surface.md`), the CG travelling ~4.3 m over ~30 s
+  (Apollo 11 nightly seed 3: contact 0.27 m off, footprint 2.38 m off after settling at 7.8 deg; seeds 2 / 4 1.71 / 1.69 m
+  on 6.6 / 5.8 deg; Mons Mouton seed 14 1.51 m on 8.0 deg). A pure fall about the uphill feet would move the footprint
+  only ~0.1 m. Upright and intact, but outside the 1 m gate. The user accepted U-8 at the 8 deg slope limit; Apollo 11
+  misses at 5.8 deg on an ordinary mare site, ~3 of 7 landings, so the 8 deg limit and the 1 m gate disagree for this
+  vehicle: USER DECISION pending (slope limit, touchdown-point choice "flattest first", or the terminal procedure:
+  slope-aligned set-down / engines until the downhill feet touch); known-issues.
 - Window search: the hard Sun rule uses the geometric horizon (`site_sun`); at crater / polar sites the first slot or
   the liftoff hour can be behind terrain (terrain horizon as in `tools/lunar_sun_scan.py`: Task 13 or later). The stay's
   plane change is budgeted, not flown: the flight's ascent still ends in the plane through the liftoff point and no

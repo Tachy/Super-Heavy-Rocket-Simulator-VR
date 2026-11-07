@@ -18,7 +18,11 @@ namespace {
 constexpr double radius_m = constants::moon_mean_radius_m;
 constexpr double height_dn_scale_m = 0.5;            // as the LOLA products and today's tiles
 constexpr double albedo_dn_scale = 1.0 / 16384.0;   // relative albedo 1.0 = 16384 (ledger ruling R3)
-constexpr double albedo_lowpass_width_m = 10000.0;  // the "own low-pass" an albedo tile is divided by
+// The "own low-pass" an albedo tile is divided by has the footprint of one pixel of the global albedo map the shader
+// multiplies it with: data/textures/moon_color.png is 4096 px around the globe (CGI Moon Kit mosaic, 2.67 km/px; its
+// large scale is the 1 deg WAC Hapke w map, moon_albedo.py), so the tile adds only what that map lacks (R21).
+constexpr double global_albedo_map_width_px = 4096.0;
+constexpr double albedo_lowpass_width_m = 2.0 * constants::pi * radius_m / global_albedo_map_width_px;
 
 int bytes_per_sample(const std::string& sample_type) {
     if (sample_type == "int16") return 2;
@@ -219,7 +223,10 @@ std::string cache_key_of(const LunarTerrainProduct& p, double lat, double lon) {
     std::snprintf(buffer, sizeof buffer, "_%lld_%lld_%lld", std::llround(lat * constants::rad_to_deg * 100.0),
                   mod_ll(std::llround(wrap_deg(lon * constants::rad_to_deg) * 100.0), 36000),
                   std::llround(p.tile_half_size_m / 1000.0));
-    return p.kind + "_" + p.id + buffer;
+    std::string key = p.kind + "_" + p.id + buffer;
+    // An albedo tile's definition (its low-pass width) is part of the key: a changed definition re-cuts cached tiles.
+    if (p.kind == "albedo") key += "_lp" + std::to_string(std::llround(albedo_lowpass_width_m));
+    return key;
 }
 
 // Orders the pieces by position in the files and joins neighbours into ranges by the policy.
@@ -446,7 +453,7 @@ TerrainGridFile assemble_site_tile(const SiteTileRequest& r, const std::vector<s
         return f;
     }
 
-    // Albedo: relative to the tile's own low-pass, so the global mosaic keeps its calibration and the tile adds detail.
+    // Albedo: relative to the tile's own low-pass at the global map's pixel footprint, so the global mosaic keeps its calibration and the tile adds detail.
     const bool cylindrical = r.projection == "simple_cylindrical";
     const double line_m = cylindrical ? radius_m * constants::deg_to_rad / r.pixels_per_degree : r.scale_m;
     const double centre_lat = cylindrical ? r.first_latitude_rad - 0.5 * (r.lines - 1) / r.pixels_per_degree * constants::deg_to_rad

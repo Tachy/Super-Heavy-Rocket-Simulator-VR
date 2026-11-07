@@ -35,3 +35,10 @@ Superseded states of `docs/subsystems/lunar.md` (older lunar history: `docs/hist
   ~2.2-3 s each); now decided once by the budget lower bound.
 - The search kept references into the prototype session and read its surface flags per candidate; every complete
   result was cached, also refusals from a missing site tile.
+
+## Site albedo low-pass 10 km (2026-11-07, superseded by ruling R21)
+
+- The albedo tile was divided by its own 10 km box low-pass. The global albedo map the shader multiplies it with
+  (`moon_color.png`, 2.67 km/px) already holds the 2.7-10 km band, so that band entered twice: at Apollo 17 the km-scale
+  log contrast rose from 0.287 (global) to 0.377 (x1.09 at 1 sigma, +31 % in std). Now the low-pass has the footprint of
+  one global pixel (2665 m) and the albedo cache key carries `_lp2665`.

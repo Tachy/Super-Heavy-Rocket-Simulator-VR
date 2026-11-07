@@ -1194,7 +1194,9 @@ on top of that relief.
   correlates 0.67 with the WAC 643 nm tile averaged onto its pixels and shows no baked topographic shading (log ratio
   against the terrain gradients R^2 = 0.00) - real albedo (bright massif highland material and the South Massif's
   light mantle against the dark-mantled valley floor, as on the NAC oblique), drawn soft by the 2.7 km pixel; the site
-  factor adds the 2.7-10 km band a second time (log contrast 0.287 -> 0.377; known-issues).
+  albedo factor is the WAC tile over its own low-pass at the global map's 2.67 km pixel (R21): block-averaged over the
+  2.67 km footprint it is 1.000 +- 0.017 (log), so the km-scale log contrast of global x factor at Apollo 17 is 0.2506
+  against the global's 0.2471 (x1.003 at 1 sigma; the 10 km definition gave x1.09, history/lunar.md).
 
 ## Sources
 Each value with tag, reference and the scale range it covers. Tags: [S] sourced, [E] estimate, [D] derived.
