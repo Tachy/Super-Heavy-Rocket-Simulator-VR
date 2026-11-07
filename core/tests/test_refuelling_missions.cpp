@@ -520,6 +520,30 @@ TEST_CASE("WaitContinue coasts to its epoch and hands over to the continuation",
     CHECK(std::chrono::duration<double>(std::chrono::steady_clock::now() - wall).count() < 600.0);
 }
 
+// A continuation still deciding (the lunar continuation's background touchdown search) returns nothing: WaitContinue
+// asks again each step while the vehicle flies on, then takes its answer.
+TEST_CASE("A pending continuation is asked again each step while the vehicle flies on", "[refuelling][iss_mission]") {
+    test::spice_session();
+    DockedAtDepot f(refuelling_test::ship_with("starship_hls", 1000.0e3));
+    sim::IssMissionSequence q;
+    q.station_port = "transfer_dock";
+    q.transfer = sim::MissionTransfer::FillChaser;
+    q.continue_epoch = f.session.epoch() + 3.0 * 3600.0;
+    std::vector<time::Epoch> calls;
+    q.continuation = [&](sim::FlightSession& s) -> std::optional<report::Report> {
+        calls.push_back(s.epoch());
+        if (calls.size() < 5) return std::nullopt;
+        return report::Report{};
+    };
+    f.session.set_iss_mission(q);
+    f.fly([&] { return f.leg() == IssMissionLeg::Complete || f.leg() == IssMissionLeg::Ended; }, 6.0 * 3600.0, 60.0);
+    INFO(report::describe(f.session.iss_mission_status()));
+    REQUIRE(f.leg() == IssMissionLeg::Complete);
+    REQUIRE(calls.size() == 5);
+    for (size_t i = 1; i < calls.size(); ++i) CHECK(calls[i] > calls[i - 1]);  // one call per step, time moves on
+    CHECK(calls.back() - calls.front() <= 4.0 * sim::FlightSession::tick_s + 1e-6);
+}
+
 TEST_CASE("A continuation that installs a new sequence keeps it running", "[refuelling][iss_mission]") {
     // r5 minor: the old leg's Complete overwrote the new sequence's first leg
     test::spice_session();
@@ -1152,7 +1176,12 @@ TEST_CASE("Probe: hls_refuel_orbit timeline", "[.r5_probe]") {
 TEST_CASE("hls_refuel_orbit: docked, filled, departed, the lunar mission continues with the real tank load",
           "[refuelling][mission][lunar][slow]") {
     test::spice_session();
+    // Real-time planning on: the continuation's touchdown search runs on a background thread while the HLS flies on
+    // (lunar_landing_continuation); off: decided on the sim thread. Both continue.
+    const bool realtime = GENERATE(false, true);
+    CAPTURE(realtime);
     LunarDepotSession f;
+    f.lunar.set_realtime_planning(realtime);
     const auto s = sim::start_mission(f.lunar, refuelling_test::config_dir, "hls_refuel_orbit", f.t0, f.clock);
     INFO(report::describe(s.refusal));
     REQUIRE(s.refusal.ok());

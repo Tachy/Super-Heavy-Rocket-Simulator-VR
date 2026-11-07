@@ -385,13 +385,42 @@ std::optional<math::StateVector> lunar_parking_state(const FlightSession& sessio
 
 MissionStart continue_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                             const config::LunarLandingMission& m, time::Epoch epoch) {
+    return decided_now(session, begin_continue_lunar_landing_mission(session, config_dir, m, epoch));
+}
+
+std::function<std::optional<report::Report>(FlightSession&)> lunar_landing_continuation(
+    std::filesystem::path config_dir, config::LunarLandingMission m, time::Epoch epoch) {
+    struct Pending {
+        std::optional<DeferredMissionStart> start;
+        time::Epoch begun{};
+    };
+    auto pending = std::make_shared<Pending>();
+    return [config_dir = std::move(config_dir), m = std::move(m), epoch,
+            pending](FlightSession& f) -> std::optional<report::Report> {
+        if (!pending->start) {
+            pending->start = begin_continue_lunar_landing_mission(f, config_dir, m, epoch);
+            pending->begun = f.epoch();
+        }
+        auto& d = *pending->start;
+        if (d.done) return d.done->refusal;
+        if (f.realtime_planning() && f.epoch() - pending->begun < lunar_continuation_budget_s) {
+            if (auto s = d.poll(f)) return s->refusal;
+            return std::nullopt;  // still searching: the vehicle flies on, called again next step
+        }
+        return d.wait(f).refusal;
+    };
+}
+
+DeferredMissionStart begin_continue_lunar_landing_mission(FlightSession& session,
+                                                          const std::filesystem::path& config_dir,
+                                                          const config::LunarLandingMission& m, time::Epoch epoch) {
     const auto refuse = [&](const report::Report& reason) {
         session.disengage_autopilot();
         MissionStart s;
         s.kind = config::MissionKind::LunarLanding;
         s.epoch = epoch;
         s.refusal = reason;
-        return s;
+        return DeferredMissionStart{s};
     };
     if (!session.moon_orientation()) return refuse(report::make(report::Code::lunar_landing_no_moon_orientation));
     if (session.epoch() > epoch + 0.5 * FlightSession::tick_s) {
@@ -404,8 +433,9 @@ MissionStart continue_lunar_landing_mission(FlightSession& session, const std::f
         return refuse(detail::exception_report(e));
     }
     set_site(session, placed);
-    // A mission leg inside the flight (refuelling: the HLS after the depot): decided here, on the session's thread.
-    return decided_now(session, plan_from_live_state(session, m, epoch, placed));
+    // A mission leg inside the flight (refuelling: the HLS after the depot): the outbound plan here, on the session's
+    // thread; the touchdown search on a background thread (lunar_landing_continuation polls it).
+    return plan_from_live_state(session, m, epoch, placed);
 }
 
 std::optional<time::Epoch> lunar_planned_touchdown(const config::LunarLandingMission& m, time::Epoch epoch) {

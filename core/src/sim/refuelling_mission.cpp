@@ -306,9 +306,7 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
         q.ship_return = ship_deorbit_parameters(config::load_ship_return_mission(config_dir, m.return_id).deorbit);
     } else {  // hls_refuel: the lunar landing mission from the refuelled HLS at its epoch
         q.continue_epoch = lunar_epoch;
-        q.continuation = [config_dir, lunar, lunar_epoch](FlightSession& f) {
-            return continue_lunar_landing_mission(f, config_dir, lunar, lunar_epoch).refusal;
-        };
+        q.continuation = lunar_landing_continuation(config_dir, lunar, lunar_epoch);
     }
     session.set_iss_mission(q);
     s.return_planned = true;

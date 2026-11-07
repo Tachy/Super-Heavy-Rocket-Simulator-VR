@@ -257,7 +257,9 @@ Fidelity flag `FlightEnvironment::ignition_settling` (default on, one source `ve
   stage). The depot of the tanker / HLS flights is placed on a synthetic orbit (`[depot]`, J2-advanced mean elements);
   `hls_refuel` puts it in the lunar mission's parking plane (`lunar_parking_state` at the lunar epoch, converted to the
   true equator frame and run back by J2: 0.031 deg off after two days). `continue_lunar_landing_mission` plans the
-  outbound flight and the budget from the live HLS ("zu spät" after its epoch). Config `hls_lunar_llo_depot` (26.5
+  outbound flight and the budget from the live HLS ("zu spät" after its epoch); the mission's continuation
+  (`lunar_landing_continuation`) runs its touchdown search in the background with real-time planning on (WaitContinue
+  asks again each step; `IssMissionSequence::continuation` returns nothing while it decides). Config `hls_lunar_llo_depot` (26.5
   deg, 2026-11-02).
 - Tanker ascent (user decisions 2026-10-20, [E] placeholders until the real tanker is known): insertion **120 x 190
   km**, raised to 170 km. The booster return reserve is the bottleneck (lighter booster or less landing reserve break

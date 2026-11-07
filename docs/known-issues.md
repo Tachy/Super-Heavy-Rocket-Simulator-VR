@@ -199,13 +199,12 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   its first roll, 29.5 s worst case (every candidate through all rolls and the base check) - over the 20 s target
   (serial: 169 s / 250-290 s). No cap by ruling (a cap could refuse a site that has a safe point). Since follow-up
   U-7 (2026-11-06) it runs on a background thread at the mission start (game responsive, status line "Landeplatz wird
-  geprüft"); the wait itself is unchanged. The refuelling continuation (`continue_lunar_landing_mission`, inside
-  the flight) still checks synchronously on the simulation thread. Only IM-2 ships (136 ms in the mission start of that
+  geprüft"); the wait itself is unchanged. The refuelling continuation inside the flight runs it on a background
+  thread too since 2026-11-07 (`lunar_landing_continuation`, real-time planning at warp <= 1). Only IM-2 ships (136 ms in the mission start of that
   run; 59 ms in the IM-2 hazard test on 2026-11-07, a point 28.3 m off). Since the preferred 5 deg slope (2026-11-07)
-  the full scan also happens at reachable sites with no admissible point within 5 deg (or only far out): the mission
-  start stays responsive (background), but the refuelling continuation can then hold the simulation thread for the
-  same 16-30 s (free sites only; the shipped depot mission flies IM-2). Open: move the continuation onto the async
-  path.
+  the full scan also happens at reachable sites with no admissible point within 5 deg (or only far out); both the
+  mission start and the refuelling continuation stay responsive (background). Under time warp (real-time planning
+  off) the continuation still decides on the simulation thread, as the other planners do.
 - Lunar campaign rocking (follow-up U-8, 2026-11-06, `docs/subsystems/moon-surface.md` open points): not foot slip
   but rigid-body rocking after the engines-off first contact on one uphill foot - the hull pivots through the slope,
   overshoots onto a single downhill foot and swings round that sticking foot. Seed 19 chooses a 4.8 deg point and settles 1.04 m off

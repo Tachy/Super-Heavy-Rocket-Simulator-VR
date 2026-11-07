@@ -416,12 +416,13 @@ void FlightSession::run_iss_mission() {
         case IssMissionLeg::WaitContinue: {
             const auto continuation = q.continuation;  // the continuation may replace the sequence
             const auto generation = iss_generation_;
-            const report::Report refusal = continuation(*this);
+            const std::optional<report::Report> refusal = continuation(*this);
             if (!iss_mission_ || iss_generation_ != generation) return;  // ended, or a new sequence runs
-            if (refusal.ok()) {
+            if (!refusal) return;  // still deciding (background touchdown search): again next step
+            if (refusal->ok()) {
                 iss_enter(IssMissionLeg::Complete, simple(report::Code::iss_continued));
             } else {
-                iss_end(refusal);
+                iss_end(*refusal);
             }
             return;
         }

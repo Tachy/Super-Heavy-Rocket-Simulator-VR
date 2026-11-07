@@ -1,6 +1,8 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
+#include <optional>
 
 #include "starsim/config/lunar_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
@@ -122,6 +124,22 @@ std::optional<math::StateVector> lunar_parking_state(const FlightSession& sessio
 // start_lunar_landing_mission, and when the session's epoch is past `epoch` ("zu spät").
 MissionStart continue_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                             const config::LunarLandingMission& mission, time::Epoch epoch);
+// The same, deferred: the outbound plan from the live state at once, the touchdown search (with the hazard check up to
+// the full search radius, 16-30 s) on a background thread; poll / wait decide it (done at once when no search runs).
+DeferredMissionStart begin_continue_lunar_landing_mission(FlightSession& session,
+                                                          const std::filesystem::path& config_dir,
+                                                          const config::LunarLandingMission& mission,
+                                                          time::Epoch epoch);
+// [E] Sim time a background touchdown search of the continuation may take before it is waited for (as
+// FlightSession::ship_return_budget_s): far above the 16-30 s worst case at warp 1, far below the outbound plan's
+// 1800 s lead to its first burn (min_lead_s), so the plan is still ahead when it is committed.
+inline constexpr double lunar_continuation_budget_s = 60.0;
+// The refuelling continuation (IssMissionSequence::continuation, WaitContinue): begins the deferred continuation at its
+// first call; with the session's real-time planning on it returns nothing (still deciding, called again next step, the
+// vehicle flies on) until the search is done or lunar_continuation_budget_s of sim time has passed, then waits; off
+// (tests, campaigns, time warp) it decides at once on the sim thread - the same result either way.
+std::function<std::optional<report::Report>(FlightSession&)> lunar_landing_continuation(
+    std::filesystem::path config_dir, config::LunarLandingMission mission, time::Epoch epoch);
 
 // The touchdown the mission started at `epoch` is planned for: `epoch` + [descent] touchdown_after_epoch_h (a duration
 // from the mission's start, so a start at another epoch keeps its timing); empty without it.

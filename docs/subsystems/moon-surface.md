@@ -285,8 +285,11 @@ on top of that relief.
   polls take its result; LOLA only (detail off) is decided in that first poll. `FlightSim.start_mission` posts it as a deferred command that holds the session
   (`SessionRunner::post_deferred(..., hold_session = true)`: no advance, no pilot input until the outcome) and puts
   the status into `autopilot_status()["mission_start_status"]` until the outcome; `flight_controller.gd` shows it as
-  the event line. The refuelling continuation (`continue_lunar_landing_mission`, a leg inside the flight) and the
-  descent planner in the LLO stay synchronous (the memo makes them cheap after the start's check).
+  the event line. The refuelling continuation (a leg inside the flight, `sim::lunar_landing_continuation`, 2026-11-07)
+  runs the search on a background thread while the HLS flies on when the session's real-time planning is on (warp
+  <= 1): WaitContinue asks it again each step until it is done or `lunar_continuation_budget_s` (60 s sim time) has
+  passed, then waits; off (tests, campaigns, warp) it decides on the sim thread. The descent planner in the LLO stays
+  synchronous (the memo makes it cheap after the start's check).
 - Limits from the vehicle config (`mission::touchdown_hazard_limits(StageConfig)`, [D]): `foot_pad_radius_m` (HLS
   1.0 m); `max_foot_step_m` = `stroke_m` (0.6 m) - a conservative bound on the hanging feet and on the tilt to a
   third foot, not crush absorption: statically no core crushes (4.5 MN per leg against ~0.5 MN lunar weight, 6-9 mm
