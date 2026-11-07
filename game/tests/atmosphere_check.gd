@@ -1300,7 +1300,9 @@ func _night_vision_samples() -> void:
 		_atmosphere.snap_adaptation()
 		var adapted := await _render(day[1], day[2], day[3])
 		var gain := _atmosphere.exposure_gain
-		_compare("night vision: day %s = fixed x gain %.3f" % [day[0], gain], fixed * gain, adapted, NV_DAY_TOLERANCE)
+		# (and the white balance to the Sun's white: the cones' map of the post step, no rods by day)
+		_compare("night vision: day %s = fixed x gain %.3f" % [day[0], gain], _post(fixed * gain), adapted,
+				NV_DAY_TOLERANCE)
 		_check("night vision: day %s, no rods, no moonlight, B = S = 1" % day[0], _atmosphere.rod_scale == 0.0
 				and _atmosphere.brightness == 1.0 and _atmosphere.chroma == 1.0 and not _atmosphere.moonlight_active,
 				"rod scale %s, moonlight %s, brightness %s, chroma %s" % [_num(_atmosphere.rod_scale),
@@ -1417,9 +1419,10 @@ func _luminance_quad(view_itrf: Vector3, distance_m: float, luminance_cd_m2: flo
 	return _view_quad(view_itrf, distance_m, material)
 
 
-## The pixel the eye model's post step makes of a scene value (VisionEffect: the cones' chroma, then the rods).
+## The pixel the eye model's post step makes of a scene value (VisionEffect: the cones' white balance and chroma, then
+## the rods).
 func _post(scene: Vector3) -> Vector3:
-	return EyeAdaptation.post_step(scene, _atmosphere.rod_scale, _atmosphere.chroma)
+	return EyeAdaptation.post_step(scene, _atmosphere.rod_scale, _atmosphere.chroma, _atmosphere.white_balance)
 
 
 ## The scene value the post step turned into this pixel (its linear map inverted).

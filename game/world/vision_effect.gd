@@ -1,15 +1,17 @@
 class_name VisionEffect
 extends CompositorEffect
-## Night vision's rod signal and the cones' chroma (EyeAdaptation, user decisions 2026-10-25): a full-screen step on the
-## HDR scene after the transparent pass, before glow and the tone mapper. Every pixel becomes
-##     rgb' = Y + chroma x (rgb - Y) + rod_scale x (SCOTOPIC_WEIGHTS . rgb) x ROD_TINT,   Y = BT.709 luminance of rgb
+## Night vision's rod signal and the cones' white balance and chroma (EyeAdaptation, user decisions 2026-10-25; the
+## white balance: look fixes T2, 2026-11-07): a full-screen step on the HDR scene after the transparent pass, before glow
+## and the tone mapper. Every pixel becomes
+##     rgb' = C rgb + rod_scale x (SCOTOPIC_WEIGHTS . rgb) x ROD_TINT,   C = EyeAdaptation.cone_map(chroma, white balance)
 ## (Ferwerda et al. 1996 Eq. 6: the cones' image, already scaled by the cone gain and the brightness factor in the
-## shaders, at the Hunt effect's chroma, plus the rods' achromatic, slightly blue image). Linear in the pixel (the
+## shaders, adapted to the Sun's white and at the Hunt effect's chroma, plus the rods' achromatic, slightly blue image).
+## Linear in the pixel (the
 ## scotopic weights are non-negative, so no clamp is needed for a scene pixel): the display-referred inverse is exact
 ## also under alpha and additive blending. A per-pixel function of the pixel alone with uniforms of the frame:
-## identical for both VR eyes (every view layer of a multiview buffer), no view dependence. rod_scale 0 and chroma 1
-## (daylight, or the adaptation off): nothing is dispatched. Display-referred emitters take the inverse in their shaders
-## (shaders/vision.gdshaderinc, globals vision_rod_weights / vision_inverse_tint / vision_chroma), so they leave this
+## identical for both VR eyes (every view layer of a multiview buffer), no view dependence. rod_scale 0 and C the
+## identity (the adaptation off): nothing is dispatched. Display-referred emitters take the inverse in their shaders
+## (shaders/vision.gdshaderinc, globals vision_rod_weights / vision_inverse_tint / vision_cone_inverse), so they leave this
 ## step as they were drawn. Without a RenderingDevice (headless, Compatibility) it does nothing.
 
 const SHADER_CODE := """
@@ -19,10 +21,11 @@ layout(rgba16f, set = 0, binding = 0) uniform image2D color_image;
 layout(push_constant, std430) uniform Params {
 	vec4 tint_scale;  // ROD_TINT x rod_scale, unused
 	vec4 weights;     // SCOTOPIC_WEIGHTS, unused
-	vec4 size;        // width, height, chroma, unused
+	vec4 size;        // width, height, unused, unused
+	vec4 cone_x;      // the cones' map C (EyeAdaptation.cone_map), its columns
+	vec4 cone_y;
+	vec4 cone_z;
 } params;
-
-const vec3 LUMINANCE_WEIGHTS = vec3(0.2126, 0.7152, 0.0722);  // [S: ITU-R BT.709]
 
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
@@ -35,9 +38,8 @@ void main() {
 	if (any(isnan(c))) {
 		c = vec3(0.0);
 	}
-	float y = dot(LUMINANCE_WEIGHTS, c);
 	float rods = dot(params.weights.rgb, c);
-	vec3 result = vec3(y) + params.size.z * (c - vec3(y)) + params.tint_scale.rgb * rods;
+	vec3 result = mat3(params.cone_x.rgb, params.cone_y.rgb, params.cone_z.rgb) * c + params.tint_scale.rgb * rods;
 	imageStore(color_image, pixel, vec4(clamp(result, vec3(-65000.0), vec3(65000.0)), color.a));
 }
 """
@@ -48,7 +50,7 @@ var _pipeline := RID()
 ## Render-thread copies (set through set_rods on the render thread, in order with the global shader parameters).
 var _tint_scale := Vector3.ZERO
 var _weights := Vector3.ZERO
-var _chroma := 1.0
+var _cone := Basis.IDENTITY
 
 
 func _init() -> void:
@@ -57,18 +59,18 @@ func _init() -> void:
 	RenderingServer.call_on_render_thread(_create_pipeline)
 
 
-## Main thread: this frame's rod scale (EyeAdaptation.rod_scale) and the cones' chroma factor (EyeAdaptation.chroma);
-## applied on the render thread.
-func set_rods(rod_scale: float, chroma := 1.0) -> void:
+## Main thread: this frame's rod scale (EyeAdaptation.rod_scale) and the cones' map (EyeAdaptation.cone_map of the chroma
+## factor and the white balance); applied on the render thread.
+func set_rods(rod_scale: float, cone := Basis.IDENTITY) -> void:
 	var tint_scale := EyeAdaptation.ROD_TINT * rod_scale
 	RenderingServer.call_on_render_thread(_set_on_render_thread.bind(tint_scale, EyeAdaptation.SCOTOPIC_WEIGHTS,
-			chroma))
+			cone))
 
 
-func _set_on_render_thread(tint_scale: Vector3, weights: Vector3, chroma: float) -> void:
+func _set_on_render_thread(tint_scale: Vector3, weights: Vector3, cone: Basis) -> void:
 	_tint_scale = tint_scale
 	_weights = weights
-	_chroma = chroma
+	_cone = cone
 
 
 func _create_pipeline() -> void:
@@ -94,7 +96,7 @@ func _notification(what: int) -> void:
 
 
 func _render_callback(_callback_type: int, render_data: RenderData) -> void:
-	if _rd == null or not _pipeline.is_valid() or (_tint_scale == Vector3.ZERO and _chroma == 1.0):
+	if _rd == null or not _pipeline.is_valid() or (_tint_scale == Vector3.ZERO and _cone == Basis.IDENTITY):
 		return
 	var buffers := render_data.get_render_scene_buffers() as RenderSceneBuffersRD
 	if buffers == null:
@@ -103,7 +105,9 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 	if size.x == 0 or size.y == 0:
 		return
 	var push := PackedFloat32Array([_tint_scale.x, _tint_scale.y, _tint_scale.z, 0.0,
-			_weights.x, _weights.y, _weights.z, 0.0, float(size.x), float(size.y), _chroma, 0.0])
+			_weights.x, _weights.y, _weights.z, 0.0, float(size.x), float(size.y), 0.0, 0.0,
+			_cone.x.x, _cone.x.y, _cone.x.z, 0.0, _cone.y.x, _cone.y.y, _cone.y.z, 0.0,
+			_cone.z.x, _cone.z.y, _cone.z.z, 0.0])
 	var bytes := push.to_byte_array()
 	var groups_x := (size.x - 1) / 8 + 1
 	var groups_y := (size.y - 1) / 8 + 1

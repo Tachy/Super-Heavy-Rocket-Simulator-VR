@@ -194,6 +194,9 @@ var rod_scale := 0.0
 ## chroma in the post step.
 var brightness := 1.0
 var chroma := 1.0
+## The post step's white balance at the last update (EyeAdaptation.white_balance of the TOA Sun's colour; identity with
+## the adaptation off or EyeAdaptation.white_balance_enabled false).
+var white_balance := Basis.IDENTITY
 var moonlight_relative_value := 0.0
 var moonlight_active := false
 ## The unpaced targets of the last adaptation_luminance (photopic and scotopic cd/m^2).
@@ -413,9 +416,13 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	rod_scale = 0.0
 	brightness = 1.0
 	chroma = 1.0
+	white_balance = Basis.IDENTITY
 	moonlight_active = false
 	adaptation_from_field = false
 	if eye_adaptation_enabled:
+		if EyeAdaptation.white_balance_enabled:  # the daylight white: the Sun's colour above the atmosphere
+			white_balance = EyeAdaptation.white_balance(Vector3(parameters["solar_illuminance_rgb"])
+					* Vector3(parameters["sun_radiance_to_luminance"]))
 		var moon_fixed := gcrf_to_fixed * (moon_gcrf_m - earth_center_gcrf_m) if moon_gcrf_m != Vector3.ZERO else Vector3.ZERO
 		var luminance := adaptation_luminance(camera_fixed, sun_fixed, sun_visible_fraction, d_au, moon_fixed)
 		luminance = maxf(luminance, lamp_adaptation_cd_m2)  # lamp-lit surfaces in view (white)
@@ -453,7 +460,7 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 			moonlight_relative_value if moonlight_active else 0.0)
 	if _moon_direction_fixed != Vector3.ZERO:
 		ShaderGlobals.set_value(&"atmosphere_moon_direction", Frames.to_render(_moon_direction_fixed))
-	_set_vision(rod_scale, chroma)
+	_set_vision(rod_scale, chroma, white_balance)
 	# The display's pre-exposure: the cone gain x the brightness factor (Stevens effect; the rods, relative to the
 	# pixel, follow it). The star threshold reads the sky's true luminance back through scene_per_cd_m2: unchanged.
 	var display_gain := exposure_gain * brightness
@@ -790,20 +797,22 @@ func moon_light_at(position_itrf_m: Vector3) -> Array:
 	return sun_light_at(position_itrf_m, _moon_direction_fixed, moonlight_relative_value, "")
 
 
-## Night vision's state into the shaders and the post step: the rods' scale and the cones' chroma factor
-## (VisionEffect: c' = C c + s t (w . c), C c = Y + chroma (c - Y)) and the inverse for the display-referred emitters
-## (vision.gdshaderinc, Sherman-Morrison: c = q - u (w . q), q = C^-1 c', u = s C^-1 t / (1 + s w . C^-1 t)).
-func _set_vision(scale: float, chroma_factor := 1.0) -> void:
+## Night vision's state into the shaders and the post step: the rods' scale and the cones' map (white balance and chroma
+## factor; VisionEffect: c' = C c + s t (w . c), C = EyeAdaptation.cone_map) and the inverse for the display-referred
+## emitters (vision.gdshaderinc, Sherman-Morrison: c = q - u (w . q), q = C^-1 c', u = s C^-1 t / (1 + s w . C^-1 t)).
+func _set_vision(scale: float, chroma_factor := 1.0, white := Basis.IDENTITY) -> void:
 	var tint := EyeAdaptation.ROD_TINT
 	var weights := EyeAdaptation.SCOTOPIC_WEIGHTS
+	var cone := EyeAdaptation.cone_map(chroma_factor, white)
+	var cone_inverse := cone.inverse()
 	var inverse := Vector3.ZERO
 	if scale > 0.0:
-		var tint_q := EyeAdaptation.chroma_inverse(tint, chroma_factor)
+		var tint_q := cone_inverse * tint
 		inverse = tint_q * (scale / (1.0 + scale * weights.dot(tint_q)))
 	ShaderGlobals.set_value(&"vision_rod_weights", weights)
 	ShaderGlobals.set_value(&"vision_inverse_tint", inverse)
-	ShaderGlobals.set_value(&"vision_chroma", chroma_factor)
-	vision_effect.set_rods(scale, chroma_factor)
+	ShaderGlobals.set_value(&"vision_cone_inverse", cone_inverse)
+	vision_effect.set_rods(scale, cone)
 
 
 ## Near the Moon: its disc larger than the Earth's (review I1: an eye in LEO is not near it and keeps the limb glow).

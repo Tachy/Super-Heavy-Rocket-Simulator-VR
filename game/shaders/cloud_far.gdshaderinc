@@ -7,10 +7,10 @@
 // The same field and the same light transport as the cloud pass, in its plane-parallel limit: a pixel there covers
 // >= 7 km (the shapes' detail levels have faded to their mean; the shape noise itself is resolved by a few pixels at
 // most), so the column replaces the march:
-// - The column above the ground point G (the column texels, cloud_column_mean_depth): the grid-mean optical depth tau
-//   and the largest cloud fraction f. The view ray's cover is the beam cover of f at the view's cosine mu
-//   (cloud_beam_cover_of: the rule fitted to the shapes' shadows, for any line through the layer), C_v; independent
-//   columns: clear on 1 - C_v, the in-cloud depth tau / C_v on C_v.
+// - The column above the ground point G (the column texels' B-spline, cloud_column_mean_depth_smooth): the grid-mean
+//   optical depth tau and the largest cloud fraction f. The view ray's cover is the beam cover of f at the view's
+//   cosine mu (cloud_beam_cover_of: the rule fitted to the shapes' shadows, for any line through the layer), C_v;
+//   independent columns: clear on 1 - C_v, the in-cloud depth tau / C_v on C_v.
 // - The cloud's position: where the view ray crosses the height at which the column's depth from its top reaches the
 //   transmittance-weighted mean depth of the visible light (the cloud pass's weighted cloud distance for a slab); the
 //   column is taken again there (the parallax of high cloud near the limb), the air's light at that point.
@@ -303,7 +303,11 @@ vec3 cloud_far_cloudy_radiance(vec3 p, vec3 up, vec3 view_prop, float tau, float
 vec4 cloud_far_layer(vec3 g, vec3 sky_eclipse) {
 	vec3 camera = atmosphere_camera_hi + atmosphere_camera_lo;
 	vec3 view = normalize(g - camera);
-	vec2 column_g = cloud_column_mean_depth(cloud_lat_lon(g), 0.0);
+	// The column texels' B-spline (cloud_column_mean_depth_smooth), as the cloud pass's far tier and the baked flat levels:
+	// the bilinear's creases along the cell edges, sharpened by the cover's non-linear alpha, drew the field's grid as
+	// rectangular blocks (the 1 deg analog from the start view, ~5 pixels a cell; look fixes T2). The placement's
+	// bisection below stays on the bilinear layer centres (as the flat levels' bake).
+	vec2 column_g = cloud_column_mean_depth_smooth(cloud_lat_lon(g), 0.0);
 	if (!(column_g.x > 0.0)) {
 		return vec4(0.0);
 	}
@@ -311,7 +315,7 @@ vec4 cloud_far_layer(vec3 g, vec3 sky_eclipse) {
 	float mu_g = max(-dot(view, cloud_geodetic_up(g)), CLOUD_FAR_MU_MIN);
 	float h = cloud_far_depth_height(cloud_lat_lon(g), cloud_far_seen_depth(column_g, mu_g));
 	vec3 p = cloud_far_crossing(g, view, h);
-	vec2 column = cloud_column_mean_depth(cloud_lat_lon(p), 0.0);
+	vec2 column = cloud_column_mean_depth_smooth(cloud_lat_lon(p), 0.0);
 	if (!(column.x > 0.0)) {
 		return vec4(0.0);
 	}

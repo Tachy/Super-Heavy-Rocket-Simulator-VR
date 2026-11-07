@@ -151,11 +151,12 @@ shaders:
     Ferwerda 2002, JGT 7(1)) [call].
   - Where: cone gain in the shaders as pre-exposure; rods by one CompositorEffect (`VisionEffect`, on the
     WorldEnvironment's Compositor in world.gd and the GPU check) after the transparent pass with the resolved MSAA
-    colour, before glow and AgX: rgb' = Y + S (rgb - Y) + k g_r / g_c x (w_s . rgb) x tint (Y the BT.709 luminance),
-    per pixel on every view layer; nothing dispatched while k g_r / g_c = 0 and S = 1.
-  - Display-referred emitters write the inverse of that linear step (Sherman-Morrison): q = (c - (1 - S) Y) / S, then
+    colour, before glow and AgX: rgb' = C rgb + k g_r / g_c x (w_s . rgb) x tint, C = `EyeAdaptation.cone_map`: the
+    white balance W (below), then Y + S (rgb - Y) (Y the BT.709 luminance); per pixel on every view layer; nothing
+    dispatched while k g_r / g_c = 0 and C = I (the adaptation off).
+  - Display-referred emitters write the inverse of that linear step (Sherman-Morrison): q = C^-1 c, then
     q - u (w_s . q), u = s C^-1 tint / (1 + s w_s . C^-1 tint) (`vision.gdshaderinc`, globals `vision_rod_weights`,
-    `vision_inverse_tint`, `vision_chroma`): plume, the stars' own brightness, the orbit ribbon, flight trail, the
+    `vision_inverse_tint`, `vision_cone_inverse`): plume, the stars' own brightness, the orbit ribbon, flight trail, the
     Moon's orbit line, map labels and the VR panel look as before. Holds under alpha and additive blending. GPU check:
     opaque `display_colour` quad at the moonless night (rod scale 138, S 0.52) = its day pixel within 0.5 % of its
     peak; half-transparent over a scene-referred background within 0.5 % (limit rgba16f; tolerance 2 % of the peak).
@@ -205,6 +206,26 @@ shaders:
     integrated starlight (a moonless sky is black); Jensen's k on the adaptation luminance, not per pixel; B and S one
     value per view, no Bezold-Bruecke hue shift (lunar day keeps B = S = 1).
 
+- **White balance: chromatic adaptation to the Sun's white** [look fixes T2, 2026-11-07; `EyeAdaptation.white_balance`,
+  `cone_map`, `Atmosphere.white_balance`; fidelity flag `EyeAdaptation.white_balance_enabled`, render_check
+  `--white_balance=off`]. The renderer's colours are colourimetric linear sRGB (white D65), but the Sun above the air is
+  warmer: the core's TOA spectrum in linear sRGB is (1.123, 1, 0.961), B/R 0.856. Without adaptation a sunlit white cloud
+  seen from space was drawn salmon (start view: cloud radiance B/R 0.79-0.84, physical - the TOA Sun x a cloud top's
+  near-flat reflectance under ~0.2 Rayleigh depth; displayed B/R 0.95-0.96 against EPIC's neutral (238, 243, 241)). The eye
+  adapts to the light it is in: a von Kries transform in CAT02's cone space [S: CIE 159:2004; Moroney et al. 2002] maps
+  the adopted white to the display's grey of the same luminance, W = M_rgb^-1 M_CAT02^-1 diag(grey / white) M_CAT02
+  M_rgb (diagonal-dominant: R x0.970, B x1.056, the green row 1.020). Adopted white [call]: the Sun's own colour above the
+  atmosphere (from the tables' `solar_illuminance_rgb` x `sun_radiance_to_luminance`), the same at every place and
+  hour - the daylight white: a sunlit white surface in space is white, light reddened by the air (low Sun, terminator,
+  sunset) keeps its colour (no adaptation to a sunset's own light), the ground's daylight (Sun + sky, CCT ~5500-6500 K)
+  is within ~5 % of it. Full adaptation (CIECAM02's D = 1, reached above ~100 cd/m^2; at night the rods dominate). With
+  the eye adaptation off (fixed exposure, `--camera_exposure`) the image stays colourimetric. Cost: the post step now
+  runs every frame (it was skipped by day): pad view 1600 x 900 not measurable (median 1.89 vs 1.89 ms), stereo mock
+  3534 x 2838 per eye +0.11 / +0.19 ms (5.70 / 5.80 vs 5.59 / 5.61 ms, two rounds). Test `game/tests/white_balance_test.gd` (headless): the D65 grey kept
+  (identity), the TOA Sun B/R 0.856 in 0.80-0.90 and drawn grey at its luminance (1e-6), the Sun through Rayleigh air
+  mass 4 at 700 hPa still warm (B/R 0.485 -> 0.564 < 0.75), post step o display-referred inverse = identity (1e-6).
+  A/B numbers: `.superpowers/sdd/2026-11-07-look-fixes/t1-t2-report.md`.
+
 - **Lamps in view** [call 2026-10-31, `Atmosphere.lamp_adaptation_cd_m2`]: one more candidate of L_a's maximum (white, and its scotopic
   equivalent), set by `World` from `TowerView.lamp_adaptation_cd_m2`: 3 % of the lit pad's luminance (Pad B deck 16.8 cd/m^2 at night) x the
   camera's reach (300 m full, 0 at 1.5 km) x the view axis (25 deg full, 0 at 60 deg). 0 by day and at sites without lamps. Details
@@ -243,6 +264,8 @@ shaders:
   display-side highlight treatment). Display-referred emitters never set the adaptation (the meter runs before the
   transparent pass; Task 14 fix round 1, review I-1).
 - City lights scene-referred with scale [E] (user ruling 2026-10-25).
+- White balance to the TOA Sun's white, fixed (not to the plate's current light: a sunset stays red) (look fixes plan,
+  user 2026-11-07 "Alles wie vorgeschlagen umsetzen", proposal F7).
 
 ## Open points and known limits
 

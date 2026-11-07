@@ -21,7 +21,8 @@ extends RefCounted
 ##   under the TOA Sun, the state DAY_EXPOSURE is defined for, so in the Weber range g_c = L_ref / L_a (the display
 ##   observer's adaptation is the day look's) [call]; at least 1 (the fixed day exposure in sunlit space, as before);
 ## - the rods: a full-screen post step (VisionEffect, a CompositorEffect after the transparent pass, before glow and the
-##   tone mapper; the same for both VR eyes) takes the cones' chroma to `chroma` (below) and adds
+##   tone mapper; the same for both VR eyes) adapts the cones' image to the Sun's white (white_balance, below), takes
+##   its chroma to `chroma` (below) and adds
 ##   rod_scale x (w_s . rgb) x ROD_TINT to every pixel (linear: w_s >= 0), rod_scale =
 ##   k g_r / g_c with the rod gain g_r = L_ref / (10^1.255 t_s(L_as)) (Ferwerda's m_r: the display observer is
 ##   photopic) and the scotopic luminance from the pixel's linear RGB (SCOTOPIC_WEIGHTS);
@@ -61,6 +62,25 @@ const MESOPIC_LOG_SPAN := 2.6
 const SCOTOPIC_WEIGHTS := Vector3(0.0, 1.4730, 0.9238)
 ## [S: ITU-R BT.709] luminance weights of linear sRGB (the axis the chroma factor desaturates toward).
 const LUMINANCE_WEIGHTS := Vector3(0.2126, 0.7152, 0.0722)
+## Chromatic adaptation (look fixes T2, 2026-11-07): the renderer's colours are colourimetric linear sRGB, whose white
+## is D65 - the display shows an RGB (1, 1, 1) as white. The Sun above the atmosphere is not D65 but warmer (the core's
+## TOA spectrum in linear sRGB: (1.123, 1, 0.961), B/R 0.856), so without adaptation a sunlit white cloud seen from space
+## (radiance B/R 0.79-0.84 measured, physical) was drawn salmon. The eye adapts to the light it is in: a von Kries
+## transform in CAT02's cone space [S: CIE 159:2004 CIECAM02; Moroney et al. 2002] maps the adopted white to the
+## display's white at the same luminance. Adopted white [call]: the Sun's own colour above the atmosphere - the
+## daylight white (photographic "daylight" balance), the same everywhere and at every hour: a sunlit white surface in
+## space is white, light reddened by the air (low Sun, terminator, sunset) keeps its colour (no adaptation to the
+## sunset's own light), and the ground's daylight (Sun + sky, CCT ~5500-6500 K) is within ~5 % of it. Full adaptation
+## (CIECAM02's D = 1, which it reaches above ~100 cd/m^2; at night the rods dominate anyway). Fidelity flag
+## white_balance_enabled (render_check --white_balance=off); with the eye adaptation off (fixed exposure, camera
+## exposures) the image stays colourimetric.
+static var white_balance_enabled := true
+## [S: IEC 61966-2-1 (sRGB), D65] linear sRGB -> CIE XYZ (Basis columns = the matrix's columns).
+const SRGB_TO_XYZ := Basis(Vector3(0.4124, 0.2126, 0.0193), Vector3(0.3576, 0.7152, 0.1192),
+		Vector3(0.1805, 0.0722, 0.9505))
+## [S: CIE 159:2004, CIECAM02 M_CAT02] XYZ -> the CAT02 sharpened cone space (Basis columns = the matrix's columns).
+const XYZ_TO_CAT02 := Basis(Vector3(0.7328, -0.7036, 0.0030), Vector3(0.4296, 1.6975, 0.0136),
+		Vector3(-0.1624, 0.0061, 0.9834))
 ## Suprathreshold appearance (user decision 2026-10-25, "brightness/colourfulness term"): Ferwerda's threshold matching
 ## is ratio-preserving in the Weber range (g_c = L_ref / L_a), so every adapted scene there looked as bright and as
 ## colourful as noon - a civil dusk rendered brighter than noon. A real eye sees a dim scene dimmer and less colourful
@@ -173,14 +193,29 @@ static func chroma_apply(c: Vector3, chroma_factor: float) -> Vector3:
 	return Vector3.ONE * y + (c - Vector3.ONE * y) * chroma_factor
 
 
-## ... and its inverse: (c - (1 - chroma) Y) / chroma (vision.gdshaderinc).
-static func chroma_inverse(c: Vector3, chroma_factor: float) -> Vector3:
-	return (c - Vector3.ONE * ((1.0 - chroma_factor) * LUMINANCE_WEIGHTS.dot(c))) / chroma_factor
+## The von Kries transform (CAT02 cone space, linear sRGB in and out) that maps white_rgb (linear sRGB, any scale) to the
+## display's white (R = G = B) of the same luminance: identity for an RGB grey (D65).
+static func white_balance(white_rgb: Vector3) -> Basis:
+	var to_cones := XYZ_TO_CAT02 * SRGB_TO_XYZ
+	var white := to_cones * white_rgb
+	var grey := to_cones * (Vector3.ONE * LUMINANCE_WEIGHTS.dot(white_rgb))
+	if not (white.x > 0.0 and white.y > 0.0 and white.z > 0.0):
+		return Basis.IDENTITY
+	return to_cones.inverse() * Basis.from_scale(grey / white) * to_cones
 
 
-## The whole post step on a scene pixel (VisionEffect): the cones' chroma, then the rods.
-static func post_step(c: Vector3, scale: float, chroma_factor: float) -> Vector3:
-	return chroma_apply(c, chroma_factor) + ROD_TINT * (scale * SCOTOPIC_WEIGHTS.dot(c))
+## The post step's linear cone map C (VisionEffect): the white balance, then the chroma map (chroma_apply) -
+## C c = chroma_apply(W c, chroma).
+static func cone_map(chroma_factor: float, white: Basis) -> Basis:
+	var chroma_map := Basis(chroma_apply(Vector3(1, 0, 0), chroma_factor), chroma_apply(Vector3(0, 1, 0), chroma_factor),
+			chroma_apply(Vector3(0, 0, 1), chroma_factor))
+	return chroma_map * white
+
+
+## The whole post step on a scene pixel (VisionEffect): the cones' white balance and chroma, then the rods (from the
+## scene's own colour: the rods see the light, not the cones' adapted image).
+static func post_step(c: Vector3, scale: float, chroma_factor: float, white := Basis.IDENTITY) -> Vector3:
+	return cone_map(chroma_factor, white) * c + ROD_TINT * (scale * SCOTOPIC_WEIGHTS.dot(c))
 
 
 ## CIECAM02's luminance-level adaptation factor F_L for a scene white of this luminance (cd/m^2; L_A = white x Y_b / 100).

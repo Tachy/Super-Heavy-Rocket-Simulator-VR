@@ -42,7 +42,8 @@
 # Weather: off in a render check unless --weather[=900 / =online] (online: waits for the downloads, at most 900 s or
 #          that many), --weather=analog (the shipped analog of --utc), --weather=<file.wthr> (a cached snapshot) or
 #          --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<fraction>[,ice] (ice: the slab drawn as ice, cirrus; a
-#          debug view); any other value exits with an error;
+#          debug view); any other value exits with an error; --start_view without --weather implies
+#          --weather=analog (the game's weather is on by default; --weather=off for the cloudless Earth);
 #          --cloud_quality=desktop|vr (the clouds' quality preset; default: the game's; --cloud_divisor=<n>: its march
 #          resolution divisor instead, fractional allowed: 1.5),
 #          the settle waits until the baked volume's first set is baked and shown;
@@ -52,7 +53,8 @@
 #          waits for the settled terrain only; with --out each step also saves <out>_climb<height>.png),
 #          --cloud_detail_levels=0..3 (the detail levels), --cloud_scattering=table|closed (the multiple-scattering
 #          model: Monte Carlo table, default; closed form).
-# Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
+# Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off;
+#          --white_balance=off: no chromatic adaptation to the Sun's white (EyeAdaptation.white_balance_enabled).
 # Camera exposure: --camera_exposure=<f-number>,<shutter s>,<ISO> displays the scene as that film camera exposes it
 #          (ISO 2720 meter constant 12.5, mid grey 18 %, linear, clipped; the eye adaptation off) - photo comparisons;
 #          with --luminance_probe=<x0>,<y0>,<x1>,<y1> (image fractions) the rectangle's mean luminance in cd/m^2 is printed.
@@ -165,6 +167,8 @@ func _initialize() -> void:
 		_args["weather"] = "slab:%d,%d,%s,1" % [SUN_DECK_BOTTOM_M, SUN_DECK_TOP_M,
 				float(_args["sun_through_deck"]) / SUN_DECK_EXTINCTION_PER_LWC / (SUN_DECK_TOP_M - SUN_DECK_BOTTOM_M)]
 		_args["look_at_sun"] = ""
+	if _args.has("start_view") and not _args.has("weather"):
+		_args["weather"] = "analog"  # the game's start view shows its weather (on by default): the shipped analog offline
 	if _args.has("stereo") and not _start_stereo(String(_args["stereo"])):
 		return
 	World.moon_surface_detail = _args.get("moon_detail", "on") != "off"  # read at the Moon terrain's setup
@@ -172,6 +176,7 @@ func _initialize() -> void:
 	World.moon_brdf = String(_args.get("moon_brdf", "hapke"))  # read in World._ready
 	MoonDetailShading.enabled = _args.get("moon_detail_shading", "on") != "off"  # read at the Moon terrain's setup
 	MoonRockLayer.geometry_enabled = _args.get("rocks", "on") != "off"
+	EyeAdaptation.white_balance_enabled = _args.get("white_balance", "on") != "off"
 	MoonNearShadow.enabled = _args.get("moon_near_shadows", "on") != "off"  # the fidelity setting (Task 12)
 	MoonNearShadow.fill_enabled = _args.get("moon_fill", "on") != "off"
 	if _args.has("moon_shadow_casters"):

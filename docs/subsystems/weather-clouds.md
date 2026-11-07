@@ -348,7 +348,11 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   before - one shader with a run-time flag changed the code generation, ~1400 pixels by up to 4 half-float ulps). A pixel
   there covers >= 7 km; the column replaces the march, with the same field and light transport in its plane-parallel
   limit:
-  - the column above the ground point G from the column texels (grid-mean depth tau, largest fraction f); the view's
+  - the column above the ground point G from the column texels' cubic B-spline (`cloud_column_mean_depth_smooth`, as the
+    cloud pass's far tier and the baked flat levels; look fixes T2 2026-11-07: the bilinear's creases along the cell
+    edges, sharpened by the cover's non-linear alpha, drew the 1 deg analog as rectangular blocks of ~5 pixels in the
+    start view; +0.05 ms GPU there, 1600 x 900; the placement's bisection stays on the bilinear layer centres)
+    (grid-mean depth tau, largest fraction f); the view's
     cover C_v = the beam cover of f at the view's cosine mu (`cloud_beam_cover_of`: the rule fitted to the shapes'
     shadows, for any line through the layer); independent columns: clear on 1 - C_v, the in-cloud depth tau / C_v;
   - the cloud's place: the view ray's crossing of the height where the column's depth from its top reaches the
@@ -864,8 +868,10 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
 - Far field: plane-parallel independent columns (the shapes' 3D Sun light only as a mean gain matched to the converged
   volume, switchable: `CloudLayer.far_3d_light`; no shadows
   cast on neighbouring columns or the ground beside them); in the scaled-space Earth the field's 0.25 deg grid shows as
-  soft cells near the hand-over (~4 pixels per cell at 1.5e7 m; its column stays bilinear, without the cloud pass's
-  sub-grid cover). A column with several layers is one slab (placed by its seen light's mean
+  soft blobs near the hand-over (~4 pixels per cell at 1.5e7 m; the column's B-spline, without the cloud pass's
+  sub-grid cover; the 1 deg analog's ~5-pixel cells in the start view are blurred, not structured: no sub-grid detail).
+  The ground under it is lit through the bilinear column (`cloud_ground_light`), the cloud drawn from the B-spline: at
+  cloud edges the two differ within a cell (seen as no artefact in the start view). A column with several layers is one slab (placed by its seen light's mean
   depth): from the ground, a high layer far out and a low one share one crossing.
 - **S against the core on a closed slab (2026-10-30, cloud_check section 1)**: the maps' S gives 0.927-0.937 x the
   core's slant optical depth through the 1 km slabs (tau 1 and 3, Sun 45 / 20 deg; T 0.266 vs 0.242 at tau 1 / 45 deg)

@@ -2610,3 +2610,11 @@ The user ruled the baked volume the only cloud method (2026-10-30); the last sta
     0.6 % (view 30 deg), 1.6 % (Sun +0.3 deg); Sun -0.5 deg: S1 ~0, |loss - S1| p95 0.08 % of the pixel.
   - No negative final HDR in section 14's scenes (backlit, rays, setting Sun +0.3 / -0.5 deg with the horizon in view).
   - Cost (VR proxy, whole frame, `vr-performance.md`): +1.0-1.1 ms backlit cumulus, +4.0 ms the 9 km deck view (analog weather, tops up to the upper layers: no gain).
+
+## Scaled-space far field: bilinear column (until 2026-11-07)
+
+The scaled-space far field (`cloud_far_layer`) took its column (grid-mean depth, largest fraction) from the column
+texels bilinearly (`cloud_column_mean_depth`). With the cover's non-linear alpha the bilinear creases along the cell
+edges showed the field's grid as rectangular blocks - most visible with the 1 deg analog from the start view (2e7 m,
+~5 pixels a cell; `screenshots/look_investigation/start_wx_game.png`). Since look fixes T2 the column is the B-spline
+(`cloud_column_mean_depth_smooth`), as the cloud pass's far tier had since static clouds Task 8.

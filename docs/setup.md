@@ -135,7 +135,9 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Visual check (needs GPU, no --headless): `godot --path game --script res://tests/render_check.gd --
   --utc=2024-04-08T18:42:00 --focus=earth --view_from=moon --out=<png>`; ground views with
   `--lat= --lon= --look_at_moon --fov=`; clouds with `--weather=<abs path .wthr>` or `--weather=slab:<bottom>,<top>,<liquid>,<fraction>`
-  and `--cloud_quality=desktop|vr`, `--cloud_divisor=<x>` (`docs/subsystems/weather-clouds.md` "Diagnostics"). Read the PNG to verify rendering changes.
+  and `--cloud_quality=desktop|vr`, `--cloud_divisor=<x>` (`docs/subsystems/weather-clouds.md` "Diagnostics"). The
+  game's first view: `--start_view` (implies `--weather=analog`, the game's weather being on by default; `--weather=off`
+  for the cloudless Earth); `--white_balance=off` drops the eye's adaptation to the Sun's white. Read the PNG to verify rendering changes.
 - Sky radiance checks (GPU, `res://tests/sky_radiance_check.gd`, `--stale` in any mode freezes the cube: must exit 1): no
   options (phases against references; `-- --only=<phase>`), `-- --steady`,
   `-- --timelapse`, `-- --flight --utc=2026-10-12T17:30:00 --expect=lit --t_plus=1`, `-- --flight
