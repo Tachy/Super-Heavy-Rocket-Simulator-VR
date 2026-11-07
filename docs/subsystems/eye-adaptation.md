@@ -66,6 +66,21 @@ shaders:
   was 4.54-4.55 (+0.25 ms, the extra MSAA resolve). Sky radiance cube with the view-following gain: a head nodding
   -30 .. +40 deg every 4 s redraws it 0.5 times per second (gain 2.97-3.30), and redrawing it every frame changes the
   stereo GPU time by < 0.02 ms.
+- **Anchored rule (option under evaluation, not the default)** [2026-11-07, `Atmosphere.field_rule`
+  `FieldRule.ANCHOR`, user argument `--anchored_adaptation`; the game keeps `FieldRule.MEAN_GREY` until the user
+  decides]: the field rule's grey-world key over-brightens dark scenes and needs a hand key in the white cabin
+  (cockpit_shots' 0.5 / 1.2), the white-plate rule is too dark outside and black in the cabin. Anchoring theory
+  [S: Gilchrist et al. 1999, "An anchoring theory of lightness perception", Psychol. Rev. 106, 795: the highest luminance
+  of a sufficiently large area is seen as white]: from the same histograms, after the same 2 % highlight cut and
+  3.7-decade exclusion (`AdaptationMeter._field_bins`), the anchor L_anchor (`field_anchor`) is the weighted
+  `ANCHOR_PERCENTILE` (0.95 [call]) percentile of the remaining weight, each bin's weight spread evenly in log across the
+  bin (no step at a bin edge); L_a = L_anchor / `EyeAdaptation.ANCHOR_WHITE` (0.9 [E], the reflectance the anchor is seen
+  as), the scotopic one likewise; `field_key` is not used. A black field gives 0 (the dark-adapted floor); everything
+  downstream (Ferwerda gains and their low-light limits, pacing, mesopic k, CIECAM02 factors, clamps, cap at L_ref,
+  fallbacks) is the field rule's. A bright spot under ~7 % of the weight (2 % cut + 5 % above the percentile) does not
+  move the anchor, a larger bright area sets it (`adaptation_meter_test.gd`). Both statistics are measured under either
+  rule (`last_field_cd_m2`, `last_anchor_cd_m2`; render_check and cockpit_shots log them). Comparison A field / B
+  white plate / C anchored: `screenshots/eye_adaptation/anchored/` (values in the open points).
 - **White-plate rule** (the fallback and the GPU check's / headless tests' rule; formerly the only one):
   [call 2026-10-25, `eye_adaptation.gd`, fidelity flag `Atmosphere.eye_adaptation_enabled`, on in
   the game, off in the GPU check's comparisons]: cone gain on every physical luminance (tables, Sun light, Moon, Sun
@@ -236,6 +251,14 @@ shaders:
 - The VR panel was not in the stereo mock's lunar-night view (`--keep_vr_panel`), and the night plume seen from
   500 m (fov 25 deg) stays inside the 2 % highlight cut; the run-away the meter now avoids was therefore not
   reproduced in a render, only excluded by construction (display-referred shaders in the transparent pass, test).
+- Anchored rule under evaluation (user decides; 2026-11-07, render_check / cockpit_shots, `--hide_ui`, PNGs and sheets
+  `screenshots/eye_adaptation/anchored/`; field L_f / anchor L_anchor cd/m^2, gain A field / B white plate / C anchored):
+  Apollo 11 day 1345 / 2710, 5.80 / 1.00 / 14.4 (ground sRGB luma mean 156 / 71 / 190); lunar night 0 N 45 E 0.045 /
+  0.063, 8844 / 3012 / 10 843; Starbase noon 4526 / 8013, 1.72 / 1.15 / 4.85; dusk (Sun -3.6 deg) 19.6 / 86.0, 397 / 778
+  / 452; 400 km day 2638 / 5649, 2.95 / 1.00 / 6.88; cockpit pilot_eye (A at the game key 0.18, not the shot's 0.5)
+  15.9 / 242, 480 / 1.98 / 157. The anchor is only 2-4.4x the field in these centre-weighted fields, so C is brighter
+  than A outdoors everywhere; at noon and from orbit the anchor is the sky / the hazy limb (a self-luminous area seen
+  as a white surface), which washes the ground out. Open: percentile, ANCHOR_WHITE, a surface-only anchor.
 - The rendered Apollo 11 regolith (490 cd/m^2 in the foreground probe, field 660-710) is 3-6x below the core's Hapke
   I/F x E_sun,n / pi at that geometry (I/F 0.08-0.10 at 25-30 deg down-Sun -> 3400-4300 cd/m^2 with the highland w
   0.429); the photo's f/11 1/250 ISO 160 exposure (mid grey 2363 cd/m^2) also points to ~2000+ cd/m^2. The field rule

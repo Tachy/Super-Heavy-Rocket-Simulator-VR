@@ -124,6 +124,11 @@ const LUMINANCE_FLOOR_CD_M2 := 1.0e-6
 ## under the scene's light, a grey world); the field rule measures it - in a grey world the two are identical, a darker
 ## field (regolith, the Earth's ocean from orbit) is seen brighter, a brighter one (snow, cloud tops) darker.
 const FIELD_MID_GREY := 0.18
+## [E] The anchored rule (under evaluation, Atmosphere.FieldRule.ANCHOR; Gilchrist et al. 1999 anchoring theory: the
+## highest luminance of a sufficiently large area is seen as white): the reflectance the anchor (AdaptationMeter.field_anchor)
+## is seen as - a white of ~0.9 (white paper, the cabin's white panels). L_a = L_anchor / ANCHOR_WHITE (a white plate, as
+## the white-plate rule's), no scene key.
+const ANCHOR_WHITE := 0.9
 
 ## The cone gain this frame (the pre-exposure on every physical luminance; 1 = the fixed day exposure).
 var gain := 1.0

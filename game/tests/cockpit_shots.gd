@@ -7,7 +7,8 @@
 #                          hidden; + hatch_vs_crew1_1
 # godot --path game --script res://tests/cockpit_shots.gd -- --mission=falcon9_crew_dragon --t_plus=-60 --out_dir=<abs>/screenshots/m7-cockpit/look
 #   --fov=100 (pilot_eye, horizontal deg)  --crew=<n> (default the mission's)  --refs=<abs dir of the reference photos>
-#   --field_key=<0.18..1> (the eye adaptation's field grey, default CABIN_FIELD_KEY; 0.18 = the game default)
+#   --field_key=<0.18..1> (the eye adaptation's field grey for every shot, default the shot's key or CABIN_FIELD_KEY; 0.18 = the game default;
+#   not used with the game's --anchored_adaptation)
 #   --fixed_exposure (eye adaptation off; default: on as in the game, snapped to each shot)
 extends SceneTree
 
@@ -157,7 +158,9 @@ func _shoot() -> bool:
 	_world.camera.free_basis = target.basis
 	_wait += 1
 	if _wait == 3:
-		_world.atmosphere.field_key = float(shot.get("field_key", _args.get("field_key", CABIN_FIELD_KEY)))
+		# An explicit --field_key holds for every shot (comparisons); else the shot's own key, else the cabin key.
+		var key := float(shot.get("field_key", CABIN_FIELD_KEY))
+		_world.atmosphere.field_key = float(_args["field_key"]) if _args.has("field_key") else key
 		_world.atmosphere.snap_adaptation()
 	if _wait < SHOT_SETTLE_FRAMES:
 		return false
@@ -170,6 +173,10 @@ func _shoot() -> bool:
 		var width := roundi(image.get_height() * float(shot["crop_aspect"]))
 		image = image.get_region(Rect2i((image.get_width() - width) / 2, 0, width, image.get_height()))
 	print("cockpit_shots: saved %s (error %d), %s" % [path, image.save_png(path), _brightness(image)])
+	var a := _world.atmosphere
+	print("cockpit_shots: %s adaptation rule %s: gain %.3f, L_a %s cd/m^2, field %s, anchor %s, field key %s, from the field %s" % [
+			shot["name"], "analytic" if not a.scene_referred_adaptation else ("anchor" if a.field_rule == Atmosphere.FieldRule.ANCHOR else "field"),
+			a.exposure_gain, a.adaptation_cd_m2, a.last_field_cd_m2, a.last_anchor_cd_m2, a.field_key, a.adaptation_from_field])
 	_index += 1
 	_wait = 0
 	return false

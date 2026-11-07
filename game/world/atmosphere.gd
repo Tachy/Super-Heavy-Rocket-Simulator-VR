@@ -208,6 +208,13 @@ var adaptation_meter := AdaptationMeter.new()
 ## or until the meter has measured the view: the white-plate rule (adaptation_luminance). The user argument
 ## --analytic_adaptation switches it off at start (before / after comparisons).
 var scene_referred_adaptation := not OS.get_cmdline_user_args().has("--analytic_adaptation")
+## Which statistic of the measured field sets the white (with scene_referred_adaptation; eye-adaptation.md):
+## MEAN_GREY - the game's rule: the centre-weighted log average taken as the scene's grey, L_a = L_f / field_key;
+## ANCHOR - under evaluation (not the default; user argument --anchored_adaptation): the field's
+## AdaptationMeter.ANCHOR_PERCENTILE-th percentile taken as a white, L_a = L_anchor / EyeAdaptation.ANCHOR_WHITE
+## (field_key not used). Everything downstream (gains, pacing, clamps, fallbacks) is the same.
+enum FieldRule { MEAN_GREY, ANCHOR }
+var field_rule := FieldRule.ANCHOR if OS.get_cmdline_user_args().has("--anchored_adaptation") else FieldRule.MEAN_GREY
 ## The view is still streaming in (World: terrain nodes loading): a snapped view stays snapped to the field until the
 ## meter has seen it settled.
 var view_loading := false
@@ -215,6 +222,9 @@ var view_loading := false
 ## whether this frame's adaptation came from it.
 var last_field_cd_m2 := 0.0
 var last_field_scotopic_cd_m2 := 0.0
+## The anchor at the last measurement (cd/m^2, photopic and scotopic; AdaptationMeter.field_anchor; measured under both rules).
+var last_anchor_cd_m2 := 0.0
+var last_anchor_scotopic_cd_m2 := 0.0
 var adaptation_from_field := false
 ## [call] Frames without a new field measurement before the analytic rule takes over again (the meter answers every
 ## ~2-4 frames).
@@ -392,8 +402,12 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 			adaptation_from_field = true
 			if _field_snap:
 				_eye.snap()
-			_eye.advance(last_field_cd_m2 / field_key,
-					last_field_scotopic_cd_m2 / field_key, reference_luminance(d_au), adaptation_dt_s)
+			if field_rule == FieldRule.ANCHOR:
+				_eye.advance(last_anchor_cd_m2 / EyeAdaptation.ANCHOR_WHITE,
+						last_anchor_scotopic_cd_m2 / EyeAdaptation.ANCHOR_WHITE, reference_luminance(d_au), adaptation_dt_s)
+			else:
+				_eye.advance(last_field_cd_m2 / field_key,
+						last_field_scotopic_cd_m2 / field_key, reference_luminance(d_au), adaptation_dt_s)
 			# A new view stays snapped while it is still streaming in, and at least FIELD_SNAP_MIN_S after the jump
 			# (the streaming may not have started on its first frames).
 			_field_snap = _field_snap and (_field_loading
@@ -1143,12 +1157,14 @@ func _take_field_measurement() -> void:
 		return
 	last_field_cd_m2 = photopic
 	last_field_scotopic_cd_m2 = maxf(AdaptationMeter.field_log_average(counts, AdaptationMeter.HISTOGRAM_BINS), 0.0)
+	last_anchor_cd_m2 = maxf(AdaptationMeter.field_anchor(counts, 0), 0.0)
+	last_anchor_scotopic_cd_m2 = maxf(AdaptationMeter.field_anchor(counts, AdaptationMeter.HISTOGRAM_BINS), 0.0)
 	_field_loading = result[1]
 	_field_valid = true
 	if _log_adaptation and _field_serial % ADAPTATION_LOG_EVERY == 0:
-		print("adaptation: field %s cd/m^2 (scotopic %s), %s, white-plate rule %s cd/m^2" % [
-				last_field_cd_m2, last_field_scotopic_cd_m2, "loading" if _field_loading else "settled",
-				last_target_cd_m2])
+		print("adaptation: field %s cd/m^2 (scotopic %s), anchor %s (scotopic %s), %s, white-plate rule %s cd/m^2" % [
+				last_field_cd_m2, last_field_scotopic_cd_m2, last_anchor_cd_m2, last_anchor_scotopic_cd_m2,
+				"loading" if _field_loading else "settled", last_target_cd_m2])
 
 
 ## The Sun light of Godot's lit materials (vehicles, structures: world.gd's DirectionalLight3D) at an Earth-fixed point:

@@ -1,4 +1,4 @@
-# The scene-referred eye adaptation's field statistic (AdaptationMeter.field_log_average) and the field rule's gain
+# The scene-referred eye adaptation's field statistics (AdaptationMeter.field_log_average, field_anchor) and the field rule's gain
 # (EyeAdaptation.FIELD_MID_GREY): headless, exit code 1 on failure.
 # godot --headless --path game --script res://tests/adaptation_meter_test.gd
 extends SceneTree
@@ -63,6 +63,37 @@ func _initialize() -> void:
 	# The scotopic histogram at its offset.
 	var both := _histogram({k500: 10, BINS + k50: 10})
 	_near("scotopic offset", AdaptationMeter.field_log_average(both, BINS), _centre(k50), 1e-9)
+
+	# The anchored rule (AdaptationMeter.field_anchor, under evaluation): the ANCHOR_PERCENTILE-th percentile, each bin's
+	# weight spread evenly in log across the bin. A uniform field: the anchor inside its bin (at the percentile's place
+	# in it), so L_a = L / ANCHOR_WHITE to within the bin's resolution.
+	var width := (AdaptationMeter.LOG_MAX - AdaptationMeter.LOG_MIN) / float(BINS - 1)
+	var uniform_anchor := AdaptationMeter.field_anchor(_histogram({k500: 1000}))
+	_near("anchor uniform field", uniform_anchor,
+			pow(10.0, AdaptationMeter.bin_log_centre(k500) + (AdaptationMeter.ANCHOR_PERCENTILE - 0.5) * width), 1e-9)
+	_near("anchor uniform field within the bin", float(AdaptationMeter.bin_of(uniform_anchor)), float(k500), 0.0)
+	_near("anchor L_a", uniform_anchor / EyeAdaptation.ANCHOR_WHITE, 500.0 / EyeAdaptation.ANCHOR_WHITE,
+			pow(10.0, width) - 1.0)
+	# A 1 % bright spot (inside the 2 % highlight cut) does not move the anchor.
+	var k_bright := AdaptationMeter.bin_of(500.0 * 20.0)
+	_near("anchor 1 % spot", AdaptationMeter.field_anchor(_histogram({k500: 990, k_bright: 10})), uniform_anchor, 1e-9)
+	# A 5 % spot: 3 % left after the cut, below the 5 % above the percentile - still on the field.
+	_near("anchor 5 % spot", float(AdaptationMeter.bin_of(AdaptationMeter.field_anchor(_histogram({k500: 950, k_bright: 50})))),
+			float(k500), 0.0)
+	# A 10 % bright area (8 % of the 98 % left, above the 5 % share) sets the anchor: in the bright area's bin.
+	var area := AdaptationMeter.field_anchor(_histogram({k500: 900, k_bright: 100}))
+	_near("anchor 10 % area", float(AdaptationMeter.bin_of(area)), float(k_bright), 0.0)
+	# Same exclusions as the field average: black sky ignored, nothing above black -> 0, no samples -> -1, scotopic offset.
+	_near("anchor black sky", AdaptationMeter.field_anchor(_histogram({0: 1000, k500: 1000})), uniform_anchor, 1e-9)
+	_near("anchor below the simultaneous range", AdaptationMeter.field_anchor(_histogram({k_dim: 50, k500: 1000})),
+			uniform_anchor, 1e-9)
+	_near("anchor dark field", AdaptationMeter.field_anchor(_histogram({0: 1000})), 0.0, 0.0)
+	_near("anchor no samples", AdaptationMeter.field_anchor(_histogram({})), -1.0, 0.0)
+	_near("anchor scotopic offset", float(AdaptationMeter.bin_of(AdaptationMeter.field_anchor(both, BINS))), float(k50), 0.0)
+	# The anchor is at or above the field's log average (a percentile of the same field above its middle).
+	var spread := _histogram({k_shade: 500, k50: 500, k500: 500})
+	_near("anchor above the average", float(AdaptationMeter.field_anchor(spread) >= AdaptationMeter.field_log_average(spread)),
+			1.0, 0.0)
 
 	# The field rule's adaptation luminance L_f / FIELD_MID_GREY (Atmosphere.update): a grey-world field (18 % of the
 	# white plate) gives the plate's gain; the Apollo 11 field measured in Task 14 (660 cd/m^2 under a 41 064 cd/m^2

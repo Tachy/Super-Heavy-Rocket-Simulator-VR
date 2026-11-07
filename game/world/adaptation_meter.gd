@@ -42,6 +42,11 @@ const HIGHLIGHT_SHARE := 0.02
 ## 2010: ~3.7 log units at a fixed adaptation] luminances further below the field's highlights carry no signal at that
 ## adaptation state and do not pull it down (a black sky beside sunlit ground; the dark beyond a lamp-lit pad).
 const SIMULTANEOUS_RANGE_DECADES := 3.7
+## [call] The anchored rule (under evaluation, Atmosphere.FieldRule.ANCHOR; Gilchrist et al. 1999, "An anchoring theory
+## of lightness perception", Psychol. Rev. 106, 795: the highest luminance of a sufficiently large area is seen as white):
+## the anchor is this weighted percentile of the field left after the highlight cut - an area of more than ~5 % of the
+## centre-weighted field (after the 2 % cut) sets white; a smaller bright spot does not.
+const ANCHOR_PERCENTILE := 0.95
 ## [call] Samples per view about this many (a sparse grid; the histogram is a statistic, not an image).
 const SAMPLES_PER_VIEW := 65536
 ## [call] The meter measures every this many frames (review I-3: the MSAA resolve it needs before the transparent pass
@@ -185,11 +190,58 @@ func take_result(epoch: int, after_serial: int) -> Array:
 ## bins' centre luminances after the highlight cut and without the bins more than SIMULTANEOUS_RANGE_DECADES below the
 ## highest bin left. -1: no samples; 0: nothing above black (a dark field).
 static func field_log_average(counts: PackedInt32Array, offset := 0) -> float:
+	var field := _field_bins(counts, offset)
+	if field.is_empty():
+		return -1.0
+	var weights: PackedFloat64Array = field[0]
+	if int(field[2]) <= 0:
+		return 0.0
+	var sum_w := 0.0
+	var sum_log := 0.0
+	for k in range(int(field[1]), int(field[2]) + 1):
+		sum_w += weights[k]
+		sum_log += weights[k] * bin_log_centre(k)
+	if sum_w <= 0.0:
+		return 0.0
+	return pow(10.0, sum_log / sum_w)
+
+
+## The anchor luminance of one histogram (the anchored rule under evaluation, Atmosphere.FieldRule.ANCHOR): the
+## ANCHOR_PERCENTILE-th weighted percentile of the same field as field_log_average (after the highlight cut, inside the
+## simultaneous range below the highest bin left), each bin's weight spread evenly in log10 across the bin (no step when
+## the percentile crosses a bin edge). -1: no samples; 0: nothing above black (a dark field).
+static func field_anchor(counts: PackedInt32Array, offset := 0) -> float:
+	var field := _field_bins(counts, offset)
+	if field.is_empty():
+		return -1.0
+	var weights: PackedFloat64Array = field[0]
+	var lowest := int(field[1])
+	var top := int(field[2])
+	if top <= 0:
+		return 0.0
+	var sum_w := 0.0
+	for k in range(lowest, top + 1):
+		sum_w += weights[k]
+	if sum_w <= 0.0:
+		return 0.0
+	var width := (LOG_MAX - LOG_MIN) / float(HISTOGRAM_BINS - 1)
+	var target := ANCHOR_PERCENTILE * sum_w
+	var below := 0.0
+	for k in range(lowest, top + 1):
+		if weights[k] > 0.0 and below + weights[k] >= target:
+			return pow(10.0, bin_log_centre(k) + ((target - below) / weights[k] - 0.5) * width)
+		below += weights[k]
+	return pow(10.0, bin_log_centre(top) + 0.5 * width)
+
+
+## The field both statistics share: [weights after the highlight cut, lowest bin inside the simultaneous range, highest
+## bin left (<= 0: nothing above black)]; [] without samples.
+static func _field_bins(counts: PackedInt32Array, offset: int) -> Array:
 	var total := 0.0
 	for k in range(HISTOGRAM_BINS):
 		total += float(counts[offset + k])
 	if total <= 0.0:
-		return -1.0
+		return []
 	var weights := PackedFloat64Array()
 	weights.resize(HISTOGRAM_BINS)
 	for k in range(HISTOGRAM_BINS):
@@ -206,18 +258,9 @@ static func field_log_average(counts: PackedInt32Array, offset := 0) -> float:
 		top -= 1
 	while top > 0 and weights[top] <= 0.0:
 		top -= 1
-	if top <= 0:
-		return 0.0
 	var per_decade := float(HISTOGRAM_BINS - 1) / (LOG_MAX - LOG_MIN)
 	var lowest := maxi(1, top - int(ceil(SIMULTANEOUS_RANGE_DECADES * per_decade)))
-	var sum_w := 0.0
-	var sum_log := 0.0
-	for k in range(lowest, top + 1):
-		sum_w += weights[k]
-		sum_log += weights[k] * bin_log_centre(k)
-	if sum_w <= 0.0:
-		return 0.0
-	return pow(10.0, sum_log / sum_w)
+	return [weights, lowest, top]
 
 
 ## log10 of bin k's centre luminance (k >= 1).
