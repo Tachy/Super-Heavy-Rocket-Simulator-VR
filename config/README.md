@@ -375,7 +375,9 @@ flow separation (vacuum engines).
   Since lunar l4 the mission flies on to the surface and back to the LLO (`sim::start_lunar_landing_mission`):
   `[descent]` `pdi_altitude_above_site_km` (periselene after the DOI), `braking_range_km` (fallback; the planner sizes
   the range from the mass), `max_crossrange_km` (the LLO waits for a site pass within this; a plane trim removes the
-  rest), `slope_limit_deg`, `touchdown_search_radius_m` (admissible point nearest to the site), optional
+  rest), `slope_limit_deg` (hard limit), `preferred_slope_deg` (<= `slope_limit_deg`: the nearest admissible point
+  within it anywhere in the radius is taken, the nearest admissible one only when none is that flat),
+  `touchdown_search_radius_m`, optional
   `touchdown_after_epoch_h` (the landing the mission is planned for, hours after `[orbit] epoch_utc` - a duration, so a
   start at another epoch keeps the timing: the LLO plane holds the site then and the descent takes that
   pass; absent: the first pass after the LLO arrival); `[surface]`
