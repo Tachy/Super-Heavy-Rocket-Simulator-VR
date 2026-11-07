@@ -249,12 +249,14 @@ def test_stature_and_triangle_budget(cfg, mesh):
 
 def test_visor_sits_in_a_face_opening_with_a_white_shell_around_it(cfg, mesh):
     """Helmet shape (USER 2026-11-07, round 4 against eva_suit_detail2): a large opening (+-58-66 deg, top +33-43 deg, down past the chin), a white
-    frame bead of 30-45 mm with a black seal inside it, the closed visor seated in it (domed), slim pivot brackets, an egg-shaped shell with a crown
+    frame bead of 30-45 mm with a black seal inside it, the closed visor seated in it (domed), round pivot buttons (round 5, jsc2024e066389), an egg-shaped shell with a crown
     ridge, and the neck collar is a distinct grey ring wider than the neck."""
     h = cfg["helmet"]
     assert 58.0 <= h["visor_half_angle_deg"] <= 66.0 and 33.0 <= h["visor_up_deg"] <= 43.0 and h["visor_down_deg"] <= -35.0
     assert 0.030 <= 2.0 * h["rim_radius_m"] <= 0.045 and 0.0 < h["liner_radius_m"] < h["rim_radius_m"]
-    assert max(h["pivot_housing_m"][0], h["pivot_housing_m"][2]) <= 0.012  # slim brackets, no blocks
+    # round 5: the pivot is a low round button (066389: ~19 mm across), at jaw height behind the frame bead, not a slab at eye height
+    assert 0.007 <= h["pivot_button_radius_m"] <= 0.013 and 0.0 < h["pivot_button_height_m"] <= 0.006
+    assert -40.0 <= h["pivot_el_deg"] <= -20.0 and h["pivot_az_offset_deg"] > 0.0
     assert 0.0 < h["egg_taper"] < 0.2 and 0.0 < h["crown_ridge_m"] < 0.015 and 0.3 <= h["visor_tint_split"] <= 0.7
     assert cfg["material"]["collar"]["albedo"][0] < 0.5 * cfg["material"]["helmet"]["albedo"][0]  # grey collar against the white shell
     assert h["visor_proud_m"] > h["visor_edge_m"] and h["half_depth_m"] > h["half_width_m"]

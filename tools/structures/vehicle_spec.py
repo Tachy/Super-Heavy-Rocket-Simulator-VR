@@ -375,7 +375,7 @@ FIGURE_KEYS = {
              "boot_foot_half_width_m", "boot_foot_half_height_m", "boot_heel_m", "neck_radius_m"),
     "helmet": ("half_width_m", "half_depth_m", "half_below_m", "half_above_m", "visor_half_angle_deg", "visor_up_deg", "visor_down_deg", "visor_proud_m", "visor_edge_m", "visor_thickness_m", "rim_radius_m", "collar_radius_m", "collar_height_m",
                "liner_radius_m", "liner_inset_deg", "egg_taper", "crown_ridge_m", "crown_ridge_width_m", "visor_tint_split", "visor_low_albedo",
-               "visor_low_roughness", "visor_low_metallic", "pivot_housing_m", "pivot_el_deg", "pivot_az_offset_deg"),
+               "visor_low_roughness", "visor_low_metallic", "pivot_button_radius_m", "pivot_button_height_m", "pivot_el_deg", "pivot_az_offset_deg"),
 }
 FIGURE_MATERIALS = ("suit", "boots", "gloves", "helmet", "collar", "visor")
 

@@ -566,7 +566,23 @@ vec3 atm_to_point_model(vec3 offset_model, out vec3 transmittance) {
 
 // Aerial perspective to a point given camera-relative (offset_local = point - camera, Earth-local render metres): the
 // form for surfaces near the camera (terrain, sea, vehicles), whose offset is exact in float32.
+// Short paths: the in-scatter is S(camera) - T S(point), two table reads at r ~ 6.4e6 m whose coordinates differ by
+// less than the float32 / filter resolution for a path of metres; the difference is rounding noise that changes with
+// the distance (concentric rings and striping on dark surfaces a metre away, the Crew Dragon cabin, cockpit fix round 5).
+// Below ATM_SHORT_PATH_M the path is evaluated once at that length along the same ray and scaled to the true length:
+// in-scatter linear in d, transmittance T_ref^(d / D) (exact for a homogeneous segment; over 200 m the air changes by
+// ~2.5 % of a term that is itself ~0.2 % of the light).
+// [call] 200 m: long enough that the two reads differ well beyond their resolution, short enough to be homogeneous.
+const float ATM_SHORT_PATH_M = 200.0;
 vec3 atm_to_point_offset(vec3 offset_local, out vec3 transmittance) {
+	float d = length(offset_local);
+	if (d > 0.0 && d < ATM_SHORT_PATH_M) {
+		float k = d / ATM_SHORT_PATH_M;
+		vec3 t_ref;
+		vec3 s_ref = atm_to_point_model(offset_local * (ATM_STRETCH / k), t_ref);
+		transmittance = pow(max(t_ref, vec3(1.0e-6)), vec3(k));
+		return s_ref * k;
+	}
 	return atm_to_point_model(offset_local * ATM_STRETCH, transmittance);
 }
 

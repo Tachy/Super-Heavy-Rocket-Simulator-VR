@@ -1,9 +1,12 @@
 shader_type spatial;
+render_mode ambient_light_disabled;
 // Matte / painted cabin surfaces of the Crew Dragon (CockpitView): lit_aerial's look (Godot PBR under the Sun's light, aerial
-// perspective as FOG) plus two cabin terms. (1) ambient_visibility scales the sky's ambient light and reflections (AO): the sky
-// does not reach the inside of a closed capsule, only the Sun through the windows and the cabin lamps do; a small remainder
-// stands in for the bounced light of the white walls (look pass [call]). (2) Panel seams: thin dark lines on a grid in the
-// part's own coordinates (surface detail by shader, not geometry), strength seam_depth (0 = none).
+// perspective as FOG) plus the cabin terms. (1) Closed cabin: no sky ambient light and no sky radiance (ambient_light_disabled);
+// only the Sun through the windows and the cabin lamps light it directly. The bounced light of the white walls is an emission term:
+// diffuse albedo x fill, and the walls' reflection on glossy parts: a uniform surround of luminance fill_surround weighted with the
+// split-sum environment BRDF (fix round 5: AO 0.03 on the sky's radiance still left the sky - far brighter than the cabin the eye
+// adaptation meters - in every reflection: black seats, brackets and the lower visor read mid grey). (2) Panel seams: thin dark
+// lines on a grid in the part's own coordinates (surface detail by shader, not geometry), strength seam_depth (0 = none).
 
 #include "res://shaders/atmosphere.gdshaderinc"
 
@@ -11,8 +14,8 @@ uniform vec4 albedo : source_color = vec4(1.0);
 uniform float roughness : hint_range(0.0, 1.0) = 0.85;
 uniform float metallic : hint_range(0.0, 1.0) = 0.0;
 uniform float specular : hint_range(0.0, 1.0) = 0.4;
-uniform float ambient_visibility : hint_range(0.0, 1.0) = 0.2;
 uniform float fill = 0.0;  // scene value of the cabin's bounced light (E / pi x scene_per_cd_m2), set by CockpitView each frame
+uniform float fill_surround = 0.0;  // scene luminance of the walls the glossy parts reflect (fill x wall albedo), set by CockpitView each frame
 uniform float seam_depth : hint_range(0.0, 1.0) = 0.0;
 uniform vec2 seam_pitch_m = vec2(0.42, 0.30);
 uniform float seam_width_m = 0.0015;
@@ -39,6 +42,17 @@ void vertex() {
 	world_offset = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	local_position = VERTEX;
 	local_normal = NORMAL;
+}
+
+// Split-sum environment BRDF, analytic fit (Karis 2014, "Physically Based Shading on Mobile"): the fraction of a uniform
+// surround a surface with specular colour f0 and this roughness reflects toward the viewer.
+vec3 env_brdf(vec3 f0, float rough, float n_dot_v) {
+	const vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
+	const vec4 c1 = vec4(1.0, 0.0425, 1.04, -0.04);
+	vec4 r = rough * c0 + c1;
+	float a004 = min(r.x * r.x, exp2(-9.28 * n_dot_v)) * r.x + r.y;
+	vec2 ab = vec2(-1.04, 1.04) * a004 + r.zw;
+	return f0 * ab.x + ab.y;
 }
 
 float seam(vec3 p, vec3 n) {
@@ -83,7 +97,7 @@ void fragment() {
 	ROUGHNESS = rough;
 	METALLIC = metal;
 	SPECULAR = specular;
-	EMISSION = base * (1.0 - metal) * fill;
-	AO = ambient_visibility;
-	AO_LIGHT_AFFECT = 0.0;
+	vec3 f0 = mix(vec3(0.16 * specular * specular), base, metal);  // Godot's dielectric F0 from SPECULAR
+	float n_dot_v = clamp(dot(normalize(NORMAL), normalize(VIEW)), 1.0e-3, 1.0);
+	EMISSION = (base * (1.0 - metal) * fill + env_brdf(f0, rough, n_dot_v) * fill_surround) * colour_factor;
 }

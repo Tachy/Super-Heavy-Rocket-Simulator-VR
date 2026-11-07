@@ -24,7 +24,8 @@ CAP_STEPS = 3  # [E] rings of a rounded end
 HELMET_BOTTOM_T = -0.75  # [E] the helmet shell is cut flat at this fraction of its height below the centre (the neck ring closes it)
 HELMET_RINGS = 24  # [E] rings of the helmet shell
 VISOR_COLS, VISOR_ROWS = 24, 16
-RIM_SIDES = 14  # [E] sides of the rim bead's cross section  # [E] grid of the visor patch
+RIM_SIDES = 14  # [E] sides of the rim bead's cross section
+PIVOT_SIDES = 20  # [E] sides of the round visor-pivot button
 
 
 def vec(t):
@@ -243,14 +244,13 @@ def build_visor(cfg, parts, c):
             p, n = ellipsoid_point(h, c, el_mid + half_el * fe, (h["visor_half_angle_deg"] - inset) * fa)
             pts[key] = (p + n * (h["visor_edge_m"] * 0.5), n)
         sweep_bead(parts.mesh("head", material), loop, pts, radius, ("rim", material))
-    # slim black visor-pivot brackets on both cheeks, along the opening's side edges (detail2: thin black hardware, no blocks)
-    bracket = parts.mesh("head", "boots")
-    hx, hy, hz = h["pivot_housing_m"]
+    # the visor-pivot buttons: a low round grey disc on each side of the shell behind the opening, at jaw height (jsc2024e066389 / 066390;
+    # round 4's slim black bracket at eye height read as a flat slab). Its foot sinks into the shell so the curved surface leaves no gap.
+    button = parts.mesh("head", "collar")
+    r_b, h_b = h["pivot_button_radius_m"], h["pivot_button_height_m"]
     for side in (-1.0, 1.0):
         p, n = ellipsoid_point(h, c, h["pivot_el_deg"], side * (h["visor_half_angle_deg"] + h["pivot_az_offset_deg"]))
-        across = n.cross(V((1.0, 0.0, 0.0))).normalized()
-        up = across.cross(n).normalized()
-        vc.box(bracket, p + n * hx, n, up, across, (hx, hy, hz))
+        vc.tube(button, p - n * (0.5 * r_b), p + n * h_b, r_b, PIVOT_SIDES, ("pivot", side), cap0=False, radius1=0.85 * r_b)
 
 
 def sweep_bead(mesh, loop, pts, radius, group):

@@ -75,7 +75,7 @@ neck_radius_m = 0.080            # [E] neck ring (suit collar) radius under the 
 [helmet]
 # Shape after eva_suit_detail2 (three-quarter, round 4) / detail1 / newatlas / demo1_1: a white egg-shaped shell, longer front to back and narrower at the front, with a low crown ridge;
 # a large face opening lined with a black seal, the closed visor seated in it (upper part copper-tinted, lower part dark clear glass), a white frame bead around it,
-# slim black pivot brackets at the sides, a grey neck ring (collar). Visor closed and copper: user decision (spec).
+# a round grey visor-pivot button on each side of the shell, a grey neck ring (collar). Visor closed and copper: user decision (spec).
 half_width_m = 0.150             # [E] helmet shell half width (z): eva_suit_detail2, the shell is ~0.30 across at the temples (the ~0.30 m helmet of crew_dragon.toml's size list)
 half_depth_m = 0.170             # [E] helmet half depth (y): eva_suit_detail2 / demo1_1 side views, the shell is deeper than wide (ratio 1.13); +-0.02
 half_below_m = 0.17              # [E] helmet centre to the neck ring
@@ -96,9 +96,10 @@ visor_tint_split = 0.55          # [E] the visor's copper tint covers this fract
 visor_low_albedo = [0.025, 0.022, 0.02]  # [E] lower visor: clear glass over the dark helmet interior (no face modelled), reads near black with a gloss
 visor_low_roughness = 0.22       # [E] clear polycarbonate over a dark interior: soft reflections (round 4 shots: 0.12 mirrored the cabin as a grey band)
 visor_low_metallic = 0.0         # [E] uncoated glass: only the dielectric gloss
-pivot_housing_m = [0.004, 0.040, 0.009]  # [E] slim black visor-pivot brackets on the cheek sides (half sizes along the shell normal, up, across): detail2, a thin black bracket ~80 x 18 mm along the opening's side edge (round 4: no grey blocks)
-pivot_az_offset_deg = 7.0        # [E] the bracket stands this far (azimuth) behind the opening's side edge, just outside the frame bead
-pivot_el_deg = 0.0               # [E] bracket elevation: detail2, at eye height beside the opening
+pivot_button_radius_m = 0.0095  # [E] round grey visor-pivot button on each shell side (round 5): jsc2024e066389, disc ~55 px across at ~2850 px/m (eye to mouth 205 px = 0.072 m) = 19 mm; +-3 mm
+pivot_button_height_m = 0.004    # [E] the button stands this far proud of the shell (066389 / 066390: a low disc with a bevelled edge, no block)
+pivot_az_offset_deg = 13.0       # [E] button centre this far (azimuth) behind the opening's side edge: 066389, ~25 mm behind the black seal = outside the white frame bead (16 mm) + the button radius
+pivot_el_deg = -30.0             # [E] button elevation: 066389, ~0.09 m below eye level (255 px) on the 0.17 m lower half shell = -32 deg; at jaw height, not at eye height; +-5
 collar_radius_m = 0.112          # [E] neck collar half width: detail2, the collar ring is wider than the neck (suit neck 0.08) and carries the helmet's lower rim
 collar_height_m = 0.07           # [E] neck collar height: detail2, ~70 mm ring under the helmet shell
 

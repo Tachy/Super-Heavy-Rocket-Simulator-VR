@@ -49,7 +49,8 @@ vehicles still fly through `Us76Atmosphere`).
   declared in `cloud_pass.gdshaderinc`, not in this include).
 - **Shader include** `game/shaders/atmosphere.gdshaderinc` (port of the CPU code, globals in project.godot
   `[shader_globals]` `atmosphere_*`): `atm_sky`, `atm_to_point*` (aerial perspective; camera-relative offsets for near
-  points), `atm_sun_at` / `atm_sky_light` / `atm_sun_and_sky`, `atm_sky_to_far_object` (Moon, Sun), `atm_fog`
+  points; `atm_to_point_offset` evaluates paths under `ATM_SHORT_PATH_M` 200 m once at 200 m on the same ray and scales them, in-scatter x d / D,
+  transmittance T^(d / D): the two table reads of a metre-long path differ by less than float32 / filter resolution and gave distance rings, cockpit fix round 5), `atm_sun_at` / `atm_sky_light` / `atm_sun_and_sky`, `atm_sky_to_far_object` (Moon, Sun), `atm_fog`
   (vehicles). Floating-origin numerics: the camera's Earth-local position arrives as float32 hi + lo
   (`atmosphere_camera_hi/lo`), its altitude above the model ground differenced in float64 on the CPU
   (`atmosphere_camera_altitude_m`); rho = sqrt(h (2R + h)), discriminants as (r mu)^2 - rho^2 and (T - r)(T + r), a

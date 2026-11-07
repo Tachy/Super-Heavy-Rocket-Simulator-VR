@@ -215,6 +215,21 @@ func _define_shots() -> void:
 	if _args.has("no_lamp_shadows"):  # debugging: the console lamps without shadows
 		for light in _cockpit.find_children("light_*", "OmniLight3D", false, false):
 			(light as OmniLight3D).shadow_enabled = false
+	if _args.has("no_shadows"):  # debugging: every light without shadows (cabin lamps and the Sun)
+		for light in _world.find_children("*", "Light3D", true, false):
+			(light as Light3D).shadow_enabled = false
+	if _args.has("no_sky_light"):  # debugging: no ambient / reflected light from the sky (what reaches a closed cabin only through AO)
+		var env: Environment = _world.get("_environment")
+		env.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+		env.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
+	if _args.has("agx_contrast"):  # debugging: AgX contrast (game default 1.25 of Godot): how dark the black parts read under the high-key cabin
+		(_world.get("_environment") as Environment).tonemap_agx_contrast = float(_args["agx_contrast"])
+	if _args.has("lights_off"):  # debugging: hide lights by name pattern (comma separated, e.g. ring_*,fill_*; "sun" = the Sun)
+		for pattern: String in String(_args["lights_off"]).split(","):
+			if pattern == "sun":
+				_world.sun_light.visible = false
+			for light in _cockpit.find_children(pattern, "Light3D", false, false):
+				(light as Light3D).visible = false
 
 
 ## The hatch frame and the exterior hull (every stage node child but the cockpit) are hidden for the shot from outside the inner wall.

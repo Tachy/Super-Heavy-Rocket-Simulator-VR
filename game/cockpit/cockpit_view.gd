@@ -19,6 +19,8 @@ const LAMP_RANGE_M := 6.0
 ## [call] Look pass 2: the light the white walls bounce around the closed cabin (no GI): a flat illuminance on every cabin
 ## surface as emission albedo x E / pi, scene-referred like the lamps (so the eye adaptation sees a lit cabin at any hour).
 const FILL_LUX := 450.0
+## [E] The white walls / floor (sRGB): also the surround the glossy cabin parts reflect (fix round 5: the closed cabin reflects its walls, not the sky).
+const WALL_ALBEDO := Color(0.8, 0.8, 0.79)
 ## Lamp offset in front of its panel on the console (toward the crew, along the console normal).
 const LAMP_DROP_M := 0.08
 ## [E] The ceiling ring light around the forward tunnel (crew1_1: a bright white annulus, r ~0.45..0.9 m at the ceiling):
@@ -32,8 +34,8 @@ const SCREEN_COLOUR := Color(0.025, 0.07, 0.17)
 ## [E] crew1_1 (round 4): the dark vent band across the console's silver back, in the console's up coordinate from the centre screen centre
 ## (the back face spans -0.235..+0.265: the band at 35-75 % of its height from the top) and to 0.58 m either side of the centre (slot 1.20 of the 1.32 m back).
 ## Render layer of the console parts (round 4): the two console lamps hang 8 cm in front of the console face and light it only at grazing
-## angles; their shadow maps on that face gave the concentric shadow-acne rings at the top of pilot_eye (gone with the lamp shadows off).
-## The lamps face the crew, so they do not light the console (light_cull_mask without this layer); the ring and fill lights still do.
+## angles (their shadow maps there are prone to acne). The concentric rings at the top of pilot_eye were NOT this: they were the aerial
+## perspective's float32 noise over sub-metre paths (fix round 5, atm_to_point_offset's short-path form). The lamps face the crew, so they do not light the console (light_cull_mask without this layer); the ring and fill lights still do.
 const CONSOLE_LAYER := 1 << 11
 const CONSOLE_VENT_UP_M := Vector2(-0.11, 0.07)
 const CONSOLE_VENT_HALF_WIDTH_M := 0.58
@@ -141,9 +143,11 @@ func _process(_delta: float) -> void:
 	for i in _lights.size():
 		_lights[i].light_energy = TowerLights.energy_of(_light_cd[i], scene_per_cd)
 	var fill := FILL_LUX / PI * scene_per_cd
+	var surround := fill * WALL_ALBEDO.srgb_to_linear().get_luminance()  # the walls' luminance under the same bounced light
 	for material: Material in _materials.values():
 		if material is ShaderMaterial and (material as ShaderMaterial).shader == CABIN_SHADER:
 			(material as ShaderMaterial).set_shader_parameter("fill", fill)
+			(material as ShaderMaterial).set_shader_parameter("fill_surround", surround)
 
 
 func _build_lights() -> void:
@@ -211,7 +215,7 @@ func _build_figures(models: Dictionary) -> void:
 				if look.has(key):
 					var entry: Dictionary = look[key]
 					var c: Array = entry["albedo"]
-					var material := _cabin_material(Color(c[0], c[1], c[2]).linear_to_srgb(), float(entry["roughness"]), float(entry["metallic"]), 0.03, 0.0)
+					var material := _cabin_material(Color(c[0], c[1], c[2]).linear_to_srgb(), float(entry["roughness"]), float(entry["metallic"]), 0.0)
 					if key == String(manifest.get("visor_material", "")) and manifest.has("visor_tint"):
 						material = _visor_material(material, manifest["visor_tint"])
 					mesh_node.set_surface_override_material(s, material)
@@ -228,31 +232,32 @@ func _material_of(part: String) -> Material:
 	if part.begins_with("light_") or part == "ceiling_ring_light" or part == "console_lamps":
 		return _display(Color(0.95, 0.95, 0.9))
 	if part == "cabin_shell":
-		return _cabin_material(Color(0.8, 0.8, 0.79), 0.85, 0.0, 0.03, 0.5)
+		return _cabin_material(WALL_ALBEDO, 0.85, 0.0, 0.5)
 	if part == "floor" or part == "hatch_frame" or part.begins_with("window_"):
-		return _cabin_material(Color(0.8, 0.8, 0.79), 0.8, 0.0, 0.03, 0.0)
+		return _cabin_material(WALL_ALBEDO, 0.8, 0.0, 0.0)
 	## [E] Console (review item 3): the housing front is near black and matte (no specular sheen: it must not read beige under the lamps),
 	## the shelf modules dark grey, the back and the posts silver with the dark vent band, the underside dark grey (crew1_1, round 4: not a white slab), the lockers dark.
+	## The console colours are LINEAR albedos (photo measures), converted for the shader's sRGB uniform (round 5: they went in as sRGB, 0.07 became 0.006 linear).
 	if part == "console_housing":
-		return _cabin_material(Color(0.028, 0.028, 0.032), 0.9, 0.0, 0.03, 0.0, 0.1)
+		return _cabin_material(Color(0.028, 0.028, 0.032).linear_to_srgb(), 0.9, 0.0, 0.0, 0.1)
 	if part == "console_shelf":
-		return _cabin_material(Color(0.07, 0.07, 0.075), 0.8, 0.0, 0.03, 0.0, 0.05)  # discovery2: dark grey modules, ~0.05-0.09 linear
+		return _cabin_material(Color(0.07, 0.07, 0.075).linear_to_srgb(), 0.8, 0.0, 0.0, 0.05)  # discovery2: dark grey modules, ~0.05-0.09 linear
 	if part == "console_back":
 		return _console_back_material()
 	if part == "console_under":
-		return _cabin_material(Color(0.10, 0.10, 0.11), 0.6, 0.2, 0.03, 0.0, 0.3)
+		return _cabin_material(Color(0.10, 0.10, 0.11).linear_to_srgb(), 0.6, 0.2, 0.0, 0.3)
 	if part == "console_lockers":
-		return _cabin_material(Color(0.02, 0.02, 0.024), 0.85, 0.0, 0.03, 0.0, 0.03)
+		return _cabin_material(Color(0.02, 0.02, 0.024).linear_to_srgb(), 0.85, 0.0, 0.0, 0.03)
 	## [E] Seats (review item 4, crew1_1): white shells, black pads and black carbon leg-rest frames.
 	if part.begins_with("seat_shell_"):
-		return _cabin_material(Color(0.82, 0.82, 0.81), 0.5, 0.0, 0.03, 0.0)
+		return _cabin_material(Color(0.82, 0.82, 0.81), 0.5, 0.0, 0.0)
 	if part.begins_with("seat_"):
-		return _cabin_material(Color(0.03, 0.03, 0.032), 0.7, 0.0, 0.03, 0.0, 0.2)
+		return _cabin_material(Color(0.03, 0.03, 0.032), 0.7, 0.0, 0.0, 0.2)
 	if part.begins_with("tablet_"):
-		return _cabin_material(Color(0.03, 0.03, 0.036), 0.85, 0.0, 0.03, 0.0, 0.03)  # glass front: dark, no metal sheen under the lamps
+		return _cabin_material(Color(0.03, 0.03, 0.036).linear_to_srgb(), 0.85, 0.0, 0.0, 0.03)  # glass front: dark, no metal sheen under the lamps
 	if part.begins_with("hotas_"):
-		return _cabin_material(Color(0.06, 0.06, 0.065), 0.5, 0.4, 0.03, 0.0)
-	return _cabin_material(Color(0.09, 0.09, 0.1), 0.45, 0.3, 0.03, 0.0)  # buttons, handle
+		return _cabin_material(Color(0.06, 0.06, 0.065), 0.5, 0.4, 0.0)
+	return _cabin_material(Color(0.09, 0.09, 0.1), 0.45, 0.3, 0.0)  # buttons, handle
 
 
 ## The visor: copper tint on the upper part, dark clear glass below (manifest crew_figure.visor_tint, crew_figure.toml [helmet]).
@@ -276,7 +281,6 @@ func _console_back_material() -> ShaderMaterial:
 	m.set_shader_parameter("albedo", Color(0.30, 0.31, 0.33))  # [E] crew1_1: brushed silver, mid grey under the ring light
 	m.set_shader_parameter("roughness", 0.5)
 	m.set_shader_parameter("metallic", 0.25)
-	m.set_shader_parameter("ambient_visibility", 0.03)
 	m.set_shader_parameter("seam_depth", 0.0)
 	_materials["console_back"] = m  # gets the fill term every frame like the other cabin materials
 	var centre: Dictionary = config.screens.get("centre", {})
@@ -302,15 +306,14 @@ func _display(colour: Color) -> ShaderMaterial:
 	return _materials[key]
 
 
-func _cabin_material(albedo: Color, roughness: float, metallic: float, ambient: float, seams: float, specular := 0.4) -> ShaderMaterial:
-	var key := "cabin_%s_%s_%s_%s_%s_%s" % [albedo, roughness, metallic, ambient, seams, specular]
+func _cabin_material(albedo: Color, roughness: float, metallic: float, seams: float, specular := 0.4) -> ShaderMaterial:
+	var key := "cabin_%s_%s_%s_%s_%s" % [albedo, roughness, metallic, seams, specular]
 	if not _materials.has(key):
 		var m := ShaderMaterial.new()
 		m.shader = CABIN_SHADER
 		m.set_shader_parameter("albedo", albedo)
 		m.set_shader_parameter("roughness", roughness)
 		m.set_shader_parameter("metallic", metallic)
-		m.set_shader_parameter("ambient_visibility", ambient)
 		m.set_shader_parameter("seam_depth", seams)
 		m.set_shader_parameter("specular", specular)
 		_materials[key] = m

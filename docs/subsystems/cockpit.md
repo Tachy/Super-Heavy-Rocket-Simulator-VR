@@ -108,7 +108,8 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   that helmet), `figure_skeleton(seat)` (Task 8 poses the arm bones). Figures load through `VehicleModels.scene_for` (keeps Skeleton3D / skin; `_meshes_of` does not).
   Default crew = seat count; the mission's crew count is not wired to the view yet.
 - Exterior hull parts of the capsule stage cast shadows double-sided (sun enters only through the windows).
-- Look: `shaders/cabin.gdshader` (lit_aerial look + `ambient_visibility` as AO so the sky does not light the closed cabin, procedural panel seams on the shell),
+- Look: `shaders/cabin.gdshader` (lit_aerial look; closed cabin: `ambient_light_disabled`, no sky ambient or sky radiance, glossy parts reflect the walls
+  (round 5, below); procedural panel seams on the shell),
   `cabin_glass.gdshader` (windows), screens through `display_colour.gdshader` (dark Dragon blue placeholder, display-referred). Lamps: `OmniLight3D` at the `[[light]]` rows
   plus two fill lights standing in for bounced light ([call], flux constants in the class), energy = `TowerLights.energy_of(cd, scene_per_cd_m2)` every frame. Seats: white shell + black pads (fix round 2);
   housing near black; walls white matte.
@@ -173,16 +174,36 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
   console (x 2.845; it covers the lamp panels; crew1_1 shows the dish over the console). Nodes `console_back` (silver back face + posts, brushed albedo 0.30,
   metallic 0.25, the dark vent band by shader: `cabin.gdshader` band, up -0.11..+0.07 from the centre screen centre, +-0.58 m), `console_under` (dark grey underside
   and top), `console_lamps` (emissive strips along the underside's back lip, crew1_1). The white slab of round 3 is gone.
-- Moire at the top of pilot_eye: shadow acne of the two shadow-casting console lamps, which hang 8 cm in front of the console face and light it at grazing
-  angles (gone with `--no_lamp_shadows`). Fix: the console parts (console_*, tablets, buttons, handle, lamp panels) are on render layer `CONSOLE_LAYER` (1 << 11)
-  and the console lamps' `light_cull_mask` excludes it (the lamps face the crew; ring and fill lights still light the console). The figures keep the lamp shadows.
+- Console lamps: the console parts (console_*, tablets, buttons, handle, lamp panels) are on render layer `CONSOLE_LAYER` (1 << 11) and the console lamps'
+  `light_cull_mask` excludes it (the lamps hang 8 cm in front of the console face and face the crew; ring and fill lights still light the console). The figures
+  keep the lamp shadows. (Round 4 took this for the moire's cause; round 5 found the real one, below.)
 - Helmet against eva_suit_detail2: egg-shaped shell (`egg_taper` 0.08, narrower at the front) with a low crown ridge (6 mm, fades before the visor); larger
   opening +-62 deg x -40..+38 deg; closed visor (35 mm dome) two-tone by shader (`visor_tint_split` 0.55: copper top, dark clear glass below, manifest
-  `crew_figure.visor_tint`); white frame bead (r 16 mm) with a black seal bead (r 12 mm) just inside; slim black pivot brackets (8 x 80 x 18 mm, beside the
+  `crew_figure.visor_tint`); white frame bead (r 16 mm) with a black seal bead (r 12 mm) just inside; round 5: round grey pivot buttons instead of the round-4 brackets (below) (round 4: 8 x 80 x 18 mm, beside the
   frame at eye height) instead of the grey blocks; grey collar (`[material.collar]` 0.30). Visor stays closed and copper (user decision).
 - Tests: `test_layout_is_one_consistent_fit` (eye to centre screen 0.60-0.75, shoulders 0.62-0.75 within the reach, gaze < 30 deg off the screen normal, figure eye =
   config eye, upper panel under the ceiling); foot trays move with the hip and stay above the floor (the crew1_1 x band no longer applies: launch posture); helmet test
   on the round-4 ranges; cockpit_config_test eye forward; cockpit_view_test figure eye at the config eye.
+
+### Fix round 5 (moire, black parts, helmet pivot)
+- Moire (concentric wood-grain rings on the dark upper panel, fine striping on the dark panels of pilot_eye and behind the helmets): the aerial perspective.
+  A/B on pilot_eye (`screenshots/m7-cockpit/moire/moire_ab_pilot_eye.png`, contrast-stretched): unchanged with every shadow off (`--no_shadows`), with the ring
+  and fill omnis off, with the Sun off; gone with `atm_fog` skipped in `cabin.gdshader`. `atm_to_point_model` forms S(camera) - T S(point) from table reads at
+  r ~ 6.4e6 m; over a path of metres the two reads differ by less than their float32 / filter resolution and the difference is rounding noise that changes
+  with distance. Fix (shared include, `atmosphere-scattering.md`): `atm_to_point_offset` evaluates paths shorter than `ATM_SHORT_PATH_M` (200 m) once at 200 m
+  along the same ray and scales (in-scatter x d / D, transmittance T^(d / D)); the fixed shot matches the fog-off shot. The round-3 seam fade at grazing view stays.
+- Black parts: the cabin materials took the sky's ambient light and radiance, scaled by AO 0.03, but the sky is far brighter than the dim cabin the eye
+  adaptation meters, so every reflection carried it (black seats, console, brackets and the lower visor mid / bluish grey; A/B `--no_sky_light`,
+  `moire/black_ab_hatch.png`). Now `cabin.gdshader` is `ambient_light_disabled` and adds the walls' reflection as emission: a uniform surround of luminance
+  `fill_surround` = fill x wall albedo (`CockpitView.WALL_ALBEDO`, set each frame) weighted with the split-sum environment BRDF (Karis 2014 fit);
+  `ambient_visibility` is gone. The console albedos are linear photo measures and are now converted for the sRGB uniform (they went in as sRGB:
+  0.07 became 0.006 linear, the face read pure black once the sky lift was gone).
+- Still grey: the figures' boots, seal and pivot (albedo 0.05) read ~0.5 sRGB. Not light: they sit at the AgX pivot. At the shots' field key 1.2 a 5 %
+  albedo is ~0.18 scene value, which AgX maps to mid grey; AgX contrast 2.0 (`--agx_contrast`) leaves them at ~0.53 while the console goes black. A darker
+  rendering needs a cabin exposure / tone rule (eye-adaptation subsystem, user decision).
+- Helmet: the visor pivot is a round grey button (`pivot_button_radius_m` 9.5 mm, `pivot_button_height_m` 4 mm, collar grey) at jaw height
+  (`pivot_el_deg` -30) 13 deg behind the opening edge (jsc2024e066389: 19 mm disc ~0.09 m below eye level, ~25 mm behind the seal); `helmet_side_vs_jsc066389`.
+- Debug options of `cockpit_shots.gd`: `--no_shadows`, `--lights_off=<patterns|sun>`, `--no_sky_light`, `--agx_contrast=<c>`.
 
 ## Validation
 - Wall check (scratch script, Task 1): inner profile >= 0.094 m from the exterior meridian and the neck well everywhere.
