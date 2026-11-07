@@ -98,6 +98,8 @@ struct Run {
     sim::LegTouchdown outcome = sim::LegTouchdown::None;
     double offset_m = 0.0, sink_mps = 0.0, m0_t = 0.0, used_t = 0.0, slope_deg = 0.0;
     double first_contact_offset_m = 0.0, lateral_mps = 0.0;  // at the first leg contact (review M-c)
+    double point_offset_m = 0.0;  // the chosen touchdown point from the dispersed spot
+    bool preferred = false;       // the point within the preferred slope (flat touchdown point plan)
     report::Report status;
 };
 
@@ -126,6 +128,8 @@ Run fly(Fixture& fx, const Dispersion& d) {
     Run r;
     r.m0_t = fx.mass_kg() / 1000.0;
     r.slope_deg = point.slope_rad / deg;
+    r.point_offset_m = point.offset_m;
+    r.preferred = point.within_preferred_slope;
     REQUIRE(fx.session.begin_powered_descent(point, fx.approach_azimuth_rad));
     // 0.1 s steps (as test_lunar_powered_descent.cpp)
     for (int i = 0; i < 1200 * 10 && fx.session.lunar_step() == sim::LunarStep::PoweredDescent; ++i) {
@@ -255,9 +259,10 @@ int fly_seeds(unsigned first, unsigned last, const SiteWindow* sw = nullptr) {
         const auto d = dispersion(seed);
         const auto run = sw ? fly_at(*sw, d) : fly(d);
         if (sw) std::printf("[lunar_campaign] %s ", sw->site.id.c_str());
-        std::printf("[lunar_campaign] case %2u: thrust %.3f, propellant %.3f, spot %.0f/%.0f m, slope %.1f deg: %s, offset %.2f m "
+        std::printf("[lunar_campaign] case %2u: thrust %.3f, propellant %.3f, spot %.0f/%.0f m, point %.0f m off, slope %.1f deg%s: %s, offset %.2f m "
                     "(%.2f m at first contact, lateral %.3f m/s), sink %.2f m/s, %.1f t at PDI, %.1f t used, %s\n",
-                    seed, d.thrust_factor, d.mass_factor, d.east_m, d.north_m, run.slope_deg, sim::id_of(run.outcome),
+                    seed, d.thrust_factor, d.mass_factor, d.east_m, d.north_m, run.point_offset_m, run.slope_deg,
+                    run.preferred ? "" : " (fallback)", sim::id_of(run.outcome),
                     run.offset_m, run.first_contact_offset_m, run.lateral_mps, run.sink_mps, run.m0_t, run.used_t, report::describe(run.status).c_str());
         std::fflush(stdout);
         if (run.outcome == sim::LegTouchdown::Landed && run.offset_m < 1.0 && run.sink_mps <= 1.1) ++landed;

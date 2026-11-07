@@ -148,9 +148,12 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   from the vehicle config by `touchdown_hazard_limits`; the hull's rest plane over the feet, every roll). IM-2: the
   nominal point fails, the target moves 28.3 m. With the hazard check `TouchdownPoint::height_m` is the feet's rest
   plane under the centre (IM-2: ~0.9 m above LOLA), so the descent targets the height the pads stand on, not LOLA.
-  The landing campaign flies the composed surface (20 / 21 within 1 m: seed 14 on an 8 deg slope 1.52 m off after a
-  0.02 m first contact: rigid-body rocking after the engines-off contact, the hull swinging round a single sticking
-  downhill foot - traced in follow-up U-8, `moon-surface.md` open points; accepted by the user 2026-11-06 as real behaviour of a tall lander with free roll at the 8 deg slope limit, a known red; known-issues). The mission start checks the
+  The landing campaign flies the composed surface. With the preferred slope (2026-11-07) every chosen point of the
+  campaigns is within 5 deg (1.3-4.9 deg, 0-582 m from the dispersed spot): dispersed 20 / 21 within 1 m (seed 14,
+  formerly 1.52 m on 8.0 deg, now green; seed 19 1.04 m on 4.8 deg), sites 5 / 5, nightly Apollo 11 6 / 7 (seed 2
+  1.06 m on 4.9 deg; was 4 / 7), Apollo 15 and 17 7 / 7. The two misses touch first within 0.02 m and then rock about
+  a sticking foot after the engine cut (follow-up U-8 mechanism, `moon-surface.md` open points) - still near 5 deg;
+  open point below. The mission start checks the
   touchdown point on a background thread (status "Landeplatz wird geprüft", follow-up U-7, `moon-surface.md`) after
   the outbound plan, for the approach the flight will fly (ruling R13): the plan's LLO plane over the site at its
   touchdown (`mission::llo_approach_azimuth`, the ground velocity as `LunarDescentPlanner` computes it at a pass:
@@ -430,14 +433,13 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   re-plan after the trim; no boil-off in the stay; no degraded profile for automatic aborts from fast low states (PEG
   saturates: 111 x 115 km); status at burn end shows osculating elements (95 x 100 km for a 100 km LLO); the sub-orbital
   cutoff guard is untested.
-- Landing on 6-8 deg: the engines cut at the first leg contact with the hull vertical; the uphill feet touch first and
-  the HLS rocks about a sticking foot (the U-8 rocking / swing, `moon-surface.md`), the CG travelling ~4.3 m over ~30 s
-  (Apollo 11 nightly seed 3: contact 0.27 m off, footprint 2.38 m off after settling at 7.8 deg; seeds 2 / 4 1.71 / 1.69 m
-  on 6.6 / 5.8 deg; Mons Mouton seed 14 1.51 m on 8.0 deg). A pure fall about the uphill feet would move the footprint
-  only ~0.1 m. Upright and intact, but outside the 1 m gate. The user accepted U-8 at the 8 deg slope limit; Apollo 11
-  misses at 5.8 deg on an ordinary mare site, ~3 of 7 landings, so the 8 deg limit and the 1 m gate disagree for this
-  vehicle: USER DECISION pending (slope limit, touchdown-point choice "flattest first", or the terminal procedure:
-  slope-aligned set-down / engines until the downhill feet touch); known-issues.
+- Landing near 5 deg: the engines cut at the first leg contact with the hull vertical; the uphill feet touch first and
+  the HLS rocks about a sticking foot (the U-8 rocking / swing, `moon-surface.md`). The preferred 5 deg slope (user
+  2026-11-07, flat touchdown point plan) took the campaigns from 37 / 41 to 39 / 41 within 1 m; the two misses are just
+  over the gate at just under 5 deg (dispersed seed 19 1.04 m on 4.8 deg, Apollo 11 nightly seed 2 1.06 m on 4.9 deg;
+  other points at 4.7-4.8 deg land 0.24-0.26 m off - terrain-dependent). Upright and intact. USER DECISION pending:
+  accept them, a lower preferred slope, or the terminal procedure (slope-aligned set-down / engines until the downhill
+  feet touch); known-issues.
 - Window search: the hard Sun rule uses the geometric horizon (`site_sun`); at crater / polar sites the first slot or
   the liftoff hour can be behind terrain (terrain horizon as in `tools/lunar_sun_scan.py`: Task 13 or later). The stay's
   plane change is budgeted, not flown: the flight's ascent still ends in the plane through the liftoff point and no

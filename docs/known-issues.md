@@ -290,13 +290,11 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   U-7 (2026-11-06) it runs on a background thread at the mission start (game responsive, status line "Landeplatz wird
   geprüft"); the wait itself is unchanged. The refuelling continuation (`continue_lunar_landing_mission`, inside
   the flight) still checks synchronously on the simulation thread. Only IM-2 ships (136 ms, a point 28.3 m off).
-- Lunar campaign seed 14 (8.0 deg, the planner's slope limit) lands 1.52 m off (gate 1 m) with 0.02 m at first
-  contact - the 8-14 campaign case is red since the Task 12 head; seeds 16 / 19 settle 0.85 m off. Traced in follow-up
-  U-8 (2026-11-06, `docs/subsystems/moon-surface.md` open points): not foot slip but rigid-body rocking after the
-  engines-off first contact on one uphill foot - the hull pivots through the slope, overshoots onto a single downhill
-  foot and swings round that sticking foot (1.17 m of the 1.52 m with no slip). No physics defect found; accepted
-  by the user 2026-11-06 as real behaviour of a tall lander with free roll at the 8 deg slope limit; seed 14 stays a known
-  red in `[lunar_campaign][slow]` (gate 1 m, not loosened).
+- Lunar campaign rocking (follow-up U-8, 2026-11-06, `docs/subsystems/moon-surface.md` open points): not foot slip
+  but rigid-body rocking after the engines-off first contact on one uphill foot - the hull pivots through the slope,
+  overshoots onto a single downhill foot and swings round that sticking foot. Seed 14 (1.52 m on 8.0 deg) is green
+  since the preferred 5 deg touchdown slope (2026-11-07); seed 19 now chooses a 4.8 deg point and settles 1.04 m off
+  (gate 1 m, not loosened): the 15-21 case of `[lunar_campaign][slow]` is red - see "Flat touchdown point plan" below.
 
 ## Moon procedural surface plan, Task 16: Sun shadows on the Earth (2026-11-05)
 - The Earth's near-field shadow map covers 500 m-4 km of view depth around the eye (terrain-rendering.md "Near-field Sun
@@ -375,13 +373,10 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 
 ## Lunar sites plan, Task 13 (2026-11-07)
 
-- Landing on 6-8 deg slopes: the engines cut at the first leg contact with the hull vertical, the HLS falls onto its
-  downhill feet and its footprint ends 1.5-2.4 m downhill of the touchdown point (upright, intact). Nightly site campaign
-  Apollo 11 seeds 2 / 3 / 4: 1.71 / 2.38 / 1.69 m on 6.6 / 7.8 / 5.8 deg (`[nightly]` red, 4 / 7); Mons Mouton seed 14
-  1.51 m on 8.0 deg (the pre-existing `[slow]` red). Mechanism: after the engine cut the HLS rocks about a sticking foot
-  (U-8; CG moves ~4.3 m over ~30 s), not a simple fall onto the downhill feet (~0.1 m). U-8 was accepted at 8 deg, but
-  Apollo 11 misses at 5.8 deg (3 of 7): the slope limit and the 1 m gate disagree. Fix by the slope limit, the
-  touchdown-point choice or the terminal phase: `docs/subsystems/lunar.md` open points; USER DECISION.
 - Render checks: an eye placed by `--eye_height` over the site centre can stand next to a drawn boulder (Apollo 15
   LM-window view); the AS11/15/17 comparisons are at the photo azimuths only approximately (the camera stations are
   not reproduced).
+
+## Flat touchdown point plan (2026-11-07)
+
+- The touchdown search prefers points within 5 deg (user decision 2026-11-07); the 6-8 deg landings of the lunar sites plan Task 13 (Apollo 11 nightly 4 / 7, 1.69-2.38 m; seed 14 1.51 m) are gone. Two landings just under 5 deg still rock (U-8) just over the 1 m gate: dispersed seed 19 1.04 m on 4.8 deg (`[lunar_campaign][slow]` 15-21 red, 6 / 7) and Apollo 11 nightly seed 2 1.06 m on 4.9 deg (`[nightly]` red, 6 / 7). Campaigns 39 / 41 (was 37 / 41). Accept, a lower preferred slope or the terminal procedure: `docs/subsystems/lunar.md` open points; USER DECISION.

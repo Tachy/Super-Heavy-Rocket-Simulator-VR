@@ -1466,8 +1466,11 @@ paper, whose PDF was not reachable); Chandrasekhar's H(1) = 2.9078 for conservat
   (constant thrust only scales gravity: the rocking geometry is unchanged); an RCS roll-rate damper 1.35 / 0.49 /
   0.16 m; crush force 1.0 MN 1.39 / 0.41 / 0.14 m; a commanded touchdown roll 0.50 m (a leg pointing downhill) or
   1.93 m (an edge downhill) for seed 14 alone - terrain-dependent, no rule. Baseline 1.52 / 0.63 / 0.18 m. Accepted
-  by the user 2026-11-06 as the real behaviour of a tall lander with free roll at the 8 deg slope limit; seed 14 stays a
-  known red in `[lunar_campaign][slow]` (the 1 m gate is not loosened).
+  by the user 2026-11-06 as the real behaviour of a tall lander with free roll at the 8 deg slope limit (the numbers
+  above are from that run).
+  Since the preferred 5 deg slope (flat touchdown point plan, 2026-11-07) every campaign point is within 5 deg: seed 14
+  lands green; seed 19 moved from 6.7 deg (0.85 m) to a 4.8 deg point and settles 1.04 m off - flatter is not always
+  closer, the rocking is terrain-dependent (`lunar.md` open points, USER DECISION; the 1 m gate is not loosened).
 - Two Moon surfaces in one tick: the body's own ground contact (`FlightBody::resolve_ground_contact` via
   `ReferenceBody`) uses the full-detail point surface (relief at every point, rocks >= 1 cm, exact `rock_top`, normal
   over +-1 m, ~13 / ~50 us), the legs and base ring the contact surface (8 cm lattice, rocks >= 5 cm, interpolated
