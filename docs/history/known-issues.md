@@ -112,3 +112,40 @@ Resolved or superseded by later entries (trim margin green since 2026-11-06, ent
 - (fixed 2026-11-07: `package.ps1` runs `build_models.py --check` first)
 - `tools/package.ps1` packs `data/models` unchecked: a stale or missing local model would ship in the installer. Open (review
   2026-11-01 F5; fix: stop packaging when the manifest hash does not match `build_models.input_hash`).
+
+## Moved 2026-11-07 (notes, not open issues; user: "jo")
+
+- Trim margin, "The ship trims belly first with control margin on its flaps": green since 2026-11-06. The hypersonic
+  cases follow the schedule (Mach 21 / 65 km: schedule 53.2 deg and +6 deg: forward 45.8 / 52.4 deg); the terminal point
+  (Mach 4.5 / 40 km) checks both ends of what the terminal steering commands there: the least-lift end, capped by the
+  flaps' trim with 15 deg control margin (user 2026-11-06, `EntryAeroTable::highest_trimmed_alpha_rad`, 68 deg at 35 t:
+  forward 74.3, aft 24.9 deg) and the most-lift end (50 deg: 44.6 / 46.8 deg), plus Mach 3.5 / 37 km (on the cap's own
+  finer Mach grid) and Mach 3.625 (between its nodes); 1 deg above the cap at Mach 4.5 the flown allocation leaves the
+  window. At the residue limit (~41 t) the cap is the schedule at Mach 0.8-1.5 (no less-lift attitude: accepted, user
+  2026-11-06); that half is flat (well-defined, no division by its zero span). Details: ship-entry-return.md.
+- Detailed subsystem notes - vehicle data (Block 3, Falcon 9, Crew Dragon, HLS), ascent, booster return and catch,
+  SCvx landing, ship entry / flip / catch / return, legs, RCS, capsule entry and parachutes, lunar missions - with
+  their decisions, validation numbers and `STARSIM_DEBUG_*` diagnostics live in `docs/subsystems.md`. Read the
+  relevant section before changing a subsystem and update it with the change.
+- Standing decisions from there: only Block 3 / V3 is modelled (2026-10-13); Super Heavy is always caught, Falcon 9
+  lands on legs; physics first - webcast propellant gauges that the engines cannot explain are not followed
+  (2026-10-14); Starship throttle schedules are guidance choices, not vehicle data.
+- In scaled space the Earth is a 256x128 ellipsoid mesh (facets up to ~0.6 km below the true surface); closer, the
+  streamed terrain quadtree (`game/world/terrain/`, M8 Plan B) draws it: with the Earth terrain loaded it follows
+  `StarsimCore.surface_samples` (relief, site plateaus, sea at the geoid) plus NAIP / Sentinel-2 imagery, without data/
+  the flat rule (the pad height near launch sites). Physics ground (M8 Plan A): with `FlightSession::set_earth_terrain` (the game, `[data]`
+  tests) the real Earth terrain - flat plateaus at the derived site heights under every pad / landing zone, 3DEP /
+  GLO-30 / ETOPO beyond, water at the EGM2008 geoid; without it (all non-`[data]` tests, the comparison mode) flat at
+  the site height (FlightBody::ground_height_m) with the coarse committed geoid as the sea. Site heights in
+  `launch_sites.toml` are ellipsoidal [D] (`tools/data_pipeline/site_heights.py`; Starbase -21.11 m). Gentle contact
+  (<= 3 m/s, <= 10 deg) rests, harder contact is an impact. Landing legs creep downhill (~0.05 m/s) on slopes >= 2 deg
+  and are never judged landed there (off-plateau only; not fixed). Sky, haze and limb come from the precomputed
+  atmosphere (M8, `docs/subsystems.md` "Atmosphere rendering"): every Earth surface, the sea's reflected sky, Moon, Sun,
+  stars and vehicles are seen through it, with eye adaptation (gain <= 25) and the eclipse sky; one Sun
+  light, evaluated at the followed body. Unverified: NAIP suggests the real OLP-1 mount stands some tens of metres WSW
+  of our [E] site coordinates. Details: `docs/subsystems.md` "Earth terrain and geoid".
+- C++ sources are UTF-8 (/utf-8).
+- Interactive regression check (keys injected, logs clock/altitude/throttle): `res://tests/flight_check.gd`.
+- Horizons serves DE441; our DE440 Moon differs by up to 3.3 m (1990-2040). Tolerances reflect this.
+- `cloud_far_check.gd`: the Moon-view case uses the cached `data/weather/cache/era5_1089330.wthr` and, when it is missing, fetches the epoch's ERA5 pair through the weather service (`WeatherService.active_files`, 2026-11-07); the file was lost in the 2026-11-05 data incident, not evicted by the 4 GB cap. The run of 2026-11-07 passes all 25 checks (fetch 22 s,
+  `era5_1089326`), the hand-over cases included: the two hand-over fade failures noted before did not recur.
