@@ -1,6 +1,8 @@
 #include "flight_sim.hpp"
 
+#include <atomic>
 #include <cmath>
+#include <thread>
 #include <optional>
 #include <string>
 
@@ -20,6 +22,8 @@
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/ascent_profile_planner.hpp"
 #include "starsim/sim/earth_terrain_loader.hpp"
+#include "starsim/config/lunar_site_config.hpp"
+#include "starsim/sim/lunar_windows.hpp"
 #include "starsim/sim/mission_start.hpp"
 #include "starsim/sim/refuelling_campaign_setup.hpp"
 #include "starsim/sim/terrain_cache.hpp"
@@ -47,10 +51,29 @@ private:
 
 }  // namespace
 
-FlightSim::~FlightSim() { runner_.reset(); }
+// A window search on a thread of its own: the command (on the simulation thread) takes the environment snapshot and
+// starts it; its poll hands the outcome over once `done`. The destructor cancels and joins.
+struct FlightSim::WindowJob {
+    std::atomic<bool> cancel{false}, done{false};
+    std::atomic<double> progress{0.0};
+    sim::LunarWindowResult result;                 // written by the thread before done
+    std::optional<report::Report> failure;         // a refusal thrown out of the search
+    bool internal_error = false;
+    std::thread thread;
+    ~WindowJob() {
+        cancel = true;
+        if (thread.joinable()) thread.join();
+    }
+};
+
+FlightSim::~FlightSim() {
+    runner_.reset();
+    window_jobs_.clear();
+}
 
 void FlightSim::setup(const godot::String& config_dir) {
     runner_.reset();  // joins the old thread before its session and context go
+    window_jobs_.clear();  // cancels and joins the window searches
     config_dir_ = std::filesystem::path(config_dir.utf8().get_data());
     context_ = {};
     commands_.clear();
@@ -182,11 +205,91 @@ std::uint64_t FlightSim::post_deferred(const char* name, std::function<SessionPo
     return id;
 }
 
+namespace {
+
+godot::Dictionary window_dict(const sim::LunarLandingWindow& w) {
+    godot::Dictionary d;
+    d["mission_start_tdb_s"] = w.mission_start.tdb_seconds_past_j2000();
+    d["touchdown_tdb_s"] = w.touchdown.tdb_seconds_past_j2000();
+    d["liftoff_tdb_s"] = w.liftoff.tdb_seconds_past_j2000();
+    d["sun_elevation_deg"] = w.sun_elevation_rad * constants::rad_to_deg;
+    d["sun_azimuth_deg"] = w.sun_azimuth_rad * constants::rad_to_deg;
+    d["daylight_after_touchdown_s"] = w.daylight_after_touchdown_s;
+    d["propellant_reserve_kg"] = w.propellant_reserve_kg;
+    d["llo_inclination_deg"] = w.llo_inclination_rad * constants::rad_to_deg;
+    d["orbit"] = godot::String(w.orbit == mission::LunarOrbitKind::Nrho ? "nrho" : "llo");
+    return d;
+}
+
+}  // namespace
+
+int64_t FlightSim::find_lunar_windows(const godot::String& mission_id, double latitude_deg, double longitude_deg,
+                                      double stay_s, double start_tdb_s) {
+    const std::string id = mission_id.utf8().get_data();
+    auto job = std::make_shared<WindowJob>();
+    const auto posted = post_deferred("find_lunar_windows", [this, id, latitude_deg, longitude_deg, stay_s, start_tdb_s,
+                                                              job](sim::FlightSession& session) -> SessionPoll {
+        sim::LunarWindowRequest request;
+        request.mission_id = id;
+        request.site = config::lunar_site_at(config_dir_, latitude_deg * constants::deg_to_rad,
+                                             longitude_deg * constants::deg_to_rad);  // throws lunar.site_no_product
+        request.stay_s = stay_s;
+        request.start = epoch(start_tdb_s);
+        // The snapshot of the session's sources and flags is taken here, on its thread; the search reads only that.
+        auto environment = sim::lunar_window_environment(session);
+        job->thread = std::thread([job, environment = std::move(environment), config_dir = config_dir_,
+                                   request = std::move(request)]() {
+            try {
+                job->result = sim::find_lunar_landing_windows(environment, config_dir, request, [&job](double p) {
+                    job->progress = p;
+                    return !job->cancel.load();
+                });
+            } catch (const report::Refusal& refusal) {
+                job->failure = refusal.report();
+            } catch (const config::DataMissing& missing) {
+                job->failure = missing.report();
+            } catch (const std::exception& e) {
+                godot::UtilityFunctions::push_error(godot::String("FlightSim.find_lunar_windows: ") + godot::String::utf8(e.what()));
+                job->internal_error = true;
+            }
+            job->done = true;
+        });
+        return [job](sim::FlightSession&) -> std::optional<Outcome> {
+            if (!job->done) return std::nullopt;
+            if (job->thread.joinable()) job->thread.join();
+            if (job->internal_error) return Outcome{false, report_dict(report::make(report::Code::command_internal_error))};
+            godot::Array windows;
+            for (const auto& w : job->result.windows) windows.push_back(window_dict(w));
+            godot::Dictionary data;
+            data["windows"] = windows;
+            if (job->failure) return Outcome{false, report_dict(*job->failure), data};
+            if (job->result.refusal) return Outcome{false, report_dict(*job->result.refusal), data};
+            return Outcome{true, {}, data};
+        };
+    });
+    if (posted == 0) return 0;
+    window_jobs_[posted] = job;
+    // finished jobs of dropped commands go with them
+    for (auto it = window_jobs_.begin(); it != window_jobs_.end();) {
+        it = (commands_.find(it->first) == commands_.end() && it->second->done) ? window_jobs_.erase(it) : std::next(it);
+    }
+    return static_cast<int64_t>(posted);
+}
+
+bool FlightSim::cancel(int64_t id) {
+    const auto it = window_jobs_.find(static_cast<std::uint64_t>(id));
+    if (it == window_jobs_.end() || it->second->done) return false;
+    it->second->cancel = true;
+    return true;
+}
+
 godot::Dictionary FlightSim::result(int64_t id) const {
     godot::Dictionary d;
     d["done"] = false;
     d["ok"] = false;
     d["report"] = report_dict(report::Report{});
+    const auto job = window_jobs_.find(static_cast<std::uint64_t>(id > 0 ? id : 0));
+    if (job != window_jobs_.end()) d["progress"] = job->second->progress.load();  // a window search
     if (!runner_ || id <= 0) {
         d["done"] = true;
         d["report"] = report_dict(report::make(report::Code::command_unknown_id));
@@ -204,6 +307,7 @@ godot::Dictionary FlightSim::result(int64_t id) const {
         d["ok"] = it->second.second->ok;
         d["report"] = it->second.second->report;
         d["data"] = it->second.second->data;
+        if (it->second.second->data.has("windows")) d["windows"] = it->second.second->data["windows"];
     } else {
         d["report"] = report_dict(report::make(report::Code::command_unknown_id));
     }
@@ -273,15 +377,26 @@ int64_t FlightSim::launch_from_site(const godot::String& vehicle_id, const godot
     }));
 }
 
-int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s, bool wait_on_pad, double countdown_s) {
+int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s, bool wait_on_pad, double countdown_s,
+                                 const godot::Dictionary& options_in) {
     const std::string id = mission_id.utf8().get_data();
     // Follow-up U-7: a lunar landing's touchdown search (up to ~30 s for a refused site) runs on a background thread;
     // the command holds the session meanwhile and the snapshot carries its status ("Landeplatz wird geprüft").
-    return static_cast<int64_t>(post_deferred("start_mission", [this, id, tdb_s, wait_on_pad,
-                                                                countdown_s](sim::FlightSession& session) -> SessionPoll {
+    const godot::Dictionary lunar_in = options_in.get("lunar", godot::Dictionary());
+    return static_cast<int64_t>(post_deferred("start_mission", [this, id, tdb_s, wait_on_pad, countdown_s,
+                                                                lunar_in](sim::FlightSession& session) -> SessionPoll {
         sim::StartOptions options;
         options.wait_on_pad = wait_on_pad;
         options.countdown_s = countdown_s;
+        if (!lunar_in.is_empty()) {  // a free site: throws lunar.site_no_product (the command's refusal)
+            sim::LunarStartOverride lunar;
+            lunar.site = config::lunar_site_at(config_dir_, double(lunar_in.get("lat_deg", 0.0)) * constants::deg_to_rad,
+                                               double(lunar_in.get("lon_deg", 0.0)) * constants::deg_to_rad);
+            lunar.stay_s = lunar_in.get("stay_s", 0.0);
+            lunar.mission_start = epoch(lunar_in.get("mission_start_tdb_s", tdb_s));
+            if (lunar_in.has("touchdown_tdb_s")) lunar.touchdown = epoch(lunar_in["touchdown_tdb_s"]);
+            options.lunar = lunar;
+        }
         // a launch from the pad plans its ascent inside sim::start_mission (seconds to ~45 s): the planning flag is
         // published first ("Startvorbereitung" on the session as it stands - the call places the vehicle)
         std::optional<PlanningFlag> planning;
@@ -830,8 +945,11 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("launch_from_site", "vehicle_id", "site_id", "heading_deg", "tdb_s", "countdown_s",
                                   "ascent_target"),
                          &FlightSim::launch_from_site, DEFVAL(0.0), DEFVAL(godot::Dictionary()));
-    ClassDB::bind_method(D_METHOD("start_mission", "mission_id", "tdb_s", "wait_on_pad", "countdown_s"),
-                         &FlightSim::start_mission, DEFVAL(false), DEFVAL(0.0));
+    ClassDB::bind_method(D_METHOD("start_mission", "mission_id", "tdb_s", "wait_on_pad", "countdown_s", "options"),
+                         &FlightSim::start_mission, DEFVAL(false), DEFVAL(0.0), DEFVAL(godot::Dictionary()));
+    ClassDB::bind_method(D_METHOD("find_lunar_windows", "mission_id", "lat_deg", "lon_deg", "stay_s", "start_tdb_s"),
+                         &FlightSim::find_lunar_windows);
+    ClassDB::bind_method(D_METHOD("cancel", "id"), &FlightSim::cancel);
     ClassDB::bind_method(D_METHOD("mission_site_id"), &FlightSim::mission_site_id);
     ClassDB::bind_method(D_METHOD("mission_display_name"), &FlightSim::mission_display_name);
     ClassDB::bind_method(D_METHOD("mission_start_tdb_s"), &FlightSim::mission_start_tdb_s);

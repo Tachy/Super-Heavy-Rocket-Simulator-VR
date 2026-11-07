@@ -772,7 +772,69 @@ func _check_lunar(config_dir: String, tdb: float) -> bool:
 	_check(not nrho.result(nid).get("ok", true) and nrho.result(nid).get("report", {}).get("code", "") == "lunar.mission_infeasible",
 			"NRHO landing at 120 t is refused honestly")
 	print("  NRHO landing start (refused): %.1f s" % ((Time.get_ticks_msec() - started) / 1000.0))
+	_check_lunar_sites(config_dir, tdb)
 	return true
+
+
+# Lunar sites plan Task 10: site tile requests, the site switch, the window search and a start with the window.
+func _check_lunar_sites(config_dir: String, tdb: float) -> void:
+	var core := StarsimCore.new()
+	core.load_terrain(config_dir)
+	var lat := 0.67416   # Apollo 11
+	var lon := 23.47314
+	var requests: Array = core.lunar_site_tile_requests(lat, lon)
+	_check(requests.size() == 2 and requests[0].get("kind", "") == "height" and requests[1].get("kind", "") == "albedo",
+			"lunar_site_tile_requests: one entry per kind")
+	var height: Dictionary = requests[0]
+	_check(height.get("ok", false) and not (height["ranges"] as Array).is_empty() and str(height["cache_key"]) != ""
+			and str((height["ranges"] as Array)[0].get("url", "")).begins_with("http")
+			and int((height["ranges"] as Array)[0]["last"]) >= int((height["ranges"] as Array)[0]["first"]),
+			"Apollo 11 height tile request has ranges (%d)" % (height["ranges"] as Array).size())
+	var bad: Dictionary = core.assemble_lunar_site_tile(height, [])
+	_check(not bad.get("ok", true) and bad.get("report", {}).has("code"), "assemble with the wrong body count is refused")
+	if not bool(height.get("present", false)) or not core.lunar_site_tiles_present(lat, lon):
+		print("  SKIP lunar site windows: Apollo 11 tile not in data/terrain/sites")
+		return
+	var set_result: Dictionary = core.set_lunar_site(lat, lon)
+	_check(set_result.get("ok", false), "set_lunar_site Apollo 11: %s" % I18n.report_text(set_result.get("report", {})))
+	_check(core.surface_resolution_m("moon", lat, lon) < 100.0, "active site: the 60 m tile (%.0f m)" % core.surface_resolution_m("moon", lat, lon))
+	var missing: Dictionary = core.set_lunar_site(-40.0, 100.0)
+	_check(not missing.get("ok", true) and str(missing["report"].get("code", "")).begins_with("data."),
+			"set_lunar_site without a tile: data code, state kept")
+	_check(core.surface_resolution_m("moon", lat, lon) < 100.0, "a failed switch keeps the active site")
+
+	var started := Time.get_ticks_msec()
+	var sim := FlightSim.new()
+	sim.setup(config_dir)
+	var wid: int = sim.find_lunar_windows("hls_lunar_llo", lat, lon, 24.0 * 3600.0, tdb)
+	_check(wid > 0, "find_lunar_windows posts a command")
+	var seen_progress := false
+	while Time.get_ticks_msec() - started < 180000 and not sim.result(wid).get("done", false):
+		seen_progress = seen_progress or float(sim.result(wid).get("progress", 0.0)) > 0.0
+		sim.advance_to(tdb)
+		OS.delay_msec(5)
+	var found: Dictionary = sim.result(wid)
+	var windows: Array = found.get("windows", [])
+	_check(found.get("done", false) and found.get("ok", false) and windows.size() >= 3,
+			"Apollo 11 window search: ok, %d windows (%s)" % [windows.size(), I18n.report_text(found.get("report", {}))])
+	print("  lunar window search: %.1f s, progress seen %s" % [(Time.get_ticks_msec() - started) / 1000.0, seen_progress])
+	if windows.is_empty():
+		return
+	var w: Dictionary = windows[0]
+	_check(float(w["touchdown_tdb_s"]) > float(w["mission_start_tdb_s"]) and float(w["liftoff_tdb_s"]) > float(w["touchdown_tdb_s"])
+			and float(w["sun_elevation_deg"]) > 0.0 and str(w["orbit"]) == "llo" and w.has("propellant_reserve_kg")
+			and w.has("sun_azimuth_deg") and w.has("daylight_after_touchdown_s") and w.has("llo_inclination_deg"),
+			"window dictionary fields")
+	# cancel: a second search for another stay is stopped right away
+	var cid: int = sim.find_lunar_windows("hls_lunar_llo", lat, lon, 36.0 * 3600.0, tdb)
+	sim.cancel(cid)
+	_check(sim.wait_idle(120.0) and sim.result(cid).get("done", false), "cancelled search ends")
+	# start the mission with the window
+	var started_id: int = sim.start_mission("hls_lunar_llo", tdb, false, 0.0, {"lunar": {"lat_deg": lat, "lon_deg": lon,
+			"stay_s": 24.0 * 3600.0, "mission_start_tdb_s": w["mission_start_tdb_s"], "touchdown_tdb_s": w["touchdown_tdb_s"]}})
+	_check(sim.wait_idle(180.0) and sim.result(started_id).get("ok", false),
+			"start_mission with the window: %s" % I18n.report_text(sim.result(started_id).get("report", {})))
+	_check(absf(sim.mission_start_tdb_s() - float(w["mission_start_tdb_s"])) < 1.0, "the mission starts at the window")
 
 
 # ISS missions (i6): the three kinds start, ISS / rendezvous / docking telemetry, station geometry, commands.

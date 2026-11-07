@@ -306,6 +306,22 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   the site surface load): `hls_lunar_llo` Apollo 11 2.1 s, Apollo 15 1.7 s, Tsiolkovskiy 3.1 s; `hls_lunar_nrho` to
   Apollo 11 refused in < 0.1 s after the daylight scan (was 488 s).
 
+
+- Lunar sites in the bindings (plan Task 10; the game's site service and picker build on these): `StarsimCore`
+  `lunar_site_tile_requests(lat_deg, lon_deg)` (one entry per kind "height" / "albedo": `{kind, lat_deg, lon_deg,
+  cache_key, present, ranges: [{url, first, last}], ok, report}`; an albedo refusal `lunar.site_no_product` is non-fatal),
+  `assemble_lunar_site_tile(request, bodies)` (re-plans from kind / lat / lon, checks cache key and body count, writes
+  `data/terrain/sites/<key>.i16` then `.toml`; worker-callable), `lunar_site_tiles_present`, `set_lunar_site(lat, lon)`
+  (rebuilds the Moon terrain + composed surface with the site's tile off the lock, then swaps one `MoonState` bundle under
+  a mutex; every reader takes the bundle once, so a switch never mixes two sites; a failed switch keeps the old state;
+  until the first call the game has the global grid only, ruling R9). `FlightSim` `find_lunar_windows(mission_id, lat, lon,
+  stay_s, start_tdb_s)` is a deferred command whose search runs on a thread of its own (the environment snapshot is taken on
+  the simulation thread; the simulation flies on); `result(id)` adds `progress` and `windows` (the fields of
+  `LunarLandingWindow` in degrees / seconds TDB, `orbit` "llo" | "nrho"; also with a cancelled / refused search: the
+  windows found so far); `cancel(id)` stops it (`lunar.window_search_cancelled`). `start_mission(..., options)` takes
+  `{lunar: {lat_deg, lon_deg, stay_s, mission_start_tdb_s, touchdown_tdb_s}}` (`touchdown_tdb_s` optional: the window's
+  touchdown, so the LLO plane is the listed one; `StartOptions::lunar`). Smoke test: `_check_lunar_sites`.
+
 ## Standing decisions
 - Plan like mission planners: find the departure window, no epoch hopping (user 2026-10-18); re-plan from flight data.
 - Lunar plane wait is refused honestly rather than re-targeting in the LLO (user 2026-10-16); the plane itself is

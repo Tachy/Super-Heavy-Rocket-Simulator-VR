@@ -60,8 +60,21 @@ public:
     // for an unknown, invalid or ship-return mission, or a lunar mission the planner refuses (message: its reason).
     // wait_on_pad: launch missions stand on the pad and lift off at their scheduled T-0 (sim::StartOptions); countdown_s:
     // their countdown from `tdb_s` when the mission sets no [mission] countdown_s (StartOptions::countdown_s).
+    // options: {lunar: {lat_deg, lon_deg, stay_s, mission_start_tdb_s, touchdown_tdb_s}} - a lunar landing at a free site
+    // with the stay and window of find_lunar_windows (sim::StartOptions::lunar; touchdown_tdb_s optional: the window's
+    // touchdown, the LLO plane is chosen through the site then); other mission kinds ignore it.
     int64_t start_mission(const godot::String& mission_id, double tdb_s, bool wait_on_pad = false,
-                          double countdown_s = 0.0);
+                          double countdown_s = 0.0, const godot::Dictionary& options = {});
+    // Landing windows of a lunar landing mission (sim::find_lunar_landing_windows) at the site (lat_deg, lon_deg: MOON_ME)
+    // for `stay_s`, from `start_tdb_s` on: a deferred command (the search takes seconds, minutes at worst, on a
+    // thread of its own; the simulation goes on). result(id): {done, ok, report, progress (0..1), windows: [{
+    // mission_start_tdb_s, touchdown_tdb_s, liftoff_tdb_s, sun_elevation_deg, sun_azimuth_deg, daylight_after_touchdown_s,
+    // propellant_reserve_kg, llo_inclination_deg, orbit ("llo" | "nrho")}]}. Not ok: report (lunar.no_window ...,
+    // lunar.window_search_cancelled with the windows found until then). Needs the site's tile (lunar.site_tile_missing).
+    int64_t find_lunar_windows(const godot::String& mission_id, double latitude_deg, double longitude_deg, double stay_s,
+                               double start_tdb_s);
+    // Stops a running window search (its result becomes lunar.window_search_cancelled); false when `id` is none.
+    bool cancel(int64_t id);
     // Epoch (TDB s) the current flight began at: the launch, or a return mission's own epoch (the world clock jumps there).
     double mission_start_tdb_s() const;
     // Launch site id of the current flight (launch_from_site or the mission), "" before the first.
@@ -342,6 +355,10 @@ private:
     std::map<std::uint64_t, std::pair<godot::String, std::shared_ptr<Outcome>>> commands_;
     std::optional<bool> realtime_planning_;  // last posted value
     std::uint64_t realtime_planning_id_ = 0;
+    struct WindowJob;  // a window search's thread (flight_sim.cpp)
+    // Main thread only. Declared before runner_ and after the ephemeris / orientations: destroyed (joined) after the runner
+    // and before those sources the search reads.
+    std::map<std::uint64_t, std::shared_ptr<WindowJob>> window_jobs_;
     std::unique_ptr<sim::SessionRunner> runner_;  // owns the session; last member: destroyed (joined) first
 };
 

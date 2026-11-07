@@ -45,6 +45,10 @@
 #include "starsim/report/report.hpp"
 #include "starsim/config/geoid_config.hpp"
 #include "starsim/sim/earth_terrain_loader.hpp"
+#include "starsim/config/lunar_site_config.hpp"
+#include "starsim/config/data_missing.hpp"
+#include "starsim/config/lunar_site_tile.hpp"
+#include "starsim/sim/lunar_site.hpp"
 #include "starsim/sim/terrain_cache.hpp"
 
 namespace starsim::bindings {
@@ -288,9 +292,10 @@ godot::Dictionary StarsimCore::load_terrain(const godot::String& config_dir) {
     const std::filesystem::path config(config_dir.utf8().get_data());
     const auto data_dir = config.parent_path() / "data";
     moon_cache_dir_ = data_dir / "cache";
+    moon_config_dir_ = config;
+    moon_data_dir_ = data_dir;
     const auto say = [](const std::string& message) { godot::UtilityFunctions::print(godot::String::utf8(message.c_str())); };
     earth_terrain_.reset();
-    moon_terrain_.reset();
     coarse_geoid_.reset();
     try {
         coarse_geoid_ = std::make_shared<const environment::Geoid>(config::load_coarse_geoid(config));
@@ -315,46 +320,201 @@ godot::Dictionary StarsimCore::load_terrain(const godot::String& config_dir) {
             moon_config_failed = true;
         }
     }
+    auto moon = std::make_shared<MoonState>();
     if (moon_grid_present) {
         try {
-            moon_terrain_ = sim::shared_lunar_terrain(config, data_dir);
+            std::vector<std::string> notes;
+            moon = build_moon_state(nullptr, notes);
+            for (const auto& note : notes) say(note);
         } catch (const std::exception& e) {
             say(std::string("Lunar terrain not loadable - smooth sphere: ") + e.what());
         }
     } else if (!moon_config_failed) {
         say("Lunar terrain missing - smooth sphere (python tools/data_pipeline/fetch.py)");
     }
-    moon_surface_.reset();
-    if (moon_terrain_ != nullptr) {
-        // The composed surface (LOLA + detail + rocks); rocks need the Diviner map: without it detail only.
-        for (const bool rocks : {true, false}) {
-            try {
-                moon_surface_ = sim::shared_moon_surface(config, data_dir, {true, rocks});
-                moon_unresolved_.reset();
-                if (!rocks) say("Lunar rocks unavailable without the Diviner map - surface detail without rocks");
-                break;
-            } catch (const std::exception& e) {
-                if (!rocks) say(std::string("Lunar surface detail not loadable - LOLA only: ") + e.what());
-            }
-        }
-    }
+    publish_moon_state(std::move(moon));
     godot::Dictionary result;
     result["earth"] = earth_terrain_ != nullptr;
-    result["moon"] = moon_terrain_ != nullptr;
+    result["moon"] = moon_state()->terrain != nullptr;
     return result;
 }
 
-const environment::Terrain* StarsimCore::terrain_of(const godot::String& body) const {
+std::shared_ptr<StarsimCore::MoonState> StarsimCore::moon_state() const {
+    const std::lock_guard<std::mutex> lock(moon_mutex_);
+    return moon_state_;
+}
+
+void StarsimCore::publish_moon_state(std::shared_ptr<MoonState> state) {
+    const std::lock_guard<std::mutex> lock(moon_mutex_);
+    moon_state_ = std::move(state);
+}
+
+std::shared_ptr<StarsimCore::MoonState> StarsimCore::build_moon_state(const config::LunarSiteConfig* site,
+                                                                      std::vector<std::string>& notes) const {
+    auto state = std::make_shared<MoonState>();
+    state->terrain = site != nullptr ? sim::shared_lunar_terrain(moon_config_dir_, moon_data_dir_, *site)
+                                     : sim::shared_lunar_terrain(moon_config_dir_, moon_data_dir_);
+    // The composed surface (LOLA + detail + rocks); rocks need the Diviner map: without it detail only.
+    for (const bool rocks : {true, false}) {
+        try {
+            state->surface = site != nullptr
+                                 ? sim::shared_moon_surface(moon_config_dir_, moon_data_dir_, {true, rocks}, *site)
+                                 : sim::shared_moon_surface(moon_config_dir_, moon_data_dir_, {true, rocks});
+            if (!rocks) notes.push_back("Lunar rocks unavailable without the Diviner map - surface detail without rocks");
+            break;
+        } catch (const std::exception& e) {
+            if (!rocks) notes.push_back(std::string("Lunar surface detail not loadable - LOLA only: ") + e.what());
+        }
+    }
+    return state;
+}
+
+godot::Dictionary StarsimCore::set_lunar_site(double latitude_deg, double longitude_deg) {
+    godot::Dictionary result;
+    result["ok"] = false;
+    result["report"] = report_dict(report::Report{});
+    if (moon_config_dir_.empty()) {
+        godot::UtilityFunctions::push_error("StarsimCore.set_lunar_site: call load_terrain() first");
+        result["report"] = report_dict(report::make(report::Code::command_internal_error));
+        return result;
+    }
+    try {
+        const auto site = config::lunar_site_at(moon_config_dir_, latitude_deg * constants::deg_to_rad,
+                                                longitude_deg * constants::deg_to_rad);
+        std::vector<std::string> notes;
+        auto state = build_moon_state(&site, notes);  // heavy, off the lock; the old state serves meanwhile
+        for (const auto& note : notes) godot::UtilityFunctions::print(godot::String::utf8(note.c_str()));
+        publish_moon_state(std::move(state));
+        result["ok"] = true;
+    } catch (const report::Refusal& refusal) {
+        result["report"] = report_dict(refusal.report());
+    } catch (const config::DataMissing& missing) {
+        result["report"] = report_dict(missing.report());
+    } catch (const std::exception& e) {
+        godot::UtilityFunctions::push_error(godot::String("StarsimCore.set_lunar_site: ") + godot::String::utf8(e.what()));
+        result["report"] = report_dict(report::make(report::Code::command_internal_error));
+    }
+    return result;
+}
+
+bool StarsimCore::lunar_site_tiles_present(double latitude_deg, double longitude_deg) const {
+    if (moon_config_dir_.empty()) return false;
+    try {
+        const auto site = config::lunar_site_at(moon_config_dir_, latitude_deg * constants::deg_to_rad,
+                                                longitude_deg * constants::deg_to_rad);
+        return sim::lunar_site_tiles_present(moon_config_dir_, moon_data_dir_, site);
+    } catch (const std::exception&) {  // no product holds the tile: nothing to be present
+        return false;
+    }
+}
+
+godot::Array StarsimCore::lunar_site_tile_requests(double latitude_deg, double longitude_deg) const {
+    godot::Array out;
+    if (moon_config_dir_.empty()) {
+        godot::UtilityFunctions::push_error("StarsimCore.lunar_site_tile_requests: call load_terrain() first");
+        return out;
+    }
+    std::vector<config::LunarTerrainProduct> products;
+    try {
+        products = config::load_lunar_terrain_products(moon_config_dir_);
+    } catch (const std::exception& e) {
+        godot::UtilityFunctions::push_error(godot::String("StarsimCore.lunar_site_tile_requests: ") +
+                                            godot::String::utf8(e.what()));
+        return out;
+    }
+    for (const char* kind : {"height", "albedo"}) {
+        godot::Dictionary d;
+        d["kind"] = godot::String(kind);
+        d["lat_deg"] = latitude_deg;
+        d["lon_deg"] = longitude_deg;
+        d["ok"] = false;
+        d["report"] = report_dict(report::Report{});
+        d["cache_key"] = godot::String();
+        d["present"] = false;
+        d["ranges"] = godot::Array();
+        try {
+            const auto request = config::plan_site_tile(products, kind, latitude_deg * constants::deg_to_rad,
+                                                        longitude_deg * constants::deg_to_rad);
+            godot::Array ranges;
+            for (const auto& r : request.ranges) {
+                godot::Dictionary range;
+                range["url"] = godot::String::utf8(r.url.c_str());
+                range["first"] = static_cast<int64_t>(r.first);
+                range["last"] = static_cast<int64_t>(r.last);
+                ranges.push_back(range);
+            }
+            d["cache_key"] = godot::String::utf8(request.cache_key.c_str());
+            d["present"] = std::filesystem::exists(moon_data_dir_ / "terrain" / "sites" / (request.cache_key + ".toml"));
+            d["ranges"] = ranges;
+            d["ok"] = true;
+        } catch (const report::Refusal& refusal) {
+            d["report"] = report_dict(refusal.report());  // e.g. an albedo tile across +-60 deg: non-fatal for the caller
+        } catch (const std::exception& e) {
+            godot::UtilityFunctions::push_error(godot::String("StarsimCore.lunar_site_tile_requests: ") +
+                                                godot::String::utf8(e.what()));
+            d["report"] = report_dict(report::make(report::Code::command_internal_error));
+        }
+        out.push_back(d);
+    }
+    return out;
+}
+
+godot::Dictionary StarsimCore::assemble_lunar_site_tile(const godot::Dictionary& request,
+                                                        const godot::Array& bodies) const {
+    godot::Dictionary result;
+    result["ok"] = false;
+    result["report"] = report_dict(report::Report{});
+    if (moon_config_dir_.empty()) {
+        godot::UtilityFunctions::push_error("StarsimCore.assemble_lunar_site_tile: call load_terrain() first");
+        result["report"] = report_dict(report::make(report::Code::command_internal_error));
+        return result;
+    }
+    try {
+        // The request is planned again from its site (the same products give the same ranges), as the CLI does.
+        const auto products = config::load_lunar_terrain_products(moon_config_dir_);
+        const std::string kind = godot::String(request.get("kind", "")).utf8().get_data();
+        const auto planned = config::plan_site_tile(products, kind, double(request.get("lat_deg", 0.0)) * constants::deg_to_rad,
+                                                    double(request.get("lon_deg", 0.0)) * constants::deg_to_rad);
+        const std::string key = godot::String(request.get("cache_key", "")).utf8().get_data();
+        if (planned.cache_key != key || static_cast<size_t>(bodies.size()) != planned.ranges.size()) {
+            godot::UtilityFunctions::push_error(
+                godot::String("StarsimCore.assemble_lunar_site_tile: request does not match the products or the body count (cache key ") +
+                godot::String::utf8(planned.cache_key.c_str()) + ")");
+            result["report"] = report_dict(report::make(report::Code::command_internal_error));
+            return result;
+        }
+        std::vector<std::vector<std::uint8_t>> raw;
+        raw.reserve(planned.ranges.size());
+        for (int64_t i = 0; i < bodies.size(); ++i) {
+            const godot::PackedByteArray body = bodies[i];
+            raw.emplace_back(body.ptr(), body.ptr() + body.size());
+        }
+        // The grid first, the .toml last: the toml is what lunar_site_tiles_present looks for.
+        config::write_terrain_grid_file(config::assemble_site_tile(planned, raw),
+                                        moon_data_dir_ / "terrain" / "sites" / (planned.cache_key + ".toml"));
+        result["ok"] = true;
+    } catch (const report::Refusal& refusal) {
+        result["report"] = report_dict(refusal.report());
+    } catch (const std::exception& e) {
+        godot::UtilityFunctions::push_error(godot::String("StarsimCore.assemble_lunar_site_tile: ") +
+                                            godot::String::utf8(e.what()));
+        result["report"] = report_dict(report::make(report::Code::command_internal_error));
+    }
+    return result;
+}
+
+std::shared_ptr<const environment::Terrain> StarsimCore::terrain_of(const godot::String& body) const {
+    const auto moon = moon_state();
     const auto lower = body.to_lower();
-    if (lower == "earth") return earth_terrain_.get();
-    if (lower == "moon") return moon_terrain_.get();
+    if (lower == "earth") return earth_terrain_;
+    if (lower == "moon") return moon->terrain;
     return nullptr;
 }
 
 godot::Dictionary StarsimCore::surface_samples(const godot::String& body, const godot::PackedFloat64Array& latitudes_deg,
                                                const godot::PackedFloat64Array& longitudes_deg) const {
     godot::Dictionary result;
-    const environment::Terrain* terrain = terrain_of(body);
+    std::shared_ptr<const environment::Terrain> terrain = terrain_of(body);
     godot::PackedFloat64Array heights;
     godot::PackedByteArray water;
     const bool present = terrain != nullptr && latitudes_deg.size() == longitudes_deg.size();
@@ -389,7 +549,8 @@ godot::Dictionary StarsimCore::surface_samples_detail(const godot::String& body,
                                                       const godot::PackedFloat64Array& latitudes_deg,
                                                       const godot::PackedFloat64Array& longitudes_deg,
                                                       double min_wavelength_m, double min_rock_diameter_m) const {
-    if (body.to_lower() != "moon" || moon_surface_ == nullptr || !moon_detail_on_) {
+    const auto moon = moon_state();
+    if (body.to_lower() != "moon" || moon->surface == nullptr || !moon_detail_on_) {
         return surface_samples(body, latitudes_deg, longitudes_deg);  // detail off: the LOLA samples
     }
     godot::Dictionary result;
@@ -410,7 +571,7 @@ godot::Dictionary StarsimCore::surface_samples_detail(const godot::String& body,
         units[static_cast<size_t>(k)] = {std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
     }
     std::vector<double> limited(units.size());
-    moon_surface_->heights_limited_m(units, min_wavelength_m, rock_min_m, limited);  // parallel, = the serial loop
+    moon->surface->heights_limited_m(units, min_wavelength_m, rock_min_m, limited);  // parallel, = the serial loop
     godot::PackedFloat64Array heights;
     godot::PackedByteArray water;
     heights.resize(n);
@@ -479,27 +640,29 @@ bool face_cell_ok(int face, int level, int64_t i, int64_t j, double min_diameter
 }  // namespace
 
 godot::Dictionary StarsimCore::moon_rocks(int face, int level, int64_t i, int64_t j, double min_diameter_m) const {
+    const auto moon = moon_state();
     // Out-of-range cells (and a NaN size) give an empty result; the rock layer may be absent (no Diviner map).
     std::vector<environment::Rock> rocks;
     double radius_m = 0.0;
-    if (moon_surface_ != nullptr && moon_detail_on_ && moon_rocks_on_ && moon_surface_->rocks_on() &&
-        moon_surface_->rocks_shared() != nullptr && face_cell_ok(face, level, i, j, min_diameter_m)) {
-        radius_m = moon_surface_->detail().sphere_radius_m();
-        rocks = moon_surface_->rocks().rocks_in_cell({face, level, i, j}, min_diameter_m);
+    if (moon->surface != nullptr && moon_detail_on_ && moon_rocks_on_ && moon->surface->rocks_on() &&
+        moon->surface->rocks_shared() != nullptr && face_cell_ok(face, level, i, j, min_diameter_m)) {
+        radius_m = moon->surface->detail().sphere_radius_m();
+        rocks = moon->surface->rocks().rocks_in_cell({face, level, i, j}, min_diameter_m);
     }
     return rock_dictionary(rocks, radius_m);
 }
 
 godot::Dictionary StarsimCore::moon_rocks_in_node(int face, int level, int64_t i, int64_t j,
                                                   double min_diameter_m) const {
+    const auto moon = moon_state();
     std::vector<environment::Rock> rocks;
     double radius_m = 0.0;
     godot::String error;
-    if (moon_surface_ != nullptr && moon_detail_on_ && moon_rocks_on_ && moon_surface_->rocks_on() &&
-        moon_surface_->rocks_shared() != nullptr && face_cell_ok(face, level, i, j, min_diameter_m)) {
-        radius_m = moon_surface_->detail().sphere_radius_m();
+    if (moon->surface != nullptr && moon_detail_on_ && moon_rocks_on_ && moon->surface->rocks_on() &&
+        moon->surface->rocks_shared() != nullptr && face_cell_ok(face, level, i, j, min_diameter_m)) {
+        radius_m = moon->surface->detail().sphere_radius_m();
         try {
-            rocks = moon_surface_->rocks().rocks_in_region({face, level, i, j}, min_diameter_m);  // largest first
+            rocks = moon->surface->rocks().rocks_in_region({face, level, i, j}, min_diameter_m);  // largest first
         } catch (const std::exception& e) {
             error = godot::String::utf8(e.what());
         }
@@ -597,20 +760,21 @@ double StarsimCore::moon_hapke_disc_reflectance(double phase_rad, double theta_b
 }
 
 godot::Dictionary StarsimCore::moon_unresolved_shading() {
+    const auto moon = moon_state();
     godot::Dictionary result;
     result["present"] = false;
-    if (moon_surface_ == nullptr) return result;
-    if (!moon_unresolved_) {
+    if (moon->surface == nullptr) return result;
+    if (!moon->unresolved) {
         try {
-            moon_unresolved_ = std::make_unique<environment::UnresolvedShadingModel>(
-                environment::make_unresolved_shading_model(moon_surface_->detail(), moon_surface_->rocks_shared().get(),
+            moon->unresolved = std::make_unique<environment::UnresolvedShadingModel>(
+                environment::make_unresolved_shading_model(moon->surface->detail(), moon->surface->rocks_shared().get(),
                                                           moon_cache_dir_));
         } catch (const std::exception& e) {
             godot::UtilityFunctions::push_warning(godot::String::utf8(e.what()));
             return result;
         }
     }
-    const auto& m = *moon_unresolved_;
+    const auto& m = *moon->unresolved;
     const auto packed = [](const std::vector<double>& v) {
         godot::PackedFloat64Array a;
         a.resize(static_cast<int64_t>(v.size()));
@@ -659,28 +823,31 @@ godot::Vector2 StarsimCore::moon_unresolved_light_factors(double abundance, doub
                                                           double earth_elevation_rad, double view_elevation_rad,
                                                           double sun_view_azimuth_rad, double earth_view_azimuth_rad,
                                                           bool sun_shadow_map, double shadow_map_resolved_m) const {
-    if (!moon_unresolved_) return {1.0, 1.0};
+    const auto moon = moon_state();
+    if (!moon->unresolved) return {1.0, 1.0};
     environment::UnresolvedView view;
     view.elevation_rad = view_elevation_rad;
     view.sun_azimuth_difference_rad = sun_view_azimuth_rad;
     view.earth_azimuth_difference_rad = earth_view_azimuth_rad;
     view.sun_shadow_map = sun_shadow_map;
     view.shadow_map_resolved_m = shadow_map_resolved_m;
-    const auto f = environment::unresolved_light_factors(*moon_unresolved_, abundance, geometry_min_diameter_m,
+    const auto f = environment::unresolved_light_factors(*moon->unresolved, abundance, geometry_min_diameter_m,
                                                          spacing_m, horizon_spacing_m, sun_elevation_rad,
                                                          earth_elevation_rad, true, view);
     return {static_cast<real_t>(f.sun), static_cast<real_t>(f.earth)};
 }
 
 double StarsimCore::moon_residual_theta_bar(double spacing_m) const {
-    if (!moon_unresolved_) return moon_surface_ ? moon_surface_->detail().config().hapke.theta_bar_rad : 0.0;
-    return environment::residual_theta_bar(*moon_unresolved_, spacing_m);
+    const auto moon = moon_state();
+    if (!moon->unresolved) return moon->surface ? moon->surface->detail().config().hapke.theta_bar_rad : 0.0;
+    return environment::residual_theta_bar(*moon->unresolved, spacing_m);
 }
 
 godot::PackedFloat32Array StarsimCore::moon_rock_abundance_grid(int width, int height) const {
+    const auto moon = moon_state();
     godot::PackedFloat32Array out;
     if (width <= 0 || height <= 0) return out;
-    const auto rocks = moon_surface_ ? moon_surface_->rocks_shared() : nullptr;
+    const auto rocks = moon->surface ? moon->surface->rocks_shared() : nullptr;
     if (!rocks) {
         out.resize(static_cast<int64_t>(width) * height);
         out.fill(1.0f);
@@ -693,10 +860,11 @@ godot::PackedFloat32Array StarsimCore::moon_rock_abundance_grid(int width, int h
 }
 
 godot::Dictionary StarsimCore::moon_surface_statistics() const {
+    const auto moon = moon_state();
     godot::Dictionary result;
-    result["present"] = moon_surface_ != nullptr;
-    if (moon_surface_ == nullptr) return result;
-    const auto& detail = moon_surface_->detail();
+    result["present"] = moon->surface != nullptr;
+    if (moon->surface == nullptr) return result;
+    const auto& detail = moon->surface->detail();
     const auto& cfg = detail.config();
     result["sphere_radius_m"] = detail.sphere_radius_m();
     result["finest_wavelength_m"] = detail.finest_wavelength_m();
@@ -741,9 +909,9 @@ godot::Dictionary StarsimCore::moon_surface_statistics() const {
     // cover_above_m[k] = area share of the rocks with diameter in [cover_diameters_m[k], D_max]: the share the shader
     // takes from the albedo / roughness model for rocks smaller than the ones drawn as meshes.
     godot::PackedFloat64Array diameters, cover_above;
-    const bool rocks_present = moon_surface_->rocks_shared() != nullptr;
+    const bool rocks_present = moon->surface->rocks_shared() != nullptr;
     if (rocks_present) {
-        const environment::LunarRocks::CoverCurve curve = moon_surface_->rocks().cover_curve();
+        const environment::LunarRocks::CoverCurve curve = moon->surface->rocks().cover_curve();
         diameters.resize(static_cast<int64_t>(curve.diameters_m.size()));
         cover_above.resize(static_cast<int64_t>(curve.cover_above.size()));
         for (size_t k = 0; k < curve.diameters_m.size(); ++k) {
@@ -759,7 +927,7 @@ godot::Dictionary StarsimCore::moon_surface_statistics() const {
 }
 
 double StarsimCore::surface_resolution_m(const godot::String& body, double latitude_deg, double longitude_deg) const {
-    const environment::Terrain* terrain = terrain_of(body);
+    std::shared_ptr<const environment::Terrain> terrain = terrain_of(body);
     if (terrain == nullptr) return std::numeric_limits<double>::infinity();
     return terrain->resolution_m(latitude_deg * constants::deg_to_rad, longitude_deg * constants::deg_to_rad);
 }
@@ -767,17 +935,18 @@ double StarsimCore::surface_resolution_m(const godot::String& body, double latit
 double StarsimCore::surface_finest_resolution_m(const godot::String& body,
                                                 const godot::PackedFloat64Array& latitudes_deg,
                                                 const godot::PackedFloat64Array& longitudes_deg) const {
-    const environment::Terrain* terrain = terrain_of(body);
-    if (terrain != nullptr && body.to_lower() == "moon" && moon_surface_ != nullptr && moon_detail_on_) {
-        terrain = moon_surface_.get();  // the procedural limit
+    const auto moon = moon_state();
+    std::shared_ptr<const environment::Terrain> terrain = terrain_of(body);
+    if (terrain != nullptr && body.to_lower() == "moon" && moon->surface != nullptr && moon_detail_on_) {
+        terrain = moon->surface;  // the procedural limit
     }
-    return finest_resolution_of(terrain, latitudes_deg, longitudes_deg, "surface_finest_resolution_m");
+    return finest_resolution_of(terrain.get(), latitudes_deg, longitudes_deg, "surface_finest_resolution_m");
 }
 
 double StarsimCore::surface_data_resolution_m(const godot::String& body,
                                               const godot::PackedFloat64Array& latitudes_deg,
                                               const godot::PackedFloat64Array& longitudes_deg) const {
-    return finest_resolution_of(terrain_of(body), latitudes_deg, longitudes_deg, "surface_data_resolution_m");
+    return finest_resolution_of(terrain_of(body).get(), latitudes_deg, longitudes_deg, "surface_data_resolution_m");
 }
 
 double StarsimCore::finest_resolution_of(const environment::Terrain* terrain,
@@ -805,8 +974,9 @@ godot::PackedFloat32Array StarsimCore::horizon_elevations(const godot::String& b
                                                           const godot::PackedFloat64Array& longitudes_deg,
                                                           const godot::PackedFloat64Array& heights_m, int azimuth_count,
                                                           double spacing_m, bool layer_major) const {
+    const auto moon = moon_state();
     godot::PackedFloat32Array result;
-    if (body.to_lower() != "moon" || moon_terrain_ == nullptr) return result;
+    if (body.to_lower() != "moon" || moon->terrain == nullptr) return result;
     const auto count = static_cast<size_t>(latitudes_deg.size());
     const int n = static_cast<int>(std::lround(std::sqrt(static_cast<double>(count))));
     if (longitudes_deg.size() != latitudes_deg.size() || heights_m.size() != latitudes_deg.size() ||
@@ -823,7 +993,7 @@ godot::PackedFloat32Array StarsimCore::horizon_elevations(const godot::String& b
         lon[i] = longitudes_deg[static_cast<int64_t>(i)] * constants::deg_to_rad;
         height[i] = heights_m[static_cast<int64_t>(i)];
     }
-    const auto elevations = environment::horizon_elevations_lattice(*moon_terrain_, moon_terrain_->sphere_radius_m(), n,
+    const auto elevations = environment::horizon_elevations_lattice(*moon->terrain, moon->terrain->sphere_radius_m(), n,
                                                                     lat, lon, height, spacing_m, azimuth_count);
     result.resize(static_cast<int64_t>(elevations.size()));
     if (!layer_major) {
@@ -842,17 +1012,19 @@ godot::PackedFloat32Array StarsimCore::horizon_elevations(const godot::String& b
 
 double StarsimCore::horizon_elevation_rad(const godot::String& body, double latitude_deg, double longitude_deg,
                                           double height_m, double azimuth_rad) const {
-    if (body.to_lower() != "moon" || moon_terrain_ == nullptr) return std::numeric_limits<double>::quiet_NaN();
+    const auto moon = moon_state();
+    if (body.to_lower() != "moon" || moon->terrain == nullptr) return std::numeric_limits<double>::quiet_NaN();
     const double lat = latitude_deg * constants::deg_to_rad, lon = longitude_deg * constants::deg_to_rad;
     // The first step of a lattice vertex with 1 m spacing (half the finest data within the near range).
-    const double first_step_m = environment::lattice_first_step_m(*moon_terrain_, lat, lon, 1.0);
-    return environment::horizon_elevation_rad(*moon_terrain_, moon_terrain_->sphere_radius_m(), lat, lon, height_m,
+    const double first_step_m = environment::lattice_first_step_m(*moon->terrain, lat, lon, 1.0);
+    return environment::horizon_elevation_rad(*moon->terrain, moon->terrain->sphere_radius_m(), lat, lon, height_m,
                                               azimuth_rad, environment::HorizonMarch{first_step_m, first_step_m});
 }
 
 double StarsimCore::terrain_max_height_m(const godot::String& body) const {
-    if (body.to_lower() != "moon" || moon_terrain_ == nullptr) return std::numeric_limits<double>::quiet_NaN();
-    return moon_terrain_->max_height_m();
+    const auto moon = moon_state();
+    if (body.to_lower() != "moon" || moon->terrain == nullptr) return std::numeric_limits<double>::quiet_NaN();
+    return moon->terrain->max_height_m();
 }
 
 std::shared_ptr<const environment::AtmosphereScattering> StarsimCore::atmosphere() const {
@@ -1510,6 +1682,10 @@ void StarsimCore::_bind_methods() {
                          &StarsimCore::solar_eclipse_fraction_gcrf);
     ClassDB::bind_method(D_METHOD("atmospheric_refraction", "camera_fixed_m"), &StarsimCore::atmospheric_refraction);
     ClassDB::bind_method(D_METHOD("load_terrain", "config_dir"), &StarsimCore::load_terrain);
+    ClassDB::bind_method(D_METHOD("lunar_site_tile_requests", "lat_deg", "lon_deg"), &StarsimCore::lunar_site_tile_requests);
+    ClassDB::bind_method(D_METHOD("assemble_lunar_site_tile", "request", "bodies"), &StarsimCore::assemble_lunar_site_tile);
+    ClassDB::bind_method(D_METHOD("lunar_site_tiles_present", "lat_deg", "lon_deg"), &StarsimCore::lunar_site_tiles_present);
+    ClassDB::bind_method(D_METHOD("set_lunar_site", "lat_deg", "lon_deg"), &StarsimCore::set_lunar_site);
     ClassDB::bind_method(D_METHOD("surface_samples", "body", "latitudes_deg", "longitudes_deg"),
                          &StarsimCore::surface_samples);
     ClassDB::bind_method(D_METHOD("set_moon_surface_detail", "on"), &StarsimCore::set_moon_surface_detail);

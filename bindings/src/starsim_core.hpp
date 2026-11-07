@@ -29,6 +29,7 @@
 #include "starsim/environment/detailed_lunar_terrain.hpp"
 #include "starsim/environment/lunar_terrain.hpp"
 #include "starsim/environment/unresolved_shading.hpp"
+#include "starsim/config/lunar_site_config.hpp"
 #include "starsim/config/moon_surface_config.hpp"
 #include "starsim/environment/cloud_noise.hpp"
 #include "starsim/environment/cloud_optics.hpp"
@@ -93,6 +94,22 @@ public:
     // {earth: bool, moon: bool}; prints one German line per missing or unloadable terrain. Call before the
     // surface queries below, from one thread.
     godot::Dictionary load_terrain(const godot::String& config_dir);
+
+    // Lunar landing sites (docs/subsystems/lunar.md): any latitude / longitude (MOON_ME). Call load_terrain first.
+    // The download itself is the game's (HTTP in GDScript): requests -> ranges -> assemble.
+    // One entry per kind ("height", "albedo"): {kind, lat_deg, lon_deg, cache_key, present (the tile file exists), ranges:
+    // [{url, first, last}] (inclusive byte ranges), ok, report}. ok is false with the report lunar.site_no_product when no
+    // product holds the tile - for "albedo" non-fatal (the global albedo serves).
+    godot::Array lunar_site_tile_requests(double latitude_deg, double longitude_deg) const;
+    // Decodes the downloaded range bodies (one PackedByteArray per ranges entry, in order) of one request dictionary and
+    // writes the tile into data/terrain/sites/. {ok, report}. Worker-callable (no engine state touched).
+    godot::Dictionary assemble_lunar_site_tile(const godot::Dictionary& request, const godot::Array& bodies) const;
+    // The global grid and the site's height tile are both on disk (nothing is loaded).
+    bool lunar_site_tiles_present(double latitude_deg, double longitude_deg) const;
+    // Makes this site the active one: rebuilds the Moon terrain and composed surface with its 60 m tile (R9: until the
+    // first call only the global grid is loaded) and swaps them atomically; readers keep the state they took. {ok, report}
+    // (lunar.site_no_product, data.lunar_site_tile_missing). Heavy (a rebuild): call it on a worker.
+    godot::Dictionary set_lunar_site(double latitude_deg, double longitude_deg);
 
     // Terrain heights and water flags at latitude / longitude points (degrees; body "earth" or "moon"):
     // {present, height_m: PackedFloat64Array above the WGS84 ellipsoid / lunar sphere, water: PackedByteArray}.
@@ -323,7 +340,7 @@ protected:
     static void _bind_methods();
 
 private:
-    const environment::Terrain* terrain_of(const godot::String& body) const;
+    std::shared_ptr<const environment::Terrain> terrain_of(const godot::String& body) const;
     // environment::finest_resolution_m over degree arrays; INF for a null terrain or mismatched sizes (pushes an error
     // naming `caller`).
     static double finest_resolution_of(const environment::Terrain* terrain, const godot::PackedFloat64Array& latitudes_deg,
@@ -331,8 +348,22 @@ private:
     std::shared_ptr<const environment::AtmosphereScattering> atmosphere() const;
 
     std::shared_ptr<const environment::EarthTerrain> earth_terrain_;  // load_terrain(); nullptr when absent
-    std::shared_ptr<const environment::LunarTerrain> moon_terrain_;
-    std::shared_ptr<const environment::DetailedLunarTerrain> moon_surface_;  // load_terrain(); nullptr when absent
+    // The Moon's terrain, composed surface and the unresolved-shading model built from it: one bundle. load_terrain and
+    // set_lunar_site publish a new one (any thread) under moon_mutex_; every reader takes moon_state() once and works on
+    // that copy, so a site switch never mixes two sites and never frees what a reader still uses.
+    struct MoonState {
+        std::shared_ptr<const environment::LunarTerrain> terrain;          // nullptr when absent
+        std::shared_ptr<const environment::DetailedLunarTerrain> surface;  // nullptr when absent
+        std::unique_ptr<environment::UnresolvedShadingModel> unresolved;   // moon_unresolved_shading()
+    };
+    std::shared_ptr<MoonState> moon_state() const;
+    void publish_moon_state(std::shared_ptr<MoonState> state);
+    // Terrain + surface for `site` (nullptr: the global grid alone), as load_terrain does; `notes` get the lines to say.
+    // Throws what the loaders throw.
+    std::shared_ptr<MoonState> build_moon_state(const config::LunarSiteConfig* site, std::vector<std::string>& notes) const;
+    mutable std::mutex moon_mutex_;
+    std::shared_ptr<MoonState> moon_state_ = std::make_shared<MoonState>();
+    std::filesystem::path moon_config_dir_, moon_data_dir_;  // load_terrain()
     config::HapkeParameters moon_hapke_;  // load_moon_hapke()
     bool moon_hapke_loaded_ = false;
     std::unique_ptr<environment::UnresolvedShadingModel> moon_unresolved_;  // moon_unresolved_shading()
