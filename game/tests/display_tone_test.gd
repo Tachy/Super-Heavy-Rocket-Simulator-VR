@@ -18,7 +18,9 @@
 # - the emitters' inverse (vision.gdshaderinc): an opaque display-referred colour through tone_inverse, hunt_inverse and
 #   the step is shown as AgX alone showed it, within 3 % per channel at S 1 and 1.64 (not exact: the Hunt inverse keeps
 #   the OkLab lightness, the step's curve reads the luminance; the path to white above scene 2); above AgX's white
-#   display white.
+#   display white;
+# - the glow bound (fix round 1): no written channel above max(scene's largest, glow threshold), hue and the round trip
+#   kept under it, the noon aureole held below the threshold, the grey lift above white, u >= 0 (_check_glow_bound).
 # Headless: godot --headless --path game --script res://tests/display_tone_test.gd
 extends SceneTree
 
@@ -44,6 +46,7 @@ func _run() -> void:
 	_check_chroma()
 	_check_hunt_factor()
 	_check_emitter_inverse()
+	_check_glow_bound()
 	print("display_tone_test: %s (%d failures)" % ["PASS" if _failures == 0 else "FAIL", _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -203,6 +206,86 @@ func _check_emitter_inverse() -> void:
 	worst_dark = (white - Vector3.ONE).abs().length()
 	_check("emitters: step o inverse ~ AgX", worst < EMITTER_TOLERANCE and worst_dark < EXACT,
 			"largest channel error %.4f, above white %s" % [worst, worst_dark])
+
+
+## Glow bound (fix round 1, review I1): with world.gd's glow (threshold 4, strength 1) no written channel exceeds
+## max(4, the scene's largest channel, the largest written by the step without the Hunt boost) - over random saturated
+## colours (scene luminance 0.05 .. 16, S 1.64) and the noon aureole (scene (1.75, 2.15, 2.35), which wrote 4.9 at S
+## 1.58 without the bound); hue still kept (0.5 deg) and AgX o step = target; display-referred emitters at S 1 written
+## as without the bound (1e-4 relative: their glow is not cut); above AgX's white the grey lift is
+## display white with the largest channel at most doubled; the AgX curve outputs u = OUTSET^-1 d are >= 0 on the whole
+## sRGB cube (review M4; reachable guards it).
+func _check_glow_bound() -> void:
+	var environment := Environment.new()
+	environment.glow_enabled = true
+	environment.glow_hdr_threshold = 4.0
+	environment.glow_strength = 1.0
+	var glow := DisplayTone.glow_bound(environment)
+	environment.glow_enabled = false
+	_check("glow bound: threshold / strength, off = INF", glow == 4.0 and DisplayTone.glow_bound(environment) == INF,
+			"bound %s" % glow)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20261107
+	var worst_excess := 0.0
+	var worst_hue := 0.0
+	var worst_round := 0.0
+	var count := 0
+	var floored := 0
+	for i in range(1500):
+		var c := Vector3(rng.randf(), rng.randf(), rng.randf())
+		c = c * c + Vector3.ONE * 1e-3
+		var y := exp(rng.randf_range(log(0.05), log(16.0)))
+		var x := c * (y / DisplayTone.LUMINANCE_WEIGHTS.dot(c))
+		var written := DisplayTone.apply(x, 1.64, _p, glow)
+		# the Hunt boost adds no glow: written <= the threshold, the scene or what the step writes without the boost
+		var no_hunt := DisplayTone.apply(x, 1.0, _p)
+		var limit := maxf(maxf(glow, maxf(x.x, maxf(x.y, x.z))), maxf(no_hunt.x, maxf(no_hunt.y, no_hunt.z)))
+		if maxf(written.x, maxf(written.y, written.z)) > maxf(glow, maxf(x.x, maxf(x.y, x.z))) * (1.0 + EXACT):
+			floored += 1  # the bound left less chroma than S = 1: the S = 1 colour (unbounded)
+		worst_excess = maxf(worst_excess, maxf(written.x, maxf(written.y, written.z)) / limit - 1.0)
+		var shown := DisplayTone.agx(written, _p)
+		var shown_target := DisplayTone.target(x, 1.64, _p, glow)
+		if y < _p[4]:
+			worst_round = maxf(worst_round, (shown - shown_target).length())
+		var lab := DisplayTone.to_oklab(shown_target)
+		if Vector2(lab.y, lab.z).length() > 0.01:
+			worst_hue = maxf(worst_hue, _angle_deg(DisplayTone.hue_angle(shown_target), DisplayTone.hue_angle(x)))
+			count += 1
+	_check("glow bound: written <= max(4, scene, S = 1)", worst_excess < EXACT,
+			"largest excess %s (1500 colours, %d at the S = 1 floor)" % [worst_excess, floored])
+	_check("glow bound: hue kept, AgX o step = target", worst_hue < HUE_TOLERANCE_DEG and worst_round < EXACT,
+			"hue %.4f deg over %d, round trip %s" % [worst_hue, count, worst_round])
+	var aureole := Vector3(1.75, 2.15, 2.35)
+	var free := DisplayTone.apply(aureole, 1.58, _p)
+	var bounded := DisplayTone.apply(aureole, 1.58, _p, glow)
+	var free_max := maxf(free.x, maxf(free.y, free.z))
+	var bounded_max := maxf(bounded.x, maxf(bounded.y, bounded.z))
+	_check("glow bound: noon aureole below the threshold", free_max > glow and bounded_max <= glow * (1.0 + EXACT),
+			"largest channel %.3f unbounded, %.3f bounded" % [free_max, bounded_max])
+	var worst_emitter := 0.0
+	for c: Vector3 in [Vector3(3.0, 1.2, 0.2), Vector3(4.5, 1.0, 0.1), Vector3(1.0, 0.45, 0.1), Vector3(6.0, 1.5, 0.3)]:
+		var x := DisplayTone.tone_inverse(c, _p)
+		var written := DisplayTone.apply(x, 1.0, _p, glow)
+		worst_emitter = maxf(worst_emitter, (written - DisplayTone.apply(x, 1.0, _p)).length() / c.length())
+	_check("glow bound: emitters at S 1 not cut by it", worst_emitter < 1e-4,
+			"largest relative change %s" % worst_emitter)
+	var worst_white := 0.0
+	var worst_lift := 0.0
+	for x: Vector3 in [Vector3(40, 18, 3), Vector3(30, 20, 10), Vector3(5, 20, 60), Vector3(17, 17, 17)]:
+		var written := DisplayTone.apply(x, 1.64, _p, glow)
+		worst_white = maxf(worst_white, (DisplayTone.agx(written, _p) - Vector3.ONE).abs().length())
+		worst_lift = maxf(worst_lift, maxf(written.x, maxf(written.y, written.z)) / maxf(x.x, maxf(x.y, x.z)))
+	_check("above white: display white, largest x <= 2", worst_white < EXACT and worst_lift <= 2.0,
+			"white error %s, largest lift %.3f" % [worst_white, worst_lift])
+	# u >= 0 (review M4): OUTSET^-1 has only positive entries, so every d >= 0 of the sRGB cube gives u >= 0 - the
+	# explicit test in reachable is a guard; a d with a negative u (outside the cube) is rejected.
+	var outset_inverse := DisplayTone.AGX_OUTSET.inverse()
+	var smallest := INF
+	for k in range(3):
+		smallest = minf(smallest, minf(outset_inverse[k].x, minf(outset_inverse[k].y, outset_inverse[k].z)))
+	var outside := DisplayTone.AGX_OUTSET * Vector3(0.5, -0.05, 0.5)
+	_check("reachable: u >= 0 on the cube, guarded", smallest > 0.0 and not DisplayTone.reachable(outside, _p),
+			"smallest OUTSET^-1 entry %.4f" % smallest)
 
 
 static func _angle_deg(a: float, b: float) -> float:

@@ -212,7 +212,8 @@ shaders:
     the emitter takes the display tone step's inverse (`vision_tone_inverse`, `vision_hunt_inverse`; globals
     `vision_tone`, `vision_tone_white`, `vision_hunt`, neutral while the step is off): AgX's colour of c scaled to the
     scene luminance the step's curve shows at its luminance, then the OkLab chroma / S - shown as AgX alone showed it,
-    exact for an emitter alone on its pixel (CPU within 0.7 % per channel, GPU patches within 2e-3), approximate where
+    within ~1 % for an emitter alone on its pixel (CPU within 0.7 % per channel, GPU patches within 2e-3; the Hunt
+    inverse keeps the OkLab lightness while the curve reads the luminance), approximate where
     it blends with the scene (the step is not linear). GPU check:
     opaque `display_colour` quad at the moonless night (rod scale 138, S 0.52) = its day pixel within 0.5 % of its
     peak; half-transparent over a scene-referred background within 0.5 % (limit rgba16f; tolerance 2 % of the peak).
@@ -244,7 +245,11 @@ shaders:
     `cone_map`; the display-referred inverse exact), its part > 1 in the display tone step (OkLab chroma x S at
     constant lightness and hue, `display_hunt`, below) - a linear boost about Y turns saturated blues 4-7 deg in OkLab
     hue. Fidelity flag `EyeAdaptation.hunt_display_reference` (render_check / cockpit_shots `--hunt=day`: the former
-    reference L_day, S <= 1; docs/history/atmosphere-rendering.md).
+    reference L_day, S <= 1; docs/history/atmosphere-rendering.md). S is CIECAM02's colourfulness match to first order
+    (C's t^0.9 and the cone compression ignored: OkLab chroma x S ~ CIECAM02 C x S^0.9). [call] S's reference is the
+    display white 100 cd/m^2 also at dusk / night, where B dims the display (B 0.37-0.44): the display viewer's own
+    adapting white would then be ~B x 100 cd/m^2 and S ~7 % higher (dusk ~1.00 -> ~1.07); kept at 100 pending the
+    user's verdict on the dusk / night S (T5 report, concern 3).
   - Moon disc and regolith (`moon_regolith.gdshaderinc`, mirrored by `Atmosphere.regolith_reflectance`): one BRDF for
     every light on the regolith, albedo x R x E / pi x LS(mu0, mu) x f(g), LS = 2 mu0 / (mu0 + mu), f(g) = O(g)
     10^(-0.4 (0.026 g + 4e-9 g^4)) / Phi_LS(g), opposition surge O = 1.35 - 0.05 g below 7 deg [S: K&S 1991 as
@@ -304,18 +309,37 @@ shaders:
   gamut mapping at constant OkLab lightness and hue [call]: C_max(L, h) = the largest chroma AgX can show (in the sRGB
   cube and reached from a non-negative AgX input; 12 bisection steps, skipped while C / 0.75 is reachable), C / C_max
   compressed softly above the knee 0.75 (1 - 0.25 exp(-(r - 0.75) / 0.25)); (6) the pixel is written as AgX's exact
-  inverse of the result, INSET^-1 awp^-1(OUTSET^-1 d), so the engine's AgX shows d (glow, encoding and the HDR
-  magnitudes downstream unchanged; on the grey axis the pixel is untouched); at and above AgX's white the pixel is
-  scaled to at least white in every AgX channel (white on screen, magnitude kept for the glow). Active only while the
-  environment's tone mapper is AgX (the linear camera exposures and the GPU checks' linear environments stay
-  colourimetric). Display-referred emitters take the step's inverse (above) and look as before.
+  inverse of the result, INSET^-1 awp^-1(OUTSET^-1 d), so the engine's AgX shows d (encoding unchanged; on the grey
+  axis the pixel is untouched); at and above AgX's white the pixel is lifted along grey, x + max(0, white - min(INSET
+  x)) (INSET maps grey to grey), to at least white in every AgX channel (white on screen, its largest channel at most
+  doubled). Glow (fix round 1, review I1): Godot's glow reads this buffer before AgX with a largest-channel threshold
+  (copy.glsl, world.gd 4.0), and P is steep near AgX's gamut edge (awp^-1(0.95) = 8.8): unbounded, the noon aureole
+  (scene (1.75, 2.15, 2.35), max 2.35, no glow before) was written with a blue channel of 4.9-9.35 and glowed blue.
+  The Hunt boost (3) is therefore gamut-mapped (5) into the colours whose largest written channel is at most max(the
+  scene's largest channel, the glow threshold / glow strength) (`DisplayTone.glow_bound`, INF with glow off), but
+  never below the chroma the step shows without the boost (unbounded): the boost starts no glow and strengthens none
+  (written <= max(threshold, max x, the S = 1 value)); at S <= 1 the step is as without the bound, so display-referred
+  emitters (their S = 1 value is their former c) keep their former glow. The aureole is then written at max 3.91
+  (unbounded 4.90). A/B/C (pre-T5 / T5 / fix round 1, `screenshots/look_fixes/t5_fix1/`): pad noon Sun view, displayed
+  luma of the aureole r 40-60 px 0.760 / 0.839 / 0.760, r 60-100 0.737 / 0.805 / 0.736, r 100-200 0.652 / 0.660 /
+  0.651 (the T5 blue glow gone; the colour stays the scene's, B/R 1.07 / 1.38 / 1.35); night plume halo (97-99.5 %
+  band) 0.144 / 0.153 / 0.153, noon plume 0.403 / 0.399 / 0.399; cabin (pilot eye, 97-99.5 %) 0.822 / 0.826 / 0.825.
+  The night plume's ~6 % wider halo is the emitters' inverse under additive blending (T5), not the Hunt boost (S < 1
+  there). Active only while
+  the environment's tone mapper is AgX at `tonemap_exposure` 1 with SDR output (`DisplayServer.
+  window_is_hdr_output_enabled` false: the inverse assumes AgX's output max 1; the linear camera exposures and the
+  GPU checks' linear environments stay colourimetric). Display-referred emitters take the step's inverse (above)
+  and look as before.
   Tests: `game/tests/display_tone_test.gd` (headless: grey written unchanged and shown on AgX's grey curve, AgX o step
   = target within 1e-5, monotonic in the scene level, OkLab hue kept within 0.5 deg over 3600 random colours at S 1
   and 1.64 (largest 0.0000 deg), the noon sky's B/R kept (AgX turns its hue 7.1 deg), Hunt = OkLab chroma x S at the
   same lightness, path to white, S's values / monotonic / cap / flag, cone_map's part <= 1, the emitters' inverse =
-  AgX within 3 %, largest 0.7 %); `game/tests/display_tone_check.gd` (GPU: 9 patches through the shader at S 1 and
-  1.64 and with the step off against the CPU mirror, largest error 7e-4 of display-linear, tolerance 3e-3; 3
-  display-referred emitter patches = AgX, largest 1.9e-3, tolerance 1e-2).
+  AgX within 3 %, largest 0.7 %; glow bound: written <= max(4, scene, the S = 1 value) over 1500 random colours at S
+  1.64, hue kept and AgX o step = target under it, the noon aureole 4.90 -> 3.91, emitters at S 1 unchanged by it,
+  the grey lift display white with the largest channel <= 2x (1.18), u >= 0 on the sRGB cube);
+  `game/tests/display_tone_check.gd` (GPU: 10 patches (with the noon aureole) through the shader at S 1 and 1.64, at
+  S 1.64 with glow on (threshold 4, intensity 0) and with the step off against the CPU mirror, largest error 7e-4 of
+  display-linear, tolerance 3e-3; 3 display-referred emitter patches = AgX, largest 1.9e-3, tolerance 1e-2).
   A/B (A = AgX + S against L_day, B = this step + S against the display; `screenshots/look_fixes/t5/`, report
   `.superpowers/sdd/2026-11-07-look-fixes/t5-report.md`): pad noon el 5 (S 1.58) sky el ~29 sRGB (82, 118, 154) B/R
   3.81 -> (62, 111, 182) B/R 9.85, OkLab hue -110.3 -> -102.4 deg = the scene's -102.4 (AgX turned it 7.9 deg); zenith
@@ -379,10 +403,12 @@ shaders:
 - Display tone step (T5): with the chroma kept (and x1.6 by day) the clouds' residual warmth after the white balance
   shows - cloud radiance B/R 0.93-0.95 of the TOA Sun's white (start view / 400 km), displayed B/R 0.88-0.92 against
   AgX's 0.97-0.98 and EPIC's 1.00-1.04: the clouds read pink. Candidates: the adopted white (the eye adapting to the
-  scene's bright field, the clouds, rather than the TOA Sun) or the clouds' TOA colour (T7). The lunar regolith reads
-  teal (displayed B/R 1.15 -> 1.30): the Moon's Sun light is white (`moon_sun_scene` a scalar, not the TOA Sun's colour)
-  while the white balance assumes the TOA Sun, and the albedo texture is slightly blue (the real regolith is
-  red-sloped). The S reference moved civil dusk from S 0.68 to ~1.0 (more colourful twilight).
+  scene's bright field, the clouds, rather than the TOA Sun) or the clouds' TOA colour (T7; review: a missing cloud /
+  air coupling, so the TOA Sun stays the adopted white). The lunar regolith's teal (white Moon light under the Sun-
+  coloured white balance) is fixed (fix round 1: `moon_sun_color`, moon-surface.md); the albedo mosaic carries about a
+  third of the real regolith's red slope (moon-surface.md, open). The S reference moved civil dusk from S 0.68 to ~1.0
+  (more colourful twilight) - user's verdict open. Glow: with the bound, emitters at S > 1 (the plume by day) glow
+  somewhat less than with AgX alone (their S = 1 value is their former c through the Hunt inverse, less saturated).
 
 - Earth in view for a Moon eye at partial phases underestimates up to ~2x; the eclipse-time Earth renders several
   times its day brightness (AgX rolls it toward white) - kept physical.

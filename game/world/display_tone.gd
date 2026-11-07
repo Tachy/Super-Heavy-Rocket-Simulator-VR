@@ -21,12 +21,22 @@ extends RefCounted
 ##    (in the sRGB cube and reachable from a non-negative AgX input, bisection); C / C_max is compressed softly above
 ##    GAMUT_KNEE (exponential shoulder toward 1, C1 at the knee) - no per-channel clip, so no hue shift toward violet;
 ## 6. pre-distortion: the step writes P(d) = INSET^-1 awp^-1(OUTSET^-1 d), the scene value Godot's AgX maps to d exactly
-##    (AgX stays the engine's tone mapper: glow, the sRGB encoding and the HDR buffer's magnitudes downstream unchanged;
-##    on the grey axis P(d) = x). Above AgX's white (Y >= white, display white) the pixel is scaled to at least white in
-##    every AgX channel instead, x max(1, white / min(INSET x)): white on screen, its magnitude kept for the glow.
+##    (AgX stays the engine's tone mapper and the sRGB encoding is unchanged; on the grey axis P(d) = x). Above AgX's
+##    white (Y >= white, display white) the pixel is lifted along grey to at least white in every AgX channel instead,
+##    x + max(0, white - min(INSET x)) (INSET maps grey to grey): white on screen, its largest channel at most doubled
+##    (max x >= Y >= white).
+## Glow (fix round 1, review I1): Godot's glow reads this buffer before AgX with a largest-channel threshold
+## (copy.glsl). P(d) is steep near AgX's gamut edge (awp^-1(0.95) = 8.8), so a saturated display colour can ask for a
+## channel far above the scene's (the noon aureole: scene max 2.35 -> 4.9-9.35, a blue glow that was not there). The
+## Hunt boost of step 3 is therefore bounded by the glow: the boosted chroma is gamut-mapped into the colours whose
+## largest written channel stays at or below max(the glow threshold, the scene's largest channel), but never below the
+## chroma the step shows without the boost (unbounded). The Hunt boost then starts no glow and strengthens none (written
+## <= max(threshold, max x, P(the S = 1 colour))); at S <= 1 the step is as without the bound, so display-referred
+## emitters (whose S = 1 colour is AgX's colour of their former value c, P = c) keep their former glow (glow_bound; INF
+## while glow is off).
 ## Display-referred emitters (vision.gdshaderinc) take the inverse of the step (tone_inverse, then the Hunt factor's
-## OkLab chroma / S): they are shown as AgX showed them before - exact alone on their pixel, approximate where they blend
-## with the scene (the step is not linear).
+## OkLab chroma / S): they are shown as AgX showed them before - within ~1 % alone on their pixel (the Hunt inverse
+## changes Y at constant OkLab lightness), approximate where they blend with the scene (the step is not linear).
 
 ## [S: Ottosson 2020] linear sRGB -> LMS and LMS^(1/3) -> OkLab (Basis columns = the matrix's columns).
 const OKLAB_M1 := Basis(Vector3(0.4122214708, 0.2119034982, 0.0883024619),
@@ -55,6 +65,8 @@ const GAMUT_CHROMA_START := 0.4
 ## Numerical guards: the curve's inverse below its asymptote, the reachability test's slack (relative).
 const CURVE_INVERSE_MAX := 0.999999
 const REACH_EPSILON := 1e-5
+## OkLab chroma below which a colour is taken as grey (the shader's float32 threshold, the same on the CPU).
+const CHROMA_MIN := 1e-7
 
 ## Fidelity flag: the chroma-preserving step (true) or Godot's AgX alone (false; render_check --tone=agx).
 static var enabled := true
@@ -120,24 +132,29 @@ static func from_oklab(lab: Vector3) -> Vector3:
 	return OKLAB_M1.inverse() * (lms * lms * lms)
 
 
-## Whether AgX can show d: in the sRGB cube and reached from a non-negative scene value (slack relative to the colour's
-## size: the GPU's float32 at bright values, exact near black).
-static func reachable(d: Vector3, p: PackedFloat64Array) -> bool:
+## Whether AgX can show d: in the sRGB cube, AgX's curve outputs u = OUTSET^-1 d non-negative, reached from a
+## non-negative scene value whose largest channel is at most bound (the glow bound; slack relative to the colour's size:
+## the GPU's float32 at bright values, exact near black).
+static func reachable(d: Vector3, p: PackedFloat64Array, bound := INF) -> bool:
 	var slack := REACH_EPSILON * maxf(d.x, maxf(d.y, d.z))
 	if d.x < -slack or d.y < -slack or d.z < -slack or d.x > 1.0 + REACH_EPSILON or d.y > 1.0 + REACH_EPSILON 			or d.z > 1.0 + REACH_EPSILON:
 		return false
+	var u := AGX_OUTSET.inverse() * d
+	if u.x < -slack or u.y < -slack or u.z < -slack:
+		return false
 	var x := predistort(d, p)
-	slack = REACH_EPSILON * maxf(x.x, maxf(x.y, x.z))
-	return x.x >= -slack and x.y >= -slack and x.z >= -slack
+	var largest := maxf(x.x, maxf(x.y, x.z))
+	slack = REACH_EPSILON * largest
+	return x.x >= -slack and x.y >= -slack and x.z >= -slack and largest <= bound * (1.0 + REACH_EPSILON)
 
 
-## The largest OkLab chroma AgX can show at this lightness and hue direction (cos h, sin h).
-static func chroma_max(lightness: float, hue: Vector2, p: PackedFloat64Array) -> float:
+## The largest OkLab chroma AgX can show at this lightness and hue direction (cos h, sin h) within the glow bound.
+static func chroma_max(lightness: float, hue: Vector2, p: PackedFloat64Array, bound := INF) -> float:
 	var lo := 0.0
 	var hi := GAMUT_CHROMA_START
 	for i in range(GAMUT_STEPS):
 		var mid := 0.5 * (lo + hi)
-		if reachable(from_oklab(Vector3(lightness, mid * hue.x, mid * hue.y)), p):
+		if reachable(from_oklab(Vector3(lightness, mid * hue.x, mid * hue.y)), p, bound):
 			lo = mid
 		else:
 			hi = mid
@@ -151,9 +168,19 @@ static func gamut_shoulder(r: float) -> float:
 	return 1.0 - (1.0 - GAMUT_KNEE) * exp(-(r - GAMUT_KNEE) / (1.0 - GAMUT_KNEE))
 
 
-## The display-linear colour the step shows for a scene value x (steps 1-5 above) with the Hunt factor hunt (>= 1).
-static func target(x: Vector3, hunt: float, p: PackedFloat64Array) -> Vector3:
+## The glow bound of the environment (header, Glow): the largest channel Godot's glow does not pick up - its HDR
+## threshold over the glow strength (copy.glsl compares max(rgb) x strength); INF while glow is off.
+static func glow_bound(environment: Environment) -> float:
+	if environment == null or not environment.glow_enabled:
+		return INF
+	return environment.glow_hdr_threshold / maxf(environment.glow_strength, 1e-6)
+
+
+## The display-linear colour the step shows for a scene value x (steps 1-5 above) with the Hunt factor hunt (>= 1) and
+## the glow threshold glow (header, Glow: the Hunt boost only as far as no written channel exceeds max(glow, max x)).
+static func target(x: Vector3, hunt: float, p: PackedFloat64Array, glow := INF) -> Vector3:
 	x = x.max(Vector3.ZERO)
+	var bound := maxf(glow, maxf(x.x, maxf(x.y, x.z)))
 	var y := LUMINANCE_WEIGHTS.dot(x)
 	if y <= 0.0:
 		return Vector3.ZERO
@@ -164,30 +191,37 @@ static func target(x: Vector3, hunt: float, p: PackedFloat64Array) -> Vector3:
 	var lab := to_oklab(x * (g / y))
 	var lightness := minf(lab.x, 1.0)
 	var c := Vector2(lab.y, lab.z).length()
-	if c < 1e-12:
+	if c < CHROMA_MIN:
 		return Vector3.ONE * g
 	var hue := Vector2(lab.y, lab.z) / c
-	c *= hunt
 	var t := clampf((log(y / PATH_TO_WHITE_START)) / log(white / PATH_TO_WHITE_START), 0.0, 1.0)
 	c *= 1.0 - t * t * (3.0 - 2.0 * t)
-	var shown := c
-	# Below the gamut's knee (C_max >= C / knee) the chroma stays: one test (as the shader).
-	if not reachable(from_oklab(Vector3(lightness, hue.x * c / GAMUT_KNEE, hue.y * c / GAMUT_KNEE)), p):
-		var c_max := chroma_max(lightness, hue, p)
-		shown = gamut_shoulder(c / c_max) * c_max if c_max > 1e-9 else 0.0
+	var shown := gamut_map(lightness, hue, c * hunt, p, bound)
+	# The glow bound limits only the Hunt boost: never less chroma than the step without it (unbounded) shows.
+	if shown < c:
+		shown = maxf(shown, gamut_map(lightness, hue, c, p))
 	return from_oklab(Vector3(lightness, shown * hue.x, shown * hue.y)).clamp(Vector3.ZERO, Vector3.ONE)
 
 
-## The whole step on a scene pixel: the value it writes for AgX (step 6 above).
-static func apply(x: Vector3, hunt: float, p: PackedFloat64Array) -> Vector3:
+## Step 5 on an OkLab chroma c at this lightness and hue within the bound: kept below the gamut's knee (C_max >= C / knee:
+## one test, as the shader), else the soft shoulder on C / C_max.
+static func gamut_map(lightness: float, hue: Vector2, c: float, p: PackedFloat64Array, bound := INF) -> float:
+	if reachable(from_oklab(Vector3(lightness, hue.x * c / GAMUT_KNEE, hue.y * c / GAMUT_KNEE)), p, bound):
+		return c
+	var c_max := chroma_max(lightness, hue, p, bound)
+	return gamut_shoulder(c / c_max) * c_max if c_max > 1e-9 else 0.0
+
+
+## The whole step on a scene pixel: the value it writes for AgX (step 6 above), glow the glow bound.
+static func apply(x: Vector3, hunt: float, p: PackedFloat64Array, glow := INF) -> Vector3:
 	x = x.max(Vector3.ZERO)
 	var y := LUMINANCE_WEIGHTS.dot(x)
 	if y <= 0.0:
 		return Vector3.ZERO
 	if y >= p[4]:
 		var c := AGX_INSET * x
-		return x * maxf(1.0, p[4] / minf(c.x, minf(c.y, c.z)))
-	return predistort(target(x, hunt, p), p).max(Vector3.ZERO)
+		return x + Vector3.ONE * maxf(0.0, p[4] - minf(c.x, minf(c.y, c.z)))
+	return predistort(target(x, hunt, p, glow), p).max(Vector3.ZERO)
 
 
 ## The Hunt factor's inverse for a display-referred emitter (vision.gdshaderinc): OkLab chroma / hunt.
@@ -201,8 +235,8 @@ static func hunt_inverse(c: Vector3, hunt: float) -> Vector3:
 ## The display-referred emitters' inverse of the tone step (vision.gdshaderinc vision_tone_inverse, with hunt_inverse
 ## after it): the scene value the step shows as AgX would have shown c - AgX's colour d = AgX(c), scaled to the scene
 ## luminance whose grey the curve shows at d's luminance (the step keeps the chromaticity below its gamut knee and the
-## path to white). Exact for an emitter alone on its pixel below scene 2 and inside the knee; at and above AgX's white c
-## itself (white either way, its magnitude kept for the glow).
+## path to white). Exact (with hunt_inverse after it within ~1 %) for an emitter alone on its pixel below scene 2 and
+## inside the knee; at and above AgX's white c itself (white either way).
 static func tone_inverse(c: Vector3, p: PackedFloat64Array) -> Vector3:
 	c = c.max(Vector3.ZERO)
 	if LUMINANCE_WEIGHTS.dot(c) >= p[4]:

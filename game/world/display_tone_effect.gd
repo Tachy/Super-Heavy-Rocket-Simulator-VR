@@ -2,10 +2,12 @@ class_name DisplayToneEffect
 extends CompositorEffect
 ## The display tone step (look fixes T5; the model and its CPU mirror: DisplayTone): a full-screen step on the HDR scene
 ## after the eye's post step (VisionEffect), before glow and Godot's AgX. It writes, per pixel, the scene value AgX maps
-## to the chroma-preserving, hue-stable display colour with the daylight Hunt factor, so the engine's tone mapper, glow
-## and encoding stay as they are. A per-pixel function with uniforms of the frame: identical for both VR eyes (every view
-## layer of a multiview buffer). Active only while the environment's tone mapper is AgX (the linear camera exposures
-## and the GPU checks with their own linear environments stay colourimetric) and DisplayTone.enabled; without a
+## to the chroma-preserving, hue-stable display colour with the daylight Hunt factor, so the engine's tone mapper and
+## encoding stay as they are; the gamut is bounded so that glow (which reads this buffer) picks up no pixel it did not
+## and none more strongly (DisplayTone header, Glow). A per-pixel function with uniforms of the frame: identical for both
+## VR eyes (every view layer of a multiview buffer). Active only while the environment's tone mapper is AgX at exposure 1
+## with SDR output (the linear camera exposures and the GPU checks with their own linear environments stay
+## colourimetric) and DisplayTone.enabled; without a
 ## RenderingDevice (headless, Compatibility) it does nothing. update() also sets the globals of the emitters' inverse
 ## (vision.gdshaderinc): vision_hunt (1 while the step is off), vision_tone / vision_tone_white (0 while off).
 
@@ -16,7 +18,7 @@ layout(rgba16f, set = 0, binding = 0) uniform image2D color_image;
 layout(push_constant, std430) uniform Params {
 	vec4 curve;  // the allenwp curve: contrast, toe_a, slope, w
 	vec4 shape;  // Hunt factor, log2 path-to-white start, log2 white, white
-	vec4 size;   // width, height, gamut knee, unused
+	vec4 size;   // width, height, gamut knee, glow bound (DisplayTone.glow_bound; GLOW_BOUND_OFF while glow is off)
 } params;
 
 // DisplayTone (game/world/display_tone.gd) is the CPU mirror of everything below; keep them identical.
@@ -72,13 +74,40 @@ vec3 from_oklab(vec3 lab, mat3 m2_inverse, mat3 m1_inverse) {
 	return m1_inverse * (lms * lms * lms);
 }
 
-bool reachable(vec3 d, mat3 outset_inverse, mat3 inset_inverse) {
+bool reachable(vec3 d, mat3 outset_inverse, mat3 inset_inverse, float bound) {
 	float slack = REACH_EPSILON * max(d.x, max(d.y, d.z));
-	if (any(lessThan(d, vec3(-slack))) || any(greaterThan(d, vec3(1.0 + REACH_EPSILON)))) {
+	if (any(lessThan(d, vec3(-slack))) || any(greaterThan(d, vec3(1.0 + REACH_EPSILON)))
+			|| any(lessThan(outset_inverse * d, vec3(-slack)))) {
 		return false;
 	}
 	vec3 x = predistort(d, outset_inverse, inset_inverse);
-	return all(greaterThanEqual(x, vec3(-REACH_EPSILON * max(x.x, max(x.y, x.z)))));
+	float largest = max(x.x, max(x.y, x.z));
+	return all(greaterThanEqual(x, vec3(-REACH_EPSILON * largest))) && largest <= bound * (1.0 + REACH_EPSILON);
+}
+
+// Step 5 on an OkLab chroma within the bound (DisplayTone.gamut_map): below the gamut's knee (C_max >= C / knee) the
+// chroma stays (one test, no bisection), else the soft shoulder on C / C_max.
+float gamut_map(float lightness, vec2 hue, float chroma, float bound, mat3 m2_inverse, mat3 m1_inverse,
+		mat3 outset_inverse, mat3 inset_inverse) {
+	float knee = params.size.z;
+	if (reachable(from_oklab(vec3(lightness, hue * (chroma / knee)), m2_inverse, m1_inverse), outset_inverse,
+			inset_inverse, bound)) {
+		return chroma;
+	}
+	float lo = 0.0;
+	float hi = GAMUT_CHROMA_START;
+	for (int i = 0; i < GAMUT_STEPS; i++) {
+		float mid = 0.5 * (lo + hi);
+		if (reachable(from_oklab(vec3(lightness, hue * mid), m2_inverse, m1_inverse), outset_inverse, inset_inverse,
+				bound)) {
+			lo = mid;
+		} else {
+			hi = mid;
+		}
+	}
+	float r = lo > 1e-9 ? chroma / lo : 0.0;
+	float compressed = r < knee ? r : 1.0 - (1.0 - knee) * exp(-(r - knee) / (1.0 - knee));
+	return compressed * lo;
 }
 
 void main() {
@@ -95,9 +124,9 @@ void main() {
 	float white = params.shape.w;
 	vec3 result = vec3(0.0);
 	if (y >= white) {
-		// display white: every AgX channel at least white, the magnitude kept for the glow
+		// display white: lifted along grey until every AgX channel is at least white (largest channel at most doubled)
 		vec3 c = INSET * x;
-		result = x * max(1.0, white / min(c.x, min(c.y, c.z)));
+		result = x + vec3(max(0.0, white - min(c.x, min(c.y, c.z))));
 	} else if (y > 0.0) {
 		mat3 outset_inverse = inverse(OUTSET);
 		mat3 inset_inverse = inverse(INSET);
@@ -110,28 +139,16 @@ void main() {
 		vec3 shown_rgb = vec3(g);
 		if (chroma > 1e-7) {
 			vec2 hue = lab.yz / chroma;
-			chroma *= params.shape.x;
 			float t = clamp((log2(y) - params.shape.y) / (params.shape.z - params.shape.y), 0.0, 1.0);
 			chroma *= 1.0 - t * t * (3.0 - 2.0 * t);
-			float knee = params.size.z;
-			float shown = chroma;
-			// Below the knee of the gamut (C_max >= C / knee) the chroma stays: one test, no bisection.
-			if (!reachable(from_oklab(vec3(lightness, hue * (chroma / knee)), m2_inverse, m1_inverse), outset_inverse,
-					inset_inverse)) {
-				float lo = 0.0;
-				float hi = GAMUT_CHROMA_START;
-				for (int i = 0; i < GAMUT_STEPS; i++) {
-					float mid = 0.5 * (lo + hi);
-					if (reachable(from_oklab(vec3(lightness, hue * mid), m2_inverse, m1_inverse), outset_inverse,
-							inset_inverse)) {
-						lo = mid;
-					} else {
-						hi = mid;
-					}
-				}
-				float r = lo > 1e-9 ? chroma / lo : 0.0;
-				float compressed = r < knee ? r : 1.0 - (1.0 - knee) * exp(-(r - knee) / (1.0 - knee));
-				shown = compressed * lo;
+			// the Hunt boost within the glow bound (DisplayTone header, Glow): no written channel above the glow threshold
+			// or the scene's largest, but never less chroma than the step shows without the boost (unbounded)
+			float bound = max(params.size.w, max(x.r, max(x.g, x.b)));
+			float shown = gamut_map(lightness, hue, chroma * params.shape.x, bound, m2_inverse, m1_inverse,
+					outset_inverse, inset_inverse);
+			if (shown < chroma) {
+				shown = max(shown, gamut_map(lightness, hue, chroma, 1.0e30, m2_inverse, m1_inverse, outset_inverse,
+						inset_inverse));
 			}
 			shown_rgb = clamp(from_oklab(vec3(lightness, hue * shown), m2_inverse, m1_inverse), vec3(0.0), vec3(1.0));
 		}
@@ -140,6 +157,9 @@ void main() {
 	imageStore(color_image, pixel, vec4(result, color.a));
 }
 """
+
+## The glow bound while glow is off (far above the shader's clamp of the scene, 65000).
+const GLOW_BOUND_OFF := 1.0e9
 
 var _rd: RenderingDevice
 var _shader := RID()
@@ -158,8 +178,10 @@ func _init() -> void:
 ## Main thread, every frame: the environment (its tone mapper and AgX parameters) and the eye's chroma factor
 ## (Atmosphere.chroma; its daylight part EyeAdaptation.display_hunt is applied here). Sets the global vision_hunt.
 func update(environment: Environment, chroma_factor: float) -> void:
+	# The inverse assumes AgX's SDR output (max 1) at exposure 1: off for HDR output or another exposure (review M5).
 	var active := enabled and DisplayTone.enabled and environment != null \
-			and environment.tonemap_mode == Environment.TONE_MAPPER_AGX
+			and environment.tonemap_mode == Environment.TONE_MAPPER_AGX and environment.tonemap_exposure == 1.0 \
+			and not DisplayServer.window_is_hdr_output_enabled()
 	var hunt := EyeAdaptation.display_hunt(chroma_factor) if active else 1.0
 	ShaderGlobals.set_value(&"vision_hunt", hunt)
 	var push := PackedFloat32Array()
@@ -170,7 +192,8 @@ func update(environment: Environment, chroma_factor: float) -> void:
 		tone = Vector4(p[0], p[1], p[2], p[3])
 		white = p[4]
 		push = PackedFloat32Array([p[0], p[1], p[2], p[3], hunt, log(DisplayTone.PATH_TO_WHITE_START) / log(2.0),
-				log(p[4]) / log(2.0), p[4], 0.0, 0.0, DisplayTone.GAMUT_KNEE, 0.0])
+				log(p[4]) / log(2.0), p[4], 0.0, 0.0, DisplayTone.GAMUT_KNEE,
+				minf(DisplayTone.glow_bound(environment), GLOW_BOUND_OFF)])
 	ShaderGlobals.set_value(&"vision_tone", tone)  # the emitters' inverse of the step (vision.gdshaderinc)
 	ShaderGlobals.set_value(&"vision_tone_white", white)
 	RenderingServer.call_on_render_thread(_set_on_render_thread.bind(active, push))

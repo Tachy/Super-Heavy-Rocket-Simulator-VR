@@ -10,8 +10,9 @@
 // The display tone step after it (DisplayToneEffect, look fixes T5: a chroma-preserving curve on AgX's grey curve, the
 // daylight Hunt factor in OkLab) is not linear: the emitter first takes its inverse (DisplayTone.tone_inverse /
 // hunt_inverse) - AgX's colour of c scaled to the scene luminance the curve shows at its luminance, then the OkLab
-// chroma / vision_hunt - so it is shown as AgX alone showed it. Exact for an emitter alone on its pixel (on black,
-// opaque; below scene 2 and the gamut knee), approximate where it blends with the scene. vision_tone = the allenwp
+// chroma / vision_hunt - so it is shown as AgX alone showed it. Within ~1 % for an emitter alone on its pixel (on
+// black, opaque; below scene 2 and the gamut knee; the Hunt inverse keeps the OkLab lightness, the curve reads the
+// luminance), approximate where it blends with the scene. vision_tone = the allenwp
 // curve (contrast, toe_a, slope, w), vision_tone_white AgX's white; contrast 0 and vision_hunt 1 while the step is off.
 
 global uniform vec3 vision_rod_weights;

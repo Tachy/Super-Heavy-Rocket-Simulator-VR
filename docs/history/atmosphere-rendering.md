@@ -503,3 +503,12 @@ frame-only measurements.
 - Display: Godot's AgX alone (inset matrix, allenwp curve per channel, outset). It took 16-26 % of the sky's and the
   ocean's B/R at mid-high scene values (investigation F3) and turned the noon sky's OkLab hue by ~8 deg (pad noon
   A/B, T5 report). Still available: `DisplayTone.enabled = false` (`--tone=agx`).
+- Display tone step as first committed (620f93de, superseded the same day by T5 fix round 1): the gamut was bounded
+  only by the sRGB cube and a non-negative AgX input, and pixels at and above AgX's white were scaled by
+  max(1, white / min(INSET x)) "to keep the magnitude for the glow". Glow reads the written buffer: saturated
+  highlights near the gamut edge were written with channels far above the scene's (noon aureole: scene max 2.35 ->
+  4.9-9.35, a blue glow), the white branch multiplied saturated highlights by 10-20. Now the glow bound and the grey
+  lift (eye-adaptation.md, Display tone step).
+- Moon light white (until T5 fix round 1): `moon_sun_scene` lit the regolith (moon, terrain, rocks, the radiance
+  map's Moon) with a D65-white Sun while the post step's white balance adopts the TOA Sun's colour: a grey regolith
+  came out ~9 % blue (Moon day ground displayed B/R 1.15 pre-T5, 1.30 with T5's kept chroma). Now `moon_sun_color`.

@@ -5,7 +5,8 @@
 # DisplayTone.agx(DisplayTone.apply(x)) within 3e-3 (half-float buffer, float32 shader). With the step off (the global
 # vision_hunt then 1) the patches are AgX itself. A last row of display-referred emitters (vision.gdshaderinc
 # vision_display_referred, unshaded, opaque; no eye post step in this scene) is shown as AgX alone showed it, within
-# EMITTER_TOLERANCE.
+# EMITTER_TOLERANCE. A glow pass (glow on at threshold 4, intensity 0) checks the glow bound (all patches incl. the noon
+# aureole (1.75, 2.15, 2.35)) against DisplayTone.apply with the same bound.
 # Needs a GPU: godot --path game --script res://tests/display_tone_check.gd
 extends SceneTree
 
@@ -14,9 +15,9 @@ const SETTLE_FRAMES := 4
 const TOLERANCE := 3.0e-3
 const PATCHES := [Vector3(0.18, 0.18, 0.18), Vector3(0.0869, 0.1426, 0.284), Vector3(0.012, 0.035, 0.09),
 	Vector3(0.02, 0.05, 0.6), Vector3(0.9, 0.35, 0.03), Vector3(0.5, 0.02, 0.02), Vector3(3.0, 6.0, 9.0),
-	Vector3(40.0, 30.0, 20.0), Vector3(0.002, 0.003, 0.004)]
+	Vector3(40.0, 30.0, 20.0), Vector3(0.002, 0.003, 0.004), Vector3(1.75, 2.15, 2.35)]
 const COLUMNS := 3
-const ROWS := 4
+const ROWS := 5
 const EMITTERS := [Vector3(1.0, 0.45, 0.1), Vector3(0.2, 0.4, 1.0), Vector3(0.9, 0.7, 0.4)]
 ## [call] The emitters' inverse is exact on the CPU within 0.7 % (display_tone_test); half floats and float32 here.
 const EMITTER_TOLERANCE := 0.01
@@ -50,6 +51,20 @@ func _run() -> void:
 			var e: Vector3 = EMITTERS[k]
 			_compare("emitter, S %.2f, %s = AgX" % [hunt, e], _read(image, PATCHES.size() + k), DisplayTone.agx(e, p),
 					EMITTER_TOLERANCE)
+	# The glow bound (fix round 1): glow on at world.gd's threshold 4 but at intensity 0 (additive), so the read-back
+	# still shows the step alone; the shader's bound against DisplayTone.apply with the same bound.
+	_environment.glow_enabled = true
+	_environment.glow_hdr_threshold = 4.0
+	_environment.glow_intensity = 0.0
+	_environment.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
+	var glow := DisplayTone.glow_bound(_environment)
+	_effect.update(_environment, 1.64)
+	var bounded := await _frame()
+	for i in range(PATCHES.size()):
+		var x: Vector3 = PATCHES[i]
+		_compare("glow bound 4, S 1.64, patch %s" % x, _read(bounded, i),
+				DisplayTone.agx(DisplayTone.apply(x, 1.64, _p_for_check(), glow), _p_for_check()))
+	_environment.glow_enabled = false
 	DisplayTone.enabled = false
 	_effect.update(_environment, 1.64)
 	var plain := await _frame()
@@ -61,6 +76,10 @@ func _run() -> void:
 	DisplayTone.enabled = true
 	print("display_tone_check: %s (%d failures)" % ["PASS" if _failures == 0 else "FAIL", _failures])
 	quit(1 if _failures > 0 else 0)
+
+
+func _p_for_check() -> PackedFloat64Array:
+	return DisplayTone.curve_parameters(_environment.tonemap_agx_contrast, _environment.tonemap_agx_white)
 
 
 func _setup() -> void:
@@ -130,7 +149,7 @@ void fragment() { ALBEDO = vision_display_referred(colour); }
 
 
 func _tile_position(i: int) -> Vector3:
-	return Vector3(float(i % COLUMNS) - 1.0, 1.5 - float(i / COLUMNS), -2.0)
+	return Vector3(float(i % COLUMNS) - 1.0, 0.5 * float(ROWS - 1) - float(i / COLUMNS), -2.0)
 
 
 func _frame() -> Image:
