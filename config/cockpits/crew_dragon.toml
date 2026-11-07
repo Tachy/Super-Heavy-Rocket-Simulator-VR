@@ -66,7 +66,7 @@ up = [0.57358, -0.81915, 0.0]         # [D] perpendicular to forward in the X-Y 
 centre_m = [3.010, 0.066, 0.0]      # [D] centre screen centre - 0.02 up (housing reaches 0.25 above and 0.29 below it)
 normal = [-0.81915, -0.57358, 0.0]    # [D] = centre screen normal
 up = [0.57358, -0.81915, 0.0]         # [D] = eye up
-width_m = 1.60                      # [E] crew1_1 console box 450 px wide below the tunnel at ~1.4 m (1.2-1.4 m) + side wings with the tablets (discovery10); +-0.15
+width_m = 1.32                      # [E] discovery2 / discovery10 at the iPad-mini scale (134.8 mm tablet = ~255 px, ~1,900-2,100 px/m): the three screens with gaps span 1.22 m, the button shelf ends 0.03-0.05 m past the outer screen edges (dark upper panel 0.05-0.08 m); the tablets stand above the outer screens, not on wings; +-0.05
 height_m = 0.54                     # [D] 0.13 housing above the screens (tablet mounts, discovery10) + 0.215 screen + 0.195 shelf, button rows, handle box below
 depth_m = 0.15                      # [E] crew11, crew13: thin box; back top stays below ceiling_x_m (x 3.29)
 fold_deg = 12.0                     # [E] side wings and side screens turned toward the crew about `up`: discovery10, training2 (+-5)

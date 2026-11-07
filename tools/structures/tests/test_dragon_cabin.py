@@ -224,3 +224,63 @@ def test_shell_has_no_hole_except_the_apertures(spec, nodes):
         if not (near_window or near_hatch):
             stray.append((owner[k], tuple(round(c, 3) for c in mid)))
     assert stray == [], stray[:8]
+
+
+BUTTON_PROUD_MIN_M = 0.005  # [E] every button's top stands at least 5 mm in front of the housing's surface beneath it (the buttons are 6 mm / 1 cm high)
+
+
+def _ray_triangle(o, d, a, b, c):
+    """Moller-Trumbore: distance along d to the triangle or None."""
+    sub = lambda u, v: [u[i] - v[i] for i in range(3)]
+    cross = lambda u, v: [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]
+    dot = lambda u, v: sum(x * y for x, y in zip(u, v))
+    e1, e2 = sub(b, a), sub(c, a)
+    p = cross(d, e2)
+    det = dot(e1, p)
+    if abs(det) < 1e-12:
+        return None
+    t_vec = sub(o, a)
+    u = dot(t_vec, p) / det
+    q = cross(t_vec, e1)
+    v = dot(d, q) / det
+    if u < 0.0 or v < 0.0 or u + v > 1.0:
+        return None
+    t = dot(e2, q) / det
+    return t if t > 0.0 else None
+
+
+def test_every_button_stands_proud_of_the_housing(spec, nodes):
+    """Shelves are built per button module: no button is buried in a neighbouring panel's housing (cluster C under the left wing, r_led_3)."""
+    housing = nodes["console_housing"]
+    pos, idx = housing["pos"], housing["idx"]
+    screens = {s["id"]: s for s in spec["cockpit"]["screen"]}
+    worst = (1e9, None)
+    for b in spec["cockpit"]["button"]:
+        if b["kind"] == "handle":
+            continue
+        n = screens[b["panel"]]["normal"]
+        top = b["centre_m"]
+        w, h = b["size_m"]
+        right, up = cl.screen_right(screens[b["panel"]]), screens[b["panel"]]["up"]
+        for sa, sb in ((0, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)):  # centre and corners of the top face
+            origin = [top[i] + 0.5 * n[i] + 0.4 * w * sa * right[i] + 0.4 * h * sb * up[i] for i in range(3)]
+            hits = [t for k in range(0, len(idx), 3) if (t := _ray_triangle(origin, [-c for c in n], pos[idx[k]], pos[idx[k + 1]], pos[idx[k + 2]])) is not None]
+            assert hits, b["id"]
+            proud = min(hits) - 0.5  # the housing surface lies this far behind the button's top face
+            worst = min(worst, (proud, b["id"]))
+    assert worst[0] >= BUTTON_PROUD_MIN_M, f"button {worst[1]} stands only {worst[0] * 1000:.1f} mm proud of the housing"
+
+
+def test_manifest_buttons_carry_their_node_names(spec):
+    block = cl.cockpit_manifest(spec["cockpit"])
+    assert block["buttons"]["handle"]["node"] == "handle" and block["buttons"]["cam1"]["node"] == "button_cam1"
+
+
+def test_cockpit_toml_is_part_of_the_input_hash(spec):
+    """An edit of config/cockpits/crew_dragon.toml changes the crew_dragon set's hash (the spec text carries spec["cockpit"])."""
+    import copy
+    table = vehicle_spec.generator_table(ID)
+    base = build_models.vehicle_hash(vehicle_spec.dumps(spec), "x", table)
+    edited = copy.deepcopy(spec)
+    edited["cockpit"]["console"]["width_m"] += 0.01
+    assert build_models.vehicle_hash(vehicle_spec.dumps(edited), "x", table) != base

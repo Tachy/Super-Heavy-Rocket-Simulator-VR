@@ -34,7 +34,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 | Eye forward | 20 deg above the chest normal | E | crew10 / crew11 gaze to the screens | +-10 deg |
 | Screens | 0.382 x 0.215 m (16:9) | E | training2 finger scale (index finger ~0.072 m on the glass) 0.35-0.40 wide; aspect 1.76-1.88 measured | +-15 % |
 | Screen layout | centre on the centre line 0.70 m along the gaze, gap 0.045, side screens folded 12 deg | E / D | discovery10 (gap 90 / 780 px), training2 | +-0.1 m, +-5 deg |
-| Console housing | 1.60 x 0.54 x 0.15 m | E / D | crew1_1 box 1.2-1.4 m + tablet wings (discovery10) | +-0.15 m |
+| Console housing | 1.32 x 0.54 x 0.15 m | E / D | discovery2 / discovery10 at the iPad-mini scale: screens span 1.22 m, shelf ends 0.03-0.05 m past the outer screens (corrected from 1.60 in fix round 1; the tablets stand above the outer screens) | +-0.05 m |
 | Tablets | 0.1348 x 0.2032 m | S / E | Apple iPad mini spec; model assumed from the shape | - |
 | Button positions | rows 0.17 / 0.20 m below the screen centres | E | discovery10 x along the screens' lower edges (fisheye: fractions per screen) | +-0.02 along, +-0.03 across |
 | HOTAS grips | 0.22 m forward, 0.44 m below the eye (seat axes), +-0.25 / 0.27 lateral | E | armrest, forearm reach | calibrated in Task 9 |
@@ -67,7 +67,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   the apertures so the cut edge hides under the bezel). `vehicle_spec.load_dragon` loads and validates `config/cockpits/<[vehicle] cockpit>.toml` into
   `spec["cockpit"]` (hashed into the manifest; `VehicleModels` staleness includes the cockpit TOML). Capsule stage frame.
   Nodes: `cabin_shell`, `floor`, `hatch_frame`, `window_<i>` / `window_glass_<i>` (i = exterior table row, +az then -az: 0 = +33.3, 1 = -33.3,
-  2 = +90, 3 = -90), `seat_s1..s4`, `console_housing` (centre box, two folded wings, a lower shelf under each screen, two struts), `screen_left|centre|right`
+  2 = +90, 3 = -90), `seat_s1..s4`, `console_housing` (centre box, two folded wings, a lower shelf under each screen, two struts; a wing shelf stops 1 cm before a neighbouring panel's buttons that lie under it (cluster C, `r_led_3`), whose own shelf is part of the centre module; tested: every button stands >= 5 mm proud of the housing), `screen_left|centre|right`
   (one quad each, exactly the TOML centre / size, UV 0..1 with (0, 0) top left, +normal toward the crew), `tablet_l|r` (`[[tablet]]` ids l / r),
   `button_<id>` (one node per button; the centre handle is the node `handle`, no `button_handle`), `light_<i>` (`[[light]]` rows in file order),
   `hotas_stick`, `hotas_throttle`. Manifest `cockpit`: `nodes`, `screens[id] = {centre, normal, up, size}`, `buttons[id] = {centre, size}` (all 39 incl.

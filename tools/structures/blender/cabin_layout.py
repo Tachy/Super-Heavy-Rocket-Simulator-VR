@@ -86,7 +86,7 @@ def cockpit_manifest(cockpit):
     return {
         "nodes": node_names(cockpit),
         "screens": {s["id"]: {"centre": s["centre_m"], "normal": s["normal"], "up": s["up"], "size": s["size_m"]} for s in cockpit["screen"]},
-        "buttons": {b["id"]: {"centre": b["centre_m"], "size": b["size_m"]} for b in cockpit["button"]},
+        "buttons": {b["id"]: {"centre": b["centre_m"], "size": b["size_m"], "node": button_node(b)} for b in cockpit["button"]},
         "button_ids": [b["id"] for b in cockpit["button"]],
         "tablets": {t["id"]: {"node": f"tablet_{t['id']}", "centre": t["centre_m"], "normal": t["normal"], "up": t["up"], "size": t["size_m"]} for t in cockpit["tablet"]},
     }

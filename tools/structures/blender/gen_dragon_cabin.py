@@ -268,6 +268,9 @@ def build_seat(seat, floor_x):
     return mesh
 
 
+SHELF_CLEAR_M = 0.01  # [D] a wing shelf ends this far before a neighbouring panel's button
+
+
 def build_console(cockpit):
     con = cockpit["console"]
     scr = screens_by_id(cockpit)
@@ -296,7 +299,21 @@ def build_console(cockpit):
             continue
         offs = [(V(b["centre_m"]) - p.o).dot(p.n) for b in mine]
         lats = [(V(b["centre_m"]) - p.o).dot(p.right) for b in mine]
-        lo, hi = (min(-seam, min(lats) - 0.03), max(seam, max(lats) + 0.03)) if pid == "centre" else wing_range(p)
+        if pid == "centre":
+            lo, hi = min(-seam, min(lats) - 0.03), max(seam, max(lats) + 0.03)
+        else:
+            lo, hi = wing_range(p)
+            inner_is_hi = p.o.z * p.right.z < 0.0
+            mid = 0.5 * (min(lats) + max(lats))
+            for b in cockpit["button"]:  # the wing shelf stops before a neighbouring panel's buttons (cluster C, r_led_3) that lie under it
+                if b["panel"] == pid or b["kind"] == "handle":
+                    continue
+                lat_b = (V(b["centre_m"]) - p.o).dot(p.right)
+                half = b["size_m"][0] / 2.0 + SHELF_CLEAR_M
+                if inner_is_hi and mid < lat_b < hi + 0.1:
+                    hi = min(hi, lat_b - half)
+                elif not inner_is_hi and lo - 0.1 < lat_b < mid:
+                    lo = max(lo, lat_b + half)
         p.box(mesh, lo, hi, u0, -p.h / 2.0 - SHELF_TOP_GAP_M, min(offs) - BUTTON_PROUD_M, -SCREEN_PROUD_M)
     # two struts from the housing top up to the ceiling ring
     for z_strut in con["strut_z_m"]:
