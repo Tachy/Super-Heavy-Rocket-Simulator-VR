@@ -1,0 +1,587 @@
+# Crew Dragon cabin (M7 cockpit step 1): measured from reference photos, rebuilt by us; nothing of any photo or model is copied.
+# Frame: the capsule stage body frame of docs/subsystems/vehicle-models.md "Crew Dragon": X = station above the heat shield apex
+# (nose +X), (Y, Z) = r (cos az, sin az), az 0 = side hatch. Y points to the hatch, Z = az +90 = the crew's LEFT (the crew face
+# the hatch side and the console, backs toward the shield and the az 180 wall). Metres, unit vectors unitless, angles degrees.
+# Every value line carries [S] (published), [E] (own estimate, photo + known size named) or [D] (derived, how). Derivations,
+# uncertainties and the photo list: docs/subsystems/cockpit.md and .superpowers/sdd/2026-11-07-m7-cockpit-crew-dragon/task-1-report.md.
+# Photos (git-ignored, screenshots/m7-cockpit-refs/): mielke/discovery1..16 (camera between s2 and s3, flight panel), mielke/crew1_1
+# (4-seat row seen from the hatch), wm_crew_dragon_interior_configuration (Wikimedia CC0, seats S1..S4 labelled), dragon_cockpit_crew10/11/11b/13
+# (NASA, outer seat, windows), mielke/training2 (Engadget 2018 mock-up, button labels), D_CCP_SpaceX_Demo_2_Dragon__3_ (exterior, falcon9_ref).
+# Known sizes used: seat pitch from the Wikimedia seat-back width, iPad mini 134.8 x 203.2 mm (Apple spec), index finger ~0.072 m,
+# helmet ~0.30 m, exterior profile / windows / hatch of config/vehicles/detail/crew_dragon.toml (capsule D 4.0 m).
+
+[cabin]
+wall_m = 0.18                  # [E] side wall normal thickness (backshell TPS + pressure shell + liner): crew1_1 window wells ~0.15-0.25 deep; crew1_1 window spacing gives inner r 1.43 +-0.1 at x 2.38 (exterior 1.62)
+floor_x_m = 1.15               # [E] floor panels: Wikimedia photo, cargo C5-C7 (bags ~0.45 m) under the seat pans; 0.5 m below the hatch sill (x 1.70 exterior); +-0.15
+ceiling_x_m = 3.35             # [E] upper bulkhead trim around the forward tunnel (crew1_1, Wikimedia: flat annular ceiling with the tunnel ring); parachute bay above it; +-0.1
+tunnel_radius_m = 0.45         # [E] forward-hatch tunnel trim: IDSS passage 0.8 m [S: IDSS IDD Rev E] + trim; dragon_crew12_portrait (four heads in the opening)
+tunnel_top_x_m = 3.66          # [D] forward hatch face: exterior recess floor 3.74 (detail file neck_m) - 0.08 hatch plate
+# Inner wall of revolution [x, r], floor centre -> side wall -> ceiling -> tunnel -> forward hatch centre. Side wall = exterior profile_m offset inward by wall_m along the meridian normal.
+profile_m = [[1.15, 0.0], [1.15, 1.756], [1.4, 1.716], [1.6, 1.675], [1.8, 1.622], [2.0, 1.562], [2.2, 1.499], [2.4, 1.429], [2.6, 1.356], [2.8, 1.276], [3.0, 1.196], [3.2, 1.116], [3.35, 1.064], [3.35, 0.45], [3.66, 0.45], [3.66, 0.0]]  # [D] wall_m offset of the exterior profile_m (closest exterior point 0.094 m), floor_x_m, ceiling_x_m, tunnel_*
+# Windows and hatch in the EXTERIOR table's convention (outer surface: [az deg, x, half x, half az deg]); the generator carries them through the wall along the local wall normal (x shifts -0.06 m on the inner face).
+windows = [[33.3, 2.38, 0.255, 5.5], [90.0, 2.385, 0.245, 5.6]]  # [D] = detail/crew_dragon.toml windows (mirrored to -az); photos agree within their +-20 % / +-10 deg resolution (cockpit.md "Windows and hatch")
+hatch = [0.0, 2.345, 0.645, 19.0]  # [D] = detail/crew_dragon.toml hatch; interior side seen only in part (discovery10 under the console)
+window_reveal_radius_m = 0.24  # [E] round interior reveal (white bezel, dark well): crew1_1 opening ~0.46 x 0.50 m at the az 90 windows (helmet-scaled, +-25 %); dragon_cockpit_crew11 round bezel
+window_bezel_m = 0.06          # [E] white bezel ring width around the reveal, dragon_cockpit_crew11 (ring ~1/4 of the reveal radius)
+hatch_trim_m = 0.05            # [E] white trim frame around the hatch's inner face, discovery10
+
+[[seat]]
+id = "s1"                      # [D] S1..S4 from the crew's left: Wikimedia interior photo labels (S1 on the crew's left = +Z)
+role = "specialist"            # [S] spec 2026-11-07: mission specialists on the outer seats
+hip_m = [1.72, -0.02, 1.05]    # [E] Z = 1.5 seat pitches; outer seats 0.08 lower (Wikimedia: outer seat tops lower in the image); +-0.1
+back_angle_deg = 35.0          # [E] seat back from +X toward -Y: crew1_1 torso foreshortening (hip-helmet 0.65 of 0.75 m seen from the hatch), knees above hips; +-10
+width_m = 0.58                 # [E] seat shell at the hip: Wikimedia, pitch / back width = 1.2
+
+[[seat]]
+id = "s2"                      # [D] see s1
+role = "commander"             # [S] spec 2026-11-07: player = commander, left of centre
+hip_m = [1.80, -0.02, 0.35]    # [E] Z = half seat pitch 0.70 (Wikimedia pitch / back width 1.2, back 0.58); X, Y: eye 0.70 m from the console (arm's reach, crew2_1, inspiration4_1) and 0.55 m above the hatch sill; +-0.1
+back_angle_deg = 35.0          # [E] see s1
+width_m = 0.58                 # [E] see s1
+
+[[seat]]
+id = "s3"                      # [D] see s1
+role = "pilot"                 # [S] spec 2026-11-07: pilot right of centre
+hip_m = [1.80, -0.02, -0.35]   # [D] mirror of s2
+back_angle_deg = 35.0          # [E] see s1
+width_m = 0.58                 # [E] see s1
+
+[[seat]]
+id = "s4"                      # [D] see s1
+role = "specialist"            # [S] spec 2026-11-07
+hip_m = [1.72, -0.02, -1.05]   # [D] mirror of s1
+back_angle_deg = 35.0          # [E] see s1
+width_m = 0.58                 # [E] see s1
+
+[eye]
+position_m = [2.447, -0.351, 0.35]  # [D] s2 hip + 0.72 m up the seat back + 0.10 m forward (seated eye height 0.79 m above the pan, hip point 0.07 above it); +-0.10 per axis
+forward = [0.81915, 0.57358, 0.0]     # [E] straight ahead, 20 deg above the seat's chest normal toward the console (crew11, crew10: gaze up to the screens)
+up = [0.57358, -0.81915, 0.0]         # [D] perpendicular to forward in the X-Y plane, head-up side
+
+[console]
+# Housing: one slab across the panel, front face in the centre screen's plane, side wings folded like the side screens.
+centre_m = [3.010, 0.066, 0.0]      # [D] centre screen centre - 0.02 up (housing reaches 0.25 above and 0.29 below it)
+normal = [-0.81915, -0.57358, 0.0]    # [D] = centre screen normal
+up = [0.57358, -0.81915, 0.0]         # [D] = eye up
+width_m = 1.60                      # [E] crew1_1 console box 450 px wide below the tunnel at ~1.4 m (1.2-1.4 m) + side wings with the tablets (discovery10); +-0.15
+height_m = 0.54                     # [D] 0.13 housing above the screens (tablet mounts, discovery10) + 0.215 screen + 0.195 shelf, button rows, handle box below
+depth_m = 0.15                      # [E] crew11, crew13: thin box; back top stays below ceiling_x_m (x 3.29)
+fold_deg = 12.0                     # [E] side wings and side screens turned toward the crew about `up`: discovery10, training2 (+-5)
+strut_z_m = [0.55, -0.55]           # [E] two struts from the housing top to the ceiling ring, crew1_1 / Wikimedia (at 1/3 and 2/3 of the box)
+
+[[screen]]
+id = "left"                         # [S] spec 2026-11-07: left screen = external cameras
+centre_m = [2.984, 0.025, 0.422]    # [D] centre screen edge + 0.045 m gap, folded fold_deg toward the crew
+normal = [-0.8013, -0.5610, -0.2079]  # [D] centre normal turned fold_deg about up
+up = [0.57358, -0.81915, 0.0]         # [D] = eye up
+size_m = [0.382, 0.215]             # [E] active area: training2 finger scale (index finger ~0.072 m on the screen) gives 0.35-0.40 wide; 16:9 (17.3 in class); +-15 %
+aspect = 1.7778                     # [E] discovery10 1.88, training2 1.76 (perspective): 16:9
+
+[[screen]]
+id = "centre"                       # [S] spec 2026-11-07
+centre_m = [3.021, 0.050, 0.0]      # [D] on the centre line, 0.70 m along eye forward from the eye's (X, Y): reach (crew2_1, inspiration4_1: arms near straight); +-0.1
+normal = [-0.81915, -0.57358, 0.0]    # [D] facing the eye's forward
+up = [0.57358, -0.81915, 0.0]         # [D] = eye up
+size_m = [0.382, 0.215]             # [E] see left
+aspect = 1.7778                     # [E] see left
+
+[[screen]]
+id = "right"                        # [S] spec 2026-11-07
+centre_m = [2.984, 0.025, -0.422]   # [D] mirror of left
+normal = [-0.8013, -0.5610, 0.2079] # [D] mirror of left
+up = [0.57358, -0.81915, 0.0]         # [D] = eye up
+size_m = [0.382, 0.215]             # [E] see left
+aspect = 1.7778                     # [E] see left
+# Screen gap 0.045 m [E]: discovery10 centre-right active gap 90 px of 780 px width.
+
+[[tablet]]
+id = "l"                            # [E] procedure tablets on mounts above the outer screens, discovery1..15
+centre_m = [3.075, -0.191, 0.366]   # [E] lower edge on the left screen's top bezel, 0.045 inboard of its centre (discovery10: at 0.61 of its width), 0.06 proud on the mount
+normal = [-0.8013, -0.5610, -0.2079]  # [D] = left screen normal
+up = [0.57358, -0.81915, 0.0]         # [D] portrait, = eye up
+size_m = [0.1348, 0.2032]           # [S] Apple iPad mini (5th gen) 134.8 x 203.2 mm; model assumed from the shape in discovery1..15 [E]
+
+[[tablet]]
+id = "r"                            # [E] see l
+centre_m = [3.075, -0.191, -0.366]  # [E] mirror of l (discovery10: right tablet at 0.34 of the right screen's width)
+normal = [-0.8013, -0.5610, 0.2079] # [D] = right screen normal
+up = [0.57358, -0.81915, 0.0]         # [D] = eye up
+size_m = [0.1348, 0.2032]           # [S] see l
+
+[[light]]
+id = "l"                            # [E] ceiling lamp panel above the commander's side, discovery10 top-left corner
+position_m = [3.34, -0.45, 0.70]    # [E] on the ceiling behind the console, discovery10 / crew11 (lamp beside the console top)
+size_m = [0.25, 0.08]               # [E] discovery10 lamp ~1.5 tablet widths long
+
+[[light]]
+id = "r"                            # [E] mirror, discovery4 / crew11 (lamp on the other side)
+position_m = [3.34, -0.45, -0.70]   # [E] mirror of l
+size_m = [0.25, 0.08]               # [E] see l
+
+# Physical buttons, flight panel as discovery10 shows it (camera between s2 and s3). Positions: read along the screens' lower
+# edges (fraction of the screen above), rows 0.17 / 0.20 m below the screen centre on the screen's up axis, 0.03 m proud along
+# its normal; +-0.02 m along the row, +-0.03 m elsewhere. panel = the screen above (its normal and up apply). shape round = a
+# round push button with a ring, rect = a labelled push button. Functions only with evidence; "none" = drawn, inert.
+# Under the left screen (clusters A and B): camera direct keys by the user's decision (spec 2026-11-07 item 5), slots upper row
+# left to right, then lower row. The real labels there are unreadable; Engadget 2018 names the panel groups Commands, Pyros,
+# Displays, Power (no per-button functions).
+
+[[button]]
+id = "cam1"                         # [E] cluster A upper row, round
+panel = "left"                      # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.838, 0.130, 0.556]    # [E] discovery10 x 402 px on the left screen's edge 340-830
+size_m = [0.016, 0.016]             # [E] round, ~0.6 of the 0.027 m pitch
+shape = "round"                     # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07 (spec item 5)
+camera_slot = 1                     # [D] order: upper row left to right, then lower row
+evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam2"                         # [E] cluster A upper row
+panel = "left"                      # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.842, 0.133, 0.535]    # [E] discovery10 x 429 px
+size_m = [0.024, 0.016]             # [E] labelled key, pitch 0.027-0.035
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 2                     # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam3"                         # [E] cluster A upper row
+panel = "left"                      # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.846, 0.136, 0.511]    # [E] discovery10 x 460 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 3                     # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam4"                         # [E] cluster A upper row
+panel = "left"                      # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.851, 0.139, 0.484]    # [E] discovery10 x 496 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 4                     # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam5"                         # [E] cluster A upper row, round
+panel = "left"                      # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.855, 0.142, 0.457]    # [E] discovery10 x 531 px
+size_m = [0.016, 0.016]             # [E] see cam1
+shape = "round"                     # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 5                     # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam6"                         # [E] cluster B upper row, round
+panel = "left"                      # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.862, 0.147, 0.420]    # [E] discovery10 x 580 px
+size_m = [0.016, 0.016]             # [E] see cam1
+shape = "round"                     # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 6                     # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable (possibly POWER 1)"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam7"                         # [E] cluster B upper row
+panel = "left"                      # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.867, 0.150, 0.392]    # [E] discovery10 x 616 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 7                     # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam8"                         # [E] cluster B upper row
+panel = "left"                      # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.872, 0.154, 0.362]    # [E] discovery10 x 656 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 8                     # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam9"                         # [E] cluster B upper row
+panel = "left"                      # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.877, 0.158, 0.331]    # [E] discovery10 x 696 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 9                     # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam10"                        # [E] cluster B upper row, round
+panel = "left"                      # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.883, 0.162, 0.297]    # [E] discovery10 x 741 px
+size_m = [0.016, 0.016]             # [E] see cam1
+shape = "round"                     # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 10                    # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable (possibly RESET 1)"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam11"                        # [E] cluster A lower row
+panel = "left"                      # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.827, 0.159, 0.522]    # [E] discovery10 x 446 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 11                    # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam12"                        # [E] cluster A lower row
+panel = "left"                      # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.831, 0.162, 0.500]    # [E] discovery10 x 475 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 12                    # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam13"                        # [E] cluster A lower row
+panel = "left"                      # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.835, 0.165, 0.474]    # [E] discovery10 x 509 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 13                    # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam14"                        # [E] cluster B lower row, round
+panel = "left"                      # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.847, 0.173, 0.409]    # [E] discovery10 x 594 px
+size_m = [0.016, 0.016]             # [E] see cam1
+shape = "round"                     # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 14                    # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable (possibly POWER 2)"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam15"                        # [E] cluster B lower row
+panel = "left"                      # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.851, 0.176, 0.383]    # [E] discovery10 x 629 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 15                    # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam16"                        # [E] cluster B lower row
+panel = "left"                      # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.856, 0.180, 0.354]    # [E] discovery10 x 667 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 16                    # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam17"                        # [E] cluster B lower row
+panel = "left"                      # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.862, 0.183, 0.322]    # [E] discovery10 x 708 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 17                    # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+
+[[button]]
+id = "cam18"                        # [E] cluster B lower row, round
+panel = "left"                      # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.868, 0.188, 0.289]    # [E] discovery10 x 752 px
+size_m = [0.016, 0.016]             # [E] see cam1
+shape = "round"                     # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "camera"                 # [S] user decision 2026-11-07
+camera_slot = 18                    # [D] order
+evidence = "user decision: keys under the left screen = cameras; real label unreadable (possibly RESET 2)"  # [S] spec 2026-11-07
+
+# Cluster C (centre-left, between the left screen and the handle; its housing straddles the screen gap, placed in the centre screen's frame).
+
+[[button]]
+id = "c_upper_1"                    # [E] cluster C upper row
+panel = "centre"                    # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.898, 0.172, 0.252]    # [E] discovery10 x 792 px, centre screen edge 905-1615 extrapolated
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] no readable label; training2 mock-up shows ENABLE BACKUP ... at about this place (incomplete)
+evidence = "discovery10 two-line label unreadable; training2 (2018 mock-up) ENABLE BACKUP ... second word hidden"  # [E]
+
+[[button]]
+id = "c_upper_2"                    # [E] cluster C upper row
+panel = "centre"                    # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.898, 0.172, 0.224]    # [E] discovery10 x 844 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] training2 mock-up reads JETTISON with an unreadable object word: function not known
+evidence = "training2 (2018 mock-up) JETTISON + unreadable second line; discovery10 label unreadable"  # [E]
+
+[[button]]
+id = "c_mains_only"                 # [E] cluster C upper row
+panel = "centre"                    # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.898, 0.172, 0.200]    # [E] discovery10 x 888 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "chute_mains_only"       # [E] manual main parachute deploy (backup); label read
+evidence = "label MAINS ONLY: training2 (Engadget 2018 mock-up, readable); discovery10 flight panel same place, two-line label (blurred)"  # [E]
+
+[[button]]
+id = "c_drogues_mains"              # [E] cluster C upper row
+panel = "centre"                    # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.898, 0.172, 0.173]    # [E] discovery10 x 938 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "chute_drogues_and_mains"  # [E] manual drogue + main deploy (backup); label read
+evidence = "label DROGUES & MAINS: training2 (Engadget 2018 mock-up, readable); discovery10 '... & MAINS' at the same place"  # [E]
+
+[[button]]
+id = "c_lower_1"                    # [E] cluster C lower row
+panel = "centre"                    # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.881, 0.197, 0.242]    # [E] discovery10 x 810 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] three-line label unreadable
+evidence = "discovery10 label unreadable"  # [E]
+
+[[button]]
+id = "c_lower_2"                    # [E] cluster C lower row
+panel = "centre"                    # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.881, 0.197, 0.218]    # [E] discovery10 x 855 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] label unreadable
+evidence = "discovery10 label unreadable"  # [E]
+
+[[button]]
+id = "c_lower_round"                # [E] cluster C lower row, round, at the cluster's right end
+panel = "centre"                    # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.881, 0.197, 0.143]    # [E] discovery10 x 995 px
+size_m = [0.016, 0.016]             # [E] see cam1
+shape = "round"                     # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] candidate fire suppression (forum report of a SUPPRESS FIRE label), not confirmed
+evidence = "discovery10 short label unreadable; CosmoQuest forum 2020 mentions SUPPRESS FIRE (not authoritative)"  # [E]
+
+[[button]]
+id = "handle"                       # [S] the centre handle, Engadget 2018: eject control in the centre of the panel
+panel = "centre"                    # [E] discovery10, training2
+row = 2                             # [E] below the button rows
+centre_m = [2.864, 0.204, 0.0]      # [E] box centre: discovery10 x 1125-1390 px (centre on the panel centre line), 0.215 below the screen centre, 0.04 proud
+size_m = [0.16, 0.09]               # [E] recessed box: discovery10 0.14 x 0.06 (foreshortened), training2 mock-up 0.19 x 0.11; grip ~0.10 long
+shape = "rect"                      # [E] training2: red-rimmed recess with a T grip
+kind = "handle"                     # [E] training2, ui2
+function = "abort"                  # [S] Engadget 2018: "eject" separates the capsule from the rocket during liftoff or climb (launch escape)
+evidence = "training2 handle labelled EJECT (2018 mock-up); Engadget 2018-08-14 text; ui2 / discovery10 same handle on the flight panel"  # [S]
+
+# Right of the handle (centre screen frame, lower row).
+
+[[button]]
+id = "r_backup_g_meter"             # [E] three-line label right of the handle
+panel = "centre"                    # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.881, 0.197, -0.146]   # [E] discovery10 x 1531 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "backup_g_meter"         # [E] enables the backup acceleration display
+evidence = "training2 (2018 mock-up) ENABLE BACKUP G-METER right of the handle; discovery10 three-line label at that place (blurred)"  # [E]
+
+[[button]]
+id = "r_led_1"                      # [E] lit (blue) push button
+panel = "centre"                    # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.881, 0.197, -0.174]   # [E] discovery10 x 1584 px
+size_m = [0.020, 0.016]             # [E] discovery10, smaller lit key
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] no label readable
+evidence = "discovery10 blue lit key, no readable label"  # [E]
+
+[[button]]
+id = "r_led_2"                      # [E] see r_led_1
+panel = "centre"                    # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.881, 0.197, -0.200]   # [E] discovery10 x 1632 px
+size_m = [0.020, 0.016]             # [E] see r_led_1
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] no label readable
+evidence = "discovery10 blue lit key, no readable label"  # [E]
+
+[[button]]
+id = "r_led_3"                      # [E] see r_led_1
+panel = "centre"                    # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.881, 0.197, -0.226]   # [E] discovery10 x 1680 px
+size_m = [0.020, 0.016]             # [E] see r_led_1
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] no label readable
+evidence = "discovery10 blue lit key, no readable label"  # [E]
+
+# Under the right screen.
+
+[[button]]
+id = "r_cover"                      # [E] dark covered panel with a round knob, under the right screen's inner half
+panel = "right"                     # [E] discovery10
+row = 1                             # [E] spans both rows
+centre_m = [2.865, 0.168, -0.352]   # [E] discovery10 x 1771-1983 px, between the rows (0.185 below the screen centre)
+size_m = [0.11, 0.05]               # [E] discovery10, 212 px of the right screen's 540
+shape = "rect"                      # [E] discovery10
+kind = "covered"                    # [E] discovery10: hinged dark cover
+function = "none"                   # [E] function not known
+evidence = "discovery10 covered panel, no label readable"  # [E]
+
+[[button]]
+id = "r_upper_1"                    # [E] right cluster upper row, round (mirror of cluster A)
+panel = "right"                     # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.858, 0.144, -0.444]   # [E] discovery10 x 2011 px on the right screen's edge 1700-2240
+size_m = [0.016, 0.016]             # [E] see cam1
+shape = "round"                     # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] label unreadable
+evidence = "discovery10 label unreadable"  # [E]
+
+[[button]]
+id = "r_upper_2"                    # [E] right cluster upper row
+panel = "right"                     # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.853, 0.141, -0.471]   # [E] discovery10 x 2050 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] label unreadable
+evidence = "discovery10 label unreadable"  # [E]
+
+[[button]]
+id = "r_upper_3"                    # [E] right cluster upper row
+panel = "right"                     # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.849, 0.138, -0.495]   # [E] discovery10 x 2084 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] label unreadable
+evidence = "discovery10 label unreadable"  # [E]
+
+[[button]]
+id = "r_upper_4"                    # [E] right cluster upper row
+panel = "right"                     # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.845, 0.135, -0.518]   # [E] discovery10 x 2117 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] label unreadable
+evidence = "discovery10 label unreadable"  # [E]
+
+[[button]]
+id = "r_upper_5"                    # [E] right cluster upper row, round
+panel = "right"                     # [E] discovery10
+row = 1                             # [E] discovery10
+centre_m = [2.840, 0.132, -0.543]   # [E] discovery10 x 2154 px
+size_m = [0.016, 0.016]             # [E] see cam1
+shape = "round"                     # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] label unreadable
+evidence = "discovery10 label unreadable"  # [E]
+
+[[button]]
+id = "r_lower_1"                    # [E] right cluster lower row
+panel = "right"                     # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.837, 0.166, -0.462]   # [E] discovery10 x 2036 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] label unreadable
+evidence = "discovery10 label unreadable"  # [E]
+
+[[button]]
+id = "r_lower_2"                    # [E] right cluster lower row
+panel = "right"                     # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.833, 0.163, -0.488]   # [E] discovery10 x 2074 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] label unreadable
+evidence = "discovery10 label unreadable"  # [E]
+
+[[button]]
+id = "r_lower_3"                    # [E] right cluster lower row
+panel = "right"                     # [E] discovery10
+row = 2                             # [E] discovery10
+centre_m = [2.829, 0.160, -0.512]   # [E] discovery10 x 2108 px
+size_m = [0.024, 0.016]             # [E] see cam2
+shape = "rect"                      # [E] discovery10
+kind = "push"                       # [E] discovery10
+function = "none"                   # [E] label unreadable
+evidence = "discovery10 label unreadable"  # [E]
+
+[hotas]
+# Deliberate deviation (user 2026-11-07): the real Dragon has no stick or throttle. Thrustmaster T.16000M stick on the commander's
+# right armrest, TWCS throttle on the left, placed where the player's real HOTAS is; calibrated in the VR run (plan Task 9).
+props = true                        # [E] user 2026-11-07: shown, switchable
+stick_grip_m = [-0.234, 0.433, -0.25]     # [E] from the eye point, capsule axes: s2 hip + 0.32 m forward (chest normal) + 0.28 m up the back, 0.25 m to the crew's right of the seat centre (armrest); = 0.22 forward, 0.44 below the eye in seat axes
+throttle_grip_m = [-0.234, 0.433, 0.27]   # [E] same, 0.27 m to the crew's left of the seat centre

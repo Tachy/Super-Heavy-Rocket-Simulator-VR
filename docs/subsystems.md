@@ -27,5 +27,6 @@ Older code comments refer to sections of this file by their former titles; the t
 | Aero derivation (ascent and booster descent drag from the built models, cross-check) | `subsystems/aero-derivation.md` | - |
 | Moon procedural near-ground surface (craters, regolith roughness, rocks, Hapke) | `subsystems/moon-surface.md` | `history/moon-surface.md` |
 | Language and report codes (core codes, text tables, `I18n`, checks) | `subsystems/i18n.md` | - |
+| Cockpit (M7: Crew Dragon cabin tables, seats, eye point, console, buttons, armrest HOTAS) | `subsystems/cockpit.md` | - |
 
 New subsystems get their own `docs/subsystems/<slug>.md`.
