@@ -249,6 +249,45 @@ TEST_CASE("An HLS lands on the LOLA terrain at the flattest spot near the site",
     CHECK(fx.session.body(0).resting());
 }
 
+// Lunar sites Task 13: on a slope the ground 1.5 km from the site centre lies ~250 m above the site's tangent plane
+// (75 N 30 E: -305 m against -553 m); the leg simulation starts tracking near that ground, not near the plane (the HLS
+// passed through the terrain untracked and struck it with its base 200 m below).
+TEST_CASE("An HLS lands on terrain far above the site's plane", "[hls][legs][lunar][terrain][data]") {
+    Fixture fx;
+    const auto config = config::lunar_site_at(STARSIM_CONFIG_DIR, 75.0 * deg, 30.0 * deg);
+    if (!sim::lunar_site_tiles_present(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, config)) SKIP("75 N 30 E tile not installed");
+    const auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR, config);
+    fx.session.set_moon_terrain(terrain);
+    fx.session.set_lunar_landing_site(sim::lunar_site(config, *terrain));
+    const auto& surface = fx.session.leg_landing().surface();
+    const auto cfg = hls(100.0e3);
+    const double r = cfg.stages.front().landing_legs.footprint_radius_m;
+    double best = 1e9, be = 0.0, bn = 0.0;  // flattest spot of a 50 m lattice within 250 m of (-770, 1295) m
+    for (int i = -5; i <= 5; ++i) {
+        for (int j = -5; j <= 5; ++j) {
+            double worst = 0.0;
+            for (int k = -1; k < 6; ++k) {
+                const double a = k * 60.0 * deg;
+                const double e = -770.0 + 50.0 * i - (k < 0 ? 0.0 : r * std::sin(a));
+                const double n = 1295.0 + 50.0 * j + (k < 0 ? 0.0 : r * std::cos(a));
+                worst = std::max(worst, std::acos(std::min(1.0, surface.below(e, n).normal.z)));
+            }
+            if (worst < best) {
+                best = worst;
+                be = -770.0 + 50.0 * i;
+                bn = 1295.0 + 50.0 * j;
+            }
+        }
+    }
+    const double above_plane_m = surface.below(be, bn).height_m;
+    std::printf("[hls] 75 N 30 E: spot (%.0f, %.0f) m, %.2f deg, ground %.1f m above the site's plane\n", be, bn,
+                best / deg, above_plane_m);
+    REQUIRE(above_plane_m > 100.0);  // the case this test is about
+    place_over_site(fx, cfg, 0.5, {0.0, 0.0, -1.0}, be, bn);
+    CHECK(run_drop(fx) == sim::LegTouchdown::Landed);
+    CHECK(fx.session.body(0).resting());
+}
+
 TEST_CASE("An HLS lands with its disc footpads on the procedural surface", "[hls][legs][lunar][terrain][moon_surface][data][slow]") {
     const std::filesystem::path data = STARSIM_DATA_DIR;
     if (!std::filesystem::exists(data / "terrain" / "diviner_rock_abundance.i16")) SKIP("Diviner data not installed");

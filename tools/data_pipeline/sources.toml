@@ -700,3 +700,12 @@ target = "core/tests/test_lunar_site_sun.cpp"
 kind = "licence_only"
 license = "NASA publication (US government work, public domain); only numerical values are used"
 credit = "Apollo landing Sun elevations: Apollo Lunar Surface Journal (NASA), computed by P. Fjeld and J. Scotti"
+
+[[source]]
+id = "lunar_sites_look_references"
+name = "Look references of the lunar sites validation (lunar sites plan Task 13), compared side by side with renders, not shipped: Apollo surface photographs AS11-40-5903, AS15-86-11603, AS17-140-21497 (images.nasa.gov ~large.jpg, also apollo_surface_photos_look_reference); LROC NAC Taurus-Littrow oblique (SVS 4302 image taurus_littrow_oblique_crop) and the LROC WAC context view (SVS 4717 flyover frame 150) (svs.gsfc.nasa.gov/4302, /4717)"
+url = "https://svs.gsfc.nasa.gov/4302"
+target = "docs/subsystems/moon-surface.md"
+kind = "licence_only"
+license = "NASA photographs and NASA SVS visualisations of LRO data: public domain (US government work, NASA media usage guidelines); LROC data NASA/GSFC/Arizona State University"
+credit = "Apollo surface photographs: NASA; LROC NAC / WAC views: NASA/GSFC/Arizona State University, NASA Scientific Visualization Studio (look references, not shipped)"

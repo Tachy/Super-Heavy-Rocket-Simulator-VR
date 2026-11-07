@@ -320,6 +320,12 @@ on top; it replaced the interim `GroundPatch`.
 
 ## Validation
 
+- Lunar site tiles (lunar sites Task 13): across the Apollo 17 tile edge the physics heights step at most 1.69 m per
+  20 m in the 1 km blend (outside: equal to the global grid), the site albedo factor is exactly 1 at the edge and steps
+  at most 0.13 per 100 m pixel in the 5 km band (0.20 inside the tile); renders from 300 m and 3 km across the edge show
+  no seam (`screenshots/lunar_sites/a17_tile_edge_close.png`, `a17_tile_edge_3km.png`). End to end through the game
+  (`game/tests/lunar_picker_e2e.gd`): picker search at Apollo 15 lists 5 real windows, window 1 starts the mission
+  (terrain switch + start) and it flies to the touchdown; numbers in `docs/subsystems/lunar.md` Validation.
 - Earth near-field Sun shadows (Task 16): the Pad B tower's shadow tip (render_check `--shadow_length`, `EarthShadowLength`:
   a nadir view 500 m over the pad, the shadowed ground pixels from the on / off frames at the direct Sun's 50 % contour,
   against the largest (P - O).a + (h - dh) / tan e over the 91 330 casting vertices: the head's roof, 147.9 m; dh the

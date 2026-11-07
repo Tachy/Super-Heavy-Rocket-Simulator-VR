@@ -1174,6 +1174,27 @@ on top of that relief.
   rock patches at abundance 3 / 10 equal the Task 13 numbers to 0.01 % (ab.10 +1.52 % worst); moon_shadow_check PASS. The boulder-field camera jump fails its 5 ms gate
   intermittently (one 21-26 ms pool allocation in the pool take): 4 of 5 runs with this pass's code, 2 of 4 with the former
   LOD-1 shadow mesh - not from this pass (known-issues).
+- Lunar sites Task 13 (2026-11-07, look against photos; renders `screenshots/lunar_sites/`, references
+  `screenshots/lunar_sites/ref/`, sources.toml `lunar_sites_look_references`): Apollo 11 / 15 / 17 at their touchdown
+  UTC (the Sun of Task 6: 10.7 / 12.0 / 13.4 deg in the east), LM-window view (eye 5 m, looking west, down-Sun) and a
+  15 km view. Km-scale relief agrees with LROC: Hadley Rille's sinuous channel with its shadowed east wall and the
+  Apennine front (`a15_15km_west`), the Taurus-Littrow valley between the North / South Massifs (`a17_15km`, the
+  NAC oblique of SVS 4302), the flat Tranquillitatis mare with wrinkle ridges and bright-haloed fresh craters
+  (`a11_15km`). Photo-like views: AS15-86-11603 (Mount Hadley to the north-east, EVA 1) - the massif's lit east flank and
+  shaded front, its rounded profile and the low hills to its right match; the drawn foreground holds more cm-dm rocks
+  than the photo's smooth regolith. AS11-40-5903 - mare grey and the opposition brightening down-Sun match, the drawn
+  near field is rougher (wavier) than the photo's fine regolith. AS17-140-21497 (station 6, EVA 3) - the South Massif
+  across the valley and the scattered boulders match in scale; the photo's massif slopes are smoother and less bright.
+  Tile edge (b): physics heights across the Apollo 17 tile edge (1 km blend, 20 m steps, 4 directions) - largest step in
+  the blend 1.27-1.69 m against 3.6-13.2 m inside the tile and 0.6-5.0 m outside, outside equal to the global grid to
+  0.000 m; site albedo factor (5 km blend) exactly 1.0000 at the edge, largest per-pixel factor step in the band
+  0.04-0.13 (in the core 0.12-0.20); close view from 300 m and the 3 km view across the edge show no seam
+  (`a17_tile_edge_close`, `a17_tile_edge_3km`). Massif blotches (c): the soft bright patches on the Taurus-Littrow
+  massifs come from the global albedo (`moon_color.png`, 2.7 km/px): over 1.8 x 1.8 deg around the site its luminance
+  correlates 0.67 with the WAC 643 nm tile averaged onto its pixels and shows no baked topographic shading (log ratio
+  against the terrain gradients R^2 = 0.00) - real albedo (bright massif highland material and the South Massif's
+  light mantle against the dark-mantled valley floor, as on the NAC oblique), drawn soft by the 2.7 km pixel; the site
+  factor adds the 2.7-10 km band a second time (log contrast 0.287 -> 0.377; known-issues).
 
 ## Sources
 Each value with tag, reference and the scale range it covers. Tags: [S] sourced, [E] estimate, [D] derived.

@@ -193,8 +193,13 @@ void LegLandingSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies,
         if (!on_site || v.leg_deployment() <= 0.0 || body->impacted() || body->resting()) continue;
         // A track starts near the ground: near the site's plane AND near the body's own ground (lunar l3: an Earth site's
         // plane passes through low Earth orbit ~14 deg from the site; an HLS with fixed legs struck it there).
+        // On a terrain field "near the site's surface" is near the field below the CG, not the site's plane (lunar sites
+        // Task 13: a touchdown point 250 m above the site centre's height on a 10 deg slope - the CG passed through the
+        // ground untracked, the base struck it far below).
         if (tracks_.count(body) == 0 &&
-            (pose.cg_m.z > contact_zone_height_m || body->ground_clearance(env, epoch).height_m > contact_zone_height_m)) {
+            (body->ground_clearance(env, epoch).height_m > contact_zone_height_m ||
+             pose.cg_m.z - ((!deck && surface_.field) ? surface_.below(pose.cg_m.x, pose.cg_m.y).height_m : 0.0) >
+                 contact_zone_height_m)) {
             continue;
         }
         auto& tr = track(*body);

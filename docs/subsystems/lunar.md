@@ -61,7 +61,9 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   CloudFront host (LROC) answered HTTP 429 with `Retry-After: 3600` after ~1,500 small range requests in 10 min: read albedo
   in large row blocks and honour Retry-After. Polar north uses `line = pole_line + rho cos(lon) / s` (south has the minus sign).
   Leg landings work on any reference body
-  (`sim::LegSite` with a tracking radius; `set_legs_on_site`) and press the feet along the surface normal
+  (`sim::LegSite` with a tracking radius; `set_legs_on_site`; a body's feet are tracked once its CG is within 50 m of
+  its own ground AND of the field's surface below it - on a terrain field the field height there, not the site's plane:
+  on slopes the ground 1.5 km from the site centre lies 250 m above that plane, lunar sites Task 13) and press the feet along the surface normal
   (`contact::SurfaceField`: `PlaneField`, `TerrainField`). Footpads are discs (`foot_pad_radius_m`, HLS 1.0 m [E],
   user-approved 2026-11-04; 0 = point foot): each foot stands on `below_disc` (the pad's support and normal), the base
   ring asks `height_below`; feet and ring points above the field's upper bounds are skipped (same result). On the
@@ -350,6 +352,17 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   into 100 x 100 km. Campaign (`test_lunar_landing_campaign.cpp`, PDI state +-1 km / +-5 m/s per axis, thrust +-2 % via
   `FlightSession::set_thrust_dispersion`, propellant +-5 %): 21 / 21 landed, 0.02-0.78 m, sink 0.98-1.03 m/s, 237-256
   t from PDI; aborts from 3 / 1 / 0.3 km reach the LLO (148 / 142 / 135 t).
+- Site campaign (lunar sites Task 13, `test_lunar_landing_campaign.cpp` "Site campaign"): each site's first listed
+  window (24 h stay, search from 2026-11-06), the descent planned through the public chain from the window's start
+  (impulsive TLI / insertion, planned once settled in the LLO), then the campaign's dispersed PDI on that plan's track
+  and PDI epoch on the site's composed surface (`test::place_hls_at_pdi_on_track`). Seed 1, `[slow]`: Apollo 11 window
+  +9.67 d, Sun 7.1 deg, reserve 62.0 t, LLO i 6.2 deg, approach 96.2 deg: landed 0.21 m; Apollo 15 +11.38 d, 6.6 deg,
+  62.6 t, i 26.1, 90.6 deg: 0.01 m; Apollo 17 +9.39 d, 9.9 deg, 60.6 t, i 24.2, 103.6 deg: 0.24 m; Tsiolkovskiy
+  (20.4 S 129.1 E) +13.50 d, 19.8 deg, 48.7 t, i 139.3, -54.2 deg: 0.49 m; 75 N 30 E +10.86 d, 5.5 deg, 57.9 t, i
+  77.5, 122.6 deg: 0.58 m (all sink 1.02 m/s, 247.8-249.1 t from PDI; no site refused - a refusal would have to name its
+  cause). The 75 N case found the leg-tracking defect fixed in Task 13 (above). `[nightly]` seeds 1-7: Apollo 15 7 / 7
+  and Apollo 17 7 / 7 within 1 m; Apollo 11 4 / 7 - seeds 2, 3, 4 land upright but 1.71 / 2.38 / 1.69 m off on 6.6 /
+  7.8 / 5.8 deg (open points).
 - Lunar return: LLO direct (Nov 12 2026) TEI ~876-888 m/s, braking ~1,030-1,043 m/s, entry 9,695 m/s -4.8 deg, peak
   0.75-1.06 MW/m^2, 2.6-4.2 g, caught (8-13 t left); aircatch braking 926 m/s, exit ~53-55 x ~422-427 km, perigee raise
   43 m/s + circularisation 62 m/s, b4 deorbit 63 m/s ~93 h later, caught 7.6 t; NRHO direct caught 6.1 t. Campaigns
@@ -393,7 +406,10 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   `STARSIM_DEBUG_LUNAR_SESSION`, `STARSIM_DEBUG_LUNAR_DESCENT`, `STARSIM_DEBUG_LUNAR_ASCENT`,
   `STARSIM_DEBUG_LUNAR_WINDOWS` (per candidate: time, touchdown, band, outcome; per re-solve start, arrival drift,
   pass, crossrange; the NRHO screen's floor and margin); single
-  campaign case `"[.lunar_case]"` with `STARSIM_LUNAR_CASE=<seed>`; hidden `"[.lunar_return_case]"`
+  campaign case `"[.lunar_case]"` with `STARSIM_LUNAR_CASE=<seed>` (`STARSIM_LUNAR_SITE=<preset id>`: at that site's
+  first window; `STARSIM_CAMPAIGN_TRACE=1`: CG, ground and mass once a second below 500 m, every tick after the first
+  contact, and the 5 s of settling); game end to end: `game/tests/lunar_picker_e2e.gd` (GPU; picker search, window 1,
+  start, flight to the touchdown; PNGs of the list, the coast and the landed HLS); hidden `"[.lunar_return_case]"`
   (`STARSIM_RETURN_SEED`, `STARSIM_RETURN_AIRCATCH=1`), `"[.lunar_gate_replay]"` (`STARSIM_GATE_STATE`),
   `"[.lunar_handover_replay]"` (`STARSIM_HANDOVER_STATE`), `"[.lunar_return_epoch_probe]"`, `"Aerocapture dispersion
   probe"` (`STARSIM_PROBE_DENSITY`, `_AERO`, `_PROPELLANT_KG`, `_KICK` "h_km,wx,wy,wz"; a peak-q
@@ -404,6 +420,11 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   re-plan after the trim; no boil-off in the stay; no degraded profile for automatic aborts from fast low states (PEG
   saturates: 111 x 115 km); status at burn end shows osculating elements (95 x 100 km for a 100 km LLO); the sub-orbital
   cutoff guard is untested.
+- Landing on 6-8 deg: the engines cut at the first leg contact with the hull vertical; the uphill feet touch first and
+  the HLS falls ~6-8 deg onto the downhill feet, its footprint moving 1.5-2.4 m downhill (Apollo 11 nightly seed 3:
+  contact 0.27 m off, 2.38 m after settling at 6.8 deg; Mons Mouton seed 14 1.51 m on 8.0 deg). Upright and intact, but
+  outside the 1 m gate - open: the touchdown-point choice (flatter admissible spots first) or the terminal phase
+  (setting down slope-aligned / staying lit until the downhill feet touch); known-issues.
 - Window search: the hard Sun rule uses the geometric horizon (`site_sun`); at crater / polar sites the first slot or
   the liftoff hour can be behind terrain (terrain horizon as in `tools/lunar_sun_scan.py`: Task 13 or later). The stay's
   plane change is budgeted, not flown: the flight's ascent still ends in the plane through the liftoff point and no

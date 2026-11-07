@@ -372,3 +372,17 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 ## Lunar sites plan, Task 11 (2026-11-07)
 
 - `World.switch_lunar_site` blocks the main thread for ~5.0 s (`TerrainQuadtree.setup` ~4.3 s, rock layer ~0.4 s, detail configure ~0.25 s; game start ~7.7 s for the same setup). Accepted while the switch happens in the mission wizard before a flight (ruling R20); moving the quadtree setup off the main thread is open. Measured value: `World.last_site_rebuild_ms` (printed by `render_check`).
+
+## Lunar sites plan, Task 13 (2026-11-07)
+
+- Landing on 6-8 deg slopes: the engines cut at the first leg contact with the hull vertical, the HLS falls onto its
+  downhill feet and its footprint ends 1.5-2.4 m downhill of the touchdown point (upright, intact). Nightly site campaign
+  Apollo 11 seeds 2 / 3 / 4: 1.71 / 2.38 / 1.69 m on 6.6 / 7.8 / 5.8 deg (`[nightly]` red, 4 / 7); Mons Mouton seed 14
+  1.51 m on 8.0 deg (the pre-existing `[slow]` red). Fix by the touchdown-point choice or the terminal phase:
+  `docs/subsystems/lunar.md` open points; needs a decision (guidance change).
+- Site albedo: the factor is the WAC tile over its own 10 km box mean, so features between the global map's 2.7 km
+  pixel and 10 km are in both the global albedo and the factor: at Apollo 17 the km-scale log contrast rises from 0.287
+  (global) to 0.377 (x1.09 at 1 sigma). The massifs' soft bright patches themselves are real albedo (`moon-surface.md` Validation).
+- Render checks: an eye placed by `--eye_height` over the site centre can stand next to a drawn boulder (Apollo 15
+  LM-window view); the AS11/15/17 comparisons are at the photo azimuths only approximately (the camera stations are
+  not reproduced).

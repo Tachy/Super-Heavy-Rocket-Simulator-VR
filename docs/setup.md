@@ -17,7 +17,8 @@ One-time setup:
 # albedo tile of every preset site of config/lunar_sites.toml through that CLI (HTTP ranges, 16 parallel connections: PDS answers
 # 403 above ~300 requests at 32; HTTP 429 stops with its Retry-After) into data/terrain/sites/<cache key>.{toml,i16}: Mons Mouton
 # 2 MB + 5 MB, each Apollo site ~26 MB + ~5 MB (the albedo download is ~165 MB transient per equatorial tile, only ~5 MB kept).
-# `fetch.py lunar_test_sites` (opt-in, like weather_analog) also caches Tsiolkovskiy (20.4 S 129.1 E) and 75.0 N 30.0 E.
+# `fetch.py lunar_test_sites` (opt-in, like weather_analog) also caches Tsiolkovskiy (20.4 S 129.1 E) and 75.0 N 30.0 E (the
+# far-side and high-north site campaign cases and window tests SKIP without them; the Apollo cases need `lunar_sites`).
 # The weather_analog step is opt-in (a bare fetch.py skips it): after building the core run
 # `python tools/data_pipeline/fetch.py weather_analog` (needs build/core/weather_snapshot.exe); it downloads 48 ERA5 hours (the 15th of each
 # month at 00/06/12/18 UTC of 2025, ~65 MB raw each, deleted after use) and writes data/weather/analog (48 x 8.6 MB, ~400 MB)

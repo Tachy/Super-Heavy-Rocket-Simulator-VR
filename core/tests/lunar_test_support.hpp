@@ -31,6 +31,21 @@ inline config::VehicleConfig hls_with_propellant(double propellant_kg, double dr
     return cfg;
 }
 
+// The PDI state in the orbit plane with normal `n` (unit, GCRF, normal to the point's direction): the HLS moves along
+// -cross(n, p) over the point p. See place_hls_at_pdi.
+inline void place_hls_at_pdi_in_plane(sim::FlightSession& session, const ephemeris::Ephemeris& ephemeris,
+                                      const math::Vec3& p, const math::Vec3& n, const mission::TouchdownPoint& point,
+                                      time::Epoch t0, double propellant_kg, double dry_kg, double range_m,
+                                      const math::Vec3& position_error_m, const math::Vec3& velocity_error_mps);
+
+// The touchdown point's direction from the Moon's centre (unit, GCRF) at t0.
+inline math::Vec3 point_direction_gcrf(const frames::BodyOrientation& moon_me, const mission::TouchdownPoint& point,
+                                       time::Epoch t0) {
+    const auto rot = moon_me.fixed_to_gcrf(t0).rotation;
+    return rot * math::Vec3{std::cos(point.latitude_rad) * std::cos(point.longitude_rad),
+                            std::cos(point.latitude_rad) * std::sin(point.longitude_rad), std::sin(point.latitude_rad)};
+}
+
 // Moon-relative PDI state: periselene of a (h_point + 15 km) x 100 km polar ellipse, `range_m` of ground arc before
 // the touchdown point, in the plane through the pole and the point, heading south; the HLS retrograde, ready to brake.
 // `position_error_m` / `velocity_error_mps` (GCRF) are added to that state (dispersion campaigns).
@@ -38,13 +53,37 @@ inline void place_hls_at_pdi(sim::FlightSession& session, const ephemeris::Ephem
                              const frames::BodyOrientation& moon_me, const mission::TouchdownPoint& point, time::Epoch t0,
                              double propellant_kg, double dry_kg = 0.0, double range_m = 450e3,
                              const math::Vec3& position_error_m = {}, const math::Vec3& velocity_error_mps = {}) {
+    const math::Vec3 p = point_direction_gcrf(moon_me, point, t0);
+    const math::Vec3 pole = moon_me.fixed_to_gcrf(t0).rotation * math::Vec3{0.0, 0.0, 1.0};
+    const math::Vec3 n = math::normalized(cross(p, pole));  // cross(n, p): local north at p
+    place_hls_at_pdi_in_plane(session, ephemeris, p, n, point, t0, propellant_kg, dry_kg, range_m, position_error_m,
+                              velocity_error_mps);
+}
+
+// The same on the ground track `approach_azimuth_rad` (clockwise from north, MOON_ME) over the point - the descent
+// plan's approach (lunar sites plan Task 13: campaigns at a window's planned geometry). 180 deg = place_hls_at_pdi.
+inline void place_hls_at_pdi_on_track(sim::FlightSession& session, const ephemeris::Ephemeris& ephemeris,
+                                      const frames::BodyOrientation& moon_me, const mission::TouchdownPoint& point,
+                                      time::Epoch t0, double propellant_kg, double range_m, double approach_azimuth_rad,
+                                      const math::Vec3& position_error_m = {},
+                                      const math::Vec3& velocity_error_mps = {}) {
+    using math::Vec3;
+    const Vec3 p = point_direction_gcrf(moon_me, point, t0);
+    const Vec3 pole = moon_me.fixed_to_gcrf(t0).rotation * Vec3{0.0, 0.0, 1.0};
+    const Vec3 east = math::normalized(cross(pole, p));
+    const Vec3 north = cross(p, east);
+    const Vec3 heading = north * std::cos(approach_azimuth_rad) + east * std::sin(approach_azimuth_rad);
+    const Vec3 n = cross(heading, p);  // -cross(n, p) = heading
+    place_hls_at_pdi_in_plane(session, ephemeris, p, n, point, t0, propellant_kg, 0.0, range_m, position_error_m,
+                              velocity_error_mps);
+}
+
+inline void place_hls_at_pdi_in_plane(sim::FlightSession& session, const ephemeris::Ephemeris& ephemeris,
+                                      const math::Vec3& p, const math::Vec3& n, const mission::TouchdownPoint& point,
+                                      time::Epoch t0, double propellant_kg, double dry_kg, double range_m,
+                                      const math::Vec3& position_error_m, const math::Vec3& velocity_error_mps) {
     using math::Vec3;
     const double R = constants::moon_mean_radius_m, gm = ephemeris.gm_m3ps2(ephemeris::Body::Moon);
-    const auto rot = moon_me.fixed_to_gcrf(t0).rotation;
-    const Vec3 p = rot * Vec3{std::cos(point.latitude_rad) * std::cos(point.longitude_rad),
-                              std::cos(point.latitude_rad) * std::sin(point.longitude_rad), std::sin(point.latitude_rad)};
-    const Vec3 pole = rot * Vec3{0.0, 0.0, 1.0};
-    const Vec3 n = math::normalized(cross(p, pole));  // cross(n, p): local north at p
     const double angle = range_m / (R + point.height_m);
     const Vec3 r_hat = p * std::cos(angle) + cross(n, p) * std::sin(angle);  // uprange of p: north of it
     const Vec3 along = -cross(n, r_hat);                                       // towards p: southwards
