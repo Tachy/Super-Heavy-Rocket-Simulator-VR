@@ -295,7 +295,8 @@ void fragment() {
 	float earth_lit = moon_rock_lit(earth_margin, detail_cell_m, detail_horizon_spacing_m, view.xz);
 	float norm = moon_rock_norm(abundance);
 	float half_texel_v = 0.5 / float(textureSize(albedo_texture, 0).y);
-	vec3 albedo = texture(albedo_texture, vec2(global_uv.x, clamp(global_uv.y, half_texel_v, 1.0 - half_texel_v))).rgb;
+	vec3 albedo = texture(albedo_texture, vec2(global_uv.x, clamp(global_uv.y, half_texel_v, 1.0 - half_texel_v))).rgb
+			* moon_albedo_tint;
 	albedo = site_albedo_apply(albedo, site_albedo_factor(global_uv));  // the active landing site's relative albedo (moon_site_albedo.gdshaderinc)
 	float fade = moon_near_fade(-VERTEX.z);
 	float light;

@@ -34,6 +34,12 @@ global uniform float moon_sun_scene;
 // post step's white balance maps a grey regolith to grey. The earthshine takes it too [call: the Earth's spectral
 // albedo (bluer than the Sun) is not modelled]; the umbra glow keeps its own colour. (1, 1, 1) before the tables load.
 global uniform vec3 moon_sun_color;
+// The regolith colour factor (look fixes T5b, user 2026-11-07; Atmosphere.moon_albedo_tint / moon_grey_tint): the albedo
+// texture carries only ~1/3 of the regolith's real red slope. moon_albedo_tint multiplies the texture's albedo (its mean
+// is then the measured lunar reflectance colour at the unchanged mean luminance); moon_grey_tint (luminance 1) the
+// grey albedo of the radiance map's Moon. (1, 1, 1) with the flag off.
+global uniform vec3 moon_albedo_tint;
+global uniform vec3 moon_grey_tint;
 // The same under the earthshine (Atmosphere.earthshine_scene), without the gain.
 global uniform float moon_earthshine;
 // The BRDF (above): 0 Lommel-Seeliger x K&S, 1 Hapke.

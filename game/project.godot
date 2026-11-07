@@ -114,6 +114,14 @@ moon_sun_color={
 "type": "vec3",
 "value": Vector3(1, 1, 1)
 }
+moon_albedo_tint={
+"type": "vec3",
+"value": Vector3(1, 1, 1)
+}
+moon_grey_tint={
+"type": "vec3",
+"value": Vector3(1, 1, 1)
+}
 water_wave_vectors={
 "type": "mat4",
 "value": Projection(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)

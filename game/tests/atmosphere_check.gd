@@ -926,8 +926,9 @@ func _earthshine_sample(label: String, moon_dir: Vector3, side: Vector3, phase_d
 	var regolith := Atmosphere.regolith_scale(float(_atmosphere.parameters["toa_solar_illuminance_lux"])) \
 			* Atmosphere.regolith_reflectance(Vector3.UP, Vector3.UP, Vector3.UP)
 	# x the colour of the Moon's light (moon_sun_color: the TOA Sun at luminance 1, T5 fix round 1; the earthshine
-	# takes it too).
-	_compare(label + " [regolith %.4f]" % regolith, albedo * scene * regolith * _atmosphere.moon_sun_color(), got,
+	# takes it too) and the regolith colour factor on the albedo texture (moon_albedo_tint, T5b).
+	_compare(label + " [regolith %.4f]" % regolith, albedo * Atmosphere.moon_albedo_tint() * scene * regolith
+			* _atmosphere.moon_sun_color(), got,
 			EARTHSHINE_TOLERANCE)
 
 

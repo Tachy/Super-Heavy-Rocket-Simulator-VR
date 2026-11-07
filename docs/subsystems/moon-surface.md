@@ -417,8 +417,14 @@ on top of that relief.
   red-sloped, not blue. Reference: the full Moon's B-V 0.92 against the Sun's 0.65 [S: Allen's Astrophysical
   Quantities] is a reflectance ratio R(440)/R(550) of 0.78; as a linear slope through CIE 1931 (Wyman et al. 2013 fit)
   into linear sRGB under a neutral light B/R 0.66, G/R 0.85 (0.62-0.73 for a B-V difference of 0.20-0.32; equivalent
-  Clementine-style 415/750 ratio 0.52). The mosaic carries about a third of the real slope (log ratio); a colour factor
-  would be a texture-colour change for the user to decide (open point), not applied.
+  Clementine-style 415/750 ratio 0.52). The mosaic carries about a third of the real slope (log ratio). Corrected since 2026-11-07
+  (user decision, T5b): `Atmosphere.moon_albedo_tint()` = measured colour (G/R 0.85, B/R 0.66 [S], at the texture's mean
+  luminance) / the texture's mean colour (`MOON_TEXTURE_MEAN_RGB` (0.3077, 0.2998, 0.2753) [D], area-weighted whole
+  sphere), global `moon_albedo_tint`, multiplies the albedo in moon.gdshader, terrain_moon.gdshader and
+  moon_rock.gdshader; `moon_grey_tint` (luminance 1) the grey Moon of sky.gdshader's radiance map and the CPU
+  Moon-in-view term (`adaptation_luminance`). The mean luminance is exactly kept (the calibrated albedo, regolith_scale,
+  moon_disc_calibration unchanged: luminance only); the mosaic's local colour variation stays. Fidelity flag
+  `Atmosphere.moon_colour_correction` (render_check `--moon_colour=texture` = the former look). Test `moon_colour_test.gd`.
 - Albedo map (Task 11 fix C, ruling T11-C4): `data/textures/moon_color.png` is the CGI Moon Kit colour mosaic with its
   large-scale brightness tied to the LROC WAC Hapke w map (Sato et al. 2014, 1 deg, +-70 deg;
   `tools/data_pipeline/moon_albedo.py`, run by `prepare.py`; source `lroc_wac_hapke_parameter_map`): per 1-deg cell

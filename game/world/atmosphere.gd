@@ -48,6 +48,16 @@ const EARTH_MEAN_RADIUS_M := 6371000.0
 ## mosaic, tools/data_pipeline/sources.toml "moon_color") sRGB-decoded, BT.709 luminance, area-weighted over the sphere
 ## (0.2997, kept by the WAC w-map tie of tools/data_pipeline/moon_albedo.py) - the albedo the Moon shaders multiply.
 const MOON_MEAN_TEXTURE_ALBEDO := 0.30
+## [D] The albedo texture's mean colour (linear Rec.709, area-weighted over the sphere, same decode as above): B/R 0.894,
+## G/R 0.974 - red-sloped, but only about a third of the real regolith's slope in log ratio (look fixes T5b).
+const MOON_TEXTURE_MEAN_RGB := Vector3(0.3077, 0.2998, 0.2753)
+## [S: Allen's Astrophysical Quantities, full Moon B-V 0.92 vs the Sun's 0.65 -> R(440)/R(550) 0.78; a linear spectral
+## slope through the CIE 1931 observer (Wyman et al. 2013 fit) into linear Rec.709 under a neutral light] The mean
+## regolith's reflectance colour as ratios to red: G/R 0.85, B/R 0.66 (0.62-0.73 for dB-V 0.20-0.32).
+const MOON_REGOLITH_COLOUR_RATIO := Vector3(1.0, 0.85, 0.66)
+## Fidelity flag (user 2026-11-07): the regolith colour factor on. Off: the texture's own colour (the former look;
+## render_check --moon_colour=texture).
+static var moon_colour_correction := true
 ## The regolith's reflectance (shaders/moon_regolith.gdshaderinc, regolith_reflectance here; night-vision fix round I3,
 ## I4): albedo x regolith_scale x E/pi x Lommel-Seeliger x the K&S phase factor (or Hapke x hapke_normalisation, the
 ## default since the moon procedural surface plan Task 9), for the Sun and the earthshine alike.
@@ -386,6 +396,8 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	ShaderGlobals.set_value(&"moon_earthshine", earthshine_scene)
 	ShaderGlobals.set_value(&"moon_sun_scene", DAY_EXPOSURE / (sun_au * sun_au))
 	ShaderGlobals.set_value(&"moon_sun_color", moon_sun_color())
+	ShaderGlobals.set_value(&"moon_albedo_tint", moon_albedo_tint())
+	ShaderGlobals.set_value(&"moon_grey_tint", moon_grey_tint())
 	ShaderGlobals.set_value(&"moon_regolith_scale",
 			regolith_scale(float(parameters.get("toa_solar_illuminance_lux", NOMINAL_TOA_LUX))))
 	if not poll():
@@ -533,6 +545,27 @@ func moon_sun_color() -> Vector3:
 	return sun / luminance if luminance > 0.0 else Vector3.ONE
 
 
+## The regolith colour factor for the albedo texture (global moon_albedo_tint): per channel, the measured mean
+## reflectance colour (MOON_REGOLITH_COLOUR_RATIO) at the texture's mean luminance over the texture's mean colour
+## (MOON_TEXTURE_MEAN_RGB). The mean of tint x texture is the measured colour at the unchanged mean luminance, so the
+## calibrated albedo (MOON_MEAN_TEXTURE_ALBEDO, regolith_scale) and the disc calibration stay; local colour variation
+## of the mosaic is kept. ONE with the flag off.
+static func moon_albedo_tint() -> Vector3:
+	if not moon_colour_correction:
+		return Vector3.ONE
+	var luminance := EyeAdaptation.LUMINANCE_WEIGHTS.dot(MOON_TEXTURE_MEAN_RGB)
+	var target := MOON_REGOLITH_COLOUR_RATIO * (luminance / EyeAdaptation.LUMINANCE_WEIGHTS.dot(MOON_REGOLITH_COLOUR_RATIO))
+	return target / MOON_TEXTURE_MEAN_RGB
+
+
+## The same colour factor for the grey Moon users (the sky radiance map's Moon, the eye adaptation's Moon in view),
+## normalised to luminance 1 (global moon_grey_tint): the mean regolith's colour without a texture.
+static func moon_grey_tint() -> Vector3:
+	if not moon_colour_correction:
+		return Vector3.ONE
+	return MOON_REGOLITH_COLOUR_RATIO / EyeAdaptation.LUMINANCE_WEIGHTS.dot(MOON_REGOLITH_COLOUR_RATIO)
+
+
 ## Eye adaptation's luminance at an Earth-fixed eye (cd/m^2), the larger of two white-plate equivalents (both view-
 ## direction independent, so identical for both VR eyes and steady under head motion):
 ## - down: a white Lambertian at the eye lit by the direct Sun at normal incidence (TOA x the transmittance to the Sun)
@@ -596,9 +629,10 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 		# Earthshine on a plate at the Moon facing the Earth: the Lambert-sphere Earth of earthshine_relative, the same
 		# value the Moon shaders get (moon_earthshine).
 		last_earthshine_lux = earthshine_relative(moon_itrf_m, sun_itrf_m) * float(parameters["toa_solar_illuminance_lux"])
-		# The regolith is grey: the solar colour (sunlight and earthshine) at the term's luminance.
+		# The regolith's mean colour (moon_grey_tint, luminance 1) under the solar colour (sunlight and earthshine), at
+		# the term's luminance; as the sky shader's Moon draws it (its product is not renormalised).
 		var solar_rgb := solar * sun_factor
-		moon_rgb = solar_rgb / solar_rgb.dot(LUMINANCE_WEIGHTS) * _moon_in_view_luminance(eye_itrf_m, moon_itrf_m,
+		moon_rgb = solar_rgb / solar_rgb.dot(LUMINANCE_WEIGHTS) * moon_grey_tint() * _moon_in_view_luminance(eye_itrf_m, moon_itrf_m,
 				sun_itrf_m, moon_ground_m, last_earthshine_lux, d_au) * (1.0 - occulted_fraction(moon_itrf_m - eye_itrf_m,
 				moon_ground_m, -eye_itrf_m, EARTH_MEAN_RADIUS_M))
 	# Moonlight (night vision), only while it can matter (the Moon's white plate at least MOONLIGHT_MIN_SHARE of the

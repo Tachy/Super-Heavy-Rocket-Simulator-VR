@@ -45,7 +45,7 @@ void fragment() {
 	// The Sun and the earthshine through the one regolith reflectance (night-vision fix round I3).
 	float light = moon_regolith_scale * (regolith_reflectance(n, normalize(to_sun), to_eye) * sunlit * moon_sun_scene
 			+ regolith_reflectance(n, normalize(to_earth), to_eye) * moon_earthshine);
-	vec3 albedo = texture(albedo_texture, UV).rgb;
+	vec3 albedo = texture(albedo_texture, UV).rgb * moon_albedo_tint;
 	vec3 eclipse_light = umbra_glow * (1.0 - sunlit) * lommel_seeliger;
 	vec3 color = albedo * (light * moon_sun_color + eclipse_light);
 	if (atmosphere_enabled) {

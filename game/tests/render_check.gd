@@ -56,6 +56,8 @@
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off;
 #          --white_balance=off: no chromatic adaptation to the Sun's white (EyeAdaptation.white_balance_enabled).
 #          --tone=agx: Godot's AgX alone, without the chroma-preserving display tone step (DisplayTone.enabled);
+#          --moon_colour=texture: the Moon's albedo texture colour as it is, without the regolith colour factor
+#          (Atmosphere.moon_colour_correction, look fixes T5b).
 #          --hunt=day: the Hunt factor against L_day as before look fixes T5, S <= 1 (EyeAdaptation.hunt_display_reference).
 # Camera exposure: --camera_exposure=<f-number>,<shutter s>,<ISO> displays the scene as that film camera exposes it
 #          (ISO 2720 meter constant 12.5, mid grey 18 %, linear, clipped; the eye adaptation off) - photo comparisons;
@@ -181,6 +183,7 @@ func _initialize() -> void:
 	EyeAdaptation.white_balance_enabled = _args.get("white_balance", "on") != "off"
 	DisplayTone.enabled = _args.get("tone", "chroma") != "agx"
 	EyeAdaptation.hunt_display_reference = _args.get("hunt", "display") != "day"
+	Atmosphere.moon_colour_correction = _args.get("moon_colour", "regolith") != "texture"
 	MoonNearShadow.enabled = _args.get("moon_near_shadows", "on") != "off"  # the fidelity setting (Task 12)
 	MoonNearShadow.fill_enabled = _args.get("moon_fill", "on") != "off"
 	if _args.has("moon_shadow_casters"):
