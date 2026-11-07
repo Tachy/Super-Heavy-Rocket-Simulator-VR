@@ -164,6 +164,11 @@ Inhalten. Die Skizze unten mit „rechts Außenansicht Ship“ ist damit überho
 
 ## 5. Außenansichten
 
+- **Startansicht** [Entschieden 2026-11-07, `World.START_VIEW_PHASE_DEG`]: Nach dem Laden zeigt die erste Ansicht die Erde aus
+  dem All (Fokus Erde, Abstand 20 000 km, Norden oben) zu etwa drei Vierteln beleuchtet: Der Phasenwinkel Sonne-Erde-Kamera
+  beträgt 60° (beleuchteter Anteil 0,75), die beleuchtete Seite zeigt zur Kamera. Die Kamera wird aus der Sonnenrichtung der
+  Startzeit berechnet, gilt also für jede Uhrzeit; danach lässt sie sich wie gewohnt mit der Maus drehen.
+
 ### Webcast-Overlay [Entschieden, umgesetzt 2026-10-22]
 
 Die Außenansicht trägt ein Overlay im Stil der Starship-Webcasts (Spec `docs/superpowers/archive/specs/2026-10-22-external-view-design.md`).

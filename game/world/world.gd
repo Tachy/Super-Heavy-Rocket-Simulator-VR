@@ -186,10 +186,43 @@ func _ready() -> void:
 	_setup_label(earth_label, "ui.map.earth")
 	_setup_label(moon_label, "ui.map.moon")
 	clock.set_time(core.utc_to_tdb_s(Time.get_datetime_string_from_system(true)))
+	aim_start_view()
 	if PerfLog.requested():
 		add_child(PerfLog.new(self))
 	booted = true
 	boot_finished.emit()
+
+
+## [call user 2026-11-07] The first view (the Earth from space) shows the Earth about three-quarters lit: the Sun-Earth-camera
+## phase angle is this (illuminated fraction (1 + cos 60 deg) / 2 = 0.75), the lit side toward the camera, for any start time.
+const START_VIEW_PHASE_DEG := 60.0
+
+
+## Orbit camera (yaw, pitch) of the Earth focus for the start view: the camera direction is the Sun's direction turned by
+## START_VIEW_PHASE_DEG about the axis that keeps north up and the equator level (the turn toward the side nearer
+## `prefer_yaw`). `sun_gcrf_m`: the Sun seen from the Earth's centre.
+static func start_view_angles(sun_gcrf_m: Vector3, prefer_yaw: float) -> Vector2:
+	var s := Frames.to_render(sun_gcrf_m).normalized()
+	var east := Vector3.UP.cross(s).normalized()  # horizontal (render y is the pole), perpendicular to the Sun
+	var phase := deg_to_rad(START_VIEW_PHASE_DEG)
+	var best := Vector2.ZERO
+	var best_gap := INF
+	for side in [1.0, -1.0]:
+		var c: Vector3 = s * cos(phase) + east * (side * sin(phase))
+		var yaw := atan2(c.x, c.z)
+		var gap := absf(wrapf(yaw - prefer_yaw, -PI, PI))
+		if gap < best_gap:
+			best_gap = gap
+			best = Vector2(yaw, -asin(clampf(c.y, -1.0, 1.0)))
+	return best
+
+
+## Aims the orbit camera for the start view at the clock's instant (distance unchanged).
+func aim_start_view() -> void:
+	var sun := core.apparent_body_position_gcrf_m("sun", clock.tdb_s, Vector3.ZERO, Vector3.ZERO)
+	var angles := start_view_angles(sun, camera.yaw)
+	camera.yaw = angles.x
+	camera.pitch = angles.y
 
 
 var _delta := 0.0
