@@ -77,14 +77,29 @@ Ein 3D-Raum mit Erde und Mond an ihrer echten Position zur gewählten UTC-Zeit.
 Hauptansicht im Flug. Der Spieler sitzt angeschnallt im Raumanzug im Pilotensitz; in VR mit freier
 Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzposition zurück.
 
-**Zwei Varianten je nach Fahrzeug** [Entschieden]
-- **Crew-Dragon-Stil**: bekannte Anordnung (Sitzreihe, Konsole mit drei großen Bildschirmen, wenige
-  physische Tasten unterhalb), leicht abgewandelt.
+**Drei Cockpits: Crew Dragon, Starship, HLS** [Entschieden 2026-11-07, Spec
+`docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`]
+- Zuerst die **Crew Dragon, möglichst 1:1 zum echten Innenraum** (vier Sitze in einer Reihe, Konsole mit drei
+  Bildschirmen, zwei Tablets darüber, zwei Tastenreihen und Griff darunter); danach wird das fertige Design auf
+  Starship und HLS übertragen. Abnahme per Vergleichsbild aus Pilotensicht neben den Discovery-Fotos.
+- Der Spieler ist **Kommandant links der Mitte**; Pilot rechts der Mitte, Missionsspezialisten außen; wie viele Sitze
+  belegt sind, legt die Mission fest.
+- Mit einer Dragon-Mission startet man im Cockpit. **Joystick-Knopf 3** (links neben dem Daumen-Hütchen) bzw. eine
+  Taste am Desktop schaltet zwischen Cockpit und Außenansicht (3D, auch in VR).
+- **Stick und Schubhebel an den Armlehnen**, genau wo das echte HOTAS steht (bewusste Abweichung, die echte Dragon
+  hat keine; abschaltbar).
+- Bedienung bis zum Handtracking mit der **Maus**: am Desktop der Mauszeiger, in VR ein Zeiger direkt auf den
+  Flächen von Bildschirmen und Tastenleisten. Die Anzughand folgt mit dem Zeigefinger geglättet dem Zeiger und tippt
+  beim Klick wirklich auf die Fläche.
+- Tasten mit bekannter echter Funktion bekommen sie, sonst Kulisse; die Tasten unter dem linken Bildschirm wählen die
+  Kameras.
 - **Starship-Stil**: eigenes Crewdeck in der Nasenspitze mit großen Fenstern. Offizielle Cockpit-Entwürfe
   gibt es nicht (veröffentlicht sind nur HLS-Luftschleuse und Renderings mit großen Fenstern im oberen
   Bereich); die Gestaltung ist daher unsere eigene. Dieselben drei Bildschirme wie im Crew-Dragon-Stil.
 
-**Die drei Bildschirme** [Entschieden]
+**Die drei Bildschirme** [Entschieden; 2026-11-07 geändert: **links fest die Außenkameras** (umschaltbar per
+Bildschirm-Button, Direkttasten, HOTAS), **Mitte und rechts unsere Bedienoberfläche** im Dragon-Stil mit eigenen
+Inhalten. Die Skizze unten mit „rechts Außenansicht Ship“ ist damit überholt.]
 
 ```
  ┌───────────────────┐ ┌───────────────────────────────┐ ┌───────────────────┐
@@ -139,9 +154,9 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
 - [Vorschlag] Umschalten über eine HOTAS-Taste und den mittleren Bildschirm; die aktive Stufe steht im HUD.
 
 **Crew** [Entschieden]
-- Der Spieler fliegt allein (Kommandant, mittlerer Sitz).
-- Zwei weitere Crewmitglieder sitzen sichtbar daneben (Raumanzug, Kopf- und Handbewegungen) und machen
-  Ansagen.
+- Der Spieler fliegt als Kommandant (Sitz links der Mitte) [2026-11-07, ersetzt „mittlerer Sitz“].
+- Die übrigen belegten Sitze (laut Mission) zeigen Crewmitglieder im neueren EVA-Anzug mit geschlossenem Visier;
+  Bewegungen aus den Beschleunigungen der Simulation; sie machen Ansagen [2026-11-07, ersetzt „zwei weitere“].
 - [Vorschlag] Ansagen (Sprachausgabe + Untertitel, abschaltbar):
   "Triebwerke gezündet", "Abheben", "Max-Q", "Drossel hoch", "MECO", "Stufentrennung bestätigt",
   "Ship-Triebwerke laufen", "SECO", "Orbit erreicht", "Manöver in 1 Minute", "Zündung", "Brennschluss",
