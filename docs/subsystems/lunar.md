@@ -437,9 +437,9 @@ Spec `docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md`.
   the HLS rocks about a sticking foot (the U-8 rocking / swing, `moon-surface.md`). The preferred 5 deg slope (user
   2026-11-07, flat touchdown point plan) took the campaigns from 37 / 41 to 39 / 41 within 1 m; the two misses are just
   over the gate at just under 5 deg (dispersed seed 19 1.04 m on 4.8 deg, Apollo 11 nightly seed 2 1.06 m on 4.9 deg;
-  other points at 4.7-4.8 deg land 0.24-0.26 m off - terrain-dependent). Upright and intact. USER DECISION pending:
-  accept them, a lower preferred slope, or the terminal procedure (slope-aligned set-down / engines until the downhill
-  feet touch); known-issues.
+  other points at 4.7-4.8 deg land 0.24-0.26 m off - terrain-dependent). Upright and intact. Accepted by the user 2026-11-07 ("akzeptieren")
+  as real rocking near 5 deg; both stay known reds, the 1 m gate is not loosened (not chosen: a lower preferred slope,
+  the terminal procedure: slope-aligned set-down / engines until the downhill feet touch); known-issues.
 - Window search: the hard Sun rule uses the geometric horizon (`site_sun`); at crater / polar sites the first slot or
   the liftoff hour can be behind terrain (terrain horizon as in `tools/lunar_sun_scan.py`: Task 13 or later). The stay's
   plane change is budgeted, not flown: the flight's ascent still ends in the plane through the liftoff point and no
