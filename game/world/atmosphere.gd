@@ -58,6 +58,10 @@ const MOON_REGOLITH_COLOUR_RATIO := Vector3(1.0, 0.85, 0.66)
 ## Fidelity flag (user 2026-11-07): the regolith colour factor on. Off: the texture's own colour (the former look;
 ## render_check --moon_colour=texture).
 static var moon_colour_correction := true
+## Fidelity flag (bug hunt 2026-11-08, user: "the Moon is cream, not grey"): near the Moon the field's illuminant takes
+## the regolith's colour by the share of the field the Moon fills (moon_field_tint). Off: the Sun's colour above the air
+## (the T5b look; render_check --moon_field=off).
+static var moon_field_adaptation := true
 ## The regolith's reflectance (shaders/moon_regolith.gdshaderinc, regolith_reflectance here; night-vision fix round I3,
 ## I4): albedo x regolith_scale x E/pi x Lommel-Seeliger x the K&S phase factor (or Hapke x hapke_normalisation, the
 ## default since the moon procedural surface plan Task 9), for the Sun and the earthshine alike.
@@ -648,10 +652,12 @@ const SUN_SEEN_SHARE := 0.05
 ## [call] The plate luminance (cd/m^2) below which the field has no illuminant to adapt to (field_illuminant: the white
 ## is held): a crescent Moon's plate is ~3e-3, a moonless clear night's ~1e-4 (starlight, not modelled: 0 here).
 const FIELD_ILLUMINANT_MIN_CD_M2 := 1.0e-3
-## [call] The meter's sparse grid (a sample every ~5 px) puts only ~4-6 samples into the mask, half of them often on its
-## limb ring: a seen share of this fraction of the disc's area counts as the whole Sun visible (measured: the open Sun
-## in a 50 deg frame on the Moon gives 0.48 of the disc's share).
-const SUN_SEEN_FULL_SHARE := 0.5
+## [call] The Sun counters are exact on the pixels (AdaptationMeter, bug fix 2026-11-08: on the sparse grid a sample more or
+## less switched the veil's visibility as the Sun moved by a fraction of a pixel). Measured with them: the open Sun's seen
+## pixels are 0.25 of the mask at 15 px/deg (0.36 of the disc's share; edge pixels below the threshold), fewer for a smaller
+## Sun; a seen share of this fraction of the disc's area counts as the whole Sun visible (saturates: pixel noise at the limb
+## does not show), a partly hidden Sun scales down linearly below it.
+const SUN_SEEN_FULL_SHARE := 0.15
 ## [S: sun.gdshader] the Sun disc's scene value is clamped to this largest channel (half-float range).
 const SUN_DISC_SCENE_CLAMP := 6.0e4
 
@@ -736,6 +742,27 @@ func moon_light_colour() -> Vector3:
 	var sun := Vector3(parameters["solar_illuminance_rgb"]) * Vector3(parameters["sun_radiance_to_luminance"])
 	var tinted := (sun * tint).dot(LUMINANCE_WEIGHTS)
 	return tint * (sun.dot(LUMINANCE_WEIGHTS) / tinted) if tinted > 0.0 else tint
+
+
+## The adapting field near the Moon (bug hunt 2026-11-08, user: "the Moon looks cream instead of grey"): the field the
+## eye adapts to is the light it receives from its surroundings [S: CIE 159:2004 / CIECAM02, the adopted white is that
+## of the adapting field; von Kries cone gains set by the field's mean light]. On the Earth that light is daylight off
+## a near-neutral world, so the illuminant stands for it (field_illuminant); on and near the Moon the field is regolith
+## against a black sky - every bit of light the eye gets (the Sun's disc masked) carries the regolith's red slope, and a
+## uniformly coloured field is seen as near grey [S: Helson 1938 / Judd 1940, the Helson-Judd effect: a field of one
+## surface colour is perceived toward neutral; Apollo crews reported the regolith grey at high Sun]. The plates'
+## colour therefore takes the regolith's (moon_grey_tint, luminance 1) by the share of the eye's surroundings the Moon
+## fills: 1 - cos(theta), theta the lunar ground sphere's angular radius (1 on the ground, 0.48 at 300 km, 0.23 at
+## 1000 km, ~0 from the Earth) [call: the hemisphere-normalised solid-angle share - view-independent (both VR eyes,
+## head turns) and continuous; the full Moon from the Earth needs no term, its night illuminant is moonlight already].
+## The display keeps the degree of adaptation D (white_degree), so the regolith stays slightly warm, not white.
+## ONE with moon_field_adaptation or moon_colour_correction off.
+static func moon_field_tint(eye_from_moon_m: float, ground_radius_m: float) -> Vector3:
+	if not (moon_field_adaptation and moon_colour_correction) or eye_from_moon_m <= 0.0:
+		return Vector3.ONE
+	var s := clampf(ground_radius_m / eye_from_moon_m, 0.0, 1.0)
+	var share := 1.0 - sqrt(1.0 - s * s)
+	return Vector3.ONE.lerp(moon_grey_tint(), share)
 
 
 ## The same colour factor for the grey Moon users (the sky radiance map's Moon, the eye adaptation's Moon in view),
@@ -865,6 +892,11 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 			var solar_unit := solar * sun_factor / (solar * sun_factor).dot(LUMINANCE_WEIGHTS)
 			_illuminant_far_rgb = solar_unit * (last_earthshine_lux / PI) * (1.0 - occulted_fraction(-eye_itrf_m,
 					EARTH_MEAN_RADIUS_M, moon_itrf_m - eye_itrf_m, moon_ground_m))
+			# Near the Moon the field the eye adapts to is the regolith's light (moon_field_tint): both plates take its
+			# colour by the share of the field the Moon fills (luminance kept).
+			var tint := moon_field_tint((moon_itrf_m - eye_itrf_m).length(), moon_ground_m)
+			_illuminant_down_rgb *= tint
+			_illuminant_far_rgb *= tint
 	# The glow (night vision), GLOW_ADAPTATION_SHARE of the brightest sky: inside the atmosphere with the Sun below the
 	# eye's horizon (twilight) or the eye in a solar eclipse (the ring around the umbra; review I2: the eye's own
 	# eclipse, not the global penumbra flag - a twilight eye far from the shadow keeps its glow); above it with the Sun

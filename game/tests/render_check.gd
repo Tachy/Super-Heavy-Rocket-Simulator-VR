@@ -147,6 +147,10 @@ var _deterministic_left := -1  ## --deterministic: frames still to draw after th
 var _cache_settled := 0  ## --repeat_identical: consecutive frames with the light cache settled
 var _shadow_length: EarthShadowLength = null  ## --shadow_length (Task 16)
 var _repeat_images: Array[Image] = []  ## --repeat_identical: the consecutive frames drawn so far
+const HALO_MAX_STEP := 0.02  ## --halo_sequence: largest relative frame-to-frame change of a ring's mean when the view is (nearly) static
+var _halo_previous := []
+var _halo_worst := 0.0
+var _halo_frame := 0  ## --halo_sequence: frames measured so far
 var _repeat_failed := false  ## --repeat_identical: the frames differ (exit code 1)
 var _gpu_wall_us: Array[int] = []  ## --gpu_series: the wall clock of each measured frame
 var _gpu_ms: Array[float] = []  ## --gpu_time: the measured frames' GPU render times
@@ -440,6 +444,8 @@ func _process(_delta: float) -> bool:
 				_deterministic_left -= 1
 				return false
 		if _args.has("repeat_identical") and not _repeat_frames(world):
+			return false
+		if _args.has("halo_sequence") and not _halo_sequence_done(world):
 			return false
 		if _args.has("gain_probe") and not _gain_probe_done(world):
 			return false
@@ -948,6 +954,52 @@ func _repeat_frames(world: World) -> bool:
 		if _args.has("out"):  # the first frame beside the saved last one (the difference is diagnosed from both)
 			first.save_png(String(_args["out"]).get_basename() + "_first.png")
 	return true
+
+
+## --halo_sequence=<frames>: once settled, per consecutive frame the displayed halo around the Sun (mean display luminance
+## of the annuli 1-2.5, 3-5 and 8-12 deg from the Sun's screen position) with the terms that feed it, so frame-to-frame
+## changes can be traced (bug: Sun halo flicker, 2026-11-08). Frames saved as <out>_halo<n>.png.
+func _halo_sequence_done(world: World) -> bool:
+	var frames := maxi(int(_args["halo_sequence"]) if String(_args["halo_sequence"]).is_valid_int() else 30, 2)
+	var image := root.get_viewport().get_texture().get_image()
+	var camera: Camera3D = world.camera
+	var to_sun: Vector3 = Frames.to_render((world.sun_apparent_from_earth_m - world.camera.position_gcrf_m).normalized())
+	var screen := camera.unproject_position(camera.global_position + to_sun * 1.0e3)
+	var ppd := float(image.get_height()) / camera.fov
+	var rings := [[1.0, 2.5], [3.0, 5.0], [8.0, 12.0]]
+	var means := []
+	for ring in rings:
+		var sum := 0.0
+		var count := 0
+		var r1: float = ring[1] * ppd
+		var step := maxi(int(ppd * 0.25), 1)
+		for y in range(maxi(int(screen.y - r1), 0), mini(int(screen.y + r1), image.get_height()), step):
+			for x in range(maxi(int(screen.x - r1), 0), mini(int(screen.x + r1), image.get_width()), step):
+				var d := Vector2(x, y).distance_to(screen) / ppd
+				if d >= ring[0] and d <= ring[1]:
+					var c := image.get_pixel(x, y).srgb_to_linear()
+					sum += 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+					count += 1
+		means.append(sum / maxf(count, 1))
+	var a := world.atmosphere
+	print("render_check: halo frame %d: Sun at %s, ring 1-2.5 %.5f, 3-5 %.5f, 8-12 %.5f; gain %.5f, visibility %.4f, mask %s, veil %.1f cd/m^2" % [
+			_halo_frame, screen, means[0], means[1], means[2], a.exposure_gain, a.last_veil_visibility, a.last_sun_mask_weights,
+			a.last_veil_cd_m2])
+	if _args.has("out"):
+		image.save_png("%s_halo%03d.png" % [String(_args["out"]).get_basename(), _halo_frame])
+	_halo_frame += 1
+	if not _halo_previous.is_empty():
+		for k in range(3):
+			_halo_worst = maxf(_halo_worst, absf(means[k] - _halo_previous[k]) / maxf(_halo_previous[k], 1.0e-9))
+	_halo_previous = means
+	if _halo_frame >= frames:
+		var ok := _halo_worst < HALO_MAX_STEP
+		print("render_check: halo stability over %d frames: worst frame-to-frame step %.2f %% (limit %.1f %%): %s" % [
+				frames, 100.0 * _halo_worst, 100.0 * HALO_MAX_STEP, "ok" if ok else "FAIL"])
+		_repeat_failed = _repeat_failed or not ok
+	if _args.has("halo_drift"):  # the view drifts by this many degrees per frame (head tremor / slow look: sub-pixel steps)
+		world.camera.azimuth += deg_to_rad(float(_args["halo_drift"]))
+	return _halo_frame >= frames
 
 
 ## --weather, --weather=online or --weather=<max seconds>: the weather service online (downloads); off / analog / a

@@ -132,11 +132,49 @@ void main() {
 			atomicAdd(local_bins[2u * uint(params.shape.y) + bin_of(dot(LUMINANCE_WEIGHTS, veil) * params.size.w)], weight);
 			atomicAdd(local_bins[3u * uint(params.shape.y) + bin_of(dot(SCOTOPIC_WEIGHTS, veil) * params.size.w)], weight);
 		}
-		if (weight > 0u && masked) {
-			atomicAdd(histogram.bins[COUNTER_BASE], weight);
-			if (luminance >= params.shape2.y) {
-				atomicAdd(histogram.bins[COUNTER_BASE + 1], weight);
+		// The Sun's counters are exact on the pixels, not on the sparse grid (bug: Sun halo flicker, 2026-11-08): on the grid
+		// the mask held a few samples (~4 for a desktop Sun) and one sample more or less switched the veil's visibility
+		// between its values as the Sun moved by a fraction of a pixel. A cell that can reach the mask (its centre within the
+		// mask radius widened by the cell's diagonal) is walked pixel by pixel; the counters are the pixels' sums.
+		if (params.sun.w <= 1.0) {
+			float cell_angle = 1.5 * float(stride) * 2.0 * abs(params.ray.z) / params.size.y;
+			float cos_reach = params.sun.w * cos(cell_angle) - sqrt(max(1.0 - params.sun.w * params.sun.w, 0.0)) * sin(cell_angle);
+			if (dot(ray, params.sun.xyz) > cos_reach) {
+				ivec2 origin = ivec2(gl_GlobalInvocationID.xy) * stride;
+				for (int dy = 0; dy < stride; dy++) {
+					for (int dx = 0; dx < stride; dx++) {
+						ivec2 q = origin + ivec2(dx, dy);
+						if (q.x >= int(params.size.x) || q.y >= int(params.size.y)) {
+							continue;
+						}
+						vec2 qndc = vec2(2.0 * (float(q.x) + 0.5) / params.size.x - 1.0, 1.0 - 2.0 * (float(q.y) + 0.5) / params.size.y);
+						vec3 qray = normalize(vec3(qndc.x * params.ray.x + params.ray.y, qndc.y * params.ray.z + params.ray.w, -1.0));
+						if (dot(qray, params.sun.xyz) <= params.sun.w) {
+							continue;
+						}
+						vec2 qoffset = (vec2(q) + 0.5 - 0.5 * params.size.xy) / (0.5 * length(params.size.xy));
+						uint qweight = uint(255.0 * exp(-dot(qoffset, qoffset) * params.shape.x) + 0.5);
+						vec3 qc = imageLoad(color_image, q).rgb;
+						if (params.shape2.x > 0.5) {
+							vec4 qcloud = imageLoad(cloud_image, q);
+							qc = qc * qcloud.a + qcloud.rgb;
+						}
+						if (any(isnan(qc))) {
+							qc = vec3(0.0);
+						}
+						qc = clamp(qc, vec3(0.0), vec3(65000.0));
+						if (qweight > 0u) {
+							atomicAdd(histogram.bins[COUNTER_BASE], qweight);
+							if (dot(LUMINANCE_WEIGHTS, qc) * params.size.w >= params.shape2.y) {
+								atomicAdd(histogram.bins[COUNTER_BASE + 1], qweight);
+							}
+						}
+					}
+				}
 			}
+		}
+		if (weight > 0u && masked) {
+			// in the Sun's mask: not in the histograms (its counters are above)
 		} else if (weight > 0u) {
 			uint bins = uint(params.shape.y);
 			atomicAdd(local_bins[bin_of(luminance)], weight);
