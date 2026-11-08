@@ -14,7 +14,7 @@ extends CompositorEffect
 
 enum Stage { MAP, APPLY }
 
-const DOWN_SHADER := """
+const DOWN_TEMPLATE := """
 #version 450
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(rgba16f, set = 0, binding = 0) uniform restrict readonly image2D color_image;
@@ -24,7 +24,7 @@ layout(push_constant, std430) uniform Params {
 	vec4 size;  // width, height, block, clouds (1 / 0)
 	vec4 low;   // block columns, block rows, log2 floor, sample step (px; LocalAdaptation.sample_step)
 } params;
-const vec3 LUMINANCE = vec3(0.2126, 0.7152, 0.0722);
+const vec3 LUMINANCE = vec3(@LW_R@, @LW_G@, @LW_B@);
 
 void main() {
 	ivec2 t = ivec2(gl_GlobalInvocationID.xy);
@@ -50,16 +50,16 @@ void main() {
 			if (any(isnan(c))) {
 				c = vec3(0.0);
 			}
-			float y = dot(LUMINANCE, clamp(c, vec3(0.0), vec3(65000.0)));
-			sum += y > 0.0 ? max(log2(y), floor_log) : floor_log;
+			sum += dot(LUMINANCE, clamp(c, vec3(0.0), vec3(@MAXL@)));  // LINEAR block mean (area-exact)
 			n += 1.0;
 		}
 	}
-	imageStore(block_image, t, vec4(n > 0.0 ? sum / n : floor_log));
+	float mean = n > 0.0 ? sum / n : 0.0;
+	imageStore(block_image, t, vec4(mean > 0.0 ? max(log2(mean), floor_log) : floor_log));
 }
 """
 
-const POOL_SHADER := """
+const POOL_TEMPLATE := """
 #version 450
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(r32f, set = 0, binding = 0) uniform restrict readonly image2D block_image;
@@ -72,14 +72,14 @@ layout(push_constant, std430) uniform Params {
 
 // EyeAdaptation.cone_log_threshold / cone_gain [S: Ferwerda et al. 1996 Eq. 4]
 float cone_log_threshold(float luminance) {
-	float l = log(max(luminance, 1.0e-6)) / log(10.0);
-	if (l <= -2.6) {
-		return -0.72;
+	float l = log(max(luminance, @LUM_FLOOR@)) / log(10.0);
+	if (l <= @CONE_LOW@) {
+		return @CONE_FLOOR@;
 	}
-	if (l >= 1.9) {
-		return l - 1.255;
+	if (l >= @CONE_WEBER@) {
+		return l - @WEBER_OFFSET@;
 	}
-	return pow(0.249 * l + 0.65, 2.7) - 0.72;
+	return pow(@MID_SLOPE@ * l + @MID_OFFSET@, @MID_EXPONENT@) + @CONE_FLOOR@;
 }
 
 void main() {
@@ -101,14 +101,14 @@ void main() {
 			float v = imageLoad(block_image, q).r;
 			float w = exp(-float(dx * dx + dy * dy) * params.low.w - (v - c0) * (v - c0) * params.range.x);
 			sw += w;
-			s += w * v;
+			s += w * exp2(v);  // pooled in linear luminance
 		}
 	}
-	float pooled = s / sw;
+	float pooled = log2(s / sw);
 	float log_c = 0.0;
 	if (pooled > params.range.y + 0.5 && params.range.w > 0.0) {
 		float local_cd_m2 = exp2(pooled) / params.range.z;
-		float g = clamp(params.gain.x / pow(10.0, 1.255 + cone_log_threshold(local_cd_m2 * params.gain.y)), 1.0,
+		float g = clamp(params.gain.x / pow(10.0, @WEBER_OFFSET@ + cone_log_threshold(local_cd_m2 * params.gain.y)), 1.0,
 				params.gain.z);
 		log_c = log2(min(1.0, g / params.range.w));
 	}
@@ -116,7 +116,7 @@ void main() {
 }
 """
 
-const APPLY_SHADER := """
+const APPLY_TEMPLATE := """
 #version 450
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(rgba16f, set = 0, binding = 0) uniform image2D color_image;
@@ -124,12 +124,12 @@ layout(rg32f, set = 0, binding = 1) uniform restrict readonly image2D map_image;
 layout(push_constant, std430) uniform Params {
 	vec4 size;   // width, height, block, block columns
 	vec4 shape;  // block rows, 1 / (2 sigma_up^2), 1 / (2 sigma_r^2) (log2), log2 floor
-	vec4 extra;  // MIN_WEIGHT_SHARE, -, -, -
+	vec4 extra;  // MIN_WEIGHT_SHARE, 1 / (2 sigma_dim^2) (log2; pixel dimmer than the block), FULL_WEIGHT_SHARE_RATIO, -
 	vec4 cone_x;  // N = C M^-1: the cones' part of the post step's pixel (LocalAdaptation.cone_part), its columns
 	vec4 cone_y;
 	vec4 cone_z;
 } params;
-const vec3 LUMINANCE = vec3(0.2126, 0.7152, 0.0722);
+const vec3 LUMINANCE = vec3(@LW_R@, @LW_G@, @LW_B@);
 
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
@@ -151,7 +151,7 @@ void main() {
 		return;
 	}
 	vec4 color = imageLoad(color_image, pixel);
-	vec3 x = clamp(color.rgb, vec3(0.0), vec3(65000.0));
+	vec3 x = clamp(color.rgb, vec3(0.0), vec3(@MAXL@));
 	if (any(isnan(x))) {
 		return;
 	}
@@ -166,7 +166,7 @@ void main() {
 	for (int k = 0; k < 16; k++) {
 		vec2 d = vec2(base + ivec2(k % 4 - 1, k / 4 - 1)) - tc;
 		float spatial = exp(-dot(d, d) * params.shape.y);
-		float w = spatial * exp(-(m[k].x - l) * (m[k].x - l) * params.shape.z);
+		float w = spatial * exp(-(m[k].x - l) * (m[k].x - l) * (m[k].x > l ? params.extra.y : params.shape.z));
 		ss += spatial;
 		sw += w;
 		s += w * m[k].y;
@@ -175,11 +175,76 @@ void main() {
 		return;  // no compression near this pixel, or no block like it (an emitter, a sub-block glint): c = 1
 	}
 	// LocalAdaptation.apply_pixel: the cones' part x c, the rods' part x c^2 (saturated where the cones adapt locally)
-	float c = exp2(s / sw);
+	float share = clamp((sw / ss / params.extra.x - 1.0) / (params.extra.z - 1.0), 0.0, 1.0);
+	float c = exp2(share * share * (3.0 - 2.0 * share) * s / sw);  // LocalAdaptation.smooth_share
 	vec3 cones = mat3(params.cone_x.rgb, params.cone_y.rgb, params.cone_z.rgb) * x;
-	imageStore(color_image, pixel, vec4(clamp(c * (cones + c * (x - cones)), vec3(0.0), vec3(65000.0)), color.a));
+	imageStore(color_image, pixel, vec4(clamp(c * (cones + c * (x - cones)), vec3(0.0), vec3(@MAXL@)), color.a));
 }
 """
+
+## A GLSL float literal of a constant (always with a decimal point, full precision).
+static func glsl_float(value: float) -> String:
+	var text := String.num(value, 9)
+	if not text.contains(".") and not text.contains("e"):
+		text += ".0"
+	return text
+
+
+## The shaders' source with every number taken from EyeAdaptation / LocalAdaptation (one source of truth: no hand-copied
+## constants; local_adaptation_test checks that none is left over, local_adaptation_gpu_check.gd compares the GPU's result
+## with the CPU mirror).
+static func _fill(template: String) -> String:
+	var weights := LocalAdaptation.LUMINANCE_WEIGHTS
+	var values := {
+		"LW_R": weights.x, "LW_G": weights.y, "LW_B": weights.z,
+		"MAXL": LocalAdaptation.MAX_SCENE_LUMINANCE,
+		"LUM_FLOOR": EyeAdaptation.LUMINANCE_FLOOR_CD_M2,
+		"CONE_LOW": EyeAdaptation.CONE_LOG_LOW, "CONE_FLOOR": EyeAdaptation.CONE_LOG_FLOOR,
+		"CONE_WEBER": EyeAdaptation.CONE_LOG_WEBER, "WEBER_OFFSET": EyeAdaptation.CONE_WEBER_OFFSET,
+		"MID_SLOPE": EyeAdaptation.CONE_MID_SLOPE, "MID_OFFSET": EyeAdaptation.CONE_MID_OFFSET,
+		"MID_EXPONENT": EyeAdaptation.CONE_MID_EXPONENT,
+	}
+	for key: String in values:
+		template = template.replace("@" + key + "@", glsl_float(values[key]))
+	return template
+
+
+static func down_shader_source() -> String:
+	return _fill(DOWN_TEMPLATE)
+
+
+static func pool_shader_source() -> String:
+	return _fill(POOL_TEMPLATE)
+
+
+static func apply_shader_source() -> String:
+	return _fill(APPLY_TEMPLATE)
+
+
+## Push constants of the three dispatches (the layouts of the shaders above); shared with local_adaptation_gpu_check.gd.
+static func down_push(size: Vector2i, block: int, clouds: bool, low: Vector2i, floor_log: float) -> PackedFloat32Array:
+	return PackedFloat32Array([size.x, size.y, block, 1.0 if clouds else 0.0,
+			low.x, low.y, floor_log, LocalAdaptation.sample_step(block)])
+
+
+static func pool_push(low: Vector2i, radius: int, sigma_blocks: float, floor_log: float, scene_per_cd_m2: float,
+		display_gain: float, reference_cd_m2: float, k_eff: float) -> PackedFloat32Array:
+	return PackedFloat32Array([low.x, low.y, radius, 1.0 / (2.0 * sigma_blocks * sigma_blocks),
+			LocalAdaptation.range_inverse_two_sigma_squared(), floor_log, scene_per_cd_m2, display_gain,
+			reference_cd_m2, k_eff, EyeAdaptation.GAIN_MAX, 0.0])
+
+
+static func apply_push(size: Vector2i, block: int, low: Vector2i, floor_log: float, cone_part: Basis) -> PackedFloat32Array:
+	return PackedFloat32Array([size.x, size.y, block, low.x,
+			low.y, 1.0 / (2.0 * LocalAdaptation.UPSAMPLE_SIGMA_BLOCKS * LocalAdaptation.UPSAMPLE_SIGMA_BLOCKS),
+			LocalAdaptation.range_inverse_two_sigma_squared(), floor_log,
+			LocalAdaptation.MIN_WEIGHT_SHARE,
+			LocalAdaptation.range_inverse_two_sigma_squared(LocalAdaptation.UPSAMPLE_DIM_SIGMA_DECADES),
+			LocalAdaptation.FULL_WEIGHT_SHARE_RATIO, 0.0,
+			cone_part.x.x, cone_part.x.y, cone_part.x.z, 0.0,
+			cone_part.y.x, cone_part.y.y, cone_part.y.z, 0.0,
+			cone_part.z.x, cone_part.z.y, cone_part.z.z, 0.0])
+
 
 var stage := Stage.MAP
 ## APPLY: the MAP instance whose per-view maps it reads.
@@ -239,7 +304,7 @@ func _create_pipelines() -> void:
 	_rd = RenderingServer.get_rendering_device()
 	if _rd == null:
 		return
-	var sources := [DOWN_SHADER, POOL_SHADER] if stage == Stage.MAP else [APPLY_SHADER]
+	var sources := [down_shader_source(), pool_shader_source()] if stage == Stage.MAP else [apply_shader_source()]
 	for code in sources:
 		var shader_source := RDShaderSource.new()
 		shader_source.language = RenderingDevice.SHADER_LANGUAGE_GLSL
@@ -351,12 +416,9 @@ func _map(render_data: RenderData) -> void:
 		var cloud := cloud_effect.frame_output_layer(index) if cloud_effect != null else RID()
 		_dispatch(0, [_image_uniform(0, buffers.get_color_layer(index)),
 				_image_uniform(1, cloud if cloud.is_valid() else _no_cloud), _image_uniform(2, view["block"])],
-				PackedFloat32Array([size.x, size.y, _block, 1.0 if cloud.is_valid() else 0.0,
-				low.x, low.y, floor_log, LocalAdaptation.sample_step(_block)]), groups)
+				down_push(size, _block, cloud.is_valid(), low, floor_log), groups)
 		_dispatch(1, [_image_uniform(0, view["block"]), _image_uniform(1, view["map"])],
-				PackedFloat32Array([low.x, low.y, radius, 1.0 / (2.0 * sigma_blocks * sigma_blocks),
-				LocalAdaptation.range_inverse_two_sigma_squared(), floor_log, _spc, _display_gain,
-				_reference_cd_m2, k_eff, EyeAdaptation.GAIN_MAX, 0.0]), groups)
+				pool_push(low, radius, sigma_blocks, floor_log, _spc, _display_gain, _reference_cd_m2, k_eff), groups)
 	_map_valid = true
 	if CloudEffect.capture_timestamps:
 		_rd.capture_timestamp("after_local_adaptation_map")
@@ -379,12 +441,6 @@ func _apply(render_data: RenderData) -> void:
 			continue
 		var low: Vector2i = view["low"]
 		_dispatch(0, [_image_uniform(0, buffers.get_color_layer(index)), _image_uniform(1, view["map"])],
-				PackedFloat32Array([size.x, size.y, source._block, low.x,
-				low.y, 1.0 / (2.0 * LocalAdaptation.UPSAMPLE_SIGMA_BLOCKS * LocalAdaptation.UPSAMPLE_SIGMA_BLOCKS),
-				LocalAdaptation.range_inverse_two_sigma_squared(), floor_log,
-				LocalAdaptation.MIN_WEIGHT_SHARE, 0.0, 0.0, 0.0,
-				source._cone_part.x.x, source._cone_part.x.y, source._cone_part.x.z, 0.0,
-				source._cone_part.y.x, source._cone_part.y.y, source._cone_part.y.z, 0.0,
-				source._cone_part.z.x, source._cone_part.z.y, source._cone_part.z.z, 0.0]), groups)
+				apply_push(size, source._block, low, floor_log, source._cone_part), groups)
 	if CloudEffect.capture_timestamps:
 		_rd.capture_timestamp("after_local_adaptation_apply")

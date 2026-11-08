@@ -434,20 +434,40 @@ shaders:
   the TOA Sun: the Sun's disc stays display white) - monotonic, no inversion. A region whose global display value is at
   most PLATEAU is untouched (pad noon, lunar day, the Earth from orbit by day: gain 1, nothing to lower). The rods'
   part of the post step (VisionEffect, 38 % of the Earth's displayed Y at lunar night) is scaled by c^2 (the cones' by
-  c): rod saturation [E: Aguilar & Stiles 1954] - a region the cones adapt to locally is photopic and has no rod signal.
+  c): rod saturation [E: Aguilar & Stiles 1954] - a region the cones adapt to locally is photopic and has no rod signal;
+  the shape c^2 is a [call] (only "the rods' share vanishes under strong compression, continuous at c = 1" is justified).
   Image pipeline [call]: the MAP stage (before the transparent pass, after the field meter, which measures the unchanged
   image; it asks for the MSAA resolve every frame) averages the opaque image with the cloud composite into blocks of
-  mean log2 luminance (block edge a power of two with >= 1.5 blocks per pooling sigma: 1 px on a 900 px high desktop
+  mean LINEAR luminance, stored as log2 (area-exact: a disc moving over the grid changes its blocks continuously; block edge a power of two with >= 1.5 blocks per pooling sigma: 1 px on a 900 px high desktop
   frame at fov 100, 8 px for the headset; above 4 px a 4 x 4 sample grid per block), pools them bilaterally (spatial sigma 0.428 deg, range sigma 0.4 decades
-  [S: Durand & Dorsey 2002], radius 2 sigma) and evaluates log2 c per block; the APPLY stage (after VisionEffect, before
+  [S: Durand & Dorsey 2002], radius 2 sigma; weights from log differences, the pooled sum itself LINEAR luminance as in
+  Vangorp - a [call]: round 1 replaced the geometric mean that underestimated L_loc in mixed regions) and evaluates log2 c per block; the APPLY stage (after VisionEffect, before
   the display tone step, glow and AgX) multiplies each pixel by c, joint-bilaterally upsampled against the pixel's own
-  luminance (Kopf et al. 2007; 4 x 4 blocks, spatial sigma 1 block, the same range sigma). The edge-aware pooling is a
+  luminance (Kopf et al. 2007; 4 x 4 blocks, spatial sigma 1 block; range sigma 0.4 decades, 1.0 decade for a pixel DIMMER
+  than the block [call]: the antialiased edge pixels of a disc, up to ~2 decades under it, share its factor instead of
+  staying at c = 1 as white 1-px sparkles; the dark field 4+ decades under is still unlike it). The like-block share
+  blends log c in by a smoothstep from 1 % to 4 % (`LocalAdaptation.smooth_share`) instead of a hard cut. The edge-aware pooling is a
   display requirement, not the eye's: Vangorp's plain Gaussian darkens a 0.4 deg ring of the dark field around a bright
   disc and brightens its limb (the local tone mapper's halo); here the dark field beside the disc keeps c = 1 exactly
   and the limb no more than the interior (test). A pixel unlike every block near it (range weight < 1 % of the
   spatial: an emitter drawn in the transparent pass over a dark field, a sub-block glint) keeps c = 1; over a locally
   adapted region (a label on the Earth's disc from the lunar night) a display-referred emitter takes that region's c.
-  Per view (both VR eyes, each its own map). Off with the eye adaptation off, at a display gain <= 1 and before the
+  Per view (both VR eyes, each its own map) but ONE block size per frame, from view 0's pixels per degree at the image
+  centre [call]: both eyes pool over the same footprint in degrees (no binocular gain mismatch from different footprints),
+  only the grid phase differs; measured on the GPU path, a 24 px disc at 0..8 px disparity displays a left / right peak
+  within x1.12 (gate x1.2). For a wide rectilinear frustum px/deg grows toward the edge (x1.5-3), so the pooling is wider in
+  degrees at the periphery [call, accepted]. Temporal behaviour [call]: no temporal low-pass on c. A screen-space filter
+  on log c cannot follow a moving object: with the global rule's 0.5 s light time constant (`LIGHT_TIME_CONSTANT_S`) a
+  disc swept at 30 deg/s would drag a ghost of ~15 deg; the fast neural light adaptation (~0.1 s, Pattanaik 2000) is
+  faster than a frame at the scales that matter, so c follows the image of the same frame (a lamp or the Earth entering the
+  view is compressed at once, the global gain pacing as before). What is bounded instead is the grid-phase dependence
+  (CPU test + GPU readback): a disc of 10 / 16 / 24 / 32 px (1.25 .. 4 blocks, 0.3 .. 1 deg at the headset's 31.5 px/deg)
+  moved over the grid in half-pixel steps varies its displayed flux ratio by x1.86 / 1.54 / 1.22 / 1.12 and its peak pixel by
+  x1.84 / 1.57 / 1.22 / 1.17 (before round 1, log block means and a hard share cut: x250 at 10 px, peak x60 at 16 px). A
+  structure below ~1.25 blocks (6 px = 0.19 deg) is the documented limit and still pops with the phase (flux ratio x34).
+  One source of truth: the shaders are templates whose numbers (Ferwerda branch constants, luminance floor and weights,
+  fp16 clamp) are generated from `EyeAdaptation` / `LocalAdaptation`, the push-constant layouts are shared functions
+  (`down_push`, `pool_push`, `apply_push`). Off with the eye adaptation off, at a display gain <= 1 and before the
   tables have loaded.
   - The halo (the user's "blur rim", 2026-11-08): Godot's glow (world.gd: threshold 4, intensity 0.6, its input capped
     at luminance 12 - independent of the source's luminance and of the eye), not the glare veil (that is the Sun's alone
@@ -474,7 +494,11 @@ shaders:
   image); an image of the Earth from the lunar night (2 deg disc of 1e4 cd/m^2 with +-40 % detail, blocks of 2 and of
   the step's own 4 px at 20 px/deg): its displayed mean 1.349 / 1.368 (tolerance 25 %), detail ratios within 0.3 / 0.7 %
   (5 %), the 864 ground / sky pixels beside it untouched, limb max 1.908 / 2.034 against the interior's 1.904 / 1.962
-  (1.25x), an emitter over the black sky c = 1; the flag.
+  (1.25x), an emitter over the black sky c = 1; translation invariance (disc of 10 .. 32 px over the block grid, bound x2);
+  a soft 1/r^2 gradient (factor rises outward, no ring); an image size that is no multiple of the block (disc at the edge);
+  the shaders carry the generated constants (no placeholder left); the flag. `game/tests/local_adaptation_gpu_check.gd`
+  (needs a GPU, local RenderingDevice, no render): the three generated shaders against the CPU mirror on discs of 10 .. 32
+  px at three grid phases (worst |c_gpu / c_cpu - 1| 0.0010, tolerance 3 %, fp16 input) and the stereo disparity sweep.
 
 - **Display tone step: chroma-preserving tone curve** [look fixes T5, 2026-11-07; `display_tone.gd` `DisplayTone` (model
   and CPU mirror), `display_tone_effect.gd` `DisplayToneEffect` (compute step); fidelity flag `DisplayTone.enabled`,
@@ -645,7 +669,7 @@ shaders:
 - Local adaptation (T10): a small bright object stays inside the field rule's 2 % highlight cut (the global gain is
   unchanged) and is brought into range by the local step instead. Its limits: (1) a structure narrower than ~2 blocks
   (a thin Earth crescent at desktop resolution, 1-2 px; a 3-4 px full Moon at fov 100) finds no like block and keeps c
-  = 1 (stays white; the headset has ~4.8x the desktop's pixels per degree); (2) no disability glare of the Earth or the
+  = 1 or pops with the grid phase (the desktop and the headset therefore look different for the same object by design) (stays white; the headset has ~4.8x the desktop's pixels per degree); (2) no disability glare of the Earth or the
   Moon is drawn: Godot's glow no longer fires on a locally adapted disc, while CIE 146 predicts for the full Earth from
   the lunar night (6.9 lux at the eye, L_a 0.49 cd/m^2) a veil of 18 / 6.4 / 1.3 / 0.46 cd/m^2 at 2 / 3 / 6 / 10 deg (13x
   L_a at 3 deg; for the full Moon from the Earth, 0.25 lux, ~40x less) - a physical glare spread function on the image

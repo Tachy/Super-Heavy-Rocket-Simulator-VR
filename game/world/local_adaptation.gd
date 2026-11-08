@@ -21,8 +21,14 @@ extends RefCounted
 ## below AgX's shoulder (sRGB ~213), so its detail (contrast within ~0.4 deg) stays visible]; the display value
 ## of a region rises with L_loc up to PLATEAU, stays there, and rises again where G reaches its floor 1 (L_eff above the
 ## white plate under the TOA Sun: the Sun's disc, a lamp filament stay display white) - monotonic in L_loc, no inversion.
+## Geometry [call]: one block size per frame, from view 0's pixels per degree at the image CENTRE, used by both eyes (the
+## same pooling footprint in degrees for both: no binocular gain mismatch from different footprints; only the grid phase
+## differs between eyes, measured <= 12 % in the displayed peak of a 24 px disc at 0..8 px disparity). For a wide rectilinear
+## frustum the pixels per degree grow toward the edge (px/deg x 1.5-3), so the pooling is wider in degrees at the periphery.
 ## A region whose global display value is below PLATEAU is untouched (pad noon, lunar day, the Earth from orbit by day).
-## Pooling [call, a display requirement, not a property of the eye]: in log luminance and edge-aware (a bilateral
+## Pooling [call, a display requirement, not a property of the eye]: edge-aware (the weights from differences in log luminance; the
+## block average and the pooled sum themselves are LINEAR luminance - area-exact, so a disc moving over the block grid changes
+## its blocks' values continuously, and Vangorp pools luminance linearly - a bilateral
 ## filter, Durand & Dorsey 2002, "Fast bilateral filtering for the display of high-dynamic-range images", SIGGRAPH 2002:
 ## range sigma 0.4 in log10) - Vangorp's plain Gaussian would darken a 0.4 deg ring of the dark field around a bright
 ## disc and brighten its limb (the classic local tone-mapping halo); the physically real maladaptation there is a
@@ -48,11 +54,21 @@ const KERNEL_RADIUS_SIGMAS := 2.0
 const MAX_BLOCK := 32
 ## [call] The joint upsampling's spatial sigma (blocks) over its 4 x 4 block neighbourhood.
 const UPSAMPLE_SIGMA_BLOCKS := 1.0
+## [call] The upsampling's range sigma (log10) for a pixel DIMMER than the block it is compared with: wider than
+## RANGE_SIGMA_DECADES, so the antialiased edge pixels of a bright disc (partial coverage, up to ~2 decades under it) share
+## the disc's factor instead of staying at c = 1 as 1-px white sparkles that flicker with the grid phase; a pixel 4+
+## decades under (the dark field) is still unlike it (no halo).
+const UPSAMPLE_DIM_SIGMA_DECADES := 1.0
 ## [call] A pixel whose range-weighted share of the upsampling's spatial weight is below this keeps c = 1 (no block
 ## near it is like it: an emitter or a sub-block highlight).
 const MIN_WEIGHT_SHARE := 0.01
 ## [S: the field meter's LOG_MIN, AdaptationMeter] luminances below 1e-6 cd/m^2 count as this floor in the log pooling.
 const LOG_FLOOR_CD_M2 := 1.0e-6
+## [call] The largest scene luminance a block average takes (as the field meter and the shaders clamp: fp16 range).
+const MAX_SCENE_LUMINANCE := 65000.0
+## [call] Above MIN_WEIGHT_SHARE x this the like-block share counts fully; between the two the factor blends in
+## (log domain) from 1, so a pixel crossing the "like a block near it" threshold under motion changes c continuously.
+const FULL_WEIGHT_SHARE_RATIO := 4.0
 ## [S: ITU-R BT.709] luminance weights.
 const LUMINANCE_WEIGHTS := Vector3(0.2126, 0.7152, 0.0722)
 
@@ -132,9 +148,9 @@ static func factors(image: PackedFloat64Array, width: int, height: int, paramete
 					var x := tx * block + i
 					var y := ty * block + j
 					if x < width and y < height:
-						s += log2_of(image[y * width + x], floor_log)
+						s += clampf(image[y * width + x], 0.0, MAX_SCENE_LUMINANCE)
 						n += 1
-			blocks[ty * lw + tx] = s / float(n)
+			blocks[ty * lw + tx] = log2_of(s / float(n), floor_log)  # the mean in LINEAR luminance (area-exact)
 	# 2. bilateral pooling and the factor per block
 	var k_eff := effective_per_local(spc, gain, reference)
 	var range_inv := range_inverse_two_sigma_squared()
@@ -156,13 +172,14 @@ static func factors(image: PackedFloat64Array, width: int, height: int, paramete
 					var v := blocks[qy * lw + qx]
 					var w := exp(-float(dx * dx + dy * dy) * spatial_inv - (v - c0) * (v - c0) * range_inv)
 					sw += w
-					s += w * v
-			var pooled := s / sw
+					s += w * pow(2.0, v)  # pooled in linear luminance (Vangorp), weights from the log difference
+			var pooled := log(s / sw) / log(2.0)
 			var local_cd_m2 := pow(2.0, pooled) / spc if pooled > floor_log + 0.5 else 0.0
 			log_c[ty * lw + tx] = log(factor(local_cd_m2, gain, reference, k_eff)) / log(2.0)
 	# 3. joint bilateral upsampling against the pixel's own luminance
 	var out := PackedFloat64Array()
 	out.resize(width * height)
+	var dim_inv := range_inverse_two_sigma_squared(UPSAMPLE_DIM_SIGMA_DECADES)
 	var up_inv := 1.0 / (2.0 * UPSAMPLE_SIGMA_BLOCKS * UPSAMPLE_SIGMA_BLOCKS)
 	for y in range(height):
 		for x in range(width):
@@ -186,12 +203,12 @@ static func factors(image: PackedFloat64Array, width: int, height: int, paramete
 					var dy := float(by + iy) - tcy
 					var spatial := exp(-(dx * dx + dy * dy) * up_inv)
 					var v := blocks[qy * lw + qx]
-					var w := spatial * exp(-(v - l) * (v - l) * range_inv)
+					var w := spatial * exp(-(v - l) * (v - l) * (dim_inv if v > l else range_inv))
 					ss += spatial
 					sw += w
 					s += w * log_c[qy * lw + qx]
 			if sw >= MIN_WEIGHT_SHARE * ss:
-				out[y * width + x] = pow(2.0, s / sw)
+				out[y * width + x] = pow(2.0, smooth_share(sw / ss) * s / sw)
 	return out
 
 
@@ -203,12 +220,21 @@ static func cone_part(rod_scale: float, cone: Basis) -> Basis:
 	return cone * m.inverse()
 
 
-## A post-step pixel under the local factor c: the cones' part x c, the rods' part x c^2 [E: rod saturation - the rod
+## A post-step pixel under the local factor c: the cones' part x c, the rods' part x c^2. [E: rod saturation - the rod
 ## signal saturates at a few hundred scotopic cd/m^2 (Aguilar & Stiles 1954), so a region the cones adapt to locally,
-## photopic by construction (its local mean at PLATEAU), has no rod signal; c^2: continuous at c = 1].
+## photopic by construction (its local mean at PLATEAU), has no rod signal]. [call: the SHAPE c^2 - only "the rods' share
+## vanishes under strong compression and the step is continuous at c = 1" is justified; any steeper-than-c law that is 1 at
+## c = 1 and small by c ~ 1e-2 would do, c^2 is the simplest].
 static func apply_pixel(p: Vector3, c: float, cone_part_basis: Basis) -> Vector3:
 	var cones := cone_part_basis * p
 	return c * (cones + c * (p - cones))
+
+
+## The blend of log c in from 0 (c = 1) with the like-block share (smoothstep from MIN_WEIGHT_SHARE to
+## FULL_WEIGHT_SHARE_RATIO x it).
+static func smooth_share(share: float) -> float:
+	var t := clampf((share / MIN_WEIGHT_SHARE - 1.0) / (FULL_WEIGHT_SHARE_RATIO - 1.0), 0.0, 1.0)
+	return t * t * (3.0 - 2.0 * t)
 
 
 ## log2 of the floor luminance in scene units.
@@ -220,7 +246,7 @@ static func log2_of(scene_luminance: float, floor_log: float) -> float:
 	return maxf(log(scene_luminance) / log(2.0), floor_log) if scene_luminance > 0.0 else floor_log
 
 
-## 1 / (2 sigma_r^2) for log2 luminance differences.
-static func range_inverse_two_sigma_squared() -> float:
-	var sigma_log2 := RANGE_SIGMA_DECADES * log(10.0) / log(2.0)
+## 1 / (2 sigma_r^2) for log2 luminance differences (sigma in log10 decades).
+static func range_inverse_two_sigma_squared(sigma_decades := RANGE_SIGMA_DECADES) -> float:
+	var sigma_log2 := sigma_decades * log(10.0) / log(2.0)
 	return 1.0 / (2.0 * sigma_log2 * sigma_log2)

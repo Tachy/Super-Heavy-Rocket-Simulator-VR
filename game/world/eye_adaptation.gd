@@ -40,6 +40,10 @@ const CONE_LOG_FLOOR := -0.72
 const CONE_LOG_LOW := -2.6
 const CONE_LOG_WEBER := 1.9
 const CONE_WEBER_OFFSET := 1.255
+## The mid-range branch's (0.249 log L_a + 0.65)^2.7 (also generated into LocalAdaptationEffect's shaders).
+const CONE_MID_SLOPE := 0.249
+const CONE_MID_OFFSET := 0.65
+const CONE_MID_EXPONENT := 2.7
 ## [S: Ferwerda et al. 1996 Eq. 5] the rods': log10 t_s(L_as) (scotopic cd/m^2) = -2.86 for log L_as <= -3.94,
 ## log L_as - 0.395 for log L_as >= -1.44, else (0.405 log L_as + 1.6)^2.18 - 2.86.
 const ROD_LOG_FLOOR := -2.86
@@ -413,7 +417,7 @@ static func cone_log_threshold(adaptation_cd_m2: float) -> float:
 		return CONE_LOG_FLOOR
 	if l >= CONE_LOG_WEBER:
 		return l - CONE_WEBER_OFFSET
-	return pow(0.249 * l + 0.65, 2.7) + CONE_LOG_FLOOR
+	return pow(CONE_MID_SLOPE * l + CONE_MID_OFFSET, CONE_MID_EXPONENT) + CONE_LOG_FLOOR
 
 
 ## log10 of the rods' detection threshold (scotopic cd/m^2) at the scotopic adaptation luminance (Ferwerda Eq. 5).

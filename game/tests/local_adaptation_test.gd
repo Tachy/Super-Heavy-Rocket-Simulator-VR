@@ -9,6 +9,14 @@
 #   0.05 cd/m^2, lunar-night gains): the disc's displayed mean within 25 % of PLATEAU, its detail ratios kept within 5 %,
 #   the ground and the black sky around it untouched (c = 1 exactly: no dark halo), no bright rim (the limb's displayed
 #   values at most 1.25 x the disc's mean), an emitter drawn after the opaque pass over the black sky keeps c = 1;
+# - temporal stability (T10 fix round 1): a disc of 10 .. 32 px (1.25 .. 4 blocks, 0.3 .. 1 deg on the headset) moved over
+#   the block grid in half-pixel steps: the displayed flux ratio and the peak pixel vary by at most TRANSLATION_BOUND (the
+#   area-exact linear block means and the smooth like-block blend; the sub-block 6 px disc is the documented limit and is
+#   only printed); a soft glare-like gradient has a monotonic factor (no ring) and an image whose size is not a multiple
+#   of the block (disc at the right / bottom edge) stays finite and bounded;
+# - one source of truth: the shaders' constants are generated from EyeAdaptation / LocalAdaptation (the placeholders are
+#   all resolved, the generated values equal the constants); the CPU-vs-GPU readback check is
+#   local_adaptation_gpu_check.gd;
 # - the flag: --local_adaptation=off.
 # godot --headless --path game --script res://tests/local_adaptation_test.gd
 extends SceneTree
@@ -19,6 +27,9 @@ const TOA_LUX := 127000.0
 const NIGHT_GAIN := 7557.0 * 0.368
 const DISC_CD_M2 := 1.0e4
 const GROUND_CD_M2 := 0.05
+## Largest max / min of the displayed flux ratio and of the peak displayed pixel while a 10 .. 32 px disc moves (measured
+## 1.86 / 1.84 at 10 px, 1.5 / 1.6 at 16 px, 1.2 / 1.2 at 24 px).
+const TRANSLATION_BOUND := 2.0
 
 var _failures := 0
 
@@ -82,6 +93,10 @@ func _initialize() -> void:
 			LocalAdaptation.LUMINANCE_WEIGHTS.dot(p - cone * rgb) / LocalAdaptation.LUMINANCE_WEIGHTS.dot(p)))
 	_image_case(base, reference, 2)
 	_image_case(base, reference, LocalAdaptation.block_size(20.0))  # the block size the step picks at 20 px/deg (4)
+	_translation_cases(base, reference)
+	_gradient_case(base, reference)
+	_odd_size_case(base, reference)
+	_generated_constants_case()
 	_check("flag from the arguments", not LocalAdaptation._enabled_from_arguments(
 			PackedStringArray(["--local_adaptation=off"])) and LocalAdaptation._enabled_from_arguments(
 			PackedStringArray(["--day_exposure=1.5"])), "")
@@ -145,3 +160,120 @@ func _image_case(base: float, reference: float, block: int) -> void:
 	final[emitter] = 5.0
 	var c_final := LocalAdaptation.factors(image, w, h, parameters, final)
 	_check("emitter over the black sky keeps c = 1", c_final[emitter] == 1.0, "c %.4f" % c_final[emitter])
+
+
+## A disc of diameter px (antialiased by 4 x 4 supersampling, 1e4 cd/m^2 over a 1e-3 cd/m^2 sky) centred at (cx, cy).
+func _disc_image(w: int, h: int, diameter: float, cx: float, cy: float, spc: float) -> PackedFloat64Array:
+	var image := PackedFloat64Array()
+	image.resize(w * h)
+	for y in range(h):
+		for x in range(w):
+			var cover := 0.0
+			for sy in range(4):
+				for sx in range(4):
+					var px := x + (sx + 0.5) / 4.0 - cx
+					var py := y + (sy + 0.5) / 4.0 - cy
+					if px * px + py * py <= diameter * diameter / 4.0:
+						cover += 1.0 / 16.0
+			image[y * w + x] = (DISC_CD_M2 * cover + 1.0e-3 * (1.0 - cover)) * spc
+	return image
+
+
+## Headset numbers (31.5 px/deg, block 8): the disc moves 0 .. 8 px diagonally in half-pixel steps.
+func _translation_cases(base: float, reference: float) -> void:
+	var ppd := 31.5
+	var block := LocalAdaptation.block_size(ppd)
+	var spc := base * NIGHT_GAIN
+	var parameters := {"scene_per_cd_m2": spc, "display_gain": NIGHT_GAIN, "reference_cd_m2": reference, "block": block,
+			"sigma_blocks": LocalAdaptation.POOL_SIGMA_DEG * ppd / float(block)}
+	for diameter in [6.0, 10.0, 16.0, 24.0, 32.0]:
+		var flux_low := INF
+		var flux_high := 0.0
+		var peak_low := INF
+		var peak_high := 0.0
+		for step in range(17):
+			var shift := 0.5 * step
+			var image := _disc_image(96, 96, diameter, 40.0 + shift, 40.0 + 0.6 * shift, spc)
+			var c := LocalAdaptation.factors(image, 96, 96, parameters)
+			var flux_in := 0.0
+			var flux_out := 0.0
+			var peak := 0.0
+			for i in range(image.size()):
+				flux_in += image[i]
+				flux_out += image[i] * c[i]
+				peak = maxf(peak, image[i] * c[i])
+			flux_low = minf(flux_low, flux_out / flux_in)
+			flux_high = maxf(flux_high, flux_out / flux_in)
+			peak_low = minf(peak_low, peak)
+			peak_high = maxf(peak_high, peak)
+		var detail := "flux ratio x%.2f, peak x%.2f (%.2f .. %.2f)" % [flux_high / flux_low, peak_high / peak_low, peak_low, peak_high]
+		if diameter < 8.0:  # sub-block: the documented limit (open point), printed only
+			print("local_adaptation_test: sub-block %.0f px disc, not gated: %s" % [diameter, detail])
+		else:
+			_check("disc %.0f px moving over the grid: bounded variation" % diameter,
+					flux_high / flux_low <= TRANSLATION_BOUND and peak_high / peak_low <= TRANSLATION_BOUND, detail)
+
+
+## A glare-like gradient (core 1e4 cd/m^2 falling as 1/r^2 to the sky's 1e-3 over 60 px): the factor must rise
+## monotonically away from the core (no ring, no overshoot) and stay in (0, 1].
+func _gradient_case(base: float, reference: float) -> void:
+	var w := 160
+	var h := 64
+	var ppd := 31.5
+	var block := LocalAdaptation.block_size(ppd)
+	var spc := base * NIGHT_GAIN
+	var image := PackedFloat64Array()
+	image.resize(w * h)
+	for y in range(h):
+		for x in range(w):
+			var r := maxf(Vector2(x + 0.5 - 30.0, y + 0.5 - 32.0).length(), 8.0)
+			image[y * w + x] = maxf(DISC_CD_M2 * 64.0 / (r * r), 1.0e-3) * spc
+	var parameters := {"scene_per_cd_m2": spc, "display_gain": NIGHT_GAIN, "reference_cd_m2": reference, "block": block,
+			"sigma_blocks": LocalAdaptation.POOL_SIGMA_DEG * ppd / float(block)}
+	var c := LocalAdaptation.factors(image, w, h, parameters)
+	var worst_drop := 0.0
+	var bounded := true
+	var previous := c[32 * w + 38]
+	for x in range(38, w):
+		var value: float = c[32 * w + x]
+		bounded = bounded and value > 0.0 and value <= 1.0
+		worst_drop = maxf(worst_drop, previous - value)
+		previous = maxf(previous, value)
+	_check("soft gradient: factor rises outward, no ring", bounded and worst_drop <= 0.05 * c[32 * w + w - 1],
+			"worst drop %.4f, c %.4f -> %.4f" % [worst_drop, c[32 * w + 38], c[32 * w + w - 1]])
+
+
+## 150 x 93 px (not a multiple of the block) with a 20 px disc against the right and bottom edge: the edge clamps.
+func _odd_size_case(base: float, reference: float) -> void:
+	var w := 150
+	var h := 93
+	var ppd := 31.5
+	var block := LocalAdaptation.block_size(ppd)
+	var spc := base * NIGHT_GAIN
+	var image := _disc_image(w, h, 20.0, 138.0, 83.0, spc)
+	var parameters := {"scene_per_cd_m2": spc, "display_gain": NIGHT_GAIN, "reference_cd_m2": reference, "block": block,
+			"sigma_blocks": LocalAdaptation.POOL_SIGMA_DEG * ppd / float(block)}
+	var c := LocalAdaptation.factors(image, w, h, parameters)
+	var ok := true
+	for value in c:
+		ok = ok and is_finite(value) and value > 0.0 and value <= 1.0
+	var centre := image[83 * w + 138] * c[83 * w + 138]
+	_check("odd image size, disc at the edge", ok and centre < 3.0 * LocalAdaptation.PLATEAU_SCENE and c[5 * w + 5] == 1.0,
+			"centre displayed %.3f" % centre)
+
+
+## The shaders are generated from the constants (no hand-copied numbers): no placeholder is left and a few generated
+## literals equal the constants they come from.
+func _generated_constants_case() -> void:
+	var left := false
+	var sources := [LocalAdaptationEffect.down_shader_source(), LocalAdaptationEffect.pool_shader_source(),
+			LocalAdaptationEffect.apply_shader_source()]
+	for source: String in sources:
+		left = left or source.contains("@")
+	var pool: String = sources[1]
+	_check("shaders generated, no placeholder left", not left, "")
+	_check("pool shader carries the constants", pool.contains(LocalAdaptationEffect.glsl_float(EyeAdaptation.CONE_MID_SLOPE))
+			and pool.contains(LocalAdaptationEffect.glsl_float(EyeAdaptation.CONE_WEBER_OFFSET))
+			and pool.contains(LocalAdaptationEffect.glsl_float(EyeAdaptation.CONE_LOG_LOW)), "")
+	_check("glsl_float round trip", is_equal_approx(LocalAdaptationEffect.glsl_float(0.249).to_float(), 0.249)
+			and LocalAdaptationEffect.glsl_float(3.0).contains("."), LocalAdaptationEffect.glsl_float(3.0))
