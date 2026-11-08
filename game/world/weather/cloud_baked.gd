@@ -659,8 +659,10 @@ func _start_volumes(lowest: int, highest: int) -> void:
 		_phases.append({"kind": "flat", "level": j, "total": n, "next": 0,
 			"step": maxi(1, int(FLAT_CELLS_PER_FRAME * cost * bake_scale / n))})
 	for kind in ["density", "occupancy", "light"]:
-		# the light only for the marched levels; the shape (density, occupancy) for S's too
-		for k in range(int(plan["first_level"] if kind == "light" else plan["shadow_first"]), levels):
+		# the light for the marched levels (above VOLUME_TOP_M, none marched: for S's levels - the flat levels draw the
+		# volume's own column with it, look fixes T7c); the shape (density, occupancy) for S's too
+		var light_first := int(plan["first_level"]) if int(plan["first_level"]) < levels else int(plan["shadow_first"])
+		for k in range(light_first if kind == "light" else int(plan["shadow_first"]), levels):
 			var dz: float = plan["dz"][k]
 			var nz := roundi((plan["band"].y - plan["band"].x) / dz)
 			var slices: int = plan["onz"][k] if kind == "occupancy" else nz

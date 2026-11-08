@@ -45,6 +45,10 @@ float cloud_baked_sun_depth(int si, vec3 offset, vec3 sun) {
 	float gdy = dot(sun, axis_y);
 	float tau = 0.0;
 	float near_m = min(length_m, CLOUD_BAKED_SUN_SHAPE_PATH_M);
+	// the levels with light: the marched ones; with none marched (above 62 km) the shadows' (CloudBaked bakes their light
+	// for the flat levels' volume column, look fixes T7c)
+	int k_light = int(baked.sets[si].misc.z) < int(baked.sets[si].axis_y.w) ? int(baked.sets[si].misc.z)
+			: int(baked.sets[si].misc.w);
 	float n = float(CLOUD_BAKED_SUN_NEAR_SAMPLES);
 	for (int i = 0; i < CLOUD_BAKED_SUN_NEAR_SAMPLES; i++) {
 		float a = near_m * float(i * i) / (n * n);
@@ -53,7 +57,7 @@ float cloud_baked_sun_depth(int si, vec3 offset, vec3 sun) {
 		float h = cloud_height_along(ray, t);
 		float gx = gx0 + t * gdx;
 		float gy = gy0 + t * gdy;
-		int k = max(cloud_baked_level(si, gx, gy), int(baked.sets[si].misc.z));
+		int k = max(cloud_baked_level(si, gx, gy), k_light);
 		float beta;
 		if (k < int(baked.sets[si].axis_y.w)) {
 			beta = cloud_baked_extinction(texture(baked_a_in, cloud_baked_uvw(si, k, gx, gy, h)).rg);

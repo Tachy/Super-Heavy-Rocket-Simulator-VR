@@ -24,11 +24,16 @@
 #      has cloudy are brighter with the weather on than off (ratio >= 1.3), five clear cells unchanged (2 %);
 #   5. the flat levels across a re-bake (look fixes T8): the broken layer (cf 0.4) straight down from 400 m below and
 #      above the first shape-tile edge over 63 km (the wrapped shape origin steps by a whole tile there), each with a
-#      new flat geometry (a detour to 200 km first): 25 ground points' 21 x 21 block luminance the same within 3 % (the
+#      new flat geometry (a detour to 200 km first): 25 ground points' 21 x 21 block luminance the same within 1.5 % (the
 #      flat bake's turned / tile-breaking readings followed the camera's tile: the pattern jumped at the geometry's
 #      re-bakes on a climb, 27 % here);
+#   5b. the 40-60 km takeover (look fixes T7c, user 2026-11-08: the hand-over must not change the view): the broken
+#      layer straight down from just below the takeover (the volume alone) and just above it (the flat levels alone):
+#      25 ground points' block luminance (blocks of the same ground size) the same within TAKEOVER_TOLERANCE, the mean
+#      over the points within TAKEOVER_MEAN_TOLERANCE (before T7c the flat levels placed the clouds by their own 2-D
+#      pattern: regions moved by ~12 codes over 45-65 km);
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_far_check.gd [-- --save=<dir>] (PNGs of
-# the renders) [--no_3d_light] (CloudLayer.far_3d_light off) [--only_rebake] (section 5 alone) [--only_probe] (section 1 alone). Exit code 1 on failure.
+# the renders) [--no_3d_light] (CloudLayer.far_3d_light off) [--only_rebake] (sections 5 and 5b alone) [--only_probe] (section 1 alone). Exit code 1 on failure.
 extends SceneTree
 
 const EPOCH_UTC := "2024-04-08T14:00:00"  ## no eclipse; the Sun over the Atlantic
@@ -60,30 +65,56 @@ const BRIGHT_TOP_TOLERANCE := 1.5e-3
 const BRIGHT_TOP_BR_RANGE := Vector2(1.07, 1.13)
 const TABLE_GROUND_ALBEDO := 0.1
 ## Section 1c (T7b): random points per cover and footprint, the mean's tolerance [E] (sampling SD <= 0.35 / sqrt(4096)
-## = 0.006 plus the noise's departure from a Gaussian z in the tails: 2026-11-08 C 0.1 -> 0.079 / 0.086 at 8 / 32 km,
-## C 0.9 -> 0.921 / 0.920, 0.3-0.7 within 0.005) and the least spread of a working pattern at C 0.5 (measured 0.35).
+## = 0.006 plus the field's correlation; T7c: the exact rank - C 0.1 -> 0.100 / 0.100 at 8 / 32 km, C 0.9 -> 0.899,
+## worst 0.005; T7b's median / sigma normalisation gave 0.079 / 0.921) and the least spread of a working pattern at
+## C 0.5 (measured 0.35).
 const MESO_POINTS := 4096
-const MESO_MEAN_TOLERANCE := 0.03
+const MESO_MEAN_TOLERANCE := 0.015
 const MESO_SPREAD_MIN := 0.15
 ## Section 1d (T7b): points on the sphere; the mean's tolerance [E] (sampling 0.75 / sqrt(16384) = 0.6 % plus the
 ## noise field's correlation over a few km) and the fractional SD's (the Wilson-Hilferty quantile and the clamp).
 const SPREAD_POINTS := 16384
 const SPREAD_MEAN_TOLERANCE := 0.03
 const SPREAD_FSD_TOLERANCE := 0.06
+const SPREAD_FSD := 1.0  ## the cumulus spread's (cloud_far.gdshaderinc CLOUD_SPREAD_NU = 1 / FSD^2; look fixes T7c)
+## Section 1e (T7c): the blocks probed, columns per case and the tolerances [E]: water clouds (cumulus, stratiform:
+## sampling sd <= 0.5 / sqrt(2048) = 0.011 per case plus the fit's residual; 2026-11-08 worst 0.013) and cirrus (its
+## 15.6 m vertical texels put a 1-3 km block at fractions of 0.002-0.03 per height, where the threshold table's 8-bit
+## fraction codes and their linear interpolation are coarse: 2026-11-08 worst 0.087, raw shapes up to 0.6 over).
+const PROJECTION_TYPES := [0, 1, 2]
+const PROJECTION_DEPTHS := [250.0, 500.0, 1000.0, 1500.0, 2000.0, 3000.0]
+const PROJECTION_FRACTIONS := [0.02, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8]
+const PROJECTION_POINTS := 2048
+const PROJECTION_TOLERANCE := Vector2(0.03, 0.1)  ## (water clouds, cirrus)
+## cirrus below this fraction is listed, not asserted (its per-height fraction under one code: 1 - 3 km at f 0.02 keep
+## 0.05-0.16)
+const PROJECTION_ICE_FRACTION_MIN := 0.1
 const HANDOVER_TOLERANCE := 0.05
 const CLOUDY_RATIO_MIN := 1.3
 ## Section 5 (look fixes T8): the first height (above the 40-60 km takeover and the volume's 62 km top: the flat levels
 ## alone), how far up the next shape tile edge is searched and how far below / above it the two cameras are, the
 ## ground points' grid step (deg; 5 x 5 about SUB_CAMERA), the block radius (px), the detour height that forces a new
-## flat geometry and the tolerance [E] (the mean relative block step; 2026-11-07: 1.42 % with the fix, 27.4 % before).
+## flat geometry and the tolerance [E] (the mean relative block step; 2026-11-07: 1.42 % with the T8 fix, 27.4 % before;
+## 2026-11-08 0.77 % with T7c's volume column - tightened from 3 %).
 const REBAKE_HEIGHT_M := 63000.0
 const REBAKE_SEARCH_M := 60000.0
 const REBAKE_EDGE_M := 400.0
 const REBAKE_DETOUR_M := 200000.0
 const REBAKE_GRID_DEG := 0.12
 const REBAKE_BLOCK_RADIUS := 10
-const REBAKE_TOLERANCE := 0.03
+const REBAKE_TOLERANCE := 0.015
 const CLEAR_TOLERANCE := 0.02
+## Section 5b (T7c): the heights just below / above the takeover (cloud_baked_flat.gdshaderinc
+## CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M), the ground grid step (deg; 5 x 5 about SUB_CAMERA), the block's ground radius
+## (m: a region of ~6 km, the fly-up sheets' 4 x 4 regions are 7-12 km; the points within ~13 deg of nadir - farther out
+## the volume below the takeover shows its clouds' sides, the flat levels a slab: 2026-11-08 15 % at 25 deg) and the
+## tolerances [E]: per point (linear luminance; 7 % ~ 3 sRGB codes of ~130, the user's mark; 2026-11-08 worst 5.0 %,
+## mean 0.85 %) and the mean.
+const TAKEOVER_HEIGHTS_M := Vector2(39500.0, 60500.0)
+const TAKEOVER_GRID_DEG := 0.04
+const TAKEOVER_BLOCK_M := 3000.0
+const TAKEOVER_TOLERANCE := 0.07
+const TAKEOVER_MEAN_TOLERANCE := 0.02
 ## Section 3b (T7b): the analog hour of the epoch's month (2024-04-08 14 UTC -> April, 12 UTC).
 const ANALOG_MONTH := 4
 const ANALOG_HOUR := 12
@@ -145,6 +176,7 @@ func _run() -> void:
 	if _only_rebake:
 		_show(broken)
 		await _rebake_tile_sample()
+		await _takeover_sample()
 		_finish()
 		return
 
@@ -153,6 +185,7 @@ func _run() -> void:
 	await _bright_top_samples()
 	await _meso_samples()
 	await _spread_samples()
+	await _projection_samples()
 	if _only_probe:
 		_finish()
 		return
@@ -187,6 +220,7 @@ func _run() -> void:
 	# 5. The flat levels across a re-bake whose camera is in another shape tile (look fixes T8).
 	_show(broken)
 	await _rebake_tile_sample()
+	await _takeover_sample()
 	_finish()
 
 
@@ -343,7 +377,7 @@ func _bright_top_samples() -> void:
 
 ## 1d. The cloud-to-cloud spread (look fixes T7b, cloud_spread_factor): over SPREAD_POINTS random points on the sphere
 ## the factor's mean is 1 within SPREAD_MEAN_TOLERANCE (the cell's water kept) and its fractional standard deviation
-## the gamma's 0.75 within SPREAD_FSD_TOLERANCE; its 10 / 50 / 90 % points printed (gamma nu 1.778: 0.26 / 0.83 / 1.98).
+## SPREAD_FSD within SPREAD_FSD_TOLERANCE; its 10 / 50 / 90 % points printed (the exponential, nu 1: 0.105 / 0.69 / 2.30).
 func _spread_samples() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20261109
@@ -360,8 +394,9 @@ func _spread_samples() -> void:
 	var fsd := sqrt(maxf(sum2 / SPREAD_POINTS - mean * mean, 0.0)) / maxf(mean, 1.0e-6)
 	var sorted := Array(values)
 	sorted.sort()
-	_check("cloud-to-cloud spread: mean 1 (+-%.2f), fsd 0.75 (+-%.2f)" % [SPREAD_MEAN_TOLERANCE, SPREAD_FSD_TOLERANCE],
-			absf(mean - 1.0) <= SPREAD_MEAN_TOLERANCE and absf(fsd - 0.75) <= SPREAD_FSD_TOLERANCE,
+	_check("cloud-to-cloud spread: mean 1 (+-%.2f), fsd %.2f (+-%.2f)" % [SPREAD_MEAN_TOLERANCE, SPREAD_FSD,
+			SPREAD_FSD_TOLERANCE],
+			absf(mean - 1.0) <= SPREAD_MEAN_TOLERANCE and absf(fsd - SPREAD_FSD) <= SPREAD_FSD_TOLERANCE,
 			"mean %.4f, fsd %.3f, p10 / p50 / p90 %.3f / %.3f / %.3f" % [mean, fsd, sorted[SPREAD_POINTS / 10],
 			sorted[SPREAD_POINTS / 2], sorted[SPREAD_POINTS * 9 / 10]])
 
@@ -409,6 +444,50 @@ func _meso_samples() -> void:
 			worst <= MESO_MEAN_TOLERANCE and bounded and spread_ok,
 			"worst |mean - C| %.4f (tolerance %.3f), in [0, 1] %s, pattern %s; %s" % [worst, MESO_MEAN_TOLERANCE, bounded,
 			spread_ok, "; ".join(parts)])
+
+
+## 1e. The volume's depth-aware cover (look fixes T7c, cloud_volume_fraction): the shapes seen straight down through a
+## block of uniform fraction f and depth D cover more than f (the 3-D noise's heights are displaced against each other);
+## with the volume's fraction the block's nadir cover is f (the data's total cover: maximum overlap inside a block)
+## within PROJECTION_TOLERANCE (water clouds, cirrus), f 0.02-0.8 and D 0.25-3 km (PROJECTION_POINTS columns each).
+func _projection_samples() -> void:
+	var cases: Array = []
+	for type in PROJECTION_TYPES:
+		for depth: float in PROJECTION_DEPTHS:
+			for f: float in PROJECTION_FRACTIONS:
+				for j in range(PROJECTION_POINTS):
+					cases.append([f, depth, float(type), float(j + 1)])
+	var colors := await _probe_colors(4, cases)
+	var worst := 0.0
+	var worst_ice := 0.0
+	var lines: Array[String] = []
+	var k := 0
+	for type in PROJECTION_TYPES:
+		for depth: float in PROJECTION_DEPTHS:
+			var parts: Array[String] = []
+			for f: float in PROJECTION_FRACTIONS:
+				var raw := 0.0
+				var vol := 0.0
+				var opacity := 0.0
+				for j in range(PROJECTION_POINTS):
+					raw += colors[k].r
+					vol += colors[k].g
+					opacity += colors[k].b
+					k += 1
+				raw /= PROJECTION_POINTS
+				vol /= PROJECTION_POINTS
+				opacity /= PROJECTION_POINTS
+				if type == 2 and f >= PROJECTION_ICE_FRACTION_MIN:
+					worst_ice = maxf(worst_ice, absf(vol - f))
+				elif type != 2:
+					worst = maxf(worst, absf(vol - f))
+				parts.append("%.2f: %.3f -> %.3f (%.3f)" % [f, raw, vol, opacity])
+			lines.append("type %d D %.0f m: %s" % [type, depth, ", ".join(parts)])
+	print("projected cover (f: shapes -> volume):\n  " + "\n  ".join(lines))
+	_check("the volume's nadir cover of a uniform block is its fraction (%d columns per case)" % PROJECTION_POINTS,
+			worst <= PROJECTION_TOLERANCE.x and worst_ice <= PROJECTION_TOLERANCE.y,
+			"worst |cover - f| water clouds %.4f (tolerance %.3f), cirrus %.4f (%.3f)" % [worst, PROJECTION_TOLERANCE.x,
+			worst_ice, PROJECTION_TOLERANCE.y])
 
 
 ## 2. Weather off, outside the limit: the world's Earth (earth.gdshader) against the pre-Task-10 shader as one file.
@@ -689,6 +768,41 @@ func _rebake_tile_sample() -> void:
 	_check("re-bake across a shape tile, broken cf 0.4: the %d ground points' %d x %d block luminance within %.1f %%" % [
 			points.size(), 2 * REBAKE_BLOCK_RADIUS + 1, 2 * REBAKE_BLOCK_RADIUS + 1, REBAKE_TOLERANCE * 100.0],
 			mean <= REBAKE_TOLERANCE, "mean %.2f %%, worst point %.2f %%" % [mean * 100.0, worst * 100.0])
+
+
+## 5b. The 40-60 km takeover: the volume alone just below it, the flat levels alone just above (look fixes T7c).
+func _takeover_sample() -> void:
+	var points: Array[Vector3] = []
+	for i in range(-2, 3):
+		for j in range(-2, 3):
+			points.append(_itrf(SUB_CAMERA.x + TAKEOVER_GRID_DEG * i, SUB_CAMERA.y + TAKEOVER_GRID_DEG * j))
+	var lums := {}
+	for h: float in [TAKEOVER_HEIGHTS_M.x, TAKEOVER_HEIGHTS_M.y]:
+		await _place(SUB_CAMERA, WGS84_A_M + h)
+		var image := _frame()
+		_save(image, "t7c_takeover_%.0f" % h)
+		# the block's pixel radius for TAKEOVER_BLOCK_M on the ground (the cloud layer ~1.5 km up)
+		var pixels_per_m := image.get_height() / (2.0 * (h - 1500.0) * tan(deg_to_rad(_world.camera.fov) * 0.5))
+		var radius := maxi(int(round(TAKEOVER_BLOCK_M * pixels_per_m)), 2)
+		var values: Array[float] = []
+		for p in points:
+			values.append(_block_luminance(image, _pixel_of(p), radius))
+		lums[h] = values
+	var a_all: Array = lums[TAKEOVER_HEIGHTS_M.x]
+	var b_all: Array = lums[TAKEOVER_HEIGHTS_M.y]
+	var sum_a := 0.0
+	var sum_b := 0.0
+	var worst := 0.0
+	for i in range(points.size()):
+		sum_a += a_all[i]
+		sum_b += b_all[i]
+		worst = maxf(worst, absf(float(b_all[i]) - float(a_all[i])) / maxf(float(a_all[i]), 1.0e-6))
+	var mean := absf(sum_b - sum_a) / maxf(sum_a, 1.0e-6)
+	_check(("takeover %.1f -> %.1f km, broken cf 0.4: the %d ground points' block luminance within %.0f %%, their mean "
+			+ "within %.0f %%") % [TAKEOVER_HEIGHTS_M.x * 1e-3, TAKEOVER_HEIGHTS_M.y * 1e-3, points.size(),
+			TAKEOVER_TOLERANCE * 100.0, TAKEOVER_MEAN_TOLERANCE * 100.0],
+			worst <= TAKEOVER_TOLERANCE and mean <= TAKEOVER_MEAN_TOLERANCE,
+			"worst point %.2f %%, mean %.2f %%" % [worst * 100.0, mean * 100.0])
 
 
 ## The cumulus shape tile (the unwrapped origin's integer part, CloudLayer._shape_origin) of a camera straight above

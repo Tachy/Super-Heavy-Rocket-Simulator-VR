@@ -68,8 +68,18 @@ layout(rg16f, set = 1, binding = 1) uniform writeonly image3D baked_a_out;
 // them (their erosion is the march's), so the march's sum keeps the cloud fraction (fix 1: with the bake's own state's
 // threshold the march's erosion shrank every near outline by tens of metres and tore its rim into fragments).
 // ramp_spread: the ramp sum with the cumulus type's cloud-to-cloud spread (cloud_spread_factor, look fixes T7b: thick
-// and thin clouds, mean 1; the fidelity flag cloud_far_subgrid).
-vec4 cloud_baked_ramp_at(vec3 offset, float h, float footprint_m, float extra_state, out float ramp_spread) {
+// and thin clouds, mean 1; the fidelity flag cloud_far_subgrid). block_m: the depth of the cloud block there
+// (cloud_block_depth_m): each type's threshold is that of its depth-aware fraction (cloud_volume_fraction, look fixes
+// T7c: seen from above the block covers the data's fraction), the edge mean the types' mix of theirs.
+// [E] The coarse levels' cover (look fixes T7c): a level's voxel (k >= 1: 200 m and more, the cumulus shape's texels
+// 250 m) averages the ramp over its taps and the march interpolates the edge coordinate between the voxels - small
+// clouds shrink, the nadir cover of a uniform slab fell to ~0.65 x the fine level's (slabs 0.5-2 km, f 0.2-0.7, seen
+// from 50-200 km: mean alpha 0.12 / 0.26 / 0.55 against 0.20 / 0.40 / 0.73 from 15 km). Those levels take the fraction
+// 1 - (1 - f_v)^(1 + gain (1 - f_v)), fitted to those slabs (screenshots/look_fixes/t7c/slabs*.out); with the edge mean
+// of that fraction the water is kept.
+const float CLOUD_BAKED_LEVEL_COVER_GAIN = 0.8;
+vec4 cloud_baked_ramp_at(vec3 offset, float h, float footprint_m, float extra_state, float block_m,
+		out float ramp_spread) {
 	ramp_spread = 0.0;
 	vec2 lat_lon = cloud_lat_lon(atmosphere_camera_hi + atmosphere_camera_lo + offset);
 	CloudCell cell = cloud_field(lat_lon, h);
@@ -78,13 +88,19 @@ vec4 cloud_baked_ramp_at(vec3 offset, float h, float footprint_m, float extra_st
 	}
 	float state = cloud_detail_state(footprint_m);
 	float state_t = min(state + extra_state, float(cloud_detail_levels));
-	float threshold = cloud_threshold(cell.fraction, state_t);
 	vec3 types = cloud_type_weights(cell);
 	float detail = state > 0.0 ? cloud_detail_perturbation(offset, state) : 0.0;
 	float ramp = 0.0;
 	float x_max = -CLOUD_BAKED_X_MAX;
+	float m = 0.0;
 	for (int type = 0; type < 3; type++) {
 		if (types[type] > 0.0) {
+			float f_v = cloud_volume_fraction(cell.fraction, block_m, type);
+			if (cloud_volume_depth_cover && baked.build.x > 0 && f_v < 1.0) {
+				f_v = 1.0 - pow(1.0 - f_v, 1.0 + CLOUD_BAKED_LEVEL_COVER_GAIN * (1.0 - f_v));  // (the coarse levels)
+			}
+			float threshold = cloud_threshold(f_v, state_t);
+			m += types[type] * texture(cloud_edge_mean, cloud_table_uv(f_v, state_t)).r;
 			vec4 shape = texture(cloud_noise_shape, cloud_type_shape_coordinates(type, offset, h));
 			float w = cloud_edge_width.x * pow(cloud_edge_width.y / cloud_edge_width.x, clamp(shape.a, 0.0, 1.0));
 			float x = (shape.r + detail - threshold) / max(w, 1.0e-6);
@@ -95,7 +111,6 @@ vec4 cloud_baked_ramp_at(vec3 offset, float h, float footprint_m, float extra_st
 			x_max = max(x_max, x);
 		}
 	}
-	float m = texture(cloud_edge_mean, cloud_table_uv(cell.fraction, state_t)).r;
 	return vec4(ramp, x_max, cell.extinction / max(m, 1.0e-4), 1.0);
 }
 
@@ -123,6 +138,7 @@ void main() {
 		return;
 	}
 	bool ice = max(max(lo_cell.ice, mid_cell.ice), hi_cell.ice) > 0.0;
+	float block_m = cloud_block_depth_m(lat_lon_c, g.z);
 	int taps_h = clamp(int(ceil(c / 125.0)), 1, 3);
 	int taps_v = clamp(int(ceil(dz / (ice ? 20.0 : 60.0))), 1, ice ? 16 : 8);
 	float ramp = 0.0;
@@ -144,7 +160,7 @@ void main() {
 				vec3 p = g + f * vec3(c, c, dz);
 				float r_spread;
 				vec4 r = cloud_baked_ramp_at(cloud_baked_offset_of(si, p.x, p.y, p.z), p.z, 0.5 * c, extra_state,
-						r_spread);
+						block_m, r_spread);
 				ramp += r.x;
 				ramp_spread += r_spread;
 				x_max = max(x_max, r.y);

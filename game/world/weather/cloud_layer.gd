@@ -117,6 +117,14 @@ var far_subgrid := true:
 	set(value):
 		far_subgrid = value
 		ShaderGlobals.set_value(&"cloud_far_subgrid", value)
+## Fidelity flag (shader global cloud_volume_depth_cover; look fixes T7c): the baked volume (and the flat levels'
+## pattern, which draws its column) draws each block of touching cloudy layers at the depth-aware fraction whose nadir
+## cover is the data's (clouds.gdshaderinc cloud_volume_fraction); false: every height at the stored fraction (the
+## shapes then cover 20-60 % more from above). Read by the bake: takes effect at the next re-bake.
+var volume_depth_cover := true:
+	set(value):
+		volume_depth_cover = value
+		ShaderGlobals.set_value(&"cloud_volume_depth_cover", value)
 ## Fidelity flag (shader global cloud_air_shadow; static clouds Task 9b): the clouds' shadows on the air - the single
 ## scattering of the Sun's direct beam along the view ray weighted by its cloud transmittance from the baked volume's S
 ## (cloud_pass.gdshaderinc cloud_air_shadow_loss: shadowed haze before backlit clouds, crepuscular rays); false: the
@@ -208,6 +216,7 @@ func setup(core: StarsimCore) -> void:
 	ShaderGlobals.set_value(&"cloud_debug_output", 0)
 	ShaderGlobals.set_value(&"cloud_far_3d_light", far_3d_light)
 	ShaderGlobals.set_value(&"cloud_far_subgrid", far_subgrid)
+	ShaderGlobals.set_value(&"cloud_volume_depth_cover", volume_depth_cover)
 	ShaderGlobals.set_value(&"cloud_air_shadow", air_shadow)
 	_apply_cloud_arguments(OS.get_cmdline_user_args())
 	ShaderGlobals.set_value(&"cloud_shadow_near", shadow_effect.near_texture)

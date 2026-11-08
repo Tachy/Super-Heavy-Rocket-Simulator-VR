@@ -606,6 +606,10 @@ cloud_far_subgrid={
 "type": "bool",
 "value": true
 }
+cloud_volume_depth_cover={
+"type": "bool",
+"value": true
+}
 
 [xr]
 

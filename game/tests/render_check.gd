@@ -72,6 +72,7 @@
 #          of the unchanged scene: any differing pixel fails (exit code 1; the HUD's frame-rate line hidden).
 #          --no_air_shadow: the clouds' shadows on the air off (the flag CloudLayer.air_shadow).
 #          --no_far_subgrid: the column model's sub-grid structure off (the flag CloudLayer.far_subgrid, look fixes T7 B).
+#          --no_depth_cover: every height at the stored fraction (the flag CloudLayer.volume_depth_cover, look fixes T7c).
 # Tower lamps: on as in the game (between civil dusk and dawn); --no_tower_lights leaves them out (day comparison).
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
@@ -324,6 +325,8 @@ func _process(_delta: float) -> bool:
 			world.clouds.air_shadow = false
 		if _args.has("no_far_subgrid"):  # the fidelity flag (CloudLayer.far_subgrid)
 			world.clouds.far_subgrid = false
+		if _args.has("no_depth_cover"):  # the fidelity flag (CloudLayer.volume_depth_cover)
+			world.clouds.volume_depth_cover = false
 		if _args.has("cloud_scattering"):  # the fidelity flag (CloudLayer.ScatteringModel)
 			world.clouds.scattering_model = CloudLayer.ScatteringModel.CLOSED_FORM \
 					if _args["cloud_scattering"] == "closed" else CloudLayer.ScatteringModel.TABLE

@@ -67,9 +67,9 @@ const float CLOUD_FAR_GL_W[8] = float[](0.0506142681451881, 0.1111905172266872, 
 //   approximation, here the gamma distribution's geometric mean): psi(1.778) = 0.2687 -> chi 0.736.
 // - Cover pattern: the cell's cover C as a cloud texture (white cells, dark gaps) - f(x) = Phi(a + k z(x)), z the
 //   shapes' noise read CLOUD_FAR_MESO_SCALE times enlarged (a fractal field from ~8 km texels up; prefiltered at the
-//   footprint, cloud_shape_prefiltered) and normalised by its own quantiles at that level (the prefilter tables:
-//   median and the 15.87 / 84.13 % points as -+1 sigma; read at most at their last level), a = Phi^-1(C) sqrt(1 + k^2)
-//   so that the mean over a Gaussian z is C; 0 and 1 kept; k fades to 0 over footprints of 8 - 16 texels (f -> C).
+//   footprint, cloud_shape_prefiltered) taken to a standard normal z by its exact rank at that level (the prefilter
+//   tables' inverse, cloud_prefilter_exceedance; read at most at their last level; look fixes T7c - the earlier median /
+//   +-1 sigma normalisation left the tails ~uniform), a = Phi^-1(C) sqrt(1 + k^2) so that the mean over z is C; 0 and 1 kept; k fades to 0 over footprints of 8 - 16 texels (f -> C).
 //   [E: scale 32 and contrast 1.5 - looked at against DSCOVR EPIC 2025-03-20 (trade cumulus 5-20 km cells); a value
 //   noise on a 25-50 km lattice drew square blocks. The pattern is not the data's, only its statistics are; mesoscale
 //   cellular convection is 10-50 km across, Wood & Hartmann 2006, J. Climate 19, 1748.]
@@ -119,8 +119,8 @@ float cloud_far_normal_quantile(float p) {
 }
 
 // The in-cloud optical-depth spread resolved from cloud to cloud (look fixes T7b, user 2026-11-08: the capped cumulus
-// water kept as the cell mean, thick clouds again - dark bases, relief - and thin ones beside them): the same gamma
-// distribution as the far field's effective thickness (CLOUD_FAR_TAU_SPREAD_CHI: FSD 0.75, nu = 1.778) as a field on
+// water kept as the cell mean, thick clouds again - dark bases, relief - and thin ones beside them): a gamma
+// distribution (CLOUD_SPREAD_NU; the far field's effective thickness CLOUD_FAR_TAU_SPREAD_CHI keeps FSD 0.75) as a field on
 // the sphere (a whole column thick or thin: a tower is thick through its depth) - the shapes' noise read
 // CLOUD_SPREAD_SCALE times enlarged (features of a few km, the size of single cumulus [E]) and turned against the shapes'
 // axes (the cover pattern's turn inverted), its exact rank u (the noise's own value distribution, cloud_prefilter_exceedance) taken to a normal z and the
@@ -128,7 +128,11 @@ float cloud_far_normal_quantile(float p) {
 // shapes, so the mean over any cloud field is 1 (the cell's water kept) and the outlines are the shapes' as before. (A
 // first try placed the factor by the shape value's rank inside each cloud: the margins thinned to wisps, the cover
 // fell by 12 % and the cores stayed small - not the look.)
-const float CLOUD_SPREAD_NU = 1.778;  // 1 / FSD^2, FSD 0.75 [S: Shonk et al. 2010; the gamma form Barker 1996]
+// The cumulus type's spread (look fixes T7c, user 2026-11-08): FSD 1 (nu = 1, the exponential) - broken boundary-layer
+// cumulus are the most inhomogeneous clouds, nu ~1 and below for broken fields [S: Barker, Wielicki & Parker 1996,
+// J. Atmos. Sci. 53, 2304 (Landsat); Oreopoulos & Cahalan 2005, J. Climate 18, 5110 (MODIS: the lowest nu over the
+// trade-cumulus regions)]; the far field's and the other types' 0.75 (Shonk et al. 2010's global mean) unchanged.
+const float CLOUD_SPREAD_NU = 1.0;  // 1 / FSD^2
 const float CLOUD_SPREAD_SCALE = 2.0;
 float cloud_spread_factor(vec3 p) {
 	vec3 q = transpose(CLOUD_FAR_MESO_TURN) * normalize(p) * (CLOUD_A_M / (CLOUD_SHAPE_TILE_H_M * CLOUD_SPREAD_SCALE));
@@ -160,10 +164,11 @@ float cloud_far_meso_cover(vec3 p, float cover, float footprint_m) {
 	level = clamp(level, 0.0, CLOUD_SHAPE_PREFILTER_LEVELS);
 	vec3 q = CLOUD_FAR_MESO_TURN * normalize(p) * (CLOUD_A_M / (CLOUD_SHAPE_TILE_H_M * CLOUD_FAR_MESO_SCALE));
 	float v = cloud_shape_prefiltered(q, level).r;
-	float median = texture(cloud_prefilter_threshold, cloud_prefilter_uv(0.5, level)).r;
-	float plus = texture(cloud_prefilter_threshold, cloud_prefilter_uv(0.1587, level)).r;  // exceeded by 15.87 %
-	float minus = texture(cloud_prefilter_threshold, cloud_prefilter_uv(0.8413, level)).r;
-	float z = (v - median) / max(0.5 * (plus - minus), 1.0e-6);
+	// the value's exact rank at its level (cloud_prefilter_exceedance, the threshold table's inverse) taken to a normal z
+	// (look fixes T7c: the median / +-1 sigma normalisation left the noise ~uniform in its tails - C 0.1 drew 0.08)
+	float u = clamp(texture(cloud_prefilter_exceedance, cloud_prefilter_uv(clamp(v, 0.0, 1.0), level)).r, 1.0e-4,
+			1.0 - 1.0e-4);
+	float z = cloud_far_normal_quantile(1.0 - u);
 	float a = cloud_far_normal_quantile(cover) * sqrt(1.0 + k * k);
 	return cloud_far_normal_cdf(a + k * z);
 }
@@ -470,7 +475,10 @@ vec4 cloud_far_layer(vec3 g, vec3 sky_eclipse, float footprint_m) {
 	vec3 up = cloud_geodetic_up(p);
 	vec3 view_prop = -view;
 	float mu = max(dot(view_prop, up), CLOUD_FAR_MU_MIN);
-	float cover = max(cloud_column_beam_cover(column, mu), CLOUD_MIN_FRACTION);
+	// the cover the data's total cover from straight down (cloud_column_total_cover, look fixes T7c), slanted grown by
+	// the beam rule's slant term (the largest fraction with that nadir cover)
+	float cover = max(cloud_beam_cover_of(cloud_beam_fraction_of(cloud_column_total_cover(cloud_lat_lon(p), column.y)),
+			mu), CLOUD_MIN_FRACTION);
 	// the cloudy part's vertical depth at the effective thickness of the in-cloud spread (CLOUD_FAR_TAU_SPREAD_CHI)
 	float tau = (cloud_far_subgrid ? CLOUD_FAR_TAU_SPREAD_CHI : 1.0) * column.x / cover;
 	// the cover as mesoscale cells (cloud_far_meso_cover; the in-cloud depth kept: the water's mean kept)

@@ -25,15 +25,9 @@ vec3 cloud_baked_flat_radial(int si, vec2 g) {
 	return cos(theta) * baked.sets[si].flat_up0.xyz + sin(theta) * tangent;
 }
 
-// The largest cloud fraction f whose nadir beam cover cloud_beam_cover_of(f, 1) = 1 - (1 - f)^(1 + v (1 - f)) is c
-// (v CLOUD_OVERLAP_VERTICAL; fixed-point iterations, ~1e-3).
+// The largest cloud fraction f whose nadir beam cover is c (clouds.gdshaderinc cloud_beam_fraction_of).
 float cloud_baked_fraction_of(float c) {
-	c = clamp(c, 0.0, 0.9999);
-	float f = c;
-	for (int i = 0; i < 4; i++) {
-		f = 1.0 - pow(1.0 - c, 1.0 / (1.0 + CLOUD_OVERLAP_VERTICAL * (1.0 - f)));
-	}
-	return f;
+	return cloud_beam_fraction_of(c);
 }
 
 // The edge coordinate whose ramp is r (0 < r < 1): the inverse smoothstep.

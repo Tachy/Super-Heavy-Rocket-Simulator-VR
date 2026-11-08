@@ -322,6 +322,86 @@ vec3 cloud_baked_flat_pattern(vec3 p, vec3 up, vec3 dir, float mu, float footpri
 	return result;
 }
 
+// The volume's own column at grid point (gx, gy) (look fixes T7c, user 2026-11-08: the 40-60 km takeover must not
+// change the view - the flat levels draw the clouds where and as the volume does): the baked shapes and light (A, B of
+// set si, the levels with shapes - below 62 km the marched ones, above the shadows' ones, misc.w; their light is baked
+// with them) read at the level and blend the volume's march takes there for the footprint (cloud_baked_lod,
+// cloud_baked_level_of) along the vertical through the band at half the level's vertical cell, shaded as the march
+// shades (cloud_baked_march: the Sun's and the sky's sources J, the scaled transport, the phase of the pixel's view) with
+// each step's depth taken along the view (step / mu) - seen straight down the volume's own pixel; slanted, its column
+// as a slab at the flat levels' point. Out: the radiance (before the air in front; sun / sky irradiance at p), the
+// background's transmittance; returns its weight - 1 inside the volume's levels, 0 beyond (the volume's own hand-over
+// to the flat levels at its extent, cloud_baked_flat_weight_at's band: the shapes' 2-D pattern draws there).
+const int CLOUD_BAKED_FLAT_COLUMN_STEPS_MAX = 48;
+float cloud_baked_flat_volume_column(int si, float gx, float gy, float footprint_m, vec3 p, vec3 dir, float mu,
+		bool from_above, out vec3 radiance, out float transmittance) {
+	radiance = vec3(0.0);
+	transmittance = 1.0;
+	int levels = int(baked.sets[si].axis_y.w);
+	float l = cloud_baked_lod(si, max(abs(gx), abs(gy)), footprint_m);
+	float last = float(levels) - 1.0;
+	float w = 1.0 - smoothstep(last - max(cloud_baked_band(), CLOUD_BAKED_FLAT_SEAM_BAND), last, l);
+	if (!(w > 0.0) || levels < 1) {
+		return 0.0;
+	}
+	float blend;
+	// (the marched levels: their light is baked; with none marched, above 62 km, the shadows' levels - CloudBaked bakes
+	// their light then)
+	int k_min = int(baked.sets[si].misc.z) < levels ? int(baked.sets[si].misc.z) : int(baked.sets[si].misc.w);
+	int k = min(cloud_baked_level_of(si, l, k_min, blend), levels - 1);
+	float z0 = baked.sets[si].band.x;
+	float z1 = baked.sets[si].band.y;
+	float dz = baked.sets[si].dz[k >> 2][k & 3];
+	int n = clamp(int(ceil((z1 - z0) / (0.5 * dz))), 1, CLOUD_BAKED_FLAT_COLUMN_STEPS_MAX);
+	float step_m = (z1 - z0) / float(n);
+	float k_sc = cloud_transport_scale();
+	float w_light = cloud_scattering_model == 1 ? cloud_phase.w : k_sc;
+	vec3 sun_dir = normalize(atmosphere_sun_direction);
+	vec3 diff = sun_dir - dir;
+	float one_minus_cos = 0.5 * dot(diff, diff);
+	float phase = cloud_phase_function(1.0 - one_minus_cos, one_minus_cos);
+	vec3 sun_irradiance = ATM_PI * atm_sun_at(p) * atm_sunlit(p);
+	vec3 sky_irradiance = ATM_PI * atm_sky_light(p, normalize(p * ATM_STRETCH * ATM_STRETCH))
+			* cloud_group_eclipse_near;
+#ifdef CLOUD_DIAG_SUN_ONLY
+	sky_irradiance = vec3(0.0);
+#endif
+#ifdef CLOUD_DIAG_SKY_ONLY
+	sun_irradiance = vec3(0.0);
+#endif
+	float transmittance_sc = 1.0;
+	float transmittance_l = 1.0;
+	for (int i = 0; i < n; i++) {
+		float h = from_above ? z1 - (float(i) + 0.5) * step_m : z0 + (float(i) + 0.5) * step_m;
+		vec3 uvw = cloud_baked_uvw(si, k, gx, gy, h);
+		vec2 a = cloud_baked_a(si, uvw);
+		if (blend > 0.0) {
+			a = mix(a, cloud_baked_a(si, cloud_baked_uvw(si, k + 1, gx, gy, h)), blend);
+		}
+		float beta = cloud_baked_extinction(a);
+		if (!(beta > 0.0)) {
+			continue;
+		}
+		vec4 light = cloud_baked_b(si, uvw);
+		if (blend > 0.0) {
+			light = mix(light, cloud_baked_b(si, cloud_baked_uvw(si, k + 1, gx, gy, h)), blend);
+		}
+		light *= light;  // the sqrt code
+		float tau = beta * step_m / mu;
+		float scaled_step = exp(-k_sc * tau);
+		float light_step = exp(-w_light * tau);
+		if (transmittance_sc >= CLOUD_MIN_SCALED_TRANSMITTANCE) {
+			float j_sun = phase * light.x + CLOUD_BAKED_J_MAX * light.y;
+			radiance += transmittance_sc * sky_irradiance * (CLOUD_BAKED_J_MAX * light.z) * (1.0 - scaled_step) / k_sc
+					+ transmittance_l * sun_irradiance * j_sun * (1.0 - light_step) / w_light;
+		}
+		transmittance_sc *= scaled_step;
+		transmittance_l *= light_step;
+		transmittance *= exp(-tau);
+	}
+	return w;
+}
+
 // The flat levels' height at a fetched F for a view of cosine mu (CLOUD_BAKED_FLAT_GRAZING_MU).
 float cloud_baked_flat_height(vec4 f, float mu) {
 	return 1000.0 * mix(f.w, f.z, clamp((mu - CLOUD_BAKED_FLAT_GRAZING_MU) / (1.0 - CLOUD_BAKED_FLAT_GRAZING_MU), 0.0,
@@ -500,6 +580,9 @@ bool cloud_baked_flat_shade(int si, CloudRay ray, vec3 dir, vec3 eye, float t_fr
 	}
 	alpha = cov * (1.0 - exp(-tau_v / mu));
 	float tau_light = tau_v;
+	float w_volume = 0.0;
+	vec3 radiance_v = vec3(0.0);
+	float transmittance_v = 1.0;
 	if (w_pattern > 0.0) {
 		// the pattern read on a sphere of fixed height (CLOUD_BAKED_FLAT_PATTERN_HEIGHT_M), not at p: where the
 		// column's height rises steeply against the view the shapes were dragged along it (smeared)
@@ -510,8 +593,14 @@ bool cloud_baked_flat_shade(int si, CloudRay ray, vec3 dir, vec3 eye, float t_fr
 		cov = mix(cov, pattern.x, w_pattern);
 		alpha = mix(alpha, pattern.y, w_pattern);
 		tau_light *= mix(1.0, pattern.z, w_pattern);
+		// inside the volume's levels its own column instead (cloud_baked_flat_volume_column): the clouds where and as
+		// the volume draws them; blended below with the slab's colour
+		CloudBakedRay g = cloud_baked_ray(si, eye, dir);
+		w_volume = w_pattern * cloud_baked_flat_volume_column(si, g.gx0 + t_hit * g.gdx, g.gy0 + t_hit * g.gdy,
+				pixel_angle * t_hit, p, dir, mu, cloud_camera_height_m > cloud_height_along(ray, t_hit), radiance_v,
+				transmittance_v);
 	}
-	if (!(alpha > 1.0e-6)) {
+	if (!(alpha > 1.0e-6) && !(w_volume > 0.0 && transmittance_v < 1.0 - 1.0e-6)) {
 		return false;
 	}
 #ifdef CLOUD_BAKED_DIAG_BEHIND_EARTH
@@ -545,6 +634,18 @@ bool cloud_baked_flat_shade(int si, CloudRay ray, vec3 dir, vec3 eye, float t_fr
 		seen = mix(air_transmittance, cloud_far_bright_top_transmittance(air_transmittance, mu, cov, tau_light), w_top);
 	}
 	color = seen * radiance * cov + alpha * air_light;
+	if (w_volume > 0.0) {
+		// the volume's column (as cloud_baked_set composes the volume's march: the bright top for its alpha and the
+		// vertical depth -mu ln(1 - alpha))
+		float alpha_v = 1.0 - transmittance_v;
+		vec3 seen_v = air_transmittance;
+		if (w_top > 0.0) {
+			seen_v = mix(air_transmittance, cloud_far_bright_top_transmittance(air_transmittance, mu, alpha_v,
+					-mu * log(max(1.0 - alpha_v, 1.0e-6))), w_top);
+		}
+		color = mix(color, seen_v * radiance_v + alpha_v * air_light, w_volume);
+		alpha = mix(alpha, alpha_v, w_volume);
+	}
 #ifdef CLOUD_BAKED_DIAG_LEVEL
 	color = alpha * vec3(fract(cloud_baked_diag_level), floor(cloud_baked_diag_level) / 3.0, t_col.y / 10000.0);
 #endif

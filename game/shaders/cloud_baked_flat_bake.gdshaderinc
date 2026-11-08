@@ -52,9 +52,10 @@ bool cloud_baked_flat_needed(int si, int j, vec2 g, float c) {
 // The flat levels' geometry (world-fixed: shared by the sets until the visible cap, the height range or the weather
 // changes; step 3, user ruling 2026-10-29: the old whole-Earth far field's cover is the reference). The cell's mean is
 // the far field's column rule (cloud_far.gdshaderinc cloud_far_layer): the field's column (cloud_column_mean_depth: the
-// grid-mean vertical depth tau and the largest cloud fraction f) at the cell's field points, the cover C_col =
-// cloud_beam_cover_of(f, 1) (the march takes it to the view's slant as the far field does), the in-cloud depth
-// tau / C_col - thin cloud translucent, haze invisible. The shapes only place that cover inside the cell: the pattern P
+// grid-mean vertical depth tau and the largest cloud fraction f) at the cell's field points, the cover C_col = the
+// data's total cover there (cloud_column_total_cover: maximum-random; look fixes T7c - before, the beam rule's nadir
+// cover of f, 20-40 % above it for a single block; the march takes it to the view's slant as the far field does), the
+// in-cloud depth tau / C_col - thin cloud translucent, haze invisible. The shapes only place that cover inside the cell: the pattern P
 // is the share of the cell's taps where the shapes' prefiltered value (at the taps' spacing) exceeds the prefilter
 // threshold of C_col (the old far tier's cloud_far_cover: the pattern covers the share C_col of the layer, so its mean
 // is C_col); from CLOUD_BAKED_FLAT_PATTERN_CELLS_M.x to .y of cell P fades to C_col itself (the far field's even
@@ -182,7 +183,8 @@ void main() {
 			if (w_fine > 0.0) {
 				column_p = mix(column_p, cloud_column_total_fine(lat_lon), w_fine);
 			}
-			column += column_p;
+			// (y: the data's total cover there - cloud_column_total_cover, look fixes T7c - not the largest fraction)
+			column += vec2(column_p.x, column_p.x > 0.0 ? cloud_column_total_cover(lat_lon, column_p.y) : 0.0);
 			if (!(column_p.x > 0.0)) {
 				continue;
 			}
@@ -210,7 +212,7 @@ void main() {
 	}
 	float points = float(fp * fp);
 	float depth = column.x / points;
-	float c_col = depth > 0.0 ? cloud_beam_cover_of(column.y / points, 1.0) : 0.0;
+	float c_col = depth > 0.0 ? column.y / points : 0.0;
 	if (!(c_col > 0.0)) {
 		imageStore(baked_f_out, texel, vec4(0.0));
 		imageStore(baked_t_out, texel, vec4(0.0));

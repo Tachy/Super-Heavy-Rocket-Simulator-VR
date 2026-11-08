@@ -383,13 +383,13 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
     thickness of a gamma-distributed spread, tau_eff = chi tau, chi = exp(psi(nu)) / nu = 0.736 for the fractional
     standard deviation 0.75 [S: Shonk et al. 2010 global FSD; gamma form Barker 1996; effective-thickness approximation
     Cahalan et al. 1994] (`CLOUD_FAR_TAU_SPREAD_CHI`), and the cover C_v as a cloud texture: f = Phi(a + k z), z the
-    shapes' noise read 32 x enlarged (8 km texels; prefiltered at the footprint) normalised by its prefilter tables'
-    median and +-1 sigma points, a = Phi^-1(C_v) sqrt(1 + k^2) (the mean over z is C_v; 0 and 1 kept), k 1.5 fading to
+    shapes' noise read 32 x enlarged (8 km texels; prefiltered at the footprint) taken to a normal z by its exact rank
+    (`cloud_prefilter_exceedance`; look fixes T7c - the median / +-1 sigma normalisation drew C 0.1 as 0.08), a = Phi^-1(C_v) sqrt(1 + k^2) (the mean over z is C_v; 0 and 1 kept), k 1.5 fading to
     0 beyond the tables' last level [E] (`cloud_far_meso_cover`). The flat levels take both where the shapes' pixel
     pattern has faded (weight 1 - w_pattern), so the 40-60 km hand-over (w_pattern 1 there) is unchanged and the
     scaled-space switch (w_pattern 0 there) meets the far field. Numbers: Validation "Sub-grid structure";
   - **cloud-to-cloud spread where it is resolved** (look fixes T7b, user 2026-11-08: the capped cumulus water kept as
-    the cell mean, thick clouds again): the same gamma (FSD 0.75, nu 1.778) as a field on the sphere,
+    the cell mean, thick clouds again): a gamma (FSD 1, nu 1 since look fixes T7c - broken boundary-layer cumulus [S: Barker, Wielicki & Parker 1996, J. Atmos. Sci. 53, 2304; Oreopoulos & Cahalan 2005, J. Climate 18, 5110]; T7b 0.75) as a field on the sphere,
     `cloud_spread_factor` - the shapes' noise read `CLOUD_SPREAD_SCALE` 2 x enlarged (500 m texels, features of a few
     km: single cumulus [E]), turned (the cover pattern's turn inverted), its exact rank from the noise's own value
     distribution (`cloud_prefilter_exceedance`, the threshold table's inverse built by `CloudLayer.exceedance_table`),
@@ -590,6 +590,35 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   so with the wrapped origin a new flat geometry baked after the camera had crossed a tile edge drew another pattern - a
   jump of the cover in place on a climb (look fixes T8, user report: at ~55 km; the geometry re-bakes at 40, ~52 and
   ~67 km on a climb, the analog nadir view at 26 N 97 W 10 % mean block luminance between 56 and 57 km, now 0.7 %).
+- **The seamless takeover and the data's cover from above (look fixes T7c, user 2026-11-08: no visible change over
+  40-60 km, the nadir cover the data's total cover, the layers only shape the structure)**:
+  (a) *The flat levels draw the volume's own column* (`cloud_baked_flat_volume_column`): inside the volume's levels
+  (the same hand-over band at its extent as the volume's own, `cloud_baked_flat_weight_at`) the per-pixel pattern is
+  replaced by a vertical march through the baked shapes and light (A, B; the level and blend the volume's march takes
+  for that point and footprint; half the level's vertical cell; the march's own shading - Sun and sky sources, scaled
+  transport, the pixel's phase - with each step's depth along the view, step / mu), composed as `cloud_baked_set`
+  composes the volume (bright top for its alpha). Seen straight down this is the volume's own pixel; slanted, its column
+  as a slab at the flat levels' crossing. Beyond the levels the 2-D pattern as before. The volume levels' light is
+  baked above 62 km too (`CloudBaked`: the light for S's levels when none is marched) - the flat levels use it at every
+  height. Before, the flat levels placed the clouds by their own 2-D pattern (turned, tile-broken taps at 2 km): 4 x 4
+  regions moved by ~12 codes over 45-65 km.
+  (b) *Depth-aware cover* (`cloud_volume_fraction`, fidelity flag `CloudLayer.volume_depth_cover` / global
+  `cloud_volume_depth_cover`, render_check `--no_depth_cover`): the shapes' 3-D noise is displaced from height to
+  height, so a block of touching cloudy layers seen from above covered more than its fraction (cumulus f 0.4, 1 km:
+  0.60). The density bake draws each height at f_v with 1 - (1 - f_v)^n(f_v, d) = f, n = 1 + A d^p (1 + B (1 - f_v)^q),
+  d the block's effective depth (`cloud_block_depth_m`: the touching cloudy layers' depths weighted by f_k / f_max - a
+  block whose fraction peaks in a few layers projects like those; the plain depth drew the Gulf analog's 2.5 km block of
+  f 0.05-0.43 as 0.26) in units of 8 of the type's vertical shape texels; A, p, B, q per type [E] least-squares fitted
+  to the shapes' union (cloud_far_check 1e). The coarse levels (k >= 1) lose small clouds in
+  their voxel average (slabs from 50-200 km: mean alpha 0.65 x the fine level's) and take 1 - (1 - f_v)^(1 + 0.8 (1 -
+  f_v)) (`CLOUD_BAKED_LEVEL_COVER_GAIN` [E], fitted to slabs 0.5-2 km, f 0.2-0.7); the edge mean of the fraction used
+  keeps the water. Blocks apart overlap at random: the column's maximum-random cover, the data's.
+  (c) *The drawn nadir cover is the data's total cover* (`cloud_column_total_cover`): the flat levels' C_col and the
+  scaled-space far field take 1 - (1 - f_max) E, E = (1 - C_mr) / (1 - f_max) of the layers' maximum-random cover (core
+  `cloud_column_cover_max_random`, which the snapshot's fractions are scaled to: ERA5 tcc) - before, the beam rule's
+  nadir cover of the largest fraction (20-40 % above a single block). The slant growth stays the beam rule's
+  (`cloud_beam_fraction_of`). The Sun's beam cover (shadows, ground light; `cloud_beam_cover`) is unchanged.
+  Numbers: Validation "Takeover and nadir cover (T7c)".
 - **Baked volume step 6: beyond the cap, the terminator (2026-10-30)**: (a) beyond the shown flat geometry's cap
   the far field's column draws the clouds (`cloud_baked_flat_far_weight` / `_layer`: `cloud_far_layer` at the ray's
   ground point, blended in over 0.5 deg up to 3 of the last level's cells inside the cap, the flat levels faded out by
@@ -708,6 +737,23 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
 
 ## Validation
 
+- **Takeover and nadir cover (T7c)** (look fixes T7c, 2026-11-08; `screenshots/look_fixes/t7c/`, scripts there):
+  volume alone vs flat levels alone at 50 km straight down, same camera (4 x 4 region mean |dL|, sRGB codes): before
+  Gulf analog (26 N 97.157 W, 2025-11-07 15 UTC) 15.7, cumulus ERA5 (15 N 45 W, 2025-03-20 14:28 UTC) 11.4, Sc deck
+  (20 S 80 W, analog) 27.5; after 2.05 / 0.35 / 0.29 (global -1.9 / -0.3 / -0.1 %; the Gulf's rest: cloud sides at the
+  frame's edge). Fly-up straight down 40-80 km, one process per height (`fly_stats_C.txt`, `sheet_ab_fly_*.png`):
+  per-step region change <= 1.8 codes per 5 km (<= 0.36 / km), 54-65 km <= 0.25 per step; the global luma <= 0.32 % /
+  km; the region drift 45 -> 65 km Gulf 3.2 / cumulus 4.4 codes (T7b: 12.7 / 11.3); the Sc deck <= 0.5 codes per step.
+  cloud_far_check 5b (broken cf 0.4, 39.5 vs 60.5 km, 25 points within ~13 deg of nadir): worst 5.0 %, mean 0.85 %
+  (tolerance 7 % / 2 %); section 5 (the re-bake) 1.56 -> 0.77 % (tolerance 3 -> 1.5 %).
+  Nadir cover (centre dumps, alpha > 0.05): uniform slabs (bottom 1 km, in-cloud tau 10) 0.5-2 km, f 0.2 / 0.4 / 0.7:
+  from 15 km 0.21 / 0.42 / 0.75 (1 km), from 50 km 0.21 / 0.43 / 0.73, from 100 km 0.18-0.23 / 0.39-0.44 / 0.69-0.75,
+  from 400 km 0.34 / 0.60 / 0.87 with mean alpha 0.19 / 0.43 / 0.77 (the coarsest levels smear: a wider faint margin,
+  the mean kept); before (no depth cover) from 50 km 0.25 / 0.49 / 0.80 at 1 km, 0.37 at f 0.2, 2 km. Real sites from
+  50 km against the data's maximum-random cover: Gulf 0.37 (data 0.43, tcc 0.48; 15 km 0.42), cumulus 0.37 (0.33).
+  The shapes' union (cloud_far_check 1e, 2048 columns, f 0.02-0.8, D 0.25-3 km): water clouds within 0.013, cirrus
+  within 0.086 for f >= 0.1 (its 15.6 m texels put deep blocks below one fraction code).
+
 - **Sub-grid structure and the fine column** (look fixes T7 B / C, 2026-11-08; Earth from DSCOVR's direction at
   2025-03-20 14:28 UTC against EPIC; `screenshots/look_fixes/t7/sheet_stepCB_epic1430.png`, `crop_stepCB.png`; disc
   statistics of the display PNG, linear Y over the disc's p99 - dark < 0.15 / grey / white >= 0.5 - and the Y
@@ -719,8 +765,8 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   Insolation-weighted cloud albedo effect of the column model (independent columns, `scripts/cre.py`): 0.32 before,
   0.27 capped, 0.24 at the effective thickness (CERES ~0.14; the rest: conservative slabs, r_e 10 um, no absorption).
   The pattern's mean cover (numpy model of the transform on 400 000 sphere points): within 0.007 of C; on the GPU
-  (cloud_far_check 1c, the shapes' noise, 4096 random points, footprints 8 / 32 km): C 0.3-0.7 within 0.005, C 0.1 ->
-  0.079 / 0.086 and C 0.9 -> 0.921 / 0.920 (the noise's tails are not Gaussian), tolerance 0.03; the bright-top factor
+  (cloud_far_check 1c, the shapes' noise, 4096 random points, footprints 8 / 32 km): every C 0.1-0.9 within 0.005 by the exact rank (T7c;
+  T7b's median / sigma normalisation drew C 0.1 as 0.079 / 0.086), tolerance 0.015; the bright-top factor
   against its two-stream form within 0.09 % (the probe's half-float target), its limits and the cloud's B/R increment
   x1.100 / x1.113 at A 0.6 / 0.75 (review estimate +8-10 %, band 1.07-1.13) (1b); the analog snapshot (1 deg + its
   0.25 deg fine column) across the scaled-space switch worst 3.69 % (3b, 5 %). cloud_far_check
@@ -886,6 +932,18 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
 
 ## Open points and known limits
 
+- **The Sun's beam rule against the depth-aware shapes (look fixes T7c; open)**: the core's beam cover
+  (`constants.hpp` cloud_overlap_vertical / slant, fitted to the shapes' shadows) still assumes the undeflated shapes;
+  the volume now draws each block at its depth-aware fraction, so its shadows cover less than the rule (cloud_check
+  section 2, broken 1 km layers: area mean of the direct Sun cf 0.15 / 0.3 / 0.4 at 45 deg 0.904 / 0.794 / 0.725 against
+  the CPU's 0.777 / 0.592 / 0.490). cloud_check: 14 FAIL (5 of them already with the T7b state: cf 0.3 / 0.4 shapes vs
+  CPU and the moonlight probe; new: the cf 0.15 cases, the CPU light vs the ground's mean, the tau-1 slab's slant depth
+  at a 20 deg Sun 0.898 x, the vehicle shadow / gap probe). Next: refit the rule to the shapes (a core constant change,
+  core + bindings rebuild) - the vertical term goes toward 0 with the nadir cover the data's.
+- **The volume's cover depends on its level (look fixes T7c)**: the fine level matches the data, the coarse levels
+  carry a gain fitted to slabs (`CLOUD_BAKED_LEVEL_COVER_GAIN`), the coarsest (from ~400 km) smear a faint margin over a
+  wider area (alpha > 0.05 cover 0.34 at f 0.2, mean alpha kept). Real sites from 50 km within -14 / +11 % of the
+  data's maximum-random cover.
 - **Standing decisions (user 2026-10-27, static clouds Task 10)**: with clouds the frame rate is lower - the 2.5 ms
   cloud budget is not met (cloud pass 37 / 45 ms in the proxy at the ground / the deck, `vr-performance.md`) and the
   user accepted that until a better approach exists (e.g. precomputing the static field). March sub-samples: 6 (4 fail
@@ -978,27 +1036,7 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   at a 45 / 8 deg Sun 0.556 / 0.226 against the slanted column's 0.591 / 0.395, so the 120-140 km hand-over to the
   column steps by 0.03-0.09 on the ground (a faint ring, most at a low Sun; visible from altitude). Reported, not
   asserted; the same S was the game's below 62 km since the shadow step, now at every height.
-- **Above 62 km the volume levels are baked for S only** (shape and S, not the light): a re-bake in orbit (every
-  ~19 km of flight at 400 km, ~2.4 s) runs the density / occupancy / S phases of the kept levels (3 levels from
-  400 km at the desktop's pixel angle) - more bake dispatches than before (only the flat geometry), each <= ~2 ms GPU.
-- **The volume's cover and brightness against the flat levels' (look fixes T8 / T7b; open)**: the 40-60 km takeover
-  changes the view region by region (the volume's 3-D shapes and the flat pattern place the clouds differently: 4 x 4
-  region means move by up to ~12 codes over 45-65 km, steps <= 1.5 % per km near 55 km) and, depending on the site, the
-  cover or the brightness. Measured 2026-11-08 (fly-up straight down 45-65 km, fixed exposure, one process per height;
-  `screenshots/look_fixes/t7b/sheet_handover.png`, `fly_stats_all.txt`): Gulf analog (26 N 97.157 W, 2025-11-07
-  15 UTC) cloud share 0.476 -> 0.537, mean luma -0.6 %; the 15 N 45 W cumulus hour (ERA5 2025-03-20 14 UTC) cloud
-  share 0.331 -> 0.339, mean luma +4.3 % (the volume's gaps darker: 94 vs 101 codes). Causes found (T7b, centre dumps
-  at 50 km, `CLOUD_BAKED_VOLUME_ONLY` / `FLAT_ONLY`): (1) the column rule's nadir cover is the beam cover of the
-  largest fraction, 1 - (1 - f)^(1 + 0.66 (1 - f)) - independent of the cloud block's depth - while the volume's
-  shapes project more cover the deeper the block (a 1-2 km slab 1 - (1 - f)^1.31-1.34 at nadir: 0.25 / 0.49 / 0.80
-  against the rule's 0.29 / 0.51 / 0.76 at f 0.2 / 0.4 / 0.7; the Gulf's 0.5-1.5 km blocks less, the deep trade
-  cumulus more); the data's own total cover is the largest fraction there (single blocks, ERA5 maximum overlap), the
-  rule's vertical term adds 20-40 %; (2) the volume's soft margins are translucent (in-cloud alpha 0.84-0.92 against
-  the flat pattern's 0.93-0.98), mean alpha 0.77 / 0.88 / 1.01 x the flat levels' for those slabs; (3) the volume's
-  clouds are brighter than the flat slab's (Gulf: cloud luma 191 vs 181 codes at equal cover) - before T7b the lower
-  cover hid it. A per-fraction layer inflation f' = 1 - (1 - f)^(1 + 0.55 (1 - f)^2) matched the slabs within 3 % and
-  the Gulf cover (0.536 -> 0.537) but exposed (3) there (mean luma -6.3 % over 45-65 km) and over-covered the cumulus
-  hour (0.390 -> 0.338): not taken (the hand-over must not change visibly). Next: the block depth into the volume's
-  cover (or the column rule), then the flat slab's light against the volume's. Six T8 sites (50 km, mean alpha
-  volume / flat): 0.92 / 0.70 / 0.71 / 0.81 / 0.49 / 1.04 before, 1.01 / 0.82 / 0.87 / 0.93 / 0.60 / 1.20 with the
-  inflation (sites 24.5 N 96.3 W, 25.2 N 93.8 W, 26.0 N 95.5 W, 26.0 N 97.157 W, 26.8 N 93.8 W, 27.5 N 96.3 W).
+- **Above 62 km the volume levels are baked, not marched** (shape, S and - since look fixes T7c - the light: the
+  flat levels draw the volume's own column with it): a re-bake in orbit (every ~19 km of flight at 400 km, ~2.4 s)
+  runs the density / occupancy / light / S phases of the kept levels (3 levels from 400 km at the desktop's pixel
+  angle), each dispatch <= ~2 ms GPU.
