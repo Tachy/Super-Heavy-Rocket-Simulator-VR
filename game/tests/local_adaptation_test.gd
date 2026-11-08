@@ -29,7 +29,7 @@ const DISC_CD_M2 := 1.0e4
 const GROUND_CD_M2 := 0.05
 ## Largest max / min of the displayed flux ratio and of the peak displayed pixel while a 10 .. 32 px disc moves (measured
 ## 1.86 / 1.84 at 10 px, 1.5 / 1.6 at 16 px, 1.2 / 1.2 at 24 px).
-const TRANSLATION_BOUND := 2.0
+const TRANSLATION_BOUND := 1.05  # gate: displayed flux and peak vary by < 5 % (measured 1.01 - 1.03)
 
 var _failures := 0
 
@@ -99,7 +99,7 @@ func _initialize() -> void:
 	_generated_constants_case()
 	_check("flag from the arguments", not LocalAdaptation._enabled_from_arguments(
 			PackedStringArray(["--local_adaptation=off"])) and LocalAdaptation._enabled_from_arguments(
-			PackedStringArray(["--day_exposure=1.5"])), "")
+			PackedStringArray(["--protect_adaptation"])), "")
 	quit(1 if _failures > 0 else 0)
 
 
@@ -186,14 +186,14 @@ func _translation_cases(base: float, reference: float) -> void:
 	var spc := base * NIGHT_GAIN
 	var parameters := {"scene_per_cd_m2": spc, "display_gain": NIGHT_GAIN, "reference_cd_m2": reference, "block": block,
 			"sigma_blocks": LocalAdaptation.POOL_SIGMA_DEG * ppd / float(block)}
-	for diameter in [6.0, 10.0, 16.0, 24.0, 32.0]:
+	for diameter in [6.0, 9.5, 16.0, 24.0, 32.0]:
 		var flux_low := INF
 		var flux_high := 0.0
 		var peak_low := INF
 		var peak_high := 0.0
-		for step in range(17):
-			var shift := 0.5 * step
-			var image := _disc_image(96, 96, diameter, 40.0 + shift, 40.0 + 0.6 * shift, spc)
+		for step in range(34):  # 0 .. 8 px in half-pixel steps: diagonal (17), then along x only (17)
+			var shift := 0.5 * (step % 17)
+			var image := _disc_image(96, 96, diameter, 40.0 + shift, 40.0 + (0.6 * shift if step < 17 else 0.0), spc)
 			var c := LocalAdaptation.factors(image, 96, 96, parameters)
 			var flux_in := 0.0
 			var flux_out := 0.0
@@ -210,7 +210,7 @@ func _translation_cases(base: float, reference: float) -> void:
 		if diameter < 8.0:  # sub-block: the documented limit (open point), printed only
 			print("local_adaptation_test: sub-block %.0f px disc, not gated: %s" % [diameter, detail])
 		else:
-			_check("disc %.0f px moving over the grid: bounded variation" % diameter,
+			_check("disc %.1f px moving over the grid: bounded variation" % diameter,
 					flux_high / flux_low <= TRANSLATION_BOUND and peak_high / peak_low <= TRANSLATION_BOUND, detail)
 
 
@@ -266,13 +266,13 @@ func _odd_size_case(base: float, reference: float) -> void:
 ## literals equal the constants they come from.
 func _generated_constants_case() -> void:
 	var left := false
-	var sources := [LocalAdaptationEffect.down_shader_source(), LocalAdaptationEffect.pool_shader_source(),
+	var sources := [LocalAdaptationEffect.down_shader_source(), LocalAdaptationEffect.blur_shader_source(),
 			LocalAdaptationEffect.apply_shader_source()]
 	for source: String in sources:
 		left = left or source.contains("@")
-	var pool: String = sources[1]
+	var pool: String = sources[2]
 	_check("shaders generated, no placeholder left", not left, "")
-	_check("pool shader carries the constants", pool.contains(LocalAdaptationEffect.glsl_float(EyeAdaptation.CONE_MID_SLOPE))
+	_check("apply shader carries the constants", pool.contains(LocalAdaptationEffect.glsl_float(EyeAdaptation.CONE_MID_SLOPE))
 			and pool.contains(LocalAdaptationEffect.glsl_float(EyeAdaptation.CONE_WEBER_OFFSET))
 			and pool.contains(LocalAdaptationEffect.glsl_float(EyeAdaptation.CONE_LOG_LOW)), "")
 	_check("glsl_float round trip", is_equal_approx(LocalAdaptationEffect.glsl_float(0.249).to_float(), 0.249)

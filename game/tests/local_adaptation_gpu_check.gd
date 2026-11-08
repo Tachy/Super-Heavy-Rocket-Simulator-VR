@@ -1,23 +1,22 @@
 # CPU-vs-GPU check of the local adaptation (LocalAdaptation vs the generated shaders of LocalAdaptationEffect, look fixes
-# T10 fix round 1): needs a GPU (no --headless); uses a local RenderingDevice, so it can run next to a render in another
-# process. Images: antialiased discs (1e4 cd/m^2 over a 1e-3 cd/m^2 sky, headset numbers: 31.5 px/deg, block 8), the
-# input rounded to fp16 for both sides. The factor c is read back as output / input on a grey image (cone part = identity)
-# and compared with LocalAdaptation.factors. Second part: the two eyes of a stereo pair see the disc at disparities of
-# 0 .. 8 px (a near object; the Moon and the Earth have none); both eyes use the same block size and pooling footprint (one
-# block size per frame, from view 0), so only the grid phase differs: the gain difference between the eyes is printed and
-# bounded.
+# T10 fix round 1, T13 piecewise-linear bilateral): needs a GPU (no --headless); uses a local RenderingDevice, so it can run
+# next to a render in another process. Images: antialiased discs (1e4 cd/m^2 over a 1e-3 cd/m^2 sky, headset numbers:
+# 31.5 px/deg, block 8), the input rounded to fp16 for both sides. The factor c is read back as output / input on a grey
+# image (cone part = identity) and compared with LocalAdaptation.factors. Second part (stereo): the two eyes of a stereo
+# pair see the disc at horizontal disparities of 0 .. 8 px; both eyes use the same block size and pooling footprint (one
+# block size per frame, from view 0), only the grid phase differs: the displayed peak of the left and the right eye
+# through the GPU path must agree within EYE_BOUND.
 # godot --path game --script res://tests/local_adaptation_gpu_check.gd
 extends SceneTree
 
 const TOA_LUX := 127000.0
 const NIGHT_GAIN := 7557.0 * 0.368
 const PPD := 31.5
-## Largest |c_gpu / c_cpu - 1| over pixels with c < 0.99 and input above 1e-4 scene units (fp16 output, exp2 / log2 of
-## the GPU's math).
+## Largest |c_gpu / c_cpu - 1| over pixels with c < 0.99 and input above 1e-4 scene units (fp16 maps and output, exp2 /
+## log2 of the GPU's math).
 const TOLERANCE := 0.03
-## Largest ratio between the two eyes' displayed peak for a 24 px disc at any disparity (measured 1.12; the CPU analysis
-## bounds one eye's phase variation by 1.22).
-const EYE_BOUND := 1.2
+## Largest ratio between the two eyes' displayed peak (user gate 2026-11-08: 3 %).
+const EYE_BOUND := 1.03
 
 var _rd: RenderingDevice
 var _failures := 0
@@ -37,7 +36,7 @@ func _initialize() -> void:
 		print("local_adaptation_gpu_check: no rendering device (run without --headless)")
 		quit(2)
 		return
-	for code in [LocalAdaptationEffect.down_shader_source(), LocalAdaptationEffect.pool_shader_source(),
+	for code in [LocalAdaptationEffect.down_shader_source(), LocalAdaptationEffect.blur_shader_source(),
 			LocalAdaptationEffect.apply_shader_source()]:
 		var source := RDShaderSource.new()
 		source.language = RenderingDevice.SHADER_LANGUAGE_GLSL
@@ -58,7 +57,7 @@ func _initialize() -> void:
 	var block := LocalAdaptation.block_size(PPD)
 	var parameters := {"scene_per_cd_m2": spc, "display_gain": NIGHT_GAIN, "reference_cd_m2": reference, "block": block,
 			"sigma_blocks": LocalAdaptation.POOL_SIGMA_DEG * PPD / float(block)}
-	for diameter in [10.0, 16.0, 24.0, 32.0]:
+	for diameter in [9.5, 16.0, 24.0, 32.0]:
 		for shift in [0.0, 2.5, 5.0]:
 			var image := _disc(w, h, diameter, 40.0 + shift, 40.0 + 0.6 * shift, spc)
 			var rounded := _round_half(image)
@@ -70,25 +69,30 @@ func _initialize() -> void:
 				if cpu[i] < 0.99 and rounded[i] > 1.0e-4:
 					worst = maxf(worst, absf(gpu[i] / cpu[i] - 1.0))
 					compared += 1
-			_check("disc %.0f px, shift %.1f: GPU = CPU" % [diameter, shift], worst <= TOLERANCE and compared > 20,
+			_check("disc %.1f px, shift %.1f: GPU = CPU" % [diameter, shift], worst <= TOLERANCE and compared > 20,
 					"worst %.4f over %d px" % [worst, compared])
-	# Stereo: the same 24 px disc, the left eye at x, the right at x - disparity.
-	var worst_ratio := 1.0
-	for disparity in range(0, 9):
-		var left := _gpu_factors(_round_half(_disc(w, h, 24.0, 44.0, 44.0, spc)), w, h, parameters)
-		var right_image := _round_half(_disc(w, h, 24.0, 44.0 - disparity, 44.0, spc))
-		var right := _gpu_factors(right_image, w, h, parameters)
-		var left_image := _round_half(_disc(w, h, 24.0, 44.0, 44.0, spc))
-		var peak_left := 0.0
-		var peak_right := 0.0
-		for i in range(w * h):
-			peak_left = maxf(peak_left, left_image[i] * left[i])
-			peak_right = maxf(peak_right, right_image[i] * right[i])
-		var ratio := maxf(peak_left, peak_right) / minf(peak_left, peak_right)
-		worst_ratio = maxf(worst_ratio, ratio)
-		print("local_adaptation_gpu_check: stereo disparity %d px: peak displayed L %.3f R %.3f (x%.3f)" % [disparity,
-				peak_left, peak_right, ratio])
-	_check("stereo: left / right gain difference bounded", worst_ratio <= EYE_BOUND, "worst x%.3f" % worst_ratio)
+	# Stereo: the same disc, the left eye at x, the right at x - disparity (the right eye's grid phase differs by it).
+	for diameter in [9.5, 24.0]:
+		var worst_ratio := 1.0
+		var left_image := _round_half(_disc(w, h, diameter, 44.0, 44.0, spc))
+		var left := _gpu_factors(left_image, w, h, parameters)
+		for disparity in range(0, 9):
+			var right_image := _round_half(_disc(w, h, diameter, 44.0 - disparity, 44.0, spc))
+			var right := _gpu_factors(right_image, w, h, parameters)
+			var peak_left := 0.0
+			var peak_right := 0.0
+			var flux_left := 0.0
+			var flux_right := 0.0
+			for i in range(w * h):
+				peak_left = maxf(peak_left, left_image[i] * left[i])
+				peak_right = maxf(peak_right, right_image[i] * right[i])
+				flux_left += left_image[i] * left[i]
+				flux_right += right_image[i] * right[i]
+			var ratio := maxf(peak_left, peak_right) / minf(peak_left, peak_right)
+			worst_ratio = maxf(worst_ratio, ratio)
+			print("local_adaptation_gpu_check: stereo %.1f px, disparity %d px: peak L %.3f R %.3f (x%.3f), flux x%.3f" % [
+					diameter, disparity, peak_left, peak_right, ratio, maxf(flux_left, flux_right) / minf(flux_left, flux_right)])
+		_check("stereo %.1f px: left / right displayed peak" % diameter, worst_ratio <= EYE_BOUND, "worst x%.3f" % worst_ratio)
 	quit(1 if _failures > 0 else 0)
 
 
@@ -148,16 +152,14 @@ func _dispatch(index: int, uniforms: Array, push: PackedFloat32Array, groups: Ve
 	_rd.compute_list_end()
 
 
-## The GPU's factor c per pixel for a grey image: DOWN, POOL, APPLY with the effect's push constants, output / input.
+## The GPU's factor c per pixel for a grey image: DOWN, BLUR x 2, APPLY with the effect's push constants, output / input.
 func _gpu_factors(image: PackedFloat64Array, w: int, h: int, parameters: Dictionary) -> PackedFloat64Array:
 	var block: int = parameters["block"]
 	var spc: float = parameters["scene_per_cd_m2"]
 	var size := Vector2i(w, h)
 	var low := Vector2i((w - 1) / block + 1, (h - 1) / block + 1)
 	var sigma_blocks: float = parameters["sigma_blocks"]
-	var radius := int(ceil(LocalAdaptation.KERNEL_RADIUS_SIGMAS * sigma_blocks))
-	var floor_log := LocalAdaptation.log2_floor(spc)
-	var k_eff := LocalAdaptation.effective_per_local(spc, parameters["display_gain"], parameters["reference_cd_m2"])
+	var tiles := LocalAdaptation.band_count() / 2
 	var bytes := PackedByteArray()
 	bytes.resize(w * h * 8)
 	for i in range(w * h):
@@ -166,15 +168,17 @@ func _gpu_factors(image: PackedFloat64Array, w: int, h: int, parameters: Diction
 		bytes.encode_half(i * 8 + 6, 1.0)
 	var color := _texture(w, h, RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT, bytes)
 	var none := _texture(1, 1, RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT)
-	var blocks := _texture(low.x, low.y, RenderingDevice.DATA_FORMAT_R32_SFLOAT)
-	var map := _texture(low.x, low.y, RenderingDevice.DATA_FORMAT_R32G32_SFLOAT)
+	var atlas := _texture(low.x * tiles, low.y, RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT)
+	var tmp := _texture(low.x * tiles, low.y, RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT)
 	var groups := Vector2i((low.x - 1) / 8 + 1, (low.y - 1) / 8 + 1)
-	_dispatch(0, [_uniform(0, color), _uniform(1, none), _uniform(2, blocks)],
-			LocalAdaptationEffect.down_push(size, block, false, low, floor_log), groups)
-	_dispatch(1, [_uniform(0, blocks), _uniform(1, map)], LocalAdaptationEffect.pool_push(low, radius, sigma_blocks,
-			floor_log, spc, parameters["display_gain"], parameters["reference_cd_m2"], k_eff), groups)
-	_dispatch(2, [_uniform(0, color), _uniform(1, map)], LocalAdaptationEffect.apply_push(size, block, low, floor_log,
-			Basis.IDENTITY), Vector2i((w - 1) / 8 + 1, (h - 1) / 8 + 1))
+	var wide := Vector2i((low.x * tiles - 1) / 8 + 1, (low.y - 1) / 8 + 1)
+	_dispatch(0, [_uniform(0, color), _uniform(1, none), _uniform(2, atlas)],
+			LocalAdaptationEffect.down_push(size, block, false, low), groups)
+	_dispatch(1, [_uniform(0, atlas), _uniform(1, tmp)], LocalAdaptationEffect.blur_push(low, sigma_blocks, true), wide)
+	_dispatch(1, [_uniform(0, tmp), _uniform(1, atlas)], LocalAdaptationEffect.blur_push(low, sigma_blocks, false), wide)
+	_dispatch(2, [_uniform(0, color), _uniform(1, atlas)], LocalAdaptationEffect.apply_push(size, block, low, spc,
+			parameters["display_gain"], parameters["reference_cd_m2"], Basis.IDENTITY),
+			Vector2i((w - 1) / 8 + 1, (h - 1) / 8 + 1))
 	_rd.submit()
 	_rd.sync()
 	var out_bytes := _rd.texture_get_data(color, 0)
@@ -183,6 +187,6 @@ func _gpu_factors(image: PackedFloat64Array, w: int, h: int, parameters: Diction
 	for i in range(w * h):
 		var value := out_bytes.decode_half(i * 8)
 		factors[i] = value / image[i] if image[i] > 0.0 else 1.0
-	for rid in [color, none, blocks, map]:
+	for rid in [color, none, atlas, tmp]:
 		_rd.free_rid(rid)
 	return factors

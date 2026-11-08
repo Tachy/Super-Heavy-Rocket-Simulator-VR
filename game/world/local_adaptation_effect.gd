@@ -1,16 +1,17 @@
 class_name LocalAdaptationEffect
 extends CompositorEffect
-## Local adaptation on the GPU (look fixes T10; the model and its CPU mirror: LocalAdaptation). Two instances of this
-## effect: the MAP stage before the transparent pass (after the field meter: the meter measures the unchanged image)
-## averages the opaque image with the cloud composite (as the meter does) into blocks of mean log2 luminance and pools
-## them bilaterally into a factor log2 c per block; the APPLY stage after the transparent pass (after VisionEffect, before
-## the display tone step, glow and AgX) multiplies every pixel by c, joint-bilaterally upsampled against the pixel's own
-## luminance. The map is built from the opaque image only, so what the transparent pass draws over a dark field (the
-## display-referred emitters: plume, stars, labels, the VR panel; lamp lenses) is unlike every block there and keeps
-## c = 1; over a locally adapted region (a label on the Earth's disc seen from the lunar night) it takes that region's
-## factor. Per view (both VR eyes, each its own map). Without a RenderingDevice (headless, Compatibility), with the eye
-## adaptation off or LocalAdaptation.enabled false it does nothing. The MAP stage needs the resolved colour every frame
-## (MSAA: an extra resolve before the transparent pass).
+## Local adaptation on the GPU (look fixes T10, grid-phase invariant since T13; the model and its CPU mirror:
+## LocalAdaptation). Two instances of this effect: the MAP stage before the transparent pass (after the field meter: the
+## meter measures the unchanged image) builds, from the opaque image with the cloud composite (as the meter does), the
+## piecewise-linear bilateral band maps (per log-luminance band the range weights of every full-resolution pixel,
+## box-downsampled to the block grid, then a separable Gaussian blur); the APPLY stage after the transparent pass (after
+## VisionEffect, before the display tone step, glow and AgX) reads, per pixel, its own two neighbouring bands, bilinearly
+## upsampled, gets the local mean L_loc and multiplies the pixel by the factor c. What the transparent pass draws over a
+## dark field (the display-referred emitters: plume, stars, labels, the VR panel; lamp lenses) is unlike every pixel
+## there (small share) and keeps c = 1; over a locally adapted region it takes that region's factor. Per view (both VR
+## eyes, each its own maps). Without a RenderingDevice (headless, Compatibility), with the eye adaptation off or
+## LocalAdaptation.enabled false it does nothing. The MAP stage needs the resolved colour every frame (MSAA: an extra
+## resolve before the transparent pass).
 
 enum Stage { MAP, APPLY }
 
@@ -19,22 +20,37 @@ const DOWN_TEMPLATE := """
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(rgba16f, set = 0, binding = 0) uniform restrict readonly image2D color_image;
 layout(rgba16f, set = 0, binding = 1) uniform restrict readonly image2D cloud_image;
-layout(r32f, set = 0, binding = 2) uniform restrict writeonly image2D block_image;
+layout(rgba16f, set = 0, binding = 2) uniform restrict writeonly image2D atlas_image;
 layout(push_constant, std430) uniform Params {
-	vec4 size;  // width, height, block, clouds (1 / 0)
-	vec4 low;   // block columns, block rows, log2 floor, sample step (px; LocalAdaptation.sample_step)
+	vec4 size;   // width, height, block, clouds (1 / 0)
+	vec4 low;    // block columns, block rows, sample step (px; LocalAdaptation.sample_step), -
+	vec4 bands;  // lowest band centre (log2), band spacing (log2), 1 / (2 sigma^2) at or below the band, ... above it
 } params;
 const vec3 LUMINANCE = vec3(@LW_R@, @LW_G@, @LW_B@);
+const int BANDS = @BANDS@;
 
+// LocalAdaptation.factors, step 1: the range weight of every pixel for every band, box-downsampled. The atlas holds the
+// bands side by side (tile k = bands 2k, 2k+1): RGBA = (w L / Lc_j, w) of band 2k, then of band 2k+1.
 void main() {
 	ivec2 t = ivec2(gl_GlobalInvocationID.xy);
-	if (t.x >= int(params.low.x) || t.y >= int(params.low.y)) {
+	int lw = int(params.low.x);
+	if (t.x >= lw || t.y >= int(params.low.y)) {
 		return;
 	}
 	int b = int(params.size.z);
-	int step = int(params.low.w);
-	float floor_log = params.low.z;
-	float sum = 0.0;
+	int step = int(params.low.z);
+	float c0 = params.bands.x;
+	float bstep = params.bands.y;
+	float aw[BANDS];
+	float al[BANDS];
+	float centre[BANDS];
+	float inv_centre[BANDS];
+	for (int k = 0; k < BANDS; k++) {
+		aw[k] = 0.0;
+		al[k] = 0.0;
+		centre[k] = c0 + float(k) * bstep;
+		inv_centre[k] = exp2(-centre[k]);
+	}
 	float n = 0.0;
 	for (int j = step / 2; j < b; j += step) {
 		for (int i = step / 2; i < b; i += step) {
@@ -50,27 +66,82 @@ void main() {
 			if (any(isnan(c))) {
 				c = vec3(0.0);
 			}
-			sum += dot(LUMINANCE, clamp(c, vec3(0.0), vec3(@MAXL@)));  // LINEAR block mean (area-exact)
+			float lum = dot(LUMINANCE, clamp(c, vec3(0.0), vec3(@MAXL@)));
+			float x = log2(max(lum, 1.0e-30));
+			for (int k = 0; k < BANDS; k++) {
+				float d = x - centre[k];
+				if (k == 0) {
+					d = max(d, 0.0);
+				}
+				float w = exp(-d * d * (d > 0.0 ? params.bands.w : params.bands.z));
+				aw[k] += w;
+				al[k] += w * lum * inv_centre[k];
+			}
 			n += 1.0;
 		}
 	}
-	float mean = n > 0.0 ? sum / n : 0.0;
-	imageStore(block_image, t, vec4(mean > 0.0 ? max(log2(mean), floor_log) : floor_log));
+	float inv_n = n > 0.0 ? 1.0 / n : 0.0;
+	for (int k = 0; k < BANDS / 2; k++) {
+		imageStore(atlas_image, ivec2(k * lw + t.x, t.y), vec4(al[2 * k] * inv_n, aw[2 * k] * inv_n,
+				al[2 * k + 1] * inv_n, aw[2 * k + 1] * inv_n));
+	}
 }
 """
 
-const POOL_TEMPLATE := """
+const BLUR_TEMPLATE := """
 #version 450
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
-layout(r32f, set = 0, binding = 0) uniform restrict readonly image2D block_image;
-layout(rg32f, set = 0, binding = 1) uniform restrict writeonly image2D map_image;
+layout(rgba16f, set = 0, binding = 0) uniform restrict readonly image2D source_image;
+layout(rgba16f, set = 0, binding = 1) uniform restrict writeonly image2D target_image;
 layout(push_constant, std430) uniform Params {
-	vec4 low;     // block columns, block rows, radius (blocks), 1 / (2 sigma^2) (blocks)
-	vec4 range;   // 1 / (2 sigma_r^2) (log2), log2 floor, scene per cd/m^2, display gain
-	vec4 gain;    // L_ref (cd/m^2), L_eff per L_loc, GAIN_MAX, -
+	vec4 low;  // block columns, block rows, radius (texels), 1 / (2 sigma^2) (texels)
+	vec4 dir;  // dx, dy, tiles, -
 } params;
 
-// EyeAdaptation.cone_log_threshold / cone_gain [S: Ferwerda et al. 1996 Eq. 4]
+// One direction of the separable Gaussian, per tile of the atlas; in-bounds taps renormalised (LocalAdaptation._blur_plane).
+void main() {
+	ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+	int lw = int(params.low.x);
+	int lh = int(params.low.y);
+	if (p.x >= lw * int(params.dir.z) || p.y >= lh) {
+		return;
+	}
+	int tile = p.x / lw;
+	ivec2 q0 = ivec2(p.x - tile * lw, p.y);
+	ivec2 d = ivec2(params.dir.xy);
+	int radius = int(params.low.z);
+	vec4 sum = vec4(0.0);
+	float mass = 0.0;
+	for (int i = -radius; i <= radius; i++) {
+		ivec2 q = q0 + d * i;
+		if (q.x < 0 || q.y < 0 || q.x >= lw || q.y >= lh) {
+			continue;
+		}
+		float g = exp(-float(i * i) * params.low.w);
+		sum += g * imageLoad(source_image, ivec2(tile * lw + q.x, q.y));
+		mass += g;
+	}
+	imageStore(target_image, p, sum / mass);
+}
+"""
+
+const APPLY_TEMPLATE := """
+#version 450
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(rgba16f, set = 0, binding = 0) uniform image2D color_image;
+layout(rgba16f, set = 0, binding = 1) uniform restrict readonly image2D atlas_image;
+layout(push_constant, std430) uniform Params {
+	vec4 size;    // width, height, block, block columns
+	vec4 shape;   // block rows, lowest band centre (log2), band spacing (log2), band count
+	vec4 factor;  // scene per cd/m^2, display gain, L_ref (cd/m^2), L_eff per L_loc
+	vec4 extra;   // GAIN_MAX, MIN_WEIGHT_SHARE, FULL_WEIGHT_SHARE_RATIO, -
+	vec4 cone_x;  // N = C M^-1: the cones' part of the post step's pixel (LocalAdaptation.cone_part), its columns
+	vec4 cone_y;
+	vec4 cone_z;
+} params;
+const vec3 LUMINANCE = vec3(@LW_R@, @LW_G@, @LW_B@);
+
+// EyeAdaptation.cone_log_threshold [S: Ferwerda et al. 1996 Eq. 4]
 float cone_log_threshold(float luminance) {
 	float l = log(max(luminance, @LUM_FLOOR@)) / log(10.0);
 	if (l <= @CONE_LOW@) {
@@ -82,72 +153,23 @@ float cone_log_threshold(float luminance) {
 	return pow(@MID_SLOPE@ * l + @MID_OFFSET@, @MID_EXPONENT@) + @CONE_FLOOR@;
 }
 
-void main() {
-	ivec2 t = ivec2(gl_GlobalInvocationID.xy);
-	ivec2 low = ivec2(params.low.xy);
-	if (t.x >= low.x || t.y >= low.y) {
-		return;
-	}
-	float c0 = imageLoad(block_image, t).r;
-	int radius = int(params.low.z);
-	float sw = 0.0;
-	float s = 0.0;
-	for (int dy = -radius; dy <= radius; dy++) {
-		for (int dx = -radius; dx <= radius; dx++) {
-			ivec2 q = t + ivec2(dx, dy);
-			if (q.x < 0 || q.y < 0 || q.x >= low.x || q.y >= low.y) {
-				continue;
-			}
-			float v = imageLoad(block_image, q).r;
-			float w = exp(-float(dx * dx + dy * dy) * params.low.w - (v - c0) * (v - c0) * params.range.x);
-			sw += w;
-			s += w * exp2(v);  // pooled in linear luminance
-		}
-	}
-	float pooled = log2(s / sw);
-	float log_c = 0.0;
-	if (pooled > params.range.y + 0.5 && params.range.w > 0.0) {
-		float local_cd_m2 = exp2(pooled) / params.range.z;
-		float g = clamp(params.gain.x / pow(10.0, @WEBER_OFFSET@ + cone_log_threshold(local_cd_m2 * params.gain.y)), 1.0,
-				params.gain.z);
-		log_c = log2(min(1.0, g / params.range.w));
-	}
-	imageStore(map_image, t, vec4(c0, log_c, 0.0, 0.0));
+// (w L / Lc, w) of one band, bilinear in space (the blurred low-res map brought to the pixel).
+vec2 band_value(int band, ivec2 base, vec2 f, ivec2 last, int lw) {
+	int tile = band / 2;
+	bool second = (band - 2 * tile) == 1;
+	ivec2 a = clamp(base, ivec2(0), last);
+	ivec2 b = clamp(base + ivec2(1, 1), ivec2(0), last);
+	vec4 v00 = imageLoad(atlas_image, ivec2(tile * lw + a.x, a.y));
+	vec4 v10 = imageLoad(atlas_image, ivec2(tile * lw + b.x, a.y));
+	vec4 v01 = imageLoad(atlas_image, ivec2(tile * lw + a.x, b.y));
+	vec4 v11 = imageLoad(atlas_image, ivec2(tile * lw + b.x, b.y));
+	vec4 v = mix(mix(v00, v10, f.x), mix(v01, v11, f.x), f.y);
+	return second ? v.ba : v.rg;
 }
-"""
-
-const APPLY_TEMPLATE := """
-#version 450
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
-layout(rgba16f, set = 0, binding = 0) uniform image2D color_image;
-layout(rg32f, set = 0, binding = 1) uniform restrict readonly image2D map_image;
-layout(push_constant, std430) uniform Params {
-	vec4 size;   // width, height, block, block columns
-	vec4 shape;  // block rows, 1 / (2 sigma_up^2), 1 / (2 sigma_r^2) (log2), log2 floor
-	vec4 extra;  // MIN_WEIGHT_SHARE, 1 / (2 sigma_dim^2) (log2; pixel dimmer than the block), FULL_WEIGHT_SHARE_RATIO, -
-	vec4 cone_x;  // N = C M^-1: the cones' part of the post step's pixel (LocalAdaptation.cone_part), its columns
-	vec4 cone_y;
-	vec4 cone_z;
-} params;
-const vec3 LUMINANCE = vec3(@LW_R@, @LW_G@, @LW_B@);
 
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	if (pixel.x >= int(params.size.x) || pixel.y >= int(params.size.y)) {
-		return;
-	}
-	float block = params.size.z;
-	vec2 tc = (vec2(pixel) + 0.5) / block - 0.5;
-	ivec2 base = ivec2(floor(tc));
-	ivec2 last = ivec2(int(params.size.w) - 1, int(params.shape.x) - 1);
-	// The map first (small, cached): no compression near this pixel - its colour is not even read (T10 cost).
-	vec2 m[16];
-	float lowest = 0.0;
-	for (int k = 0; k < 16; k++) {
-		m[k] = imageLoad(map_image, clamp(base + ivec2(k % 4 - 1, k / 4 - 1), ivec2(0), last)).rg;
-		lowest = min(lowest, m[k].y);
-	}
-	if (lowest >= 0.0) {
 		return;
 	}
 	vec4 color = imageLoad(color_image, pixel);
@@ -159,24 +181,36 @@ void main() {
 	if (!(y > 0.0)) {
 		return;
 	}
-	float l = max(log2(y), params.shape.w);
-	float ss = 0.0;
-	float sw = 0.0;
-	float s = 0.0;
-	for (int k = 0; k < 16; k++) {
-		vec2 d = vec2(base + ivec2(k % 4 - 1, k / 4 - 1)) - tc;
-		float spatial = exp(-dot(d, d) * params.shape.y);
-		float w = spatial * exp(-(m[k].x - l) * (m[k].x - l) * (m[k].x > l ? params.extra.y : params.shape.z));
-		ss += spatial;
-		sw += w;
-		s += w * m[k].y;
+	int count = int(params.shape.w);
+	float s = clamp((log2(y) - params.shape.y) / params.shape.z, 0.0, float(count - 1));
+	int band = min(int(floor(s)), count - 2);
+	float t = s - float(band);
+	int lw = int(params.size.w);
+	ivec2 last = ivec2(lw - 1, int(params.shape.x) - 1);
+	vec2 tc = (vec2(pixel) + 0.5) / params.size.z - 0.5;
+	ivec2 base = ivec2(floor(tc));
+	vec2 f = tc - vec2(base);
+	float loc = 0.0;
+	float share = 0.0;
+	for (int m = 0; m < 2; m++) {
+		int k = band + m;
+		float weight = m == 0 ? 1.0 - t : t;
+		vec2 v = band_value(k, base, f, last, lw);
+		float centre = exp2(params.shape.y + float(k) * params.shape.z);
+		loc += weight * (v.y > @EMPTY@ ? centre * v.x / v.y : centre);
+		share += weight * v.y;
 	}
-	if (sw < params.extra.x * ss) {
-		return;  // no compression near this pixel, or no block like it (an emitter, a sub-block glint): c = 1
+	// LocalAdaptation.smooth_share, then the factor of the pooled local luminance
+	float blend = clamp((share / params.extra.y - 1.0) / (params.extra.z - 1.0), 0.0, 1.0);
+	blend = blend * blend * (3.0 - 2.0 * blend);
+	if (blend <= 0.0) {
+		return;
 	}
+	float local_cd_m2 = loc / params.factor.x;
+	float g = clamp(params.factor.z / pow(10.0, @WEBER_OFFSET@ + cone_log_threshold(local_cd_m2 * params.factor.w)), 1.0,
+			params.extra.x);
+	float c = exp2(blend * log2(min(1.0, g / params.factor.y)));
 	// LocalAdaptation.apply_pixel: the cones' part x c, the rods' part x c^2 (saturated where the cones adapt locally)
-	float share = clamp((sw / ss / params.extra.x - 1.0) / (params.extra.z - 1.0), 0.0, 1.0);
-	float c = exp2(share * share * (3.0 - 2.0 * share) * s / sw);  // LocalAdaptation.smooth_share
 	vec3 cones = mat3(params.cone_x.rgb, params.cone_y.rgb, params.cone_z.rgb) * x;
 	imageStore(color_image, pixel, vec4(clamp(c * (cones + c * (x - cones)), vec3(0.0), vec3(@MAXL@)), color.a));
 }
@@ -197,7 +231,7 @@ static func _fill(template: String) -> String:
 	var weights := LocalAdaptation.LUMINANCE_WEIGHTS
 	var values := {
 		"LW_R": weights.x, "LW_G": weights.y, "LW_B": weights.z,
-		"MAXL": LocalAdaptation.MAX_SCENE_LUMINANCE,
+		"MAXL": LocalAdaptation.MAX_SCENE_LUMINANCE, "EMPTY": LocalAdaptation.EMPTY_WEIGHT,
 		"LUM_FLOOR": EyeAdaptation.LUMINANCE_FLOOR_CD_M2,
 		"CONE_LOW": EyeAdaptation.CONE_LOG_LOW, "CONE_FLOOR": EyeAdaptation.CONE_LOG_FLOOR,
 		"CONE_WEBER": EyeAdaptation.CONE_LOG_WEBER, "WEBER_OFFSET": EyeAdaptation.CONE_WEBER_OFFSET,
@@ -206,41 +240,47 @@ static func _fill(template: String) -> String:
 	}
 	for key: String in values:
 		template = template.replace("@" + key + "@", glsl_float(values[key]))
-	return template
+	return template.replace("@BANDS@", str(LocalAdaptation.band_count()))
 
 
 static func down_shader_source() -> String:
 	return _fill(DOWN_TEMPLATE)
 
 
-static func pool_shader_source() -> String:
-	return _fill(POOL_TEMPLATE)
+static func blur_shader_source() -> String:
+	return _fill(BLUR_TEMPLATE)
 
 
 static func apply_shader_source() -> String:
 	return _fill(APPLY_TEMPLATE)
 
 
-## Push constants of the three dispatches (the layouts of the shaders above); shared with local_adaptation_gpu_check.gd.
-static func down_push(size: Vector2i, block: int, clouds: bool, low: Vector2i, floor_log: float) -> PackedFloat32Array:
+## The blur radius (texels) and sigma for a sigma in blocks.
+static func blur_radius(sigma_blocks: float) -> int:
+	return int(ceil(LocalAdaptation.KERNEL_RADIUS_SIGMAS * sigma_blocks))
+
+
+## Push constants of the dispatches (the layouts of the shaders above); shared with local_adaptation_gpu_check.gd.
+static func down_push(size: Vector2i, block: int, clouds: bool, low: Vector2i) -> PackedFloat32Array:
 	return PackedFloat32Array([size.x, size.y, block, 1.0 if clouds else 0.0,
-			low.x, low.y, floor_log, LocalAdaptation.sample_step(block)])
+			low.x, low.y, LocalAdaptation.sample_step(block), 0.0,
+			LocalAdaptation.band_lowest_log2(), LocalAdaptation.band_step_log2(),
+			LocalAdaptation.range_inverse_two_sigma_squared(),
+			LocalAdaptation.range_inverse_two_sigma_squared(LocalAdaptation.BRIGHT_NEIGHBOUR_SIGMA_DECADES)])
 
 
-static func pool_push(low: Vector2i, radius: int, sigma_blocks: float, floor_log: float, scene_per_cd_m2: float,
-		display_gain: float, reference_cd_m2: float, k_eff: float) -> PackedFloat32Array:
-	return PackedFloat32Array([low.x, low.y, radius, 1.0 / (2.0 * sigma_blocks * sigma_blocks),
-			LocalAdaptation.range_inverse_two_sigma_squared(), floor_log, scene_per_cd_m2, display_gain,
-			reference_cd_m2, k_eff, EyeAdaptation.GAIN_MAX, 0.0])
+static func blur_push(low: Vector2i, sigma_blocks: float, horizontal: bool) -> PackedFloat32Array:
+	return PackedFloat32Array([low.x, low.y, blur_radius(sigma_blocks), 1.0 / (2.0 * sigma_blocks * sigma_blocks),
+			1.0 if horizontal else 0.0, 0.0 if horizontal else 1.0, LocalAdaptation.band_count() / 2, 0.0])
 
 
-static func apply_push(size: Vector2i, block: int, low: Vector2i, floor_log: float, cone_part: Basis) -> PackedFloat32Array:
+static func apply_push(size: Vector2i, block: int, low: Vector2i, scene_per_cd_m2: float, display_gain: float,
+		reference_cd_m2: float, cone_part: Basis) -> PackedFloat32Array:
 	return PackedFloat32Array([size.x, size.y, block, low.x,
-			low.y, 1.0 / (2.0 * LocalAdaptation.UPSAMPLE_SIGMA_BLOCKS * LocalAdaptation.UPSAMPLE_SIGMA_BLOCKS),
-			LocalAdaptation.range_inverse_two_sigma_squared(), floor_log,
-			LocalAdaptation.MIN_WEIGHT_SHARE,
-			LocalAdaptation.range_inverse_two_sigma_squared(LocalAdaptation.UPSAMPLE_DIM_SIGMA_DECADES),
-			LocalAdaptation.FULL_WEIGHT_SHARE_RATIO, 0.0,
+			low.y, LocalAdaptation.band_lowest_log2(), LocalAdaptation.band_step_log2(), LocalAdaptation.band_count(),
+			scene_per_cd_m2, display_gain, reference_cd_m2,
+			LocalAdaptation.effective_per_local(scene_per_cd_m2, display_gain, reference_cd_m2),
+			EyeAdaptation.GAIN_MAX, LocalAdaptation.MIN_WEIGHT_SHARE, LocalAdaptation.FULL_WEIGHT_SHARE_RATIO, 0.0,
 			cone_part.x.x, cone_part.x.y, cone_part.x.z, 0.0,
 			cone_part.y.x, cone_part.y.y, cone_part.y.z, 0.0,
 			cone_part.z.x, cone_part.z.y, cone_part.z.z, 0.0])
@@ -262,7 +302,7 @@ var _spc := 0.0
 var _display_gain := 0.0
 var _reference_cd_m2 := 0.0
 var _cone_part := Basis.IDENTITY
-## MAP results, render thread: per view {"block": RID, "map": RID, "size": Vector2i, "low": Vector2i}, and the frame's
+## MAP results, render thread: per view {"atlas": RID, "tmp": RID, "size": Vector2i, "low": Vector2i}, and the frame's
 ## block edge (px). The APPLY stage of the same frame reads them (same thread, after the transparent pass).
 var _views := []
 var _block := 1
@@ -304,7 +344,7 @@ func _create_pipelines() -> void:
 	_rd = RenderingServer.get_rendering_device()
 	if _rd == null:
 		return
-	var sources := [down_shader_source(), pool_shader_source()] if stage == Stage.MAP else [apply_shader_source()]
+	var sources := [down_shader_source(), blur_shader_source()] if stage == Stage.MAP else [apply_shader_source()]
 	for code in sources:
 		var shader_source := RDShaderSource.new()
 		shader_source.language = RenderingDevice.SHADER_LANGUAGE_GLSL
@@ -329,7 +369,7 @@ func _create_pipelines() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE and _rd != null:
 		for view: Dictionary in _views:  # inline: no method calls at PREDELETE
-			for key in ["block", "map"]:
+			for key in ["atlas", "tmp"]:
 				if view.has(key) and (view[key] as RID).is_valid():
 					_rd.free_rid(view[key])
 		if _no_cloud.is_valid():
@@ -340,7 +380,7 @@ func _notification(what: int) -> void:
 
 
 func _free_view(view: Dictionary) -> void:
-	for key in ["block", "map"]:
+	for key in ["atlas", "tmp"]:
 		if view.has(key) and (view[key] as RID).is_valid():
 			_rd.free_rid(view[key])
 
@@ -360,13 +400,12 @@ func _view_textures(index: int, size: Vector2i, low: Vector2i) -> Dictionary:
 		return view
 	_free_view(view)
 	var format := RDTextureFormat.new()
-	format.width = low.x
+	format.width = low.x * (LocalAdaptation.band_count() / 2)  # the bands' atlas: tile k = bands 2k, 2k+1
 	format.height = low.y
 	format.usage_bits = RenderingDevice.TEXTURE_USAGE_STORAGE_BIT
-	format.format = RenderingDevice.DATA_FORMAT_R32_SFLOAT
-	view = {"size": size, "low": low, "block": _rd.texture_create(format, RDTextureView.new(), [])}
-	format.format = RenderingDevice.DATA_FORMAT_R32G32_SFLOAT
-	view["map"] = _rd.texture_create(format, RDTextureView.new(), [])
+	format.format = RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT
+	view = {"size": size, "low": low, "atlas": _rd.texture_create(format, RDTextureView.new(), []),
+			"tmp": _rd.texture_create(format, RDTextureView.new(), [])}
 	_views[index] = view
 	return view
 
@@ -401,24 +440,25 @@ func _map(render_data: RenderData) -> void:
 	if size.x == 0 or size.y == 0:
 		return
 	var projection := render_data.get_render_scene_data().get_view_projection(0)
-	_block = LocalAdaptation.block_size(LocalAdaptation.pixels_per_degree(float(size.y), absf(projection.y.y)))
-	var sigma_blocks := LocalAdaptation.POOL_SIGMA_DEG * LocalAdaptation.pixels_per_degree(float(size.y),
-			absf(projection.y.y)) / float(_block)
-	var radius := int(ceil(LocalAdaptation.KERNEL_RADIUS_SIGMAS * sigma_blocks))
+	var ppd := LocalAdaptation.pixels_per_degree(float(size.y), absf(projection.y.y))
+	_block = LocalAdaptation.block_size(ppd)
+	var sigma_blocks := LocalAdaptation.POOL_SIGMA_DEG * ppd / float(_block)
 	var low := Vector2i((size.x - 1) / _block + 1, (size.y - 1) / _block + 1)
-	var floor_log := LocalAdaptation.log2_floor(_spc)
-	var k_eff := LocalAdaptation.effective_per_local(_spc, _display_gain, _reference_cd_m2)
+	var tiles := LocalAdaptation.band_count() / 2
 	var groups := Vector2i((low.x - 1) / 8 + 1, (low.y - 1) / 8 + 1)
+	var wide := Vector2i((low.x * tiles - 1) / 8 + 1, (low.y - 1) / 8 + 1)
 	if CloudEffect.capture_timestamps:  # render_check --gpu_passes
 		_rd.capture_timestamp("local_adaptation_map")
 	for index in range(buffers.get_view_count()):
 		var view := _view_textures(index, size, low)
 		var cloud := cloud_effect.frame_output_layer(index) if cloud_effect != null else RID()
 		_dispatch(0, [_image_uniform(0, buffers.get_color_layer(index)),
-				_image_uniform(1, cloud if cloud.is_valid() else _no_cloud), _image_uniform(2, view["block"])],
-				down_push(size, _block, cloud.is_valid(), low, floor_log), groups)
-		_dispatch(1, [_image_uniform(0, view["block"]), _image_uniform(1, view["map"])],
-				pool_push(low, radius, sigma_blocks, floor_log, _spc, _display_gain, _reference_cd_m2, k_eff), groups)
+				_image_uniform(1, cloud if cloud.is_valid() else _no_cloud), _image_uniform(2, view["atlas"])],
+				down_push(size, _block, cloud.is_valid(), low), groups)
+		_dispatch(1, [_image_uniform(0, view["atlas"]), _image_uniform(1, view["tmp"])],
+				blur_push(low, sigma_blocks, true), wide)
+		_dispatch(1, [_image_uniform(0, view["tmp"]), _image_uniform(1, view["atlas"])],
+				blur_push(low, sigma_blocks, false), wide)
 	_map_valid = true
 	if CloudEffect.capture_timestamps:
 		_rd.capture_timestamp("after_local_adaptation_map")
@@ -432,7 +472,6 @@ func _apply(render_data: RenderData) -> void:
 		return
 	var size := buffers.get_internal_size()
 	var groups := Vector2i((size.x - 1) / 8 + 1, (size.y - 1) / 8 + 1)
-	var floor_log := LocalAdaptation.log2_floor(source._spc)
 	if CloudEffect.capture_timestamps:
 		_rd.capture_timestamp("local_adaptation_apply")
 	for index in range(mini(buffers.get_view_count(), source._views.size())):
@@ -440,7 +479,8 @@ func _apply(render_data: RenderData) -> void:
 		if view.get("size", Vector2i.ZERO) != size:
 			continue
 		var low: Vector2i = view["low"]
-		_dispatch(0, [_image_uniform(0, buffers.get_color_layer(index)), _image_uniform(1, view["map"])],
-				apply_push(size, source._block, low, floor_log, source._cone_part), groups)
+		_dispatch(0, [_image_uniform(0, buffers.get_color_layer(index)), _image_uniform(1, view["atlas"])],
+				apply_push(size, source._block, low, source._spc, source._display_gain, source._reference_cd_m2,
+				source._cone_part), groups)
 	if CloudEffect.capture_timestamps:
 		_rd.capture_timestamp("after_local_adaptation_apply")
