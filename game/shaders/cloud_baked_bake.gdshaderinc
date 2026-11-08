@@ -67,7 +67,10 @@ layout(rg16f, set = 1, binding = 1) uniform writeonly image3D baked_a_out;
 // per sample (CLOUD_BAKED_DETAIL: level 1 in level 0) - the threshold and the edge mean are those of the state with
 // them (their erosion is the march's), so the march's sum keeps the cloud fraction (fix 1: with the bake's own state's
 // threshold the march's erosion shrank every near outline by tens of metres and tore its rim into fragments).
-vec4 cloud_baked_ramp_at(vec3 offset, float h, float footprint_m, float extra_state) {
+// ramp_spread: the ramp sum with the cumulus type's cloud-to-cloud spread (cloud_spread_factor, look fixes T7b: thick
+// and thin clouds, mean 1; the fidelity flag cloud_far_subgrid).
+vec4 cloud_baked_ramp_at(vec3 offset, float h, float footprint_m, float extra_state, out float ramp_spread) {
+	ramp_spread = 0.0;
 	vec2 lat_lon = cloud_lat_lon(atmosphere_camera_hi + atmosphere_camera_lo + offset);
 	CloudCell cell = cloud_field(lat_lon, h);
 	if (cell.fraction < CLOUD_MIN_FRACTION || cell.extinction <= 0.0) {
@@ -85,7 +88,10 @@ vec4 cloud_baked_ramp_at(vec3 offset, float h, float footprint_m, float extra_st
 			vec4 shape = texture(cloud_noise_shape, cloud_type_shape_coordinates(type, offset, h));
 			float w = cloud_edge_width.x * pow(cloud_edge_width.y / cloud_edge_width.x, clamp(shape.a, 0.0, 1.0));
 			float x = (shape.r + detail - threshold) / max(w, 1.0e-6);
-			ramp += types[type] * cloud_baked_ramp(x);
+			float r = types[type] * cloud_baked_ramp(x);
+			ramp += r;
+			ramp_spread += type == 0 && cloud_far_subgrid && r > 0.0
+					? r * cloud_spread_factor(atmosphere_camera_hi + atmosphere_camera_lo + offset) : r;
 			x_max = max(x_max, x);
 		}
 	}
@@ -123,6 +129,7 @@ void main() {
 	float x_max = -CLOUD_BAKED_X_MAX;
 	float scale = 0.0;
 	float scale_n = 0.0;
+	float ramp_spread = 0.0;
 	// The march's per-sample detail level (level 1 in level 0): its full weight (the march's at any footprint it has
 	// in level 0, <= ~13 m at divisor 2), counted in the threshold's state.
 #ifdef CLOUD_BAKED_DETAIL
@@ -135,8 +142,11 @@ void main() {
 			for (int kx = 0; kx < taps_h; kx++) {
 				vec3 f = (vec3(kx, ky, kz) + 0.5) / vec3(taps_h, taps_h, taps_v) - 0.5;
 				vec3 p = g + f * vec3(c, c, dz);
-				vec4 r = cloud_baked_ramp_at(cloud_baked_offset_of(si, p.x, p.y, p.z), p.z, 0.5 * c, extra_state);
+				float r_spread;
+				vec4 r = cloud_baked_ramp_at(cloud_baked_offset_of(si, p.x, p.y, p.z), p.z, 0.5 * c, extra_state,
+						r_spread);
 				ramp += r.x;
+				ramp_spread += r_spread;
 				x_max = max(x_max, r.y);
 				scale += r.z;
 				scale_n += r.w;
@@ -150,6 +160,9 @@ void main() {
 	float x = ramp <= 0.0 ? min(x_max, 0.0) : (ramp >= 1.0 ? max(x_max, 1.0) : cloud_baked_unramp(ramp));
 	// The scale: the mean over the taps with field cloud (the clear taps lower the ramp's mean instead).
 	float scale_mean = scale_n > 0.0 ? scale / scale_n : 0.0;
+	// the in-cloud spread: the extinction times the voxel's ramp-weighted mean factor (1 without cumulus; a coarse voxel
+	// averages its cores and margins toward 1)
+	scale_mean *= ramp > 0.0 ? ramp_spread / (ramp * n) : 1.0;
 	imageStore(baked_a_out, texel, vec4(clamp(x, -CLOUD_BAKED_X_MAX, CLOUD_BAKED_X_MAX),
 			scale_mean * CLOUD_BAKED_PER_KM, 0.0, 0.0));
 }

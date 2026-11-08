@@ -656,6 +656,8 @@ func _upload_noise() -> void:
 	ShaderGlobals.set_value(&"cloud_noise_shape_mips", _noise_textures[4])
 	ShaderGlobals.set_value(&"cloud_prefilter_threshold", _noise_textures[5])
 	ShaderGlobals.set_value(&"cloud_prefilter_edge_mean", _noise_textures[6])
+	_noise_textures.append(_table(exceedance_table(noise["prefilter_threshold"], prefilter_rows), prefilter_rows))
+	ShaderGlobals.set_value(&"cloud_prefilter_exceedance", _noise_textures[7])
 	ShaderGlobals.set_value(&"cloud_edge_width", Vector2(noise["edge_width_min_value"], noise["edge_width_max_value"]))
 	ShaderGlobals.set_value(&"cloud_detail_mean", float(noise["detail_mean"]))
 	ShaderGlobals.set_value(&"cloud_detail_weights", noise["detail_weights"])
@@ -706,6 +708,37 @@ func _apply_scattering_model() -> void:
 
 
 ## A table of rows of 256 (one per detail state): a 256 x rows R32F texture, filtered linearly in both directions.
+## The prefilter threshold table's inverse (look fixes T7b, cloud_far.gdshaderinc cloud_spread_factor): per row (level),
+## for the shape value v = j / (columns - 1) the share of the layer whose value exceeds v, linear between the
+## threshold table's fractions f_i = i / (columns - 1) (the threshold falls with the fraction); 1 below the lowest
+## threshold, 0 above the highest.
+static func exceedance_table(threshold: PackedFloat32Array, rows: int) -> PackedFloat32Array:
+	var columns := threshold.size() / rows
+	var out := PackedFloat32Array()
+	out.resize(threshold.size())
+	for r in range(rows):
+		var base := r * columns
+		var i := 0
+		for jj in range(columns):
+			var j := columns - 1 - jj  # values falling: the fraction step i rises (thresholds non-increasing in i)
+			var v := float(j) / (columns - 1)
+			# the step [i, i + 1] whose thresholds bracket v
+			while i < columns - 1 and threshold[base + i + 1] > v:
+				i += 1
+			var e: float
+			if v >= threshold[base]:
+				e = 0.0
+			elif v <= threshold[base + columns - 1]:
+				e = 1.0
+			else:
+				var t0 := threshold[base + i]
+				var t1 := threshold[base + i + 1]
+				var w := (t0 - v) / (t0 - t1) if t0 > t1 else 0.0
+				e = (float(i) + clampf(w, 0.0, 1.0)) / (columns - 1)
+			out[base + j] = e
+	return out
+
+
 static func _table(values: PackedFloat32Array, rows: int) -> ImageTexture:
 	return ImageTexture.create_from_image(Image.create_from_data(values.size() / rows, rows, false, Image.FORMAT_RF,
 			values.to_byte_array()))

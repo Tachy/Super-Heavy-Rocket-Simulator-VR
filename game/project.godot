@@ -422,6 +422,10 @@ cloud_prefilter_threshold={
 "type": "sampler2D",
 "value": ""
 }
+cloud_prefilter_exceedance={
+"type": "sampler2D",
+"value": ""
+}
 cloud_prefilter_edge_mean={
 "type": "sampler2D",
 "value": ""

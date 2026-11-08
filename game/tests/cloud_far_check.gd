@@ -65,6 +65,11 @@ const TABLE_GROUND_ALBEDO := 0.1
 const MESO_POINTS := 4096
 const MESO_MEAN_TOLERANCE := 0.03
 const MESO_SPREAD_MIN := 0.15
+## Section 1d (T7b): points on the sphere; the mean's tolerance [E] (sampling 0.75 / sqrt(16384) = 0.6 % plus the
+## noise field's correlation over a few km) and the fractional SD's (the Wilson-Hilferty quantile and the clamp).
+const SPREAD_POINTS := 16384
+const SPREAD_MEAN_TOLERANCE := 0.03
+const SPREAD_FSD_TOLERANCE := 0.06
 const HANDOVER_TOLERANCE := 0.05
 const CLOUDY_RATIO_MIN := 1.3
 ## Section 5 (look fixes T8): the first height (above the 40-60 km takeover and the volume's 62 km top: the flat levels
@@ -147,6 +152,7 @@ func _run() -> void:
 	await _probe_samples()
 	await _bright_top_samples()
 	await _meso_samples()
+	await _spread_samples()
 	if _only_probe:
 		_finish()
 		return
@@ -218,6 +224,16 @@ func _probe_samples() -> void:
 
 ## The probe shader's mode over the cases (four values each, one pixel per case); the red channel per case.
 func _probe(mode: int, cases: Array) -> PackedFloat32Array:
+	var colors := await _probe_colors(mode, cases)
+	var out := PackedFloat32Array()
+	out.resize(cases.size())
+	for i in range(cases.size()):
+		out[i] = colors[i].r
+	return out
+
+
+## The probe shader's mode over the cases: the colour per case.
+func _probe_colors(mode: int, cases: Array) -> PackedColorArray:
 	var width := mini(cases.size(), PROBE_ROW)
 	var height := ceili(float(cases.size()) / width)
 	var params := Image.create(width, height, false, Image.FORMAT_RGBAF)
@@ -251,10 +267,10 @@ func _probe(mode: int, cases: Array) -> PackedFloat32Array:
 	var image := viewport.get_texture().get_image()
 	viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	viewport.queue_free()
-	var out := PackedFloat32Array()
+	var out := PackedColorArray()
 	out.resize(cases.size())
 	for i in range(cases.size()):
-		out[i] = image.get_pixel(i % width, i / width).r
+		out[i] = image.get_pixel(i % width, i / width)
 	return out
 
 
@@ -323,6 +339,31 @@ func _bright_top_samples() -> void:
 		parts.append("A %.2f: B/R x%.4f" % [albedos[k], ratio])
 	_check("bright top: the cloud's blue / red increment (review I2 estimate)", in_range,
 			"%s (range %.2f-%.2f)" % [", ".join(parts), BRIGHT_TOP_BR_RANGE.x, BRIGHT_TOP_BR_RANGE.y])
+
+
+## 1d. The cloud-to-cloud spread (look fixes T7b, cloud_spread_factor): over SPREAD_POINTS random points on the sphere
+## the factor's mean is 1 within SPREAD_MEAN_TOLERANCE (the cell's water kept) and its fractional standard deviation
+## the gamma's 0.75 within SPREAD_FSD_TOLERANCE; its 10 / 50 / 90 % points printed (gamma nu 1.778: 0.26 / 0.83 / 1.98).
+func _spread_samples() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20261109
+	var cases: Array = []
+	for i in range(SPREAD_POINTS):
+		cases.append([0.0, rng.randf_range(-PI, PI), rng.randf_range(-1.0, 1.0), 0.0])
+	var values := await _probe(3, cases)
+	var sum := 0.0
+	var sum2 := 0.0
+	for v in values:
+		sum += v
+		sum2 += v * v
+	var mean := sum / SPREAD_POINTS
+	var fsd := sqrt(maxf(sum2 / SPREAD_POINTS - mean * mean, 0.0)) / maxf(mean, 1.0e-6)
+	var sorted := Array(values)
+	sorted.sort()
+	_check("cloud-to-cloud spread: mean 1 (+-%.2f), fsd 0.75 (+-%.2f)" % [SPREAD_MEAN_TOLERANCE, SPREAD_FSD_TOLERANCE],
+			absf(mean - 1.0) <= SPREAD_MEAN_TOLERANCE and absf(fsd - 0.75) <= SPREAD_FSD_TOLERANCE,
+			"mean %.4f, fsd %.3f, p10 / p50 / p90 %.3f / %.3f / %.3f" % [mean, fsd, sorted[SPREAD_POINTS / 10],
+			sorted[SPREAD_POINTS / 2], sorted[SPREAD_POINTS * 9 / 10]])
 
 
 ## 1c. The cover pattern's mean (look fixes T7 B, T7b review I2): cloud_far_meso_cover over MESO_POINTS random points on

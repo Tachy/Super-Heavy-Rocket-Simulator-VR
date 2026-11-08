@@ -388,6 +388,24 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
     0 beyond the tables' last level [E] (`cloud_far_meso_cover`). The flat levels take both where the shapes' pixel
     pattern has faded (weight 1 - w_pattern), so the 40-60 km hand-over (w_pattern 1 there) is unchanged and the
     scaled-space switch (w_pattern 0 there) meets the far field. Numbers: Validation "Sub-grid structure";
+  - **cloud-to-cloud spread where it is resolved** (look fixes T7b, user 2026-11-08: the capped cumulus water kept as
+    the cell mean, thick clouds again): the same gamma (FSD 0.75, nu 1.778) as a field on the sphere,
+    `cloud_spread_factor` - the shapes' noise read `CLOUD_SPREAD_SCALE` 2 x enlarged (500 m texels, features of a few
+    km: single cumulus [E]), turned (the cover pattern's turn inverted), its exact rank from the noise's own value
+    distribution (`cloud_prefilter_exceedance`, the threshold table's inverse built by `CloudLayer.exceedance_table`),
+    to the gamma quantile by Wilson & Hilferty (1931). Independent of the shapes: the mean over a field is 1 (the
+    cell's water kept), the outlines are the shapes'. The baked volume multiplies the cumulus type's extinction by it
+    (the density bake: the voxel's ramp-weighted mean factor; coarse voxels average it toward 1); the flat levels'
+    sub-cell pattern multiplies its broken-cloud depth k by it (not the decks' texture) and moves to chi where the
+    pattern taps' spacing passes 0.5-2 km (`CLOUD_BAKED_FLAT_SPREAD_FADE_M` [E]). Same flag as the sub-grid
+    structure. (A first try placed the factor by the shape value's rank inside each cloud: the margins thinned to
+    wisps, the cover fell 12 %.) From the sea (`screenshots/look_fixes/t7b/sheet_cores_ground.png`, ERA5 2025-03-20
+    14:28 UTC, 15 N 45 W): cloud share 0.656 -> 0.655 (el 12) / 0.414 -> 0.416 (el 45), cloud luma SD (relief) 0.064 ->
+    0.080 / 0.057 -> 0.077 (uncapped 0.068 / 0.071), grey shading on the thick clouds; the crisp dark cauliflower
+    sides of the uncapped water come back only partly (its extinction was 1.43 x everywhere). The field on the GPU
+    (cloud_far_check 1d, 16 384 sphere points): mean 0.995, FSD 0.752, p10 / p50 / p90 0.24 / 0.81 / 2.00 (gamma 0.26 /
+    0.83 / 1.98). The 40-60 km hand-over unchanged by it (fly-up 45-65 km straight down, Gulf analog and the 15 N 45 W
+    cumulus hour, with and without: every height's step within 0.2 codes; `screenshots/look_fixes/t7b/fly/`);
   - **the air above a bright top** (look fixes T7 step 3, T5 review I2 "pink clouds"): the light tables are built over a
     ground of albedo 0.1, so the cloud missed (1) its own light scattered back down by the air above it and (2) the
     diffuse transmission of its light toward the camera - both bluer than the cloud. `cloud_far_bright_top_transmittance`

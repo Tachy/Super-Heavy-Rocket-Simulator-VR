@@ -58,6 +58,7 @@ func _run() -> void:
 	_check(_state_is(["", ""], -1.0), "weather off: nothing resident: %s" % _layer.state())
 
 	_test_fine_column(camera)
+	_test_exceedance_table()
 	_test_light_follows_fade(core, camera)
 	_check(ShaderGlobals.value(&"cloud_column_before") == _layer._empty_column and _layer._empty_column.get_format() == Image.FORMAT_LA8,
 			"an empty slot binds the zero LA8 column texture (cover 0, not an R8 read as 1)")
@@ -118,6 +119,34 @@ func _test_light_follows_fade(core: StarsimCore, camera: Vector3) -> void:
 	core.weather_set_active("", "", 0.0)
 	DirAccess.remove_absolute(slab_file)
 	DirAccess.remove_absolute(clear_file)
+
+
+## Look fixes T7b: the threshold table's inverse (cloud_spread_factor's rank). A falling threshold t(f) = 1 - f gives
+## e(v) = 1 - v; a stepped one (t = 0.8 for f <= 0.5, then down to 0) the interpolated shares; e non-increasing in v.
+func _test_exceedance_table() -> void:
+	var columns := 256
+	var t := PackedFloat32Array()
+	t.resize(2 * columns)
+	for i in range(columns):
+		var f := float(i) / (columns - 1)
+		t[i] = 1.0 - f
+		t[columns + i] = 0.8 if f <= 0.5 else 0.8 * (1.0 - f) / 0.5
+	var e := CloudLayer.exceedance_table(t, 2)
+	var worst := 0.0
+	var monotone := true
+	for j in range(columns):
+		var v := float(j) / (columns - 1)
+		worst = maxf(worst, absf(e[j] - (1.0 - v)))
+		if j > 0:
+			monotone = monotone and e[j] <= e[j - 1] + 1e-6 and e[columns + j] <= e[columns + j - 1] + 1e-6
+	var stepped_ok := absf(e[2 * columns - 1]) < 1e-6 and absf(e[columns] - 1.0) < 1e-6
+	# v = 0.4 on the falling part: 0.8 (1 - f) / 0.5 = v -> f = 1 - 0.5 v / 0.8
+	var j4 := int(round(0.4 * (columns - 1)))
+	var v4 := float(j4) / (columns - 1)
+	stepped_ok = stepped_ok and absf(e[columns + j4] - (1.0 - 0.5 * v4 / 0.8)) < 0.005
+	_check(worst < 1e-5 and monotone and stepped_ok,
+			"exceedance table: linear worst %.6f, monotone %s, stepped %s (%.4f)" % [worst, monotone, stepped_ok,
+			e[columns + j4]])
 
 
 ## Look fixes T7b (T7 review I2): the fine column (the analog's 0.25 deg column, RG8) - a slot takes it when its keys

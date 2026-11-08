@@ -7,6 +7,8 @@ shader_type spatial;
 // value in all channels), y the view's cosine, z the cover, w the in-cloud depth; out r.
 // mode 2 (section 1c): cloud_far_meso_cover, params x the cell's cover, y the longitude (rad), z sin(latitude), w the
 // footprint (m); out r the local cover.
+// mode 3 (section 1d): the cloud-to-cloud spread (cloud_spread_factor) at a point on the sphere, params y the
+// longitude (rad), z sin(latitude); out r the factor.
 render_mode unshaded, cull_disabled, depth_test_disabled;
 
 #include "res://shaders/eclipse.gdshaderinc"
@@ -29,6 +31,9 @@ void fragment() {
 		float c = sqrt(max(1.0 - p.z * p.z, 0.0));
 		vec3 point = CLOUD_A_M * vec3(c * cos(p.y), c * sin(p.y), p.z);
 		ALBEDO = vec3(cloud_far_meso_cover(point, p.x, p.w));
+	} else if (mode == 3) {
+		float c = sqrt(max(1.0 - p.z * p.z, 0.0));
+		ALBEDO = vec3(cloud_spread_factor(CLOUD_A_M * vec3(c * cos(p.y), c * sin(p.y), p.z)));
 	} else {
 		float s0 = sqrt(max(1.0 - p.y * p.y, 0.0));
 		float sv = sqrt(max(1.0 - p.z * p.z, 0.0));

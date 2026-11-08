@@ -118,6 +118,29 @@ float cloud_far_normal_quantile(float p) {
 			+ 6.680131188771972e+01) * r - 1.328068155288572e+01) * r + 1.0);
 }
 
+// The in-cloud optical-depth spread resolved from cloud to cloud (look fixes T7b, user 2026-11-08: the capped cumulus
+// water kept as the cell mean, thick clouds again - dark bases, relief - and thin ones beside them): the same gamma
+// distribution as the far field's effective thickness (CLOUD_FAR_TAU_SPREAD_CHI: FSD 0.75, nu = 1.778) as a field on
+// the sphere (a whole column thick or thin: a tower is thick through its depth) - the shapes' noise read
+// CLOUD_SPREAD_SCALE times enlarged (features of a few km, the size of single cumulus [E]) and turned against the shapes'
+// axes (the cover pattern's turn inverted), its exact rank u (the noise's own value distribution, cloud_prefilter_exceedance) taken to a normal z and the
+// gamma quantile by Wilson & Hilferty (1931), m = (1 - 1/(9 nu) + z / sqrt(9 nu))^3 (mean 0.9998). Independent of the
+// shapes, so the mean over any cloud field is 1 (the cell's water kept) and the outlines are the shapes' as before. (A
+// first try placed the factor by the shape value's rank inside each cloud: the margins thinned to wisps, the cover
+// fell by 12 % and the cores stayed small - not the look.)
+const float CLOUD_SPREAD_NU = 1.778;  // 1 / FSD^2, FSD 0.75 [S: Shonk et al. 2010; the gamma form Barker 1996]
+const float CLOUD_SPREAD_SCALE = 2.0;
+float cloud_spread_factor(vec3 p) {
+	vec3 q = transpose(CLOUD_FAR_MESO_TURN) * normalize(p) * (CLOUD_A_M / (CLOUD_SHAPE_TILE_H_M * CLOUD_SPREAD_SCALE));
+	float v = texture(cloud_noise_shape, q).r;
+	float u = clamp(texture(cloud_prefilter_exceedance, cloud_prefilter_uv(clamp(v, 0.0, 1.0), 0.0)).r, 1.0e-4,
+			1.0 - 1.0e-4);
+	float z = cloud_far_normal_quantile(1.0 - u);
+	float b = 1.0 / (9.0 * CLOUD_SPREAD_NU);
+	float m = max(1.0 - b + z * sqrt(b), 0.0);
+	return m * m * m;
+}
+
 // The cover pattern's local cover at the Earth-local point p (the pattern lies on the sphere: no shift with the
 // cloud's placement height) for the cell's cover, seen with the footprint (m).
 float cloud_far_meso_cover(vec3 p, float cover, float footprint_m) {

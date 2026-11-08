@@ -73,6 +73,8 @@ global uniform sampler2D cloud_edge_mean : filter_linear, repeat_disable;
 global uniform sampler3D cloud_noise_shape_mips : filter_linear_mipmap, repeat_enable;  // shape mip levels 1..
 global uniform sampler2D cloud_prefilter_threshold : filter_linear, repeat_disable;  // 256 x rows (core)
 global uniform sampler2D cloud_prefilter_edge_mean : filter_linear, repeat_disable;  // 256 x rows (core)
+// the threshold table's inverse: the share exceeding a shape value (CloudLayer.exceedance_table; look fixes T7b)
+global uniform sampler2D cloud_prefilter_exceedance : filter_linear, repeat_disable;  // 256 x rows
 global uniform vec2 cloud_edge_width;       // (w_min, w_max) in shape-value units
 global uniform bool cloud_enabled;
 global uniform float cloud_camera_height_m;  // |M camera| - a, float64 on the CPU

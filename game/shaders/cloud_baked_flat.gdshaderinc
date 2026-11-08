@@ -246,6 +246,9 @@ const vec2 CLOUD_BAKED_FLAT_DEPTH_RANGE = vec2(0.25, 1.75);
 // change across a tap (the taps' differences: the pixel footprint's), at least CLOUD_BAKED_FLAT_AA_MIN - the edge one
 // pixel wide at every distance, sharp, not a binary staircase.
 const float CLOUD_BAKED_FLAT_AA_MIN = 0.004;
+// [E] The pattern taps' spacing (m) over which the cloud-to-cloud spread (features of 2-4 km) gives way to its effective
+// thickness (CLOUD_FAR_TAU_SPREAD_CHI).
+const vec2 CLOUD_BAKED_FLAT_SPREAD_FADE_M = vec2(500.0, 2000.0);
 
 // One reading of the sub-cell pattern: the 2 x 2 taps (t1 along, t2 across; along_m x across_m) about p, the shape
 // scaled up by `scale` (the coordinates divided by it; the tap spacing in the scaled shape picks its prefilter level);
@@ -264,6 +267,10 @@ vec3 cloud_baked_flat_pattern_at(vec3 p, vec3 t1, vec3 t2, float along_m, float 
 	float unit = 1.0 / (CLOUD_SHAPE_TILE_H_M * CLOUD_FAR_COVER_UNALIGNED_SCALE * scale);
 	vec3 q0 = CLOUD_FAR_COVER_UNALIGNED_ROTATION * p * unit;
 	float w = cloud_baked_blend_weight(q0);  // (smooth: once per pixel)
+	// the broken cloud's cloud-to-cloud spread as the volume's cumulus (cloud_spread_factor, look fixes T7b; the decks'
+	// texture below without it), toward the effective thickness where the taps outgrow its few-km features
+	float spread = cloud_far_subgrid ? mix(cloud_spread_factor(p), CLOUD_FAR_TAU_SPREAD_CHI,
+			smoothstep(CLOUD_BAKED_FLAT_SPREAD_FADE_M.x, CLOUD_BAKED_FLAT_SPREAD_FADE_M.y, spacing_m)) : 1.0;
 	vec2 s[4];
 	for (int i = 0; i < 4; i++) {
 		vec2 u = (vec2(i & 1, i >> 1) + 0.5) * 0.5 - 0.5;
@@ -279,7 +286,7 @@ vec3 cloud_baked_flat_pattern_at(vec3 p, vec3 t1, vec3 t2, float along_m, float 
 				* cloud_edge_ramp(s[i].x, threshold, s[i].y)) / k_norm;
 		float k_deck = clamp(1.0 + CLOUD_BAKED_FLAT_DEPTH_TEXTURE * (s[i].x - median), CLOUD_BAKED_FLAT_DEPTH_RANGE.x,
 				CLOUD_BAKED_FLAT_DEPTH_RANGE.y);
-		float k = mix(k_ramp, k_deck, deck);
+		float k = mix(k_ramp * spread, k_deck, deck);
 		result += vec3(covered, covered * (1.0 - exp(-tau * k / mu)), covered * k);
 	}
 	result.z = result.x > 0.0 ? result.z / result.x : 1.0;
