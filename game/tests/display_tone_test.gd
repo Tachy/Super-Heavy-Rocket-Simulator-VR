@@ -79,6 +79,9 @@ func _check_display_curve() -> void:
 	var field := EyeAdaptation.FIELD_MID_GREY * Atmosphere.DAY_EXPOSURE
 	_check("T13 field at Y_b of display white", absf(DisplayTone.display_curve(field, _p) - 0.2) < 1e-9,
 			"%s" % DisplayTone.display_curve(field, _p))
+	_check("T13 display white at DAY_EXPOSURE x BT.2408 headroom", absf(DisplayTone.display_curve(Atmosphere.DAY_EXPOSURE
+			* DisplayTone.DISPLAY_HEADROOM * (1.0 - 1e-9), _p) - 1.0) < 1e-6 and absf(DisplayTone.display_curve(
+			Atmosphere.DAY_EXPOSURE, _p) - 0.6703) < 1e-3, "white plate %s" % DisplayTone.display_curve(Atmosphere.DAY_EXPOSURE, _p))
 	var knee := DisplayTone.DISPLAY_KNEE / DisplayTone.DISPLAY_SLOPE
 	var h := 1e-6
 	var left := (DisplayTone.display_curve(knee, _p) - DisplayTone.display_curve(knee - h, _p)) / h

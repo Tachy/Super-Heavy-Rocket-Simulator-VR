@@ -60,14 +60,19 @@ float curve_inverse(float y) {
 	return 2.0 * d / (b + sqrt(max(b * b + 4.0 * a * d, 0.0))) + X0;
 }
 
-// Step 1's grey curve (DisplayTone.display_curve): linear to the knee, exponential shoulder; AgX's curve while off.
+// Step 1's grey curve (DisplayTone.display_curve): linear to the knee, log-quadratic shoulder; AgX's curve while off.
 float display_curve(float y) {
 	if (params.display.z == 0.0) {
 		return curve(y);
 	}
 	float linear = params.display.x * max(y, 0.0);
 	float knee = params.display.y;
-	return linear <= knee ? linear : 1.0 - (1.0 - knee) * exp(-(linear - knee) / (1.0 - knee));
+	if (linear <= knee) {
+		return linear;
+	}
+	float u = log(linear / knee);
+	float span = -2.0 * log(knee);
+	return u >= span ? 1.0 : knee * exp(u - u * u / (2.0 * span));
 }
 
 vec3 predistort(vec3 d, mat3 outset_inverse, mat3 inset_inverse) {

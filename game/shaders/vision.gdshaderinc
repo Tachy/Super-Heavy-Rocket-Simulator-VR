@@ -71,7 +71,9 @@ vec3 vision_tone_inverse(vec3 c) {
 	if (vision_display_curve.z != 0.0) {
 		float knee = vision_display_curve.y;
 		float yc = min(y, 0.999999);
-		scene_y = (yc <= knee ? yc : knee - (1.0 - knee) * log((1.0 - yc) / (1.0 - knee))) / vision_display_curve.x;
+		float span = -2.0 * log(knee);
+		scene_y = (yc <= knee ? yc : knee * exp(span * (1.0 - sqrt(max(1.0 - 2.0 * log(yc / knee) / span, 0.0)))))
+				/ vision_display_curve.x;
 	}
 	return d * (scene_y / y);
 }

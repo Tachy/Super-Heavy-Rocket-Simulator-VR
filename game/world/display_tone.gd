@@ -72,33 +72,40 @@ const CHROMA_MIN := 1e-7
 static var enabled := true
 
 ## The fixed display mapping of step 1 (look fixes T13, unified appearance model): the grey curve g(Y) the step shows a
-## scene luminance at. Colourimetric (relative) reproduction [S: R. W. G. Hunt, "The Reproduction of Colour", 6th ed.
-## 2004, ch. 11.7: equal relative luminances for an observer adapted to the display's white as to the scene's]: the eye's
-## adopted white renders at the scene units' white plate Atmosphere.DAY_EXPOSURE (EyeAdaptation, field rule), so
-## g = Y / DAY_EXPOSURE - the adopted white at display white, the field (Y_b = 20 % of it) at 0.2 - up to the knee;
-## above it an exponential shoulder, C1 at the knee, toward display white (highlights the display cannot show: glints,
-## the Sun's disc, clouds in backscatter, locally adapted regions' brightest parts). It replaces AgX's own grey curve
-## (allenwp: +1.0 EV on the field, the white plate at 0.69 and a ~10:1 cloud / sea contrast compressed to ~4:1, the
-## Earth from space too white against DSCOVR EPIC; look fixes T7 step 2). AgX stays the engine's encoder (step 6).
-## [S: ITU-R BT.2035 (2013): the reference display white 100 cd/m^2 is the display's white; DISPLAY_WHITE_CD_M2]
-## The slope: display per scene luminance below the knee (1 / DAY_EXPOSURE: the white plate at display white).
+## scene luminance at. Below the knee colourimetric (relative) reproduction [S: R. W. G. Hunt, "The Reproduction of
+## Colour", 6th ed. 2004, ch. 11: equal relative luminances]: g = Y / DAY_EXPOSURE x ... with the slope DISPLAY_SLOPE, so
+## the field (Y_b = 20 % of the adopted white, rendered at Y_b x DAY_EXPOSURE by the field rule) shows at 0.2 of display
+## white. Above the knee a shoulder for the scene's highlights: the adopted white is the HDR reference white and the
+## display's white is the HDR peak [S: ITU-R BT.2408-7 (2023): HDR reference (diffuse) white 203 cd/m^2 on a
+## 1000 cd/m^2 reference display - DISPLAY_HEADROOM = 1000 / 203 = 4.93], i.e. scene DAY_EXPOSURE x 4.93 reaches
+## display white; the shoulder [call] is a quadratic in log-log, ln g = ln g_k + u - u^2 / (2 U), u = ln(Y / Y_k) (slope 1
+## at the knee: C1 with the linear part; slope 0 at white, U = ln(Y_white / Y_k)), which fixes the knee at
+## g_k = 1 / (DISPLAY_SLOPE Y_white) = 0.203 (Y_k = 0.304, just above the field). Values: field 0.3 -> 0.20, white plate
+## 1.5 -> 0.67, scene 2.5 -> 0.83 (AgX's curve, the former step 1: 0.29 / 0.69 / 0.78 - it lifted the field +0.5 EV and
+## compressed the ~10:1 cloud / sea contrast of the Earth from space to ~4:1, white share 0.44 against DSCOVR EPIC's 0.13,
+## look fixes T7 step 2). AgX stays the engine's encoder (step 6).
+## The slope: display per scene luminance below the knee (1 / DAY_EXPOSURE: the field at Y_b of display white).
 const DISPLAY_SLOPE := 1.0 / Atmosphere.DAY_EXPOSURE
-## [call: SDR camera practice puts the knee point at ~80-90 % of the signal; here in display-linear luminance] The
-## display value where the shoulder starts.
-const DISPLAY_KNEE := 0.8
+## [S: ITU-R BT.2408] Display white over the adopted (reference) white, scene units.
+const DISPLAY_HEADROOM := 1000.0 / 203.0
+## The knee (display value) the shoulder's two conditions give: 1 / (slope x DAY_EXPOSURE x headroom).
+const DISPLAY_KNEE := 1.0 / (DISPLAY_SLOPE * Atmosphere.DAY_EXPOSURE * DISPLAY_HEADROOM)
 ## Fidelity flag: the fixed display curve (true) or AgX's grey curve as before T13 (false; --display_curve=agx).
 static var display_linear := not OS.get_cmdline_user_args().has("--display_curve=agx")
 
 
-## Step 1's grey curve: the fixed display mapping (linear to the knee, exponential shoulder) or AgX's (display_linear off).
+## Step 1's grey curve: the fixed display mapping (linear to the knee, log-quadratic shoulder) or AgX's (display_linear off).
 static func display_curve(y: float, p: PackedFloat64Array) -> float:
 	if not display_linear:
 		return curve(y, p)
-	y = maxf(y, 0.0)
-	var linear := DISPLAY_SLOPE * y
+	var linear := DISPLAY_SLOPE * maxf(y, 0.0)
 	if linear <= DISPLAY_KNEE:
 		return linear
-	return 1.0 - (1.0 - DISPLAY_KNEE) * exp(-(linear - DISPLAY_KNEE) / (1.0 - DISPLAY_KNEE))
+	var u := log(linear / DISPLAY_KNEE)
+	var span := -2.0 * log(DISPLAY_KNEE)
+	if u >= span:
+		return 1.0
+	return DISPLAY_KNEE * exp(u - u * u / (2.0 * span))
 
 
 ## The display curve's inverse on [0, 1).
@@ -108,7 +115,9 @@ static func display_curve_inverse(d: float, p: PackedFloat64Array) -> float:
 	d = clampf(d, 0.0, CURVE_INVERSE_MAX)
 	if d <= DISPLAY_KNEE:
 		return d / DISPLAY_SLOPE
-	return (DISPLAY_KNEE - (1.0 - DISPLAY_KNEE) * log((1.0 - d) / (1.0 - DISPLAY_KNEE))) / DISPLAY_SLOPE
+	var span := -2.0 * log(DISPLAY_KNEE)
+	var f := log(d / DISPLAY_KNEE)
+	return DISPLAY_KNEE * exp(span * (1.0 - sqrt(maxf(1.0 - 2.0 * f / span, 0.0)))) / DISPLAY_SLOPE
 
 
 ## The allenwp curve's parameters for an AgX contrast and white (Godot's environment_storage.cpp, SDR output max 1):
