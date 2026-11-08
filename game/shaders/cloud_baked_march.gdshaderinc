@@ -223,6 +223,10 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir,
 	}
 }
 
+// [E] Camera heights (m) over which the volume takes the air above the bright top (cloud_far_bright_top_transmittance):
+// none from the ground and in the cloud layer, fully where the flat levels take over (40 km).
+const vec2 CLOUD_BAKED_BRIGHT_TOP_HEIGHT_M = vec2(20000.0, 40000.0);
+
 // One set's clouds along the ray: the volume's march over its band segment [d0, d1] (volume: the segment exists; faded
 // out toward the flat levels) and the flat levels behind it. Out: premultiplied colour with the air in front, the
 // background's transmittance and the alpha-weighted cloud distance.
@@ -242,7 +246,20 @@ void cloud_baked_set(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float d
 		if (alpha > 1.0e-6) {
 			vec3 air_transmittance;
 			vec3 air_light = atm_to_point_offset(eye + dir * cloud_m, air_transmittance);
-			color = air_transmittance * radiance + alpha * air_light;
+			// the air above the bright top (cloud_far_bright_top_transmittance, look fixes T7 step 3) for a camera above
+			// the air's bulk looking down - faded in over CLOUD_BAKED_BRIGHT_TOP_HEIGHT_M so that the volume meets the
+			// flat levels at their 40-60 km takeover; the cover the volume's alpha, the in-cloud depth its -ln(1 - alpha)
+			// (a deck's; broken cloud's albedo underestimated) [E]
+			vec3 p_c = atmosphere_camera_hi + atmosphere_camera_lo + eye + dir * cloud_m;
+			float mu_c = -dot(dir, cloud_geodetic_up(p_c));
+			float w_top = smoothstep(CLOUD_BAKED_BRIGHT_TOP_HEIGHT_M.x, CLOUD_BAKED_BRIGHT_TOP_HEIGHT_M.y,
+					cloud_camera_height_m) * step(CLOUD_FAR_MU_MIN, mu_c);
+			vec3 seen = air_transmittance;
+			if (w_top > 0.0) {
+				seen = mix(air_transmittance, cloud_far_bright_top_transmittance(air_transmittance, mu_c, alpha,
+						-log(max(1.0 - alpha, 1.0e-6))), w_top);
+			}
+			color = seen * radiance + alpha * air_light;
 		}
 	}
 	// The flat levels from where their weight starts, inside the 20 km shell: behind the volume by the hand-over's

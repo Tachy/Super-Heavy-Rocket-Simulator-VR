@@ -388,6 +388,18 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
     0 beyond the tables' last level [E] (`cloud_far_meso_cover`). The flat levels take both where the shapes' pixel
     pattern has faded (weight 1 - w_pattern), so the 40-60 km hand-over (w_pattern 1 there) is unchanged and the
     scaled-space switch (w_pattern 0 there) meets the far field. Numbers: Validation "Sub-grid structure";
+  - **the air above a bright top** (look fixes T7 step 3, T5 review I2 "pink clouds"): the light tables are built over a
+    ground of albedo 0.1, so the cloud missed (1) its own light scattered back down by the air above it and (2) the
+    diffuse transmission of its light toward the camera - both bluer than the cloud. `cloud_far_bright_top_transmittance`
+    replaces T_air for the cloud's radiance: conservative Eddington two-stream for the air above (tau = -mu ln T_air per
+    channel, ozone counted as scattering), spherical albedo s = tau / (4/3 + tau), (1 - 0.1 s) / (1 - A s) with A the
+    albedo the air sees (cover x the Eddington slab's of the in-cloud depth + the clear part's 0.1), total transmission
+    ((2/3 + mu) + (2/3 - mu) T) / (4/3 + tau) [S: Eddington solution, Liou 2002 ch. 6]. In the far field, the flat
+    levels and - faded in over camera heights 20-40 km for views downward (`CLOUD_BAKED_BRIGHT_TOP_HEIGHT_M` [E]; cover
+    = the march's alpha, depth -ln(1 - alpha): a broken field's albedo underestimated) - the baked volume, so it meets
+    the flat levels at the 40-60 km takeover; no change from the ground. EPIC 2025-03-20: the brightest 5 % of the disc
+    B/R 0.960 -> 1.008 (EPIC 1.008), `screenshots/look_fixes/t7/sheet_step3_pink_epic1430.png`; a tau-10 deck from
+    8600 km +7.5 % luminance; the TOA Sun unchanged;
   - composite as the cloud pass: alpha = C_v (1 - exp(-tau / (C_v mu))), colour = T_air C_v L + alpha S_air over
     (1 - alpha) x the ground; the ground lit through the column (`cloud_ground_light`'s column tier, the terrain's
     beyond 140 km: direct, the Sun's diffuse part, the sky's; the Moon likewise).

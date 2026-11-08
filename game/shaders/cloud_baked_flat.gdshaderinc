@@ -516,7 +516,8 @@ bool cloud_baked_flat_shade(int si, CloudRay ray, vec3 dir, vec3 eye, float t_fr
 	}
 	vec3 air_transmittance;
 	vec3 air_light = atm_to_point_offset(eye + dir * t_hit, air_transmittance);
-	color = air_transmittance * radiance * cov + alpha * air_light;
+	// the air above the bright top (cloud_far_bright_top_transmittance, look fixes T7 step 3)
+	color = cloud_far_bright_top_transmittance(air_transmittance, mu, cov, tau_light) * radiance * cov + alpha * air_light;
 #ifdef CLOUD_BAKED_DIAG_LEVEL
 	color = alpha * vec3(fract(cloud_baked_diag_level), floor(cloud_baked_diag_level) / 3.0, t_col.y / 10000.0);
 #endif

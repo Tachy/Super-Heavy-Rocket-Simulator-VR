@@ -145,6 +145,34 @@ float cloud_far_meso_cover(vec3 p, float cover, float footprint_m) {
 	return cloud_far_normal_cdf(a + k * z);
 }
 
+// The air above a bright cloud top (look fixes T7 step 3, T5 review I2: the clouds read pink). The cloud is lit by the
+// direct Sun and the sky irradiance table, seen through the direct Beer transmittance plus the table in-scatter; the
+// tables are built over a ground of albedo CLOUD_FAR_TABLE_GROUND_ALBEDO, so two terms of a bright top are missing, both
+// bluer than the cloud: (1) the cloud's own reflected light scattered back down by the air above it (the multiple
+// reflection between the top and the air, 1 / (1 - A s) instead of 1 / (1 - A_t s)), (2) the cloud light scattered
+// toward the camera by the air above it (its diffuse transmission; the direct Beer term alone is a dark surface's).
+// Conservative two-stream (Eddington, g = 0: Rayleigh) for the air above the cloud of vertical depth tau (from the
+// view's Beer transmittance T and cosine mu, tau = -mu ln T; absorption by ozone counted as scattering: Chappuis tau
+// ~0.03): spherical albedo s = tau / (4/3 + tau), total transmission toward mu of an extended Lambertian source (by
+// reciprocity a beam's) T_tot = ((2/3 + mu) + (2/3 - mu) T) / (4/3 + tau) [S: the Eddington solution, e.g. Liou 2002,
+// An Introduction to Atmospheric Radiation, ch. 6; Kokhanovsky 2006, Cloud Optics]. A the albedo the air sees: the
+// cloudy part's (Eddington slab of the in-cloud depth, g of the phase function) over the clear part's table ground.
+// Expected (review I2, tau_R 0.15 blue / 0.04 red above a 2 km top, A 0.6-0.75): cloud B/R +8-10 %.
+const float CLOUD_FAR_TABLE_GROUND_ALBEDO = 0.1;  // config/atmosphere/earth_optics.toml ground_albedo (the tables')
+
+// The factor for the cloud's radiance seen through the air (replaces the Beer transmittance t_air): mu the view's
+// cosine at the cloud, cover its cover, tau_cloud the in-cloud depth.
+vec3 cloud_far_bright_top_transmittance(vec3 t_air, float mu, float cover, float tau_cloud) {
+	vec3 t = clamp(t_air, vec3(1.0e-6), vec3(1.0));
+	vec3 tau = -log(t) * mu;
+	vec3 s = tau / (4.0 / 3.0 + tau);
+	float x = 0.75 * (1.0 - cloud_asymmetry_g) * tau_cloud;
+	float albedo = mix(CLOUD_FAR_TABLE_GROUND_ALBEDO, x / (1.0 + x), clamp(cover, 0.0, 1.0));
+	vec3 down = (1.0 - CLOUD_FAR_TABLE_GROUND_ALBEDO * s) / (1.0 - albedo * s);
+	vec3 total = ((2.0 / 3.0 + mu) + (2.0 / 3.0 - mu) * t) / (4.0 / 3.0 + tau);
+	return max(total, t_air) * down;
+}
+
 // The scattering angle (x), its folded azimuth about the light's propagation from the vertical axis (y) and
 // 1 - cos(theta) (z) of a view (core cloud_sun_frame_angles; cloud_scattering_source_mc's geometry with the axis up).
 vec3 cloud_far_angles(vec3 light_dir, vec3 view_prop, vec3 up) {
@@ -428,5 +456,6 @@ vec4 cloud_far_layer(vec3 g, vec3 sky_eclipse, float footprint_m) {
 	vec3 radiance = cloud_far_cloudy_radiance(p, up, view_prop, tau, column.y, sky_eclipse);
 	vec3 air_transmittance;
 	vec3 air_light = atm_to_point_offset(p - camera, air_transmittance);
-	return vec4(air_transmittance * radiance * cover + alpha * air_light, alpha);
+	vec3 seen = cloud_far_bright_top_transmittance(air_transmittance, mu, cover, tau);  // (the air above: step 3)
+	return vec4(seen * radiance * cover + alpha * air_light, alpha);
 }
