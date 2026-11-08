@@ -601,6 +601,12 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   (a) *No takeover: the volume at every height* (`cloud_baked_set`, T7c fix 2): the volume's march draws its levels
   at every camera height, the flat levels behind it by the hand-over weight at its extent
   (`cloud_baked_flat_weight_at`) and beyond - so nothing changes over 40-60 km at any view or Sun angle, for both eyes.
+  The hand-over is a cross-fade of the two renders (T7c fix 3): the volume's extinction is kept, each march step's
+  light and opacity enter by keep = 1 - w, the flat levels by w behind the volume's part in front of the band
+  (`cloud_baked_march` front_t) - the band's mean cover and brightness are (1 - w) x the volume's + w x the flat levels'.
+  Until fix 3 the volume's extinction was scaled by 1 - w: thick cumulus stayed nearly opaque deep into the band with
+  the flat levels' cloud added in their gaps (Gulf from 300 km, 45 deg: 250-330 km 121 codes vs volume 112 / flat 115,
+  a bright ring; now 115), the small cumulus giving way over the band's last part.
   The marched levels are the footprint's at every height (`CloudBaked.first_level` = `shadow_first`; until fix 2 none
   above 62 km, `VOLUME_TOP_M` - its forced re-bake changed the view 2-3 x as much as 1 km of climb at 45-60 deg off
   nadir, a new voxel phase); from 40 km the flat levels are
@@ -983,11 +989,23 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   km (<= 0.36 codes / km); the Sc deck 80 -> 100 km -4 %; obliquely up to 0.96 % / km, the Sc deck at 60 deg off nadir
   8.6 / 7.3 codes per 5 km at 35-45 km (the haze and the far deck toward the horizon) - gradual, no step. Single ground
   points move 10-24 % over 39.5 -> 60.5 km off nadir, as much below the band (cloud_far_check 5b).
-- **The volume's coarse levels from orbit (look fixes T7c / fix 2)**: from ~400 km the volume's coarse voxel levels
-  draw blocky small cumulus within its +-410 km and meet the flat levels' softer pattern beyond - a visible change of
-  texture across the volume's extent (`t7c_fix2/sheet_edge_410km.png`; T7c's column showed the same, before T7c the
-  flat pattern drew everything above 60 km). The march there costs +0.25 ms in VR at 400 km. Open: a smoother coarse
-  level (or the flat pattern within the extent from a footprint on).
+- **The volume's coarse levels from orbit (look fixes T7c fix 2 / fix 3)**: from ~150 km the volume's coarse voxel
+  levels draw small, blocky cumulus within its +-410 km, the flat levels a softer pattern of larger patches beyond (4 x 4
+  regions of the same ground 10-18 codes apart, Gulf 300-500 km). Fix 3 made the hand-over a cover- and
+  brightness-conserving cross-fade over the band (1 octave from orbit, 205-410 km; `t7c_fix3/sheet_edge_ab.png`): no
+  bright ring, the texture changes gradually - still visible as a softer ring (user 2026-11-08: accepted for now). A
+  two-octave band (102-410 km) was tried and made the climb's region steps worse (Gulf 45 deg worst 5.3 -> 8.3 codes;
+  reverted). Open: the same structure scale in both (the flat pattern as the union of the volume's deflated heights, or
+  a smoother coarse level). The fly-up acceptance check (`cloud_flyup_check.gd`, Validation) guards today's state.
+- **Sun beam rule fitted with detail levels off (T7c review I2, open)**: the game's near shadows (preset detail levels)
+  are 4-5 % (Sun 45 deg) / ~10 % (Sun 8 deg) darker than the core's rule (`cloud_sun_beam_*`, fitted at detail 0);
+  `STARSIM_GAME_DETAIL=1` cloud_check fails 3 shape cases at 8 deg and the vehicle probe's worst point (0.20 vs 0.15).
+  A detail-on refit is open: the detail-on slant table (`STARSIM_GAME_DETAIL=1 STARSIM_SLANT_TABLE=1`, `tools/validation/cloud_fits/beam_slant_table_detail_on_2026-11-08.txt`)
+  gives n0 0.682, b 0.0395, p 1.58 by `fit_beam.py` but only rms 0.025 / worst 0.061 (committed rule on it: rms 0.047,
+  worst 0.089) - the rule's form does not fit the detail-on shadows well; a detail term or another form is needed.
+- **Region steps at 35-45 km (T7c fix 2, open)**: the Sc deck at 60 deg off nadir 8.6 / 7.3 codes per 5 km, the Gulf at
+  a low Sun 5.1 (35-40 km) - gradual; suspected the level band's growth (20-60 km) and the bright-top term's fade
+  (20-40 km) toward the horizon; not investigated further.
 - **The volume's cover depends on its level (look fixes T7c)**: the fine level matches the data, the coarse levels
   carry a gain fitted to slabs (`CLOUD_BAKED_LEVEL_COVER_GAIN`), the coarsest (from ~400 km) smear a faint margin over a
   wider area (alpha > 0.05 cover 0.34 at f 0.2, mean alpha kept). Real sites from 50 km within -14 / +11 % of the

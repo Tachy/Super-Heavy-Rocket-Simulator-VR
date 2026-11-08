@@ -120,7 +120,7 @@ float cloud_baked_beta_gap(int si, CloudBakedPoint q, vec3 offset, float footpri
 		}
 	}
 #endif
-	return cloud_baked_extinction(a) * q.keep;
+	return cloud_baked_extinction(a);  // (the hand-over's keep weights the march's steps, cloud_baked_march)
 }
 
 float cloud_baked_beta(int si, CloudBakedPoint q, vec3 offset, float footprint_m) {

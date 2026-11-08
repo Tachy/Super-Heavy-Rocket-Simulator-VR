@@ -3,13 +3,23 @@
 
 #ifdef CLOUD_BAKED_MARCH
 // The march of one set: dir (Earth-local unit) from eye over [d0, d1] of the band, from level k_min on (the marched
-// levels, cloud_baked_set). Out: radiance (before the air in front), the
-// background's transmittance and the alpha-weighted distance.
+// levels, cloud_baked_set). The hand-over to the flat levels at the volume's extent (T7c fix 3) is a cross-fade of the
+// two renders, not a thinning of the volume: the volume's extinction is kept, every step's light and opacity enter by
+// its keep = 1 - the flat levels' weight there (cloud_baked_flat_weight_at), and the flat levels are added behind by
+// their weight (cloud_baked_set) - the mean cover and brightness of the band are (1 - w) x the volume's + w x the flat
+// levels' (scaling the extinction by keep left thick cumulus nearly opaque deep into the band with the flat levels'
+// cloud added in their gaps, the volume's small cumulus then giving way over the band's last part: the 410 km ring).
+// Out: radiance (before the air in front; keep-weighted), the keep-weighted opacity alpha_w, the background's
+// transmittance where the band starts (front_t: the volume's own in front of the first point of keep < 1, its final
+// transmittance when the ray never reaches the band) and the keep- and alpha-weighted distance.
 void cloud_baked_march(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float d1, int k_min,
-		out vec3 radiance, out float transmittance_bg, out float weighted) {
+		out vec3 radiance, out float alpha_w, out float front_t, out float weighted) {
 	radiance = vec3(0.0);
-	transmittance_bg = 1.0;
+	float transmittance_bg = 1.0;
+	alpha_w = 0.0;
+	front_t = -1.0;
 	weighted = 0.0;
+	float keep = 1.0;
 	CloudBakedRay g = cloud_baked_ray(si, eye, dir);
 	vec3 camera = atmosphere_camera_hi + atmosphere_camera_lo;
 	float k_sc = cloud_transport_scale();
@@ -57,6 +67,10 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float
 		// scaled by 1 - w; the flat levels' alone from w = 1 on (w grows along the ray: x, y and the footprint grow with t
 		// from the anchor).
 		CloudBakedPoint q = cloud_baked_point(si, gx, gy, h, pixel_angle * t, k_min);
+		if (q.keep < 1.0 && front_t < 0.0) {
+			front_t = transmittance_bg;
+		}
+		keep = q.keep;
 		if (q.keep <= 0.0) {
 			break;
 		}
@@ -208,18 +222,22 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float
 		float true_step = exp(-tau);
 		if (transmittance_sc >= CLOUD_MIN_SCALED_TRANSMITTANCE) {
 			float j_sun = phase * light.x + CLOUD_BAKED_J_MAX * light.y;
-			radiance += transmittance_sc * sky_irradiance * (CLOUD_BAKED_J_MAX * light.z) * (1.0 - scaled_step) / k_sc
-					+ transmittance_l * sun_irradiance * j_sun * (1.0 - light_step) / w_light;
+			radiance += keep * (transmittance_sc * sky_irradiance * (CLOUD_BAKED_J_MAX * light.z) * (1.0 - scaled_step)
+					/ k_sc + transmittance_l * sun_irradiance * j_sun * (1.0 - light_step) / w_light);
 		}
 		transmittance_sc *= scaled_step;
 		transmittance_l *= light_step;
 		float next_bg = transmittance_bg * true_step;
-		weighted += d * (transmittance_bg - next_bg);
+		alpha_w += keep * (transmittance_bg - next_bg);
+		weighted += keep * d * (transmittance_bg - next_bg);
 		transmittance_bg = next_bg;
 		if (transmittance_sc < CLOUD_MIN_SCALED_TRANSMITTANCE
 				&& !(sun_ray && transmittance_bg > CLOUD_SUN_MIN_TRANSMITTANCE)) {
 			break;
 		}
+	}
+	if (front_t < 0.0) {
+		front_t = transmittance_bg;
 	}
 }
 
@@ -265,19 +283,20 @@ void cloud_baked_set(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float d
 #ifdef CLOUD_BAKED_FLAT_ONLY
 	march = false;  // (diagnostics: the flat levels alone)
 #endif
+	float front_t = 1.0;  // the volume's transmittance in front of the hand-over band (cloud_baked_march)
 	if (march) {
 		vec3 radiance;
 		float weighted;
-		cloud_baked_march(si, ray, dir, eye, d0, d1, k_volume, radiance, transmittance, weighted);
-		alpha = 1.0 - transmittance;
+		cloud_baked_march(si, ray, dir, eye, d0, d1, k_volume, radiance, alpha, front_t, weighted);
+		transmittance = 1.0 - alpha;
 		cloud_m = alpha > 1.0e-6 ? weighted / alpha : 0.0;
 		if (alpha > 1.0e-6) {
 			color = cloud_baked_march_color(dir, eye, radiance, alpha, cloud_m);
 		}
 	}
-	// The flat levels from where their weight starts, inside the 20 km shell: behind the volume by the hand-over's
-	// weight.
-	if (baked.sets[si].outer.x < 0.5 || transmittance < CLOUD_BAKED_FLAT_MIN_TRANSMITTANCE) {
+	// The flat levels from where their weight starts, inside the 20 km shell: by the hand-over's weight behind the
+	// volume's part in front of the band (front_t), cross-faded with the volume's band (T7c fix 3).
+	if (baked.sets[si].outer.x < 0.5 || front_t < CLOUD_BAKED_FLAT_MIN_TRANSMITTANCE) {
 		return;
 	}
 #ifdef CLOUD_BAKED_VOLUME_ONLY
@@ -304,11 +323,11 @@ void cloud_baked_set(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float d
 	if (alpha_f > 0.0) {
 		float w = cloud_baked_flat_weight_at(si, cloud_baked_lod(si, max(abs(g.gx0 + dist_f * g.gdx),
 				abs(g.gy0 + dist_f * g.gdy)), pixel_angle * dist_f));
-		float alpha_w = alpha_f * w;
-		float alpha_all = alpha + transmittance * alpha_w;
-		cloud_m = alpha_all > 1.0e-6 ? (alpha * cloud_m + transmittance * alpha_w * dist_f) / alpha_all : 0.0;
-		color += transmittance * w * color_f;
-		transmittance *= 1.0 - alpha_w;
+		float alpha_fw = front_t * alpha_f * w;
+		float alpha_all = alpha + alpha_fw;
+		cloud_m = alpha_all > 1.0e-6 ? (alpha * cloud_m + alpha_fw * dist_f) / alpha_all : 0.0;
+		color += front_t * w * color_f;
+		transmittance = max(1.0 - alpha_all, 0.0);
 	}
 }
 
