@@ -45,8 +45,8 @@ vehicles still fly through `Us76Atmosphere`).
 - **Multiple scattering.** Five orders plus a geometric tail of the higher orders (Hillaire 2020, Eq. 9): tail = last
   order x q / (1 - q), q = last / previous per texel and wavelength, capped at 0.75. Fidelity flag
   `multiple_scattering_tail` in `earth_optics.toml` (true; false truncates like Bruneton; part of the input hash; test:
-  on in the shipped config and it changes the tables). 5 vs 7 orders with the tail: within 0.20 % (sky illuminance
-  0.03 %).
+  on in the shipped config and it changes the tables). 5 vs 7 orders with the tail: within 0.03 % (sky illuminance
+  0.001 %; before T9b's phase functions 0.20 % / 0.03 %).
 - **Tables and cache.** Transmittance 1024 x 1024, scattering (Rayleigh + all multiple orders), single Mie and single
   Rayleigh (static clouds Task 9b: the first order alone, for the cloud shadows on the air, `weather-clouds.md`) 8 nu x
   32 mu_s x 128 mu x 64 r, irradiance 64 x 16; mu_s_min = cos 120 deg (twilight to -18 deg for the star threshold).
@@ -143,19 +143,30 @@ vehicles still fly through `Us76Atmosphere`).
 
 ## Validation
 
-- Core `[atmosphere]` (20 ctest cases, incl. aerial perspective to a point before the entry): Rayleigh coefficient and
+- Core `[atmosphere]` (24 ctest cases, incl. aerial perspective to a point before the entry): Rayleigh coefficient and
   vertical optical depth vs Bucholtz 1995 (1 % / 2 %); transmittance vs a direct optical-depth integral (3.24e-3) and
   single scattering vs a brute-force raymarch (1.07e-3); off-texel lookups 7.1e-3, horizon seam 9.2e-3; multiple
-  scattering 5 vs 7 orders 1.96e-3; direct sun at air mass 1.5 vs ASTM G-173 (400-700 nm) -2.1 %, runtime direct beam
-  vs raymarch < 0.05 %; zenith at Sun 60 deg 3819 cd/m^2 (B/R 1.97), horizontal illuminance at Sun zenith 125.4 klx,
+  scattering 5 vs 7 orders 2.6e-4; direct sun at air mass 1.5 vs ASTM G-173 (400-700 nm) -2.1 %, runtime direct beam
+  vs raymarch < 0.05 %; zenith at Sun 60 deg 4267 cd/m^2 (B/R 1.85; 3819 / 1.97 before T9b), horizontal illuminance at Sun zenith 123.8 klx (continental set),
   sky at 50 km 7.1e-4 x the ground, twilight zenith bluer than noon (B/R 3.12 at -4 deg); ellipsoid mapping < 1 mm;
   cache round trip / damage / stale hash / failed write.
 
+- Aerosol sets and aureole (look-fixes T9b; core: "Both aerosol sets load with their sourced values", "The aerosol phase
+  functions are normalised and follow the Mie aureole" (P/P(25) at 2 / 5 / 10 deg within 30 % of Lorenz-Mie), "The
+  maritime weight blends the two aerosol table sets" (w 0 / 1 = one set, linear between); game: smoke checks the
+  maritime set, atmosphere_check 88 samples at the pad's weight). Measured in renders (`tools/validation/
+  aureole_profile.py`, full Moon from the pad, fov 60, linear display, sky at theta over 25 deg): 2 / 5 / 10 / 15 deg
+  5.1 / 2.2 / 1.63 / 1.35 (before 8.1 / 5.3 / 2.65 / 1.67; Krisciunas & Schaefer 1991 2.3 / 2.0 / 1.65 / 1.37, whose
+  exponential Mie term underestimates the forward peak below ~5 deg); continental alone 3.3 / 1.77 / 1.49 / 1.30,
+  maritime 7.1 / 2.6 / 1.79 / 1.40. Far noon clouds (displayed B/R of the horizon band, `horizon_sweep_noon_*`):
+  0 / 300 / 1000 / 2000 m 0.774 / 0.758 / 0.783 / 0.826 (before 0.619 / 0.616 / 0.681 / 0.762; continental alone
+  0.719 at 0 m, maritime alone 0.834).
 ## Open points and known limits
 
 - Clouds on the true-space Earth (terrain, cloud pass), the scaled-space Earth (`earth_clouds.gdshader`, the far
   field) and the vehicles' light (`weather-clouds.md`); no weather-dependent
-  aerosols, no airglow; one aerosol set for the whole Earth; one Sun light (other bodies in
+  aerosols, no airglow; two aerosol types blended by one observer weight (no per-direction aerosol: a coast seen from the
+  beach takes the mixed value both ways; no dust, smoke or season); one Sun light (other bodies in
   view, e.g. the booster far below the ship or the tower seen from orbit, get the followed point's light); the totality
   approximation; night vision's limits (above); the 256 x 128 Earth mesh in scaled space sits up to ~0.6 km below the
   ellipsoid (-2 % in its aerial perspective).

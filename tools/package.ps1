@@ -180,7 +180,7 @@ Copy-Item $agility (Join-Path $GodotBin "D3D12Core.x86_64.dll") -Force
 Step "Core + GDExtension"
 & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "build.ps1") -NoTests
 if ($LASTEXITCODE -ne 0) { throw "Core build failed." }
-# The atmosphere tables (M8, ~84 MB, ~1 min): precomputed into data/atmosphere, which the smoke test uses and the base
+# The atmosphere tables (M8; two aerosol sets, 2 x 117.5 MB, ~2 min): precomputed into data/atmosphere, which the smoke test uses and the base
 # data mirror below ships. The game finds the file by its input hash (a stale file would be recomputed at runtime).
 Step "Atmosphere tables"
 $out = Run (Join-Path $Build "core\atmosphere_tables.exe") @("--config", (Join-Path $Root "config"), "--out", (Join-Path $Data "atmosphere"))
