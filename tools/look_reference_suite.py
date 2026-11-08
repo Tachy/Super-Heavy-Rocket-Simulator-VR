@@ -156,6 +156,27 @@ def m_sun(a):
             "ground_luma": float(luma(rows(a, 0.80, 0.98)).mean())}
 
 
+def m_terminator(a):
+    """Day/night boundary (measured, no gate: T9b changes the direct beam's wavelengths, user-approved 2026-11-08): the
+    lit Earth pixels (luma above 50 % of the 95th percentile of the bright object) are the day side; the band pixels
+    between 5 % and 40 % of it the terminator. Its luminance relative to the day side, its B/R (linear) against the day's,
+    its share of the object and its warm share (R > B). Physically a narrow (~500 km for Sun < 5 deg) dark orange band
+    fading into night, not a bright red rim."""
+    y = luma(lin(a))
+    lit = y > 1e-4
+    ref = np.percentile(y[lit], 95) if lit.any() else 1.0
+    day = y > 0.5 * ref
+    band = (y > 0.05 * ref) & (y < 0.4 * ref)
+    l = lin(a)
+    def ratio(m):
+        return float(l[m][:, 2].mean() / max(l[m][:, 0].mean(), 1e-9)) if m.any() else float("nan")
+    return {"band_rel_luminance": float(y[band].mean() / max(y[day].mean(), 1e-9)) if band.any() else float("nan"),
+            "band_peak_rel": float(np.percentile(y[band], 95) / max(y[day].mean(), 1e-9)) if band.any() else float("nan"),
+            "band_b_over_r": ratio(band), "day_b_over_r": ratio(day),
+            "band_share": float(band.sum() / max((band | day).sum(), 1)),
+            "band_warm_share": float((l[band][:, 0] > l[band][:, 2]).mean()) if band.any() else float("nan")}
+
+
 def m_cockpit(a):
     return {"frame_luma": float(luma(a.reshape(-1, 3)).mean()), "clipped": clipped(a.reshape(-1, 3))}
 
@@ -240,6 +261,13 @@ def _variants():
 
 
 SCENES.update(_variants())
+# The terminator (orchestrator 2026-11-08, measured values only, no gates until T9b): the half Earth from the lunar night
+# at 10 deg, and the evening terminator from 400 km (lat 0, lon 0 at 18:15 UTC: the Sun ~4 deg up behind the camera's
+# west, the terminator ~500 km east; view east, 30 deg down).
+SCENES["terminator_half_earth_f10"] = (LUNAR_NIGHT + ["--lon=45", "--utc=2026-12-01T14:00:00", "--look_at_earth",
+                                                       "--fov=10"], m_terminator, {})
+SCENES["terminator_400km"] = (["--lat=0", "--lon=0", "--height=400000", "--utc=2026-11-07T18:15:00", "--hide_ui", WEATHER,
+                               "--azimuth=90", "--elevation=-30", "--fov=60"], m_terminator, {})
 CROP_SCENES = [n for n in SCENES if n.endswith(("_vr", "_f10"))]
 GAPS = ["cockpit_night_lamps: cockpit_shots.gd has no --utc / night case (T10 note) - not automated yet"]
 
@@ -325,8 +353,8 @@ def main():
             if not ok:
                 failed.append(f"{name}.{k}")
         results[name] = {"metrics": m, "gates": checks, "log": gain_of(png[:-4] + ".log")}
-        print(f"{name}: " + ", ".join(f"{k} {v['value']:.3f} {'ok' if v['ok'] else 'FAIL'}" for k, v in checks.items()),
-              flush=True)
+        print(f"{name}: " + ", ".join(f"{k} {v['value']:.3f} {'ok' if v['ok'] else 'FAIL'}" for k, v in checks.items())
+              + ("" if checks else " measured " + ", ".join(f"{k} {v:.3f}" for k, v in m.items())), flush=True)
         if name in CROP_SCENES:
             crop(png, os.path.join(OUT, f"{o.label}_crop_{name}.png"))
         if o.compare:
