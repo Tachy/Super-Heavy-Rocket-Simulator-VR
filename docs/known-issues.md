@@ -261,3 +261,11 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 ## Flat touchdown point plan (2026-11-07)
 
 - The touchdown search prefers points within 5 deg (user decision 2026-11-07); the 6-8 deg landings of the lunar sites plan Task 13 (Apollo 11 nightly 4 / 7, 1.69-2.38 m; seed 14 1.51 m) are gone. Two landings just under 5 deg still rock (U-8) just over the 1 m gate: dispersed seed 19 1.04 m on 4.8 deg (`[lunar_campaign][slow]` 15-21 red, 6 / 7) and Apollo 11 nightly seed 2 1.06 m on 4.9 deg (`[nightly]` red, 6 / 7). Campaigns 39 / 41 (was 37 / 41). Accepted by the user 2026-11-07 as real rocking near 5 deg: both stay known reds (gate 1 m not loosened); `docs/subsystems/lunar.md` open points.
+
+## Look fixes T7c fix 3, clouds (2026-11-08)
+
+- Accepted as the current look (user 2026-11-08), guarded by `game/tests/cloud_flyup_check.gd` (recorded baseline):
+  from orbit the volume's small coarse cumulus cross-fade into the flat levels' larger patches over 205-410 km (a soft
+  ring, no bright edge); fly-up region steps above the 4-code target up to 10-12.6 codes at 29-41 km (Gulf, cumulus)
+  and 5-8 codes at 150-1100 km; the Sun beam rule is fitted with detail levels off (game's near shadows 4-10 % darker,
+  `STARSIM_GAME_DETAIL=1` cloud_check fails 4). Details: `docs/subsystems/weather-clouds.md` open points.

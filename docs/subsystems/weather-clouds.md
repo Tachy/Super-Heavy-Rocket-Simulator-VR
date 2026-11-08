@@ -761,6 +761,16 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
 
 ## Validation
 
+- **Fly-up acceptance check** (look fixes T7c fix 3, 2026-11-08; `game/tests/cloud_flyup_check.gd`, run: `docs/setup.md`):
+  the game's render (fixed exposure, analog snapshots) climbing 20 -> 2000 km in 20 % steps along a fixed line of sight
+  to an aim point 1.5 km up - Gulf 26 N 97 W, cumulus 15 N 45 W, Sc deck 20 S 80 W; straight down, 30 / 45 / 60 deg
+  zenith angle (high Sun) and 45 deg at a low Sun. Per step 4 x 4 ground regions of the lower view (same ground size in
+  both images), mean |dL| in sRGB codes, and the regions' mean change per km. Recorded state (the check's baseline,
+  gate = baseline + 2 codes (a rerun moved the worst steps by up to 2.3 codes), global x 1.5; the targets 4 codes / 1.5 % per km reported): worst steps Gulf 10.0 / 5.0 /
+  5.1 / 6.0 / 3.5 codes (0 / 30 / 45 / 60 / low), cumulus 10.2 / 12.6 / 8.4 / 9.4 / 5.7, deck 8.0 / 5.9 / 5.5 / 8.3 /
+  7.1; global <= 1.6 % per km (cumulus 30 deg), else <= 1.3. Where: straight down and 30-60 deg over the Gulf and the
+  cumulus at 29 -> 41 km (open point below), at 45-60 deg and over the deck 150-1100 km (the volume -> flat levels band
+  passing the aim point; the deck's flat pattern at its coarse levels). Log: `screenshots/look_fixes/t7c_fix3/checks/flyup.log`.
 - **Takeover and nadir cover (T7c)** (look fixes T7c, 2026-11-08; `screenshots/look_fixes/t7c/`, scripts there):
   volume alone vs flat levels alone at 50 km straight down, same camera (4 x 4 region mean |dL|, sRGB codes): before
   Gulf analog (26 N 97.157 W, 2025-11-07 15 UTC) 15.7, cumulus ERA5 (15 N 45 W, 2025-03-20 14:28 UTC) 11.4, Sc deck
@@ -1003,9 +1013,11 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   A detail-on refit is open: the detail-on slant table (`STARSIM_GAME_DETAIL=1 STARSIM_SLANT_TABLE=1`, `tools/validation/cloud_fits/beam_slant_table_detail_on_2026-11-08.txt`)
   gives n0 0.682, b 0.0395, p 1.58 by `fit_beam.py` but only rms 0.025 / worst 0.061 (committed rule on it: rms 0.047,
   worst 0.089) - the rule's form does not fit the detail-on shadows well; a detail term or another form is needed.
-- **Region steps at 35-45 km (T7c fix 2, open)**: the Sc deck at 60 deg off nadir 8.6 / 7.3 codes per 5 km, the Gulf at
-  a low Sun 5.1 (35-40 km) - gradual; suspected the level band's growth (20-60 km) and the bright-top term's fade
-  (20-40 km) toward the horizon; not investigated further.
+- **Region steps at 29-45 km (T7c fix 2 / fix 3, open)**: the fly-up check's largest steps are at 29 -> 41 km: straight
+  down Gulf 10.0, cumulus 10.2 codes (35 -> 41 km), cumulus 30 deg 12.6 (29 -> 35 km); fix 2's oblique sheets: Sc deck
+  60 deg 8.6 / 7.3 codes per 5 km, Gulf low Sun 5.1. Suspects (not investigated, user 2026-11-08: wrap up): the
+  bright-top term's fade (CLOUD_BAKED_BRIGHT_TOP_HEIGHT_M 20-40 km), the level band's growth (20-60 km), the 40 km
+  switches (flat levels shaded from the ray's start, the far-fallback march kernels).
 - **The volume's cover depends on its level (look fixes T7c)**: the fine level matches the data, the coarse levels
   carry a gain fitted to slabs (`CLOUD_BAKED_LEVEL_COVER_GAIN`), the coarsest (from ~400 km) smear a faint margin over a
   wider area (alpha > 0.05 cover 0.34 at f 0.2, mean alpha kept). Real sites from 50 km within -14 / +11 % of the
