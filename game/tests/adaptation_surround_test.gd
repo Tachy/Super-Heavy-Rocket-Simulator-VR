@@ -88,6 +88,35 @@ func _initialize() -> void:
 	_check("uniform world: out-of-frame weight added", uniform.last_out_share > 0.2 and uniform.last_out_share < 0.8,
 			str(uniform.last_out_share))
 
+	# The frame's weight is integrated over the frame (review T5b I4): the 50 deg desktop frame's against a fine
+	# integral of the cap's Gaussian over it (1 %), and a 2 deg frame's ~ its solid angle (the Gaussian ~1 there).
+	var desktop_weight := AdaptationSurround.frame_weight(_desktop(Vector3.FORWARD)["eyes"])
+	var fine := 0.0
+	var p := Projection.create_perspective(50.0, 16.0 / 9.0, 0.05, 1000.0)
+	var m := 240
+	var sigma2 := deg_to_rad(AdaptationSurround.SIGMA_DEG)
+	for i in range(m):
+		for j in range(m):
+			var u := (-1.0 + (i + 0.5) * 2.0 / m) / p.x.x
+			var v := (-1.0 + (j + 0.5) * 2.0 / m) / p.y.y
+			var q := u * u + v * v + 1.0
+			var theta := acos(1.0 / sqrt(q))
+			fine += exp(-theta * theta / (2.0 * sigma2 * sigma2)) * (2.0 / m / p.x.x) * (2.0 / m / p.y.y) / (q * sqrt(q))
+	_near("frame weight, 50 deg desktop", desktop_weight, fine, 0.01)
+	var narrow_eyes := [[Basis.IDENTITY, Projection.create_perspective(2.0, 16.0 / 9.0, 0.05, 1000.0)]]
+	var solid := 4.0 * asin(sin(deg_to_rad(1.0)) * sin(atan(tan(deg_to_rad(1.0)) * 16.0 / 9.0)))
+	_near("frame weight, 2 deg", AdaptationSurround.frame_weight(narrow_eyes), solid, 0.01)
+	# A 2 deg frame of a bright small object (the Moon's disc) in a uniform world: the surround no longer drops out
+	# (before: no query direction in the frame, weight 0, "model in frame -1"); it dominates the field, and the
+	# visibility, which a frame that narrow cannot judge, starts open.
+	var narrow := _filled(_uniform_world)
+	var moon_frame := _frame(2.0e4, 100000)
+	var narrow_field := AdaptationMeter.field_log_average(narrow.combine(moon_frame, {"head": Basis.IDENTITY,
+			"eyes": narrow_eyes}), 0)
+	_check("narrow frame: surround kept", narrow.last_out_share > 0.99 and narrow.last_visibility == 1.0,
+			"out-of-frame share %s, visibility %s" % [narrow.last_out_share, narrow.last_visibility])
+	_near("narrow frame: the surround's field", narrow_field, AdaptationMeter.field_log_average(_frame(3000.0, 100), 0), 0.02)
+
 	# Looking up into a sky darker than its horizon: the surround (the brighter horizon band) raises the field above the
 	# frame's own, i.e. the gain falls; looking at the horizon the darker ground and upper sky lower it. The two fields
 	# move toward each other.

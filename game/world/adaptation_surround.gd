@@ -58,6 +58,12 @@ const VISIBILITY_NONE_DECADES := 0.6
 ## [call] Time constant (s) of the low-pass on the disagreement in decades: slower than a head turn, as fast as the eye's
 ## adaptation steps (a cabin entered by walking fades in about this time; a view jump restarts it).
 const VISIBILITY_TIME_S := 1.0
+## [call] A frame with fewer query directions inside than this (narrower than ~15 deg) is too narrow to compare with the
+## model (I4): it keeps the visibility judged last (a fresh view: open).
+const MIN_QUERIES_IN_FRAME := 3
+## [call] The frame's angular weight (frame_weight) on this many NDC cells per axis and view (1 % against the analytic
+## cap at 50 deg).
+const FRAME_GRID := 24
 ## The model's in-frame histogram as integer counts for AdaptationMeter.field_log_average (resolution 1e-6 of the weight).
 const MODEL_COUNTS := 1.0e6
 ## [call] Main-thread time (us) a view jump's complete store may take per frame (a penumbra costs ~56 us per cell, 32 ms in
@@ -69,7 +75,8 @@ const IDLE_REFRESH_EVERY := 8
 static var enabled := not OS.get_cmdline_user_args().has("--frame_only_adaptation")
 
 ## Diagnostics of the last combine: the visibility, the out-of-frame share of the field's weight, the model's in-frame
-## field (cd/m^2; 0 black, -1 none), the frame's own field (cd/m^2).
+## field (cd/m^2; 0 black, -1 none), the frame's own field (cd/m^2) - both the visibility's statistic (the cut of the
+## whole weight, black included), not the field the rule uses (review T5b M1).
 var last_visibility := 0.0
 var last_out_share := 0.0
 var last_model_in_cd_m2 := -1.0
@@ -84,6 +91,7 @@ var _query_dirs := PackedVector3Array()  ## head space (-Z forward)
 var _query_weights := PackedFloat64Array()  ## w(theta) x solid angle
 var _in_frame := PackedByteArray()
 var _in_frame_key := []
+var _frame_weight_value := 0.0
 var _basis := Basis.IDENTITY  ## the complete store's axes (render world): y the local vertical
 var _rgb := PackedVector3Array()
 var _valid := false
@@ -217,13 +225,17 @@ func _combine(counts: PackedInt32Array, view: Dictionary, dt_s: float) -> Packed
 	var weight_in: float = _lookup[0]
 	last_model_in_cd_m2 = _lookup[1]
 	var outside: Dictionary = _lookup[2]
+	var queries_in: int = _lookup[3]
 	if weight_in <= 0.0:
 		return counts
-	var target := decades_between(last_frame_field_cd_m2, last_model_in_cd_m2)
-	if target < 0.0:
-		return counts
-	_decades = target if _decades < 0.0 else lerpf(_decades, target, 1.0 - exp(-dt_s / VISIBILITY_TIME_S))
-	last_visibility = visibility_of_decades(_decades)
+	if queries_in >= MIN_QUERIES_IN_FRAME:
+		var target := decades_between(last_frame_field_cd_m2, last_model_in_cd_m2)
+		if target < 0.0:
+			return counts
+		_decades = target if _decades < 0.0 else lerpf(_decades, target, 1.0 - exp(-dt_s / VISIBILITY_TIME_S))
+	# A frame too narrow for the comparison (I4: a 2 deg view of the Moon holds no query direction, its field is the
+	# Moon's disc, which the model does not draw) keeps the visibility judged last; a fresh view starts open.
+	last_visibility = visibility_of_decades(maxf(_decades, 0.0))
 	if last_visibility <= 0.0 or outside.is_empty():
 		return counts
 	var scale := frame_total / weight_in * last_visibility
@@ -240,12 +252,18 @@ func _combine(counts: PackedInt32Array, view: Dictionary, dt_s: float) -> Packed
 	return out
 
 
-## The query directions through the store for a head orientation in the store's axes: [weight in frame, lit weight in
-## frame, the model's field over the in-frame directions (cd/m^2; the frame's statistic), the lit out-of-frame weight by
-## histogram index {bin: weight} (photopic bins, then the scotopic ones at + HISTOGRAM_BINS)].
+## The query directions through the store for a head orientation in the store's axes: [the frame's weight (the
+## angular weight integrated over the frame, _frame_weight), the model's field over the in-frame directions (cd/m^2;
+## the frame's statistic; at the view axis when no query direction is in the frame), the lit out-of-frame weight by
+## histogram index {bin: weight} (photopic bins, then the scotopic ones at + HISTOGRAM_BINS), the number of query
+## directions in the frame]. The out-of-frame query weights are scaled so frame + outside = the cap's integral (I4: with
+## the frame's weight from the query directions, a frame narrower than their spacing had weight 0 and the surround dropped
+## out; now the frame's weight is integrated over the frame itself, and the outside keeps the rest of the cap).
 func _look_up(to_store: Basis) -> Array:
 	var black := pow(10.0, AdaptationMeter.LOG_MIN)
-	var weight_in := 0.0
+	var query_in := 0.0
+	var query_out := 0.0
+	var queries_in := 0
 	var outside := {}
 	var bins := AdaptationMeter.HISTOGRAM_BINS
 	var in_bins := PackedFloat64Array()
@@ -255,21 +273,32 @@ func _look_up(to_store: Basis) -> Array:
 		var rgb := _rgb[_cell_of(to_store * _query_dirs[j])]
 		var y := rgb.dot(Atmosphere.LUMINANCE_WEIGHTS)
 		if _in_frame[j] != 0:
-			weight_in += w
+			query_in += w
+			queries_in += 1
 			in_bins[AdaptationMeter.bin_of(y)] += w  # black in bin 0, as the frame's
-		elif y > black:
-			var photopic := AdaptationMeter.bin_of(y)
-			var scotopic := bins + AdaptationMeter.bin_of(rgb.dot(EyeAdaptation.SCOTOPIC_WEIGHTS))
-			outside[photopic] = float(outside.get(photopic, 0.0)) + w
-			outside[scotopic] = float(outside.get(scotopic, 0.0)) + w
+		else:
+			query_out += w
+			if y > black:
+				var photopic := AdaptationMeter.bin_of(y)
+				var scotopic := bins + AdaptationMeter.bin_of(rgb.dot(EyeAdaptation.SCOTOPIC_WEIGHTS))
+				outside[photopic] = float(outside.get(photopic, 0.0)) + w
+				outside[scotopic] = float(outside.get(scotopic, 0.0)) + w
+	var weight_in := minf(_frame_weight_value, query_in + query_out)
+	var out_scale := maxf(query_in + query_out - weight_in, 0.0) / query_out if query_out > 0.0 else 0.0
+	for k: int in outside:
+		outside[k] = float(outside[k]) * out_scale
+	if query_in <= 0.0:  # no query direction in the frame: the model at the view axis
+		in_bins[AdaptationMeter.bin_of(_rgb[_cell_of(to_store * Vector3(0.0, 0.0, -1.0))].dot(
+				Atmosphere.LUMINANCE_WEIGHTS))] += 1.0
+		query_in = 1.0
 	var model_in := -1.0
 	if weight_in > 0.0:
 		var counts := PackedInt32Array()
 		counts.resize(bins)
 		for k in range(bins):
-			counts[k] = int(round(in_bins[k] / weight_in * MODEL_COUNTS))
+			counts[k] = int(round(in_bins[k] / query_in * MODEL_COUNTS))
 		model_in = AdaptationMeter.field_log_average(counts, 0, true)  # as the frame's, for the visibility
-	return [weight_in, model_in, outside]
+	return [weight_in, model_in, outside, queries_in]
 
 
 ## The disagreement of the frame's field and the model's over the same directions (cd/m^2; 0: black, < 0: none) in
@@ -308,6 +337,44 @@ func _update_in_frame(eyes: Array) -> void:
 				inside = 1
 				break
 		_in_frame[j] = inside
+	_frame_weight_value = frame_weight(eyes)
+
+
+## The frame's angular weight (sr x the cap's Gaussian, within the cap): each view's frustum on FRAME_GRID^2 cells in
+## NDC, a cell's solid angle du dv / (u^2 + v^2 + 1)^(3/2) on the image plane z = -1 (u, v from the projection, as
+## AdaptationMeter.sun_mask_parameters), its weight exp(-theta^2 / 2 sigma^2) of its angle from the head's -Z; a later
+## view's cells inside an earlier view are not counted again (both VR eyes: their union).
+static func frame_weight(eyes: Array) -> float:
+	var sigma := deg_to_rad(SIGMA_DEG)
+	var cap := deg_to_rad(CAP_HALF_ANGLE_DEG)
+	var total := 0.0
+	for e in range(eyes.size()):
+		var eye: Array = eyes[e]
+		var b: Basis = eye[0]
+		var p: Projection = eye[1]
+		if p.x.x == 0.0 or p.y.y == 0.0:
+			continue
+		var du := 2.0 / FRAME_GRID / p.x.x
+		var dv := 2.0 / FRAME_GRID / p.y.y
+		for i in range(FRAME_GRID):
+			for j in range(FRAME_GRID):
+				var x := -1.0 + (i + 0.5) * 2.0 / FRAME_GRID
+				var y := -1.0 + (j + 0.5) * 2.0 / FRAME_GRID
+				var u := (x + p.z.x) / p.x.x
+				var v := (y + p.z.y) / p.y.y
+				var q := u * u + v * v + 1.0
+				var head := b * (Vector3(u, v, -1.0) / sqrt(q))
+				var earlier := false
+				for k in range(e):
+					if in_view(head, (eyes[k] as Array)[0], (eyes[k] as Array)[1]):
+						earlier = true
+						break
+				if earlier:
+					continue
+				var theta := acos(clampf(-head.z, -1.0, 1.0))
+				if theta <= cap:
+					total += exp(-theta * theta / (2.0 * sigma * sigma)) * du * dv / (q * sqrt(q))
+	return total
 
 
 ## The eyes' orientations and projections rounded (1e-4): tracking noise does not redo the in-frame flags every time.
