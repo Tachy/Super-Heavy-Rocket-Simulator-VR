@@ -471,7 +471,7 @@ class RingRadiance {
 public:
     RingRadiance(const PassModel& model, const SpectralPassTables& pass, const ScatteringUvwz& uvwz,
                  int scattering_order)
-        : ring_(model.sizes, uvwz), g_(model.atmosphere.mie_phase_g), single_(scattering_order == 1) {
+        : ring_(model.sizes, uvwz), g_(mie_phase_asymmetry(model.atmosphere.mie_phase)), single_(scattering_order == 1) {
         if (single_) {
             rayleigh_ = ring_.slice_values(pass.delta_rayleigh);
             mie_ = ring_.slice_values(pass.delta_mie);
@@ -483,7 +483,12 @@ public:
         if (!single_) return ring_.at(multiple_, nu);
         const auto r = ring_.at(rayleigh_, nu);
         const auto m = ring_.at(mie_, nu);
-        const double pr = rayleigh_phase_function(nu), pm = mie_phase_function(g_, nu);
+        // [call, look-fixes T9b] The multiple-scattering passes take the aerosol as one Henyey-Greenstein of the phase
+        // function's asymmetry g = w g_forward + (1 - w) g_broad (similarity principle: the multiply scattered field
+        // depends on the phase function through g): the forward peak (g 0.965, ~2 deg wide) is far narrower than the
+        // direction quadrature and would be hit or missed by its samples. The single scattering keeps the full
+        // two-term function at run time (the tables store it unphased).
+        const double pr = rayleigh_phase_function(nu), pm = henyey_greenstein_phase_function(g_, nu);
         return {r[0] * pr + m[0] * pm, r[1] * pr + m[1] * pm, r[2] * pr + m[2] * pm};
     }
 
@@ -534,7 +539,9 @@ DensityGeometry::DensityGeometry(const PassModel& model, const SpectralPassTable
             direction[i] = {ix, iy, iz};
             // The scattering towards -omega: coefficients x phase functions of (omega, omega_i) x the solid angle.
             const double nu2 = omega_x * ix + mu * iz;
-            const double pr = rayleigh_phase_function(nu2), pm = mie_phase_function(a.mie_phase_g, nu2);
+            // The aerosol as one Henyey-Greenstein of the phase function's asymmetry (see RingRadiance).
+            const double pr = rayleigh_phase_function(nu2);
+            const double pm = henyey_greenstein_phase_function(mie_phase_asymmetry(a.mie_phase), nu2);
             for (int k = 0; k < 3; ++k) weight[i][k] = (beta_rayleigh[k] * pr + beta_mie[k] * pm) * domega;
         }
     }

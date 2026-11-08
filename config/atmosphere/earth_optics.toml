@@ -4,13 +4,38 @@
 
 top_altitude_m = 100000.0            # [call] model top (Karman line); the density above is negligible for scattering
 ground_altitude_m = -150.0           # [E] model ground below the geoid minimum (-106 m) and every pad / landing zone
-aerosol_optical_depth_550nm = 0.1    # [E] clean continental / maritime background, vertical column at 550 nm
-aerosol_angstrom_exponent = 1.3      # [E] typical continental value (Angstrom 1964; Seinfeld & Pandis, ch. 15)
-aerosol_single_scattering_albedo = 0.9   # [E] background aerosol, visible
-aerosol_scale_height_m = 1200.0      # [E] Bruneton 2017 demo value (boundary layer aerosol)
-mie_phase_g = 0.8                    # [E] Cornette-Shanks / Henyey-Greenstein asymmetry, Bruneton 2017 demo value
 ozone_column_du = 300.0              # [S] global mean total ozone ~300 DU (WMO assessments)
 ground_albedo = 0.1                  # [E] mean land / ocean surface albedo in the visible
 scattering_orders = 5                # [call] orders computed explicitly (Bruneton 2017: 4)
 multiple_scattering_tail = true      # [call] fidelity flag: the higher orders as a geometric series (Hillaire 2020);
                                      # false truncates after scattering_orders as Bruneton does (4 orders: -7 % near the horizon)
+
+# Aerosol: two sets, one table set each (look-fixes T9b). The game blends them by the observer's maritime weight (the
+# water share of the ground around the eye, game/world/aerosol_regions.gd). Phase function: a two-term Henyey-Greenstein
+# p = w HG(g_forward) + (1 - w) HG(g_broad) [D: fitted in log p over 0.5-180 deg to the Lorenz-Mie phase function at
+# 550 nm of the AERONET size distribution and refractive index of the type (Dubovik et al. 2002, J. Atmos. Sci. 59, 590,
+# Table 1), tools/validation/aerosol_mie_check.py: within -18 / +29 % at 0.5-90 deg; the Cornette-Shanks g 0.8 before was
+# 3x the Mie aureole at 5-10 deg relative to 25 deg]. The vertical profile is exponential with the scale height.
+
+[aerosol.continental]
+optical_depth_550nm = 0.1      # [E] clean continental background (MODIS land mean ~0.19, Remer et al. 2008, JGR 113
+                               # D14S07; the Mie of the GSFC distribution at tau440 0.15 gives 0.091)
+angstrom_exponent = 1.3        # [S] AERONET continental / urban 1.2-2.5 (GSFC), 1.2-2.3 (Paris), Dubovik et al. 2002
+                               # Table 1: the clean end of the range
+single_scattering_albedo = 0.96   # [D] Mie of the GSFC distribution at 550 nm (n 1.41, k 0.003): 0.963; Dubovik 2002
+                                  # GSFC 0.98 / 0.97 at 440 / 670 nm, Paris 0.94 / 0.93
+scale_height_m = 1200.0        # [E] Bruneton 2017 demo value (boundary layer aerosol)
+phase_weight = 0.06            # [D] Mie fit (GSFC distribution): asymmetry of the fit 0.598 (Mie 0.609, Dubovik 0.59-0.68)
+phase_g_forward = 0.965        # [D] the diffraction peak of the coarse mode
+phase_g_broad = 0.575          # [D] the fine mode
+
+[aerosol.maritime]
+optical_depth_550nm = 0.1      # [S] global oceanic mean 0.11 at 500 nm (island AERONET, Smirnov et al. 2009, JGR 114
+                               # D06204) at Angstrom 0.6 -> 0.104 at 550 nm; MODIS ocean mean 0.13 (Remer et al. 2008)
+angstrom_exponent = 0.6        # [S] Smirnov et al. 2009: oceanic Angstrom (440-870 nm) ~0.6
+single_scattering_albedo = 0.97   # [S] Dubovik et al. 2002 Table 1, Lanai: 0.98 / 0.97 at 440 / 670 nm; [D] Mie 0.971
+scale_height_m = 1200.0        # [E] marine boundary layer, as continental
+phase_weight = 0.12            # [D] Mie fit (Lanai distribution, n 1.36, k 0.0015): asymmetry 0.710 (Mie 0.705,
+                               # Dubovik 2002 Lanai 0.75 / 0.71 at 440 / 670 nm)
+phase_g_forward = 0.965        # [D] the sea salt's diffraction peak
+phase_g_broad = 0.675          # [D]

@@ -18,7 +18,7 @@ namespace starsim::environment {
 namespace {
 
 constexpr char magic[8] = {'S', 'T', 'A', 'R', 'A', 'T', 'M', 'O'};
-constexpr int parameter_count = 16;
+constexpr int parameter_count = 18;
 
 std::array<int, 8> size_fields(const AtmosphereTableSizes& s) {
     return {s.transmittance_mu, s.transmittance_r, s.scattering_r,    s.scattering_mu,
@@ -42,7 +42,9 @@ std::array<double, parameter_count> parameter_fields(const AtmosphereParameters&
     return {p.bottom_radius_m,
             p.top_radius_m,
             p.mu_s_min,
-            p.mie_phase_g,
+            p.mie_phase.weight,
+            p.mie_phase.g_forward,
+            p.mie_phase.g_broad,
             p.sun_angular_radius_rad,
             p.solar_illuminance_rgb[0],
             p.solar_illuminance_rgb[1],
@@ -62,13 +64,13 @@ AtmosphereParameters parameters_from_fields(const std::array<double, parameter_c
     p.bottom_radius_m = f[0];
     p.top_radius_m = f[1];
     p.mu_s_min = f[2];
-    p.mie_phase_g = f[3];
-    p.sun_angular_radius_rad = f[4];
-    p.solar_illuminance_rgb = {f[5], f[6], f[7]};
-    p.sky_radiance_to_luminance = {f[8], f[9], f[10]};
-    p.sun_radiance_to_luminance = {f[11], f[12], f[13]};
-    p.toa_solar_illuminance_lux = f[14];
-    p.ground_albedo = f[15];
+    p.mie_phase = {f[3], f[4], f[5]};
+    p.sun_angular_radius_rad = f[6];
+    p.solar_illuminance_rgb = {f[7], f[8], f[9]};
+    p.sky_radiance_to_luminance = {f[10], f[11], f[12]};
+    p.sun_radiance_to_luminance = {f[13], f[14], f[15]};
+    p.toa_solar_illuminance_lux = f[16];
+    p.ground_albedo = f[17];
     return p;
 }
 
@@ -156,10 +158,11 @@ std::optional<AtmosphereTables> read_atmosphere_tables(const std::filesystem::pa
 
 std::shared_ptr<const AtmosphereTables> load_or_compute_atmosphere(const std::filesystem::path& config_dir,
                                                                    const std::filesystem::path& cache_dir,
-                                                                   const AtmosphereTableSizes& sizes) {
-    const auto optics = config::load_atmosphere_optics(config_dir / "atmosphere" / "earth_optics.toml");
+                                                                   const AtmosphereTableSizes& sizes,
+                                                                   config::AerosolType aerosol) {
+    const auto optics = config::load_atmosphere_optics(config_dir / "atmosphere" / "earth_optics.toml", aerosol);
     const std::uint64_t hash = atmosphere_input_hash(optics, sizes);
-    const std::filesystem::path file = cache_dir / atmosphere_cache_file_name;
+    const std::filesystem::path file = cache_dir / atmosphere_cache_file_name(aerosol);
     if (auto cached = read_atmosphere_tables(file, hash)) {
         return std::make_shared<const AtmosphereTables>(std::move(*cached));
     }

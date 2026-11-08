@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -16,6 +17,7 @@
 #include "atmosphere_reference.hpp"
 #include "starsim/config/atmosphere_optics_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
+#include "starsim/environment/atmosphere_scattering.hpp"
 #include "starsim/environment/atmosphere_tables.hpp"
 #include "starsim/math/constants.hpp"
 
@@ -150,7 +152,9 @@ TEST_CASE("Input hash changes with every input", "[atmosphere]") {
         [](auto& c) { c.aerosol_angstrom_exponent += 0.01; },
         [](auto& c) { c.aerosol_single_scattering_albedo -= 0.01; },
         [](auto& c) { c.aerosol_scale_height_m += 1.0; },
-        [](auto& c) { c.mie_phase_g += 0.01; },
+        [](auto& c) { c.mie_phase_weight += 0.01; },
+        [](auto& c) { c.mie_phase_g_forward += 0.01; },
+        [](auto& c) { c.mie_phase_g_broad += 0.01; },
         [](auto& c) { c.ozone_column_du += 1.0; },
         [](auto& c) { c.ground_albedo += 0.01; },
         [](auto& c) { c.scattering_orders += 1; },
@@ -244,5 +248,84 @@ TEST_CASE("Input hash covers the spectral data", "[atmosphere]") {
     std::printf("atmosphere spectral data checksum: 0x%016llx, input hash 0x%016llx\n",
                 static_cast<unsigned long long>(checksum), static_cast<unsigned long long>(hash));
     CHECK(checksum == 0x34af73121d46b1aaull);
-    CHECK(hash == 0x7d492c1ac62f8da8ull);  // code version 4 (single_rayleigh), channels 628 / 546 / 444 nm
+    CHECK(hash == 0x45dfae10e94fe313ull);  // code version 5, channels 628 / 546 / 444 nm, continental aerosol set
+}
+
+TEST_CASE("The aerosol phase functions are normalised and follow the Mie aureole", "[atmosphere]") {
+    // Two-term Henyey-Greenstein of earth_optics.toml vs the Lorenz-Mie phase function of the AERONET size
+    // distributions (Dubovik et al. 2002 Table 1) at 550 nm, tools/validation/aerosol_mie_check.py: P(theta) / P(25 deg)
+    // at 2 / 5 / 10 deg = 8.75 / 3.04 / 1.63 (GSFC, continental) and 18.0 / 5.65 / 2.27 (Lanai, maritime) [D].
+    // Tolerance 30 % (the fit's range, -18 / +29 % at 0.5-90 deg). Bruneton's Cornette-Shanks g 0.8 gives 10.9 / 9.15 /
+    // 5.49 - 3x the Mie value at 5-10 deg (the lunar aureole of look-fixes T13 fix 1) - and fails.
+    struct Case {
+        config::AerosolType type;
+        double p2, p5, p10;
+    };
+    for (const Case k : {Case{config::AerosolType::continental, 8.75, 3.04, 1.63},
+                         Case{config::AerosolType::maritime, 18.03, 5.65, 2.27}}) {
+        const auto p = environment::atmosphere_parameters(config::load_atmosphere_optics(optics_toml, k.type));
+        // normalised over the sphere: 2 pi integral of p d(cos theta) = 1 (Simpson in theta, the peak resolved)
+        const int n = 20000;
+        double integral = 0.0;
+        for (int i = 0; i <= n; ++i) {
+            const double th = constants::pi * i / n;
+            const double w = (i == 0 || i == n) ? 1.0 : (i % 2 ? 4.0 : 2.0);
+            integral += w * environment::mie_phase_function(p.mie_phase, std::cos(th)) * std::sin(th);
+        }
+        integral *= 2.0 * constants::pi * (constants::pi / n) / 3.0;
+        CHECK(integral == Approx(1.0).epsilon(1e-4));
+        const auto at = [&](double deg) {
+            return environment::mie_phase_function(p.mie_phase, std::cos(deg * constants::deg_to_rad));
+        };
+        const double p25 = at(25.0);
+        std::printf("%s aerosol phase P/P(25): 2 deg %.2f (Mie %.2f), 5 deg %.2f (%.2f), 10 deg %.2f (%.2f), g %.3f\n",
+                    config::aerosol_type_name(k.type), at(2.0) / p25, k.p2, at(5.0) / p25, k.p5, at(10.0) / p25, k.p10,
+                    environment::mie_phase_asymmetry(p.mie_phase));
+        CHECK(rel_error(at(2.0) / p25, k.p2) < 0.30);
+        CHECK(rel_error(at(5.0) / p25, k.p5) < 0.30);
+        CHECK(rel_error(at(10.0) / p25, k.p10) < 0.30);
+    }
+}
+
+TEST_CASE("The maritime weight blends the two aerosol table sets", "[atmosphere]") {
+    // Small tables of both sets (single scattering): w = 0 reads the continental set alone, w = 1 the maritime set, and
+    // every table read in between is the linear blend (transmittance, sky irradiance; the shader include does the same).
+    environment::AtmosphereTableSizes small;
+    small.transmittance_mu = 64;
+    small.transmittance_r = 16;
+    small.scattering_r = 8;
+    small.scattering_mu = 32;
+    small.scattering_mu_s = 8;
+    small.scattering_nu = 4;
+    const auto c = std::make_shared<const environment::AtmosphereTables>(
+        precompute_timed(config::load_atmosphere_optics(optics_toml, config::AerosolType::continental), small));
+    const auto m = std::make_shared<const environment::AtmosphereTables>(
+        precompute_timed(config::load_atmosphere_optics(optics_toml, config::AerosolType::maritime), small));
+    const environment::AtmosphereScattering both(c, m), continental(c), maritime(m);
+    const math::Vec3 ground{constants::wgs84_semi_major_axis_m + 10.0, 0.0, 0.0};
+    const math::Vec3 sun = math::normalized(math::Vec3{1.0, 0.0, 0.3});  // ~73 deg up; the view 2.9 deg up to the east
+    const math::Vec3 east{0.0, 1.0, 0.0};
+    const math::Vec3 view = math::normalized(math::Vec3{0.05, 1.0, 0.0});
+    const auto close = [](const math::Vec3& a, const math::Vec3& b) {
+        const auto near = [](double u, double v) { return std::abs(u - v) <= 1e-12 * std::abs(v) + 1e-300; };
+        return near(a.x, b.x) && near(a.y, b.y) && near(a.z, b.z);
+    };
+    CHECK(close(both.sun_transmittance(ground, sun, 0.0), continental.sun_transmittance(ground, sun)));
+    CHECK(close(both.sun_transmittance(ground, sun, 1.0), maritime.sun_transmittance(ground, sun)));
+    const math::Vec3 tc = continental.sun_transmittance(ground, sun), tm = maritime.sun_transmittance(ground, sun);
+    CHECK(close(both.sun_transmittance(ground, sun, 0.25), tc * 0.75 + tm * 0.25));
+    math::Vec3 t0, t1;
+    CHECK(close(both.sky_luminance(ground, view, sun, &t0, 1.0), maritime.sky_luminance(ground, view, sun, &t1)));
+    CHECK(close(t0, t1));
+    const auto ec = continental.sun_and_sky_illuminance(ground, east, sun);
+    const auto em = maritime.sun_and_sky_illuminance(ground, east, sun);
+    const auto eb = both.sun_and_sky_illuminance(ground, east, sun, 0.5);
+    CHECK(close(eb.sky_lux, (ec.sky_lux + em.sky_lux) * 0.5));
+    // the sets differ: near the horizon the maritime sky is bluer (Angstrom 0.6 against 1.3: less blue taken out of the
+    // long path - the lever on the distant clouds' colour, look-fixes bug-horizon report)
+    math::Vec3 tr;
+    const math::Vec3 lc = continental.sky_luminance(ground, view, sun, &tr);
+    const math::Vec3 lm = maritime.sky_luminance(ground, view, sun, &tr);
+    std::printf("horizon sky B/R continental %.3f maritime %.3f\n", lc.z / lc.x, lm.z / lm.x);
+    CHECK(lm.z / lm.x > lc.z / lc.x);
 }

@@ -92,7 +92,8 @@ Vec3 reference_single_luminance(Vec3 camera, const Vec3& view, const Vec3& sun) 
     const double nu = math::dot(view, sun);
     const auto s = ref::single_scattering(model, r, math::dot(camera, view) / r, math::dot(camera, sun) / r, nu, 4000, 300);
     const double pr = environment::rayleigh_phase_function(nu);
-    const double pm = environment::mie_phase_function(model.optics.mie_phase_g, nu);
+    const double pm = environment::mie_phase_function(
+        {model.optics.mie_phase_weight, model.optics.mie_phase_g_forward, model.optics.mie_phase_g_broad}, nu);
     const double k = constants::max_luminous_efficacy_lm_per_w;
     return {(s.rayleigh[0] * pr + s.mie[0] * pm) * k, (s.rayleigh[1] * pr + s.mie[1] * pm) * k,
             (s.rayleigh[2] * pr + s.mie[2] * pm) * k};

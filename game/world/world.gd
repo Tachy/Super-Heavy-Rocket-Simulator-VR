@@ -802,7 +802,7 @@ func _update_sky_radiance(camera_gcrf_m: Vector3, sun_fraction: float) -> void:
 			atmosphere.luminance_scale, atmosphere.moonlight_relative_value if atmosphere.moonlight_active else 0.0,
 			[sun_fraction, earth_visible, ground_sun, ground_earth, _radiance_cloud_factors[0].x, _radiance_cloud_factors[0].y,
 			_radiance_cloud_factors[0].z, _radiance_cloud_factors[1].x, _radiance_cloud_factors[1].y,
-			_radiance_cloud_factors[1].z] + local_albedo_levels)
+			_radiance_cloud_factors[1].z, atmosphere.maritime_weight] + local_albedo_levels)
 	if not due:
 		return
 	_radiance_serial += 1

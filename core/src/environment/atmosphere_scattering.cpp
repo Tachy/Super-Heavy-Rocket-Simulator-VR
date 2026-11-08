@@ -50,15 +50,34 @@ Vec3 clamp_to_ground(const AtmosphereParameters& a, const Vec3& p) {
     return p * (a.bottom_radius_m / r);
 }
 
+// The two aerosol table sets and the maritime weight of a query (look-fixes T9b): every table read is
+// (1 - w) continental + w maritime, as the shader include's atm_* lookups; w = 0 (or no maritime set) reads one set.
+struct Sets {
+    const AtmosphereTables* continental;
+    const AtmosphereTables* maritime;  // nullptr: continental only
+    double w;
+    const AtmosphereParameters& parameters() const { return continental->parameters; }
+    const AtmosphereTableSizes& sizes() const { return continental->sizes; }
+};
+
+Rgb blend(const Sets& s, const Rgb& c, const Rgb& m) {
+    if (!s.maritime) return c;
+    return {c[0] + s.w * (m[0] - c[0]), c[1] + s.w * (m[1] - c[1]), c[2] + s.w * (m[2] - c[2])};
+}
+
 // GetTransmittanceToTopAtmosphereBoundary (RGB of the table).
 Rgb transmittance_to_top(const AtmosphereTables& t, double r, double mu) {
     const TextureUv uv = transmittance_uv_from_r_mu(t.parameters, t.sizes, r, mu);
     return detail::sample_2d<3, 4>(t.transmittance, t.sizes.transmittance_mu, t.sizes.transmittance_r, uv.u, uv.v);
 }
+Rgb transmittance_to_top(const Sets& s, double r, double mu) {
+    const Rgb c = transmittance_to_top(*s.continental, r, mu);
+    return s.maritime ? blend(s, c, transmittance_to_top(*s.maritime, r, mu)) : c;
+}
 
 // GetTransmittance: between the point at (r, mu) and the point at distance d along the ray.
-Rgb transmittance(const AtmosphereTables& t, double r, double mu, double d, bool ray_r_mu_intersects_ground) {
-    const double r_d = clamp_radius(t.parameters, std::sqrt(d * d + 2.0 * r * mu * d + r * r));
+Rgb transmittance(const Sets& t, double r, double mu, double d, bool ray_r_mu_intersects_ground) {
+    const double r_d = clamp_radius(t.parameters(), std::sqrt(d * d + 2.0 * r * mu * d + r * r));
     const double mu_d = clamp_cosine((r * mu + d) / r_d);
     Rgb num{}, den{};
     if (ray_r_mu_intersects_ground) {
@@ -74,27 +93,45 @@ Rgb transmittance(const AtmosphereTables& t, double r, double mu, double d, bool
 }
 
 // GetTransmittanceToSun: the transmittance times the fraction of the Sun disc above the model horizon.
-Rgb transmittance_to_sun(const AtmosphereTables& t, double r, double mu_s) {
-    const double sin_theta_h = t.parameters.bottom_radius_m / r;
+Rgb transmittance_to_sun(const Sets& t, double r, double mu_s) {
+    const double sin_theta_h = t.parameters().bottom_radius_m / r;
     const double cos_theta_h = -std::sqrt(std::max(1.0 - sin_theta_h * sin_theta_h, 0.0));
-    const double alpha = t.parameters.sun_angular_radius_rad;
+    const double alpha = t.parameters().sun_angular_radius_rad;
     const double visible = smoothstep(-sin_theta_h * alpha, sin_theta_h * alpha, mu_s - cos_theta_h);
     Rgb out = transmittance_to_top(t, r, mu_s);
     for (double& v : out) v *= visible;
     return out;
 }
 
-// GetCombinedScattering with separate textures: the scattering (Rayleigh + multiple) and the single Mie scattering,
-// sharing one coordinate computation.
+// GetCombinedScattering with separate textures: the scattering (Rayleigh + multiple, blended) and the single Mie
+// scattering of each set times its weight (each set has its own phase function), sharing one coordinate computation.
 struct Combined {
-    Rgb scattering{}, single_mie{};
+    Rgb scattering{}, mie_continental{}, mie_maritime{};
 };
-Combined combined_scattering(const AtmosphereTables& t, double r, double mu, double mu_s, double nu,
+Combined combined_scattering(const Sets& t, double r, double mu, double mu_s, double nu,
                              bool ray_r_mu_intersects_ground) {
     const ScatteringUvwz uvwz =
-        scattering_uvwz_from_cell(t.parameters, t.sizes, {r, mu, mu_s, nu, ray_r_mu_intersects_ground});
-    const detail::ScatteringTaps taps = detail::scattering_taps(t.sizes, uvwz);
-    return {detail::sample_taps<3, 4>(t.scattering, taps), detail::sample_taps<3, 4>(t.single_mie, taps)};
+        scattering_uvwz_from_cell(t.parameters(), t.sizes(), {r, mu, mu_s, nu, ray_r_mu_intersects_ground});
+    const detail::ScatteringTaps taps = detail::scattering_taps(t.sizes(), uvwz);
+    Combined out{detail::sample_taps<3, 4>(t.continental->scattering, taps),
+                 detail::sample_taps<3, 4>(t.continental->single_mie, taps), {}};
+    if (t.maritime) {
+        out.scattering = blend(t, out.scattering, detail::sample_taps<3, 4>(t.maritime->scattering, taps));
+        const Rgb m = detail::sample_taps<3, 4>(t.maritime->single_mie, taps);
+        for (int k = 0; k < 3; ++k) {
+            out.mie_continental[k] *= 1.0 - t.w;
+            out.mie_maritime[k] = m[k] * t.w;
+        }
+    }
+    return out;
+}
+
+// The single Mie radiance of a combined lookup: each set's part times its phase function.
+Rgb phased_mie(const Sets& t, const Rgb& mie_continental, const Rgb& mie_maritime, double nu) {
+    const double pc = mie_phase_function(t.continental->parameters.mie_phase, nu);
+    const double pm = t.maritime ? mie_phase_function(t.maritime->parameters.mie_phase, nu) : 0.0;
+    return {mie_continental[0] * pc + mie_maritime[0] * pm, mie_continental[1] * pc + mie_maritime[1] * pm,
+            mie_continental[2] * pc + mie_maritime[2] * pm};
 }
 
 // GetIrradiance (the sky irradiance table).
@@ -102,10 +139,19 @@ Rgb irradiance(const AtmosphereTables& t, double r, double mu_s) {
     const TextureUv uv = irradiance_uv_from_r_mu_s(t.parameters, t.sizes, r, mu_s);
     return detail::sample_2d<3, 4>(t.irradiance, t.sizes.irradiance_mu_s, t.sizes.irradiance_r, uv.u, uv.v);
 }
-
+Rgb irradiance(const Sets& s, double r, double mu_s) {
+    const Rgb c = irradiance(*s.continental, r, mu_s);
+    return s.maritime ? blend(s, c, irradiance(*s.maritime, r, mu_s)) : c;
+}
 Vec3 sky_luminance_rgb(const AtmosphereParameters& a, const Rgb& radiance) {
     return {radiance[0] * a.sky_radiance_to_luminance[0], radiance[1] * a.sky_radiance_to_luminance[1],
             radiance[2] * a.sky_radiance_to_luminance[2]};
+}
+
+Sets make_sets(const std::shared_ptr<const AtmosphereTables>& continental,
+               const std::shared_ptr<const AtmosphereTables>& maritime, double maritime_weight) {
+    const double w = std::clamp(maritime_weight, 0.0, 1.0);
+    return {continental.get(), maritime && w > 0.0 ? maritime.get() : nullptr, w};
 }
 
 }  // namespace
@@ -122,32 +168,48 @@ Vec3 ellipsoid_normal_to_atmosphere_space(const Vec3& normal_itrf) {
     return math::normalized(Vec3{normal_itrf.x, normal_itrf.y, normal_itrf.z / polar_stretch});
 }
 
-AtmosphereScattering::AtmosphereScattering(std::shared_ptr<const AtmosphereTables> tables)
-    : tables_(std::move(tables)) {
+AtmosphereScattering::AtmosphereScattering(std::shared_ptr<const AtmosphereTables> tables,
+                                           std::shared_ptr<const AtmosphereTables> maritime)
+    : tables_(std::move(tables)), maritime_(std::move(maritime)) {
     if (!tables_) throw std::invalid_argument("AtmosphereScattering: no tables");
+    if (maritime_) {
+        const auto& a = tables_->sizes;
+        const auto& b = maritime_->sizes;
+        const auto& p = tables_->parameters;
+        const auto& q = maritime_->parameters;
+        if (a.transmittance_mu != b.transmittance_mu || a.transmittance_r != b.transmittance_r ||
+            a.scattering_r != b.scattering_r || a.scattering_mu != b.scattering_mu ||
+            a.scattering_mu_s != b.scattering_mu_s || a.scattering_nu != b.scattering_nu ||
+            a.irradiance_mu_s != b.irradiance_mu_s || a.irradiance_r != b.irradiance_r ||
+            p.bottom_radius_m != q.bottom_radius_m || p.top_radius_m != q.top_radius_m || p.mu_s_min != q.mu_s_min) {
+            throw std::invalid_argument("AtmosphereScattering: the maritime tables differ in sizes or geometry");
+        }
+    }
 }
 
-Vec3 AtmosphereScattering::sun_transmittance(const Vec3& position_itrf_m, const Vec3& sun_direction_itrf) const {
-    const AtmosphereTables& t = *tables_;
-    const Vec3 p = clamp_to_ground(t.parameters, ellipsoid_to_atmosphere_space(position_itrf_m));
+Vec3 AtmosphereScattering::sun_transmittance(const Vec3& position_itrf_m, const Vec3& sun_direction_itrf,
+                                             double maritime_weight) const {
+    const Sets t = make_sets(tables_, maritime_, maritime_weight);
+    const Vec3 p = clamp_to_ground(t.parameters(), ellipsoid_to_atmosphere_space(position_itrf_m));
     const Vec3 sun = ellipsoid_direction_to_atmosphere_space(sun_direction_itrf);
     const double r = math::norm(p);
-    if (r > t.parameters.top_radius_m) {
+    if (r > t.parameters().top_radius_m) {
         // Outside the atmosphere: the Sun is seen through it only if the ray to it crosses it.
         const double rmu = math::dot(p, sun);
-        const double discriminant = rmu * rmu - r * r + t.parameters.top_radius_m * t.parameters.top_radius_m;
+        const double discriminant = rmu * rmu - r * r + t.parameters().top_radius_m * t.parameters().top_radius_m;
         if (rmu >= 0.0 || discriminant < 0.0) return {1.0, 1.0, 1.0};
         const Vec3 entry = p + sun * (-rmu - std::sqrt(discriminant));
-        return to_vec(transmittance_to_sun(t, t.parameters.top_radius_m,
-                                           clamp_cosine(math::dot(entry, sun) / t.parameters.top_radius_m)));
+        return to_vec(transmittance_to_sun(t, t.parameters().top_radius_m,
+                                           clamp_cosine(math::dot(entry, sun) / t.parameters().top_radius_m)));
     }
     return to_vec(transmittance_to_sun(t, r, clamp_cosine(math::dot(p, sun) / r)));
 }
 
 Vec3 AtmosphereScattering::sky_luminance(const Vec3& camera_itrf_m, const Vec3& view_direction_itrf,
-                                         const Vec3& sun_direction_itrf, Vec3* transmittance_out) const {
-    const AtmosphereTables& t = *tables_;
-    const AtmosphereParameters& a = t.parameters;
+                                         const Vec3& sun_direction_itrf, Vec3* transmittance_out,
+                                         double maritime_weight) const {
+    const Sets t = make_sets(tables_, maritime_, maritime_weight);
+    const AtmosphereParameters& a = t.parameters();
     Vec3 camera = clamp_to_ground(a, ellipsoid_to_atmosphere_space(camera_itrf_m));
     const Vec3 view_ray = ellipsoid_direction_to_atmosphere_space(view_direction_itrf);
     const Vec3 sun_direction = ellipsoid_direction_to_atmosphere_space(sun_direction_itrf);
@@ -172,16 +234,18 @@ Vec3 AtmosphereScattering::sky_luminance(const Vec3& camera_itrf_m, const Vec3& 
     const bool ground = ray_intersects_ground(a, r, mu);
     if (transmittance_out) *transmittance_out = ground ? Vec3{} : to_vec(transmittance_to_top(t, r, mu));
     const Combined s = combined_scattering(t, r, mu, mu_s, nu, ground);
-    const double pr = rayleigh_phase_function(nu), pm = mie_phase_function(a.mie_phase_g, nu);
+    const double pr = rayleigh_phase_function(nu);
+    const Rgb mie = phased_mie(t, s.mie_continental, s.mie_maritime, nu);
     Rgb radiance{};
-    for (int k = 0; k < 3; ++k) radiance[k] = s.scattering[k] * pr + s.single_mie[k] * pm;
+    for (int k = 0; k < 3; ++k) radiance[k] = s.scattering[k] * pr + mie[k];
     return sky_luminance_rgb(a, radiance);
 }
 
 Vec3 AtmosphereScattering::sky_luminance_to_point(const Vec3& camera_itrf_m, const Vec3& point_itrf_m,
-                                                  const Vec3& sun_direction_itrf, Vec3* transmittance_out) const {
-    const AtmosphereTables& t = *tables_;
-    const AtmosphereParameters& a = t.parameters;
+                                                  const Vec3& sun_direction_itrf, Vec3* transmittance_out,
+                                         double maritime_weight) const {
+    const Sets t = make_sets(tables_, maritime_, maritime_weight);
+    const AtmosphereParameters& a = t.parameters();
     Vec3 camera = clamp_to_ground(a, ellipsoid_to_atmosphere_space(camera_itrf_m));
     const Vec3 point = clamp_to_ground(a, ellipsoid_to_atmosphere_space(point_itrf_m));
     const Vec3 sun_direction = ellipsoid_direction_to_atmosphere_space(sun_direction_itrf);
@@ -228,21 +292,24 @@ Vec3 AtmosphereScattering::sky_luminance_to_point(const Vec3& camera_itrf_m, con
 
     // Bruneton's hack against artefacts with the Sun below the horizon: fade the single Mie term out.
     const double mie_fade = smoothstep(0.0, 0.01, mu_s);
-    const double pr = rayleigh_phase_function(nu), pm = mie_phase_function(a.mie_phase_g, nu);
-    Rgb radiance{};
+    const double pr = rayleigh_phase_function(nu);
+    Rgb mie_c{}, mie_m{};
     for (int k = 0; k < 3; ++k) {
-        const double scattering = s.scattering[k] - tr[k] * s_p.scattering[k];
-        const double single_mie = (s.single_mie[k] - tr[k] * s_p.single_mie[k]) * mie_fade;
-        radiance[k] = scattering * pr + single_mie * pm;
+        mie_c[k] = (s.mie_continental[k] - tr[k] * s_p.mie_continental[k]) * mie_fade;
+        mie_m[k] = (s.mie_maritime[k] - tr[k] * s_p.mie_maritime[k]) * mie_fade;
     }
+    const Rgb mie = phased_mie(t, mie_c, mie_m, nu);
+    Rgb radiance{};
+    for (int k = 0; k < 3; ++k) radiance[k] = (s.scattering[k] - tr[k] * s_p.scattering[k]) * pr + mie[k];
     return sky_luminance_rgb(a, radiance);
 }
 
 AtmosphereScattering::Illuminance AtmosphereScattering::sun_and_sky_illuminance(const Vec3& point_itrf_m,
                                                                                const Vec3& normal_itrf,
-                                                                               const Vec3& sun_direction_itrf) const {
-    const AtmosphereTables& t = *tables_;
-    const AtmosphereParameters& a = t.parameters;
+                                                                               const Vec3& sun_direction_itrf,
+                                                                               double maritime_weight) const {
+    const Sets t = make_sets(tables_, maritime_, maritime_weight);
+    const AtmosphereParameters& a = t.parameters();
     // GetSunAndSkyIrradiance at a point inside the atmosphere (above the top: the top boundary's values).
     Vec3 p = clamp_to_ground(a, ellipsoid_to_atmosphere_space(point_itrf_m));
     double r = math::norm(p);

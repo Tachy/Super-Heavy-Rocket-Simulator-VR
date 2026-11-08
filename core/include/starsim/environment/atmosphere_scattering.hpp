@@ -43,25 +43,36 @@ math::Vec3 ellipsoid_normal_to_atmosphere_space(const math::Vec3& normal_itrf);
 //
 // Runtime lookups into the precomputed tables. Inputs are Earth-fixed (ITRF): positions in metres, directions unit
 // vectors. The tables are for the Sun at 1 AU: callers scale the results by 1 / d_AU^2. Thread-safe (const).
+//
+// Two aerosol sets (look-fixes T9b): the continental tables and, optionally, the maritime ones (same sizes and
+// geometry). Every query takes the maritime weight w in [0, 1] (the observer's, game/world/aerosol_regions.gd): each
+// table read is (1 - w) continental + w maritime and each set's single Mie keeps its own phase function, exactly as the
+// shader include's lookups. w = 0 or no maritime tables: the continental set alone.
 class AtmosphereScattering {
 public:
-    explicit AtmosphereScattering(std::shared_ptr<const AtmosphereTables> tables);
+    explicit AtmosphereScattering(std::shared_ptr<const AtmosphereTables> tables,
+                                  std::shared_ptr<const AtmosphereTables> maritime = nullptr);
 
     const AtmosphereTables& tables() const { return *tables_; }
+    // The maritime set, or nullptr.
+    const AtmosphereTables* maritime_tables() const { return maritime_.get(); }
 
     // Transmittance from the point to the Sun (628 / 546 / 444 nm, spectra::lambda_*_nm), with the Sun disc's fraction above the model
     // horizon (GetTransmittanceToSun).
-    math::Vec3 sun_transmittance(const math::Vec3& position_itrf_m, const math::Vec3& sun_direction_itrf) const;
+    math::Vec3 sun_transmittance(const math::Vec3& position_itrf_m, const math::Vec3& sun_direction_itrf,
+                                 double maritime_weight = 0.0) const;
 
     // Sky luminance in cd/m^2 (RGB) seen from the camera along the view direction (GetSkyRadiance x
     // SKY_SPECTRAL_RADIANCE_TO_LUMINANCE); the transmittance of the view ray to the atmosphere's edge (0 for a ray into
     // the ground) in *transmittance. Cameras in space are moved to the top boundary along the ray.
     math::Vec3 sky_luminance(const math::Vec3& camera_itrf_m, const math::Vec3& view_direction_itrf,
-                             const math::Vec3& sun_direction_itrf, math::Vec3* transmittance) const;
+                             const math::Vec3& sun_direction_itrf, math::Vec3* transmittance,
+                             double maritime_weight = 0.0) const;
     // In-scattered luminance between the camera and a point (aerial perspective, GetSkyRadianceToPoint); the
     // transmittance between them in *transmittance.
     math::Vec3 sky_luminance_to_point(const math::Vec3& camera_itrf_m, const math::Vec3& point_itrf_m,
-                                      const math::Vec3& sun_direction_itrf, math::Vec3* transmittance) const;
+                                      const math::Vec3& sun_direction_itrf, math::Vec3* transmittance,
+                                      double maritime_weight = 0.0) const;
 
     // Illuminance of a surface element (GetSunAndSkyIrradiance x the luminance factors): the direct Sun through the
     // atmosphere and the sky (the horizontal sky irradiance with Bruneton's (1 + n.up) / 2 tilt approximation), lux RGB.
@@ -69,10 +80,11 @@ public:
         math::Vec3 sun_lux, sky_lux;
     };
     Illuminance sun_and_sky_illuminance(const math::Vec3& point_itrf_m, const math::Vec3& normal_itrf,
-                                        const math::Vec3& sun_direction_itrf) const;
+                                        const math::Vec3& sun_direction_itrf, double maritime_weight = 0.0) const;
 
 private:
     std::shared_ptr<const AtmosphereTables> tables_;
+    std::shared_ptr<const AtmosphereTables> maritime_;
 };
 
 }  // namespace starsim::environment

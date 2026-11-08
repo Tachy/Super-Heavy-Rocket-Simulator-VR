@@ -199,6 +199,8 @@ func _initialize() -> void:
 	DisplayTone.enabled = _args.get("tone", "chroma") != "agx"
 	EyeAdaptation.hunt_display_reference = _args.get("hunt", "display") != "day"
 	Atmosphere.moon_colour_correction = _args.get("moon_colour", "regolith") != "texture"
+	# --maritime=<0..1>: the maritime aerosol weight fixed (look-fixes T9b A/B); default from the water map.
+	Atmosphere.maritime_weight_override = float(_args["maritime"]) if _args.has("maritime") else NAN
 	MoonNearShadow.enabled = _args.get("moon_near_shadows", "on") != "off"  # the fidelity setting (Task 12)
 	MoonNearShadow.fill_enabled = _args.get("moon_fill", "on") != "off"
 	if _args.has("moon_shadow_casters"):

@@ -4,23 +4,33 @@
 
 namespace starsim::config {
 
-AtmosphereOpticsConfig load_atmosphere_optics(const std::filesystem::path& toml_path) {
+const char* aerosol_type_name(AerosolType type) {
+    return type == AerosolType::maritime ? "maritime" : "continental";
+}
+
+AtmosphereOpticsConfig load_atmosphere_optics(const std::filesystem::path& toml_path, AerosolType aerosol) {
     const detail::Document doc(toml_path);
     const toml::table& t = doc.root;
     AtmosphereOpticsConfig c;
     c.top_altitude_m = doc.positive(t, "top_altitude_m");
     c.ground_altitude_m = doc.number(t, "ground_altitude_m");
     if (!(c.ground_altitude_m < c.top_altitude_m)) doc.fail("ground_altitude_m must be below top_altitude_m");
-    c.aerosol_optical_depth_550nm = doc.number(t, "aerosol_optical_depth_550nm");
-    if (c.aerosol_optical_depth_550nm < 0.0) doc.fail("'aerosol_optical_depth_550nm' must not be negative");
-    c.aerosol_angstrom_exponent = doc.number(t, "aerosol_angstrom_exponent");
-    c.aerosol_single_scattering_albedo = doc.number(t, "aerosol_single_scattering_albedo");
+    const toml::table& a = doc.table(doc.table(t, "aerosol"), aerosol_type_name(aerosol));
+    c.aerosol_optical_depth_550nm = doc.number(a, "optical_depth_550nm");
+    if (c.aerosol_optical_depth_550nm < 0.0) doc.fail("aerosol 'optical_depth_550nm' must not be negative");
+    c.aerosol_angstrom_exponent = doc.number(a, "angstrom_exponent");
+    c.aerosol_single_scattering_albedo = doc.number(a, "single_scattering_albedo");
     if (!(c.aerosol_single_scattering_albedo > 0.0 && c.aerosol_single_scattering_albedo <= 1.0)) {
-        doc.fail("'aerosol_single_scattering_albedo' must be in (0, 1]");
+        doc.fail("aerosol 'single_scattering_albedo' must be in (0, 1]");
     }
-    c.aerosol_scale_height_m = doc.positive(t, "aerosol_scale_height_m");
-    c.mie_phase_g = doc.number(t, "mie_phase_g");
-    if (!(c.mie_phase_g > -1.0 && c.mie_phase_g < 1.0)) doc.fail("'mie_phase_g' must be in (-1, 1)");
+    c.aerosol_scale_height_m = doc.positive(a, "scale_height_m");
+    c.mie_phase_weight = doc.number(a, "phase_weight");
+    if (!(c.mie_phase_weight >= 0.0 && c.mie_phase_weight <= 1.0)) doc.fail("aerosol 'phase_weight' must be in [0, 1]");
+    c.mie_phase_g_forward = doc.number(a, "phase_g_forward");
+    c.mie_phase_g_broad = doc.number(a, "phase_g_broad");
+    for (const double g : {c.mie_phase_g_forward, c.mie_phase_g_broad}) {
+        if (!(g > -1.0 && g < 1.0)) doc.fail("aerosol 'phase_g_forward' / 'phase_g_broad' must be in (-1, 1)");
+    }
     c.ozone_column_du = doc.number(t, "ozone_column_du");
     if (c.ozone_column_du < 0.0) doc.fail("'ozone_column_du' must not be negative");
     c.ground_albedo = doc.number(t, "ground_albedo");

@@ -119,3 +119,42 @@ TEST_CASE("Optics config loads and refuses missing keys", "[atmosphere]") {
     CHECK_THROWS_AS(config::load_atmosphere_optics(broken), config::ConfigError);
     std::filesystem::remove(broken);
 }
+
+TEST_CASE("Both aerosol sets load with their sourced values", "[atmosphere]") {
+    // earth_optics.toml [aerosol.continental] / [aerosol.maritime] (look-fixes T9b; sources in the file): the shared keys
+    // are the same, the maritime set has the smaller Angstrom exponent (Smirnov et al. 2009: ~0.6 over the oceans) and
+    // the higher single-scattering albedo (Dubovik et al. 2002, Lanai).
+    const auto c = config::load_atmosphere_optics(optics_toml, config::AerosolType::continental);
+    const auto m = config::load_atmosphere_optics(optics_toml, config::AerosolType::maritime);
+    CHECK(c.top_altitude_m == m.top_altitude_m);
+    CHECK(c.ozone_column_du == m.ozone_column_du);
+    CHECK(c.aerosol_angstrom_exponent == 1.3);
+    CHECK(m.aerosol_angstrom_exponent == 0.6);
+    CHECK(m.aerosol_single_scattering_albedo > c.aerosol_single_scattering_albedo);
+    // the default is the continental set
+    CHECK(config::load_atmosphere_optics(optics_toml).aerosol_angstrom_exponent == c.aerosol_angstrom_exponent);
+    // asymmetry of the two-term phase functions: AERONET 0.59-0.68 (GSFC) and 0.69-0.75 (Lanai), Dubovik 2002 Table 1
+    const double gc = c.mie_phase_weight * c.mie_phase_g_forward + (1.0 - c.mie_phase_weight) * c.mie_phase_g_broad;
+    const double gm = m.mie_phase_weight * m.mie_phase_g_forward + (1.0 - m.mie_phase_weight) * m.mie_phase_g_broad;
+    CHECK(gc > 0.55);
+    CHECK(gc < 0.68);
+    CHECK(gm > 0.66);
+    CHECK(gm < 0.76);
+
+    // a set without a key is refused
+    std::ifstream in(optics_toml);
+    std::string line, section;
+    std::ostringstream kept;
+    while (std::getline(in, line)) {
+        if (line.rfind("[", 0) == 0) section = line;
+        if (!(section == "[aerosol.maritime]" && line.rfind("phase_g_broad", 0) == 0)) kept << line << '\n';
+    }
+    const auto broken = std::filesystem::temp_directory_path() / "starsim_atmosphere_optics_no_maritime_g.toml";
+    {
+        std::ofstream out(broken);
+        out << kept.str();
+    }
+    CHECK_NOTHROW(config::load_atmosphere_optics(broken, config::AerosolType::continental));
+    CHECK_THROWS_AS(config::load_atmosphere_optics(broken, config::AerosolType::maritime), config::ConfigError);
+    std::filesystem::remove(broken);
+}

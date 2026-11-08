@@ -159,6 +159,7 @@ CloudRay cloud_ray_from(vec3 dir_local, vec3 origin_offset) {
 // point's horizon looks up), at d0 + (d1 - d0) (i / n)^2 - denser near the camera, where the air is densest along a
 // low ray.
 global uniform sampler3D atmosphere_single_rayleigh : filter_linear, repeat_disable;
+global uniform sampler3D atmosphere_single_rayleigh_maritime : filter_linear, repeat_disable;
 // Fidelity flag (CloudLayer.air_shadow): false keeps the clear sky's air light in front of and between the clouds.
 global uniform bool cloud_air_shadow;
 // The highest cloud top of the bound snapshots (CloudLayer._bind_slots; 0: no cloud), metres above the ellipsoid.
@@ -183,6 +184,16 @@ void cloud_single_scattering(float r, float rho, float mu, float mu_s, float nu,
 			textureLod(atmosphere_single_rayleigh, uvw1, 0.0).rgb, lerp_nu);
 	mie = mix(textureLod(atmosphere_single_mie, uvw0, 0.0).rgb, textureLod(atmosphere_single_mie, uvw1, 0.0).rgb,
 			lerp_nu);
+	// The maritime aerosol set (atm_combined_scattering's blend; mie against the continental phase function).
+	if (atmosphere_maritime_weight > 0.0) {
+		float w = atmosphere_maritime_weight;
+		vec3 r_m = mix(textureLod(atmosphere_single_rayleigh_maritime, uvw0, 0.0).rgb,
+				textureLod(atmosphere_single_rayleigh_maritime, uvw1, 0.0).rgb, lerp_nu);
+		vec3 m_m = mix(textureLod(atmosphere_single_mie_maritime, uvw0, 0.0).rgb,
+				textureLod(atmosphere_single_mie_maritime, uvw1, 0.0).rgb, lerp_nu);
+		rayleigh = mix(rayleigh, r_m, w);
+		mie = (1.0 - w) * mie + w * m_m * atm_maritime_mie_ratio(nu);
+	}
 }
 
 // The baked volume's own Sun transmittance (cloud_baked.gdshaderinc S): false beyond its levels. Its lookup footprint
@@ -262,7 +273,7 @@ bool cloud_air_ray(CloudRay ray, vec3 dir, vec3 eye, float end_m, out CloudAirRa
 	a.ground = atm_ray_intersects_ground(a.r, a.rho, a.mu);
 	a.phase_r = atm_rayleigh_phase(a.nu);
 	// Bruneton's fade of the single Mie term with the Sun below the horizon, at the camera (atm_to_point_model).
-	a.phase_m = atm_mie_phase(atmosphere_mie_phase_g, a.nu) * smoothstep(0.0, 0.01, a.mu_s);
+	a.phase_m = atm_mie_phase(a.nu) * smoothstep(0.0, 0.01, a.mu_s);
 	return true;
 }
 

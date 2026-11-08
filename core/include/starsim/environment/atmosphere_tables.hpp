@@ -47,11 +47,16 @@ struct AtmosphereTableSizes {
 
 // Everything the runtime lookups need (CPU and shader). Radii in metres from the Earth's centre in the spherical model
 // space (the WGS84 ellipsoid mapped onto the sphere of radius a). Spectral quantities are per metre of wavelength.
+// The aerosol phase function w HG(g_forward) + (1 - w) HG(g_broad) (earth_optics.toml [aerosol.*] phase_*).
+struct MiePhase {
+    double weight = 0.0, g_forward = 0.0, g_broad = 0.0;
+};
+
 struct AtmosphereParameters {
     double bottom_radius_m = 0.0;         // a + ground_altitude_m
     double top_radius_m = 0.0;            // a + top_altitude_m
     double mu_s_min = 0.0;                // cosine of the largest precomputed Sun zenith angle (120 deg)
-    double mie_phase_g = 0.0;             // Cornette-Shanks asymmetry
+    MiePhase mie_phase;                   // the aerosol phase function (two-term Henyey-Greenstein)
     double sun_angular_radius_rad = 0.0;  // at 1 AU
     // Bruneton's solar_irradiance: TOA spectral irradiance at 1 AU at the channel wavelengths (spectra::lambda_*_nm, 628 / 546 / 444 nm), in
     // W m^-2 m^-1 (Bruneton: per nm). The name follows the interface; it is not an illuminance.
@@ -92,7 +97,7 @@ struct AtmosphereTables {
 
 // Version of the precomputation code; part of the input hash. Bump on every code change that alters table contents
 // (the tabulated data is covered by atmosphere_spectral_data_checksum; code behind the optics functions is not).
-inline constexpr std::uint64_t atmosphere_tables_code_version = 4;  // 4: single_rayleigh
+inline constexpr std::uint64_t atmosphere_tables_code_version = 5;  // 4: single_rayleigh; 5: two-term HG phase
 
 // The parameters of a configuration (radii, mu_s_min, luminance factors, solar irradiance).
 AtmosphereParameters atmosphere_parameters(const config::AtmosphereOpticsConfig& optics);
@@ -112,10 +117,14 @@ std::uint64_t atmosphere_spectral_data_checksum();
 // FNV-1a 64 over the code version, every config field, every table size and the spectral data checksum.
 std::uint64_t atmosphere_input_hash(const config::AtmosphereOpticsConfig& optics, const AtmosphereTableSizes& sizes);
 
-// Phase functions (Bruneton functions.glsl): Rayleigh 3 / (16 pi) (1 + nu^2) and Cornette-Shanks with asymmetry g,
-// per steradian.
+// Phase functions per steradian: Rayleigh 3 / (16 pi) (1 + nu^2) (Bruneton functions.glsl) and the aerosol's two-term
+// Henyey-Greenstein w HG(g_forward) + (1 - w) HG(g_broad), HG(g) = (1 - g^2) / (4 pi (1 + g^2 - 2 g nu)^1.5) (look-fixes
+// T9b; Bruneton's Cornette-Shanks with g 0.8 overstated the aureole at 5-10 deg 3x against Lorenz-Mie).
 double rayleigh_phase_function(double nu);
-double mie_phase_function(double g, double nu);
+double henyey_greenstein_phase_function(double g, double nu);
+double mie_phase_function(const MiePhase& phase, double nu);
+// Its asymmetry parameter (mean cosine): w g_forward + (1 - w) g_broad.
+double mie_phase_asymmetry(const MiePhase& phase);
 
 // ---- Ray geometry (Bruneton functions.glsl). r: distance from the centre (m); mu: cosine of the view zenith angle.
 double distance_to_top_atmosphere_boundary_m(const AtmosphereParameters& atmosphere, double r_m, double mu);

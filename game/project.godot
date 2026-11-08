@@ -335,9 +335,37 @@ atmosphere_mu_s_min={
 "type": "float",
 "value": -0.5
 }
-atmosphere_mie_phase_g={
+atmosphere_mie_phase={
+"type": "vec3",
+"value": Vector3(0.06, 0.965, 0.575)
+}
+atmosphere_mie_phase_maritime={
+"type": "vec3",
+"value": Vector3(0.12, 0.965, 0.675)
+}
+atmosphere_maritime_weight={
 "type": "float",
-"value": 0.8
+"value": 0.0
+}
+atmosphere_transmittance_maritime={
+"type": "sampler2D",
+"value": ""
+}
+atmosphere_scattering_maritime={
+"type": "sampler3D",
+"value": ""
+}
+atmosphere_single_mie_maritime={
+"type": "sampler3D",
+"value": ""
+}
+atmosphere_single_rayleigh_maritime={
+"type": "sampler3D",
+"value": ""
+}
+atmosphere_irradiance_maritime={
+"type": "sampler2D",
+"value": ""
 }
 atmosphere_sun_angular_radius_rad={
 "type": "float",

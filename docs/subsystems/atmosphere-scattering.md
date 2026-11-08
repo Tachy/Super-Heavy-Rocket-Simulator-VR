@@ -20,11 +20,25 @@ vehicles still fly through `Us76Atmosphere`).
   linear sRGB (D65), no white balance. Inputs `config/atmosphere/earth_optics.toml` + spectra in
   `atmosphere_spectra.hpp`: Rayleigh from the refractive index of air (Peck & Reeder 1972) with the King factor
   (Bucholtz 1995), the US76 number density as profile; ozone cross sections (Serdyuchenko 2014 via Bruneton) on the AFGL
-  US standard profile, 300 DU [S]; aerosol AOD 0.1 at 550 nm, Angstrom 1.3, single-scattering albedo 0.9, scale height
-  1.2 km, Cornette-Shanks g 0.8 [E]; solar spectrum ASTM G-173 ETR (scaled by 1 / d_AU^2 at run time); ground albedo
+  US standard profile, 300 DU [S]; two aerosol sets (below); solar spectrum ASTM G-173 ETR (scaled by 1 / d_AU^2 at run time); ground albedo
   0.1 [E]; top 100 km [call], model ground `ground_altitude_m` -150 m [E] (below the geoid minimum -106 m and every pad;
   cameras and points below are clamped onto it).
-- **WGS84.** Evaluated in a space where the ellipsoid becomes the sphere of radius a (polar axis x a/b = 1.00336):
+- **Aerosol: two sets, blended by place** (look-fixes T9b). `earth_optics.toml` `[aerosol.continental]` (AOD 0.1 at
+  550 nm [E], Angstrom 1.3 [S: AERONET GSFC / Paris 1.2-2.5, Dubovik et al. 2002 Table 1], single-scattering albedo
+  0.96 [D: Mie of the GSFC distribution]) and `[aerosol.maritime]` (AOD 0.1 [S: island AERONET oceanic mean 0.11 at
+  500 nm, Smirnov et al. 2009], Angstrom 0.6 [S: same], albedo 0.97 [S: Dubovik 2002 Lanai]); scale height 1.2 km both.
+  Each set has its own tables (cache `earth_atmosphere.bin` / `earth_atmosphere_maritime.bin`, ~2 x 61 s once) and its
+  own phase function, a two-term Henyey-Greenstein w HG(g_forward) + (1 - w) HG(g_broad) fitted to the Lorenz-Mie phase
+  function of the type's AERONET size distribution and refractive index (`tools/validation/aerosol_mie_check.py`:
+  continental w 0.06, 0.965 / 0.575, asymmetry 0.60; maritime 0.12, 0.965 / 0.675, 0.71; fit within -18 / +29 % at
+  0.5-90 deg). The multiple-scattering passes take one HG of the same asymmetry (similarity principle; the 2-deg forward
+  peak is narrower than the direction quadrature); the single scattering keeps the full function at run time. Every
+  lookup (core `AtmosphereScattering`, shader include) is (1 - w) continental + w maritime with the observer's maritime
+  weight w (`AerosolRegions`): the water share of `data/textures/earth_water.png` around the eye's sub-point, averaged
+  over a footprint of radius max(50 km [E], 0.5 x the distance to the horizon) [call] (a 2x2-mean pyramid from 1024 x 512,
+  bilinear in place, blended between levels: continuous). Starbase pad ~0.5, open Gulf 1, inland Texas 0, ISS orbit the
+  footprint's mix. The single Mie part is carried against the continental phase function (single_mie x p_c, with the
+  maritime part x p_m / p_c), exact at every nu. `render_check --maritime=<w>` fixes w (A/B).- **WGS84.** Evaluated in a space where the ellipsoid becomes the sphere of radius a (polar axis x a/b = 1.00336):
   ground matches the ellipsoid (test: < 1 mm at 0/30/60/90 deg), optical paths off by at most 0.34 %. Rays and the
   Sun map by that stretch, normals by its inverse transpose; the direct-sun cosine is taken in true ITRF geometry. CPU
   and shaders use the same mapping.

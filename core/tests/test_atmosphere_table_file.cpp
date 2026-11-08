@@ -72,7 +72,8 @@ bool same_tables(const environment::AtmosphereTables& a, const environment::Atmo
            a.sizes.scattering_mu == b.sizes.scattering_mu && a.sizes.scattering_mu_s == b.sizes.scattering_mu_s &&
            a.sizes.scattering_nu == b.sizes.scattering_nu && a.sizes.irradiance_mu_s == b.sizes.irradiance_mu_s &&
            a.sizes.irradiance_r == b.sizes.irradiance_r && p.bottom_radius_m == q.bottom_radius_m &&
-           p.top_radius_m == q.top_radius_m && p.mu_s_min == q.mu_s_min && p.mie_phase_g == q.mie_phase_g &&
+           p.top_radius_m == q.top_radius_m && p.mu_s_min == q.mu_s_min && p.mie_phase.weight == q.mie_phase.weight &&
+           p.mie_phase.g_forward == q.mie_phase.g_forward && p.mie_phase.g_broad == q.mie_phase.g_broad &&
            p.sun_angular_radius_rad == q.sun_angular_radius_rad && p.solar_illuminance_rgb == q.solar_illuminance_rgb &&
            p.sky_radiance_to_luminance == q.sky_radiance_to_luminance &&
            p.sun_radiance_to_luminance == q.sun_radiance_to_luminance &&
@@ -128,7 +129,7 @@ TEST_CASE("Table files round-trip and damaged files are recomputed", "[atmospher
     // load_or_compute_atmosphere: an empty cache directory gets the file; a second call reads it; a damaged file is
     // recomputed and replaced; other sizes (a changed hash) recompute.
     TempDir cache;
-    const fs::path cache_file = cache.path / environment::atmosphere_cache_file_name;
+    const fs::path cache_file = cache.path / environment::atmosphere_cache_file_name();
     const auto computed = environment::load_or_compute_atmosphere(config_dir, cache.path, sizes);
     REQUIRE(computed);
     CHECK(fs::exists(cache_file));
@@ -161,13 +162,13 @@ TEST_CASE("Table files round-trip and damaged files are recomputed", "[atmospher
 
     // Temp files of a killed writer: one older than 10 minutes is removed on the next write, a fresh one is kept.
     TempDir stale;
-    const fs::path old_temp = stale.path / (std::string(environment::atmosphere_cache_file_name) + ".tmp.old");
-    const fs::path new_temp = stale.path / (std::string(environment::atmosphere_cache_file_name) + ".tmp.new");
+    const fs::path old_temp = stale.path / (std::string(environment::atmosphere_cache_file_name()) + ".tmp.old");
+    const fs::path new_temp = stale.path / (std::string(environment::atmosphere_cache_file_name()) + ".tmp.new");
     write_bytes(old_temp, {'x'});
     write_bytes(new_temp, {'x'});
     fs::last_write_time(old_temp, fs::file_time_type::clock::now() - std::chrono::hours(1));
     environment::load_or_compute_atmosphere(config_dir, stale.path, sizes);
     CHECK_FALSE(fs::exists(old_temp));
     CHECK(fs::exists(new_temp));
-    CHECK(fs::exists(stale.path / environment::atmosphere_cache_file_name));
+    CHECK(fs::exists(stale.path / environment::atmosphere_cache_file_name()));
 }

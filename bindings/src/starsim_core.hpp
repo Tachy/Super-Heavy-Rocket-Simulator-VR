@@ -229,8 +229,14 @@ public:
     // texel, x fastest, then y, then z. transmittance:
     // x = mu, y = r (transmittance_size); irradiance: x = mu_s, y = r; scattering / single_mie: x packs (nu, mu_s) as
     // x = nu_index * scattering_mu_s + mu_s_index (mu_s fastest), y = mu, z = r (scattering_size = width, height, depth;
-    // scattering_cells: Vector4i(nu, mu_s, mu, r) cell counts).
+    // scattering_cells: Vector4i(nu, mu_s, mu, r) cell counts). These top-level tables and parameters are the continental
+    // aerosol set; "maritime": a Dictionary with the maritime set's five tables and parameters (look-fixes T9b, its
+    // cache earth_atmosphere_maritime.bin).
     godot::Dictionary load_atmosphere(const godot::String& config_dir, const godot::String& cache_dir);
+    // The observer's maritime aerosol weight in [0, 1] (game/world/aerosol_regions.gd): every lookup below blends the
+    // two sets by it (AtmosphereScattering). 0 until set.
+    void set_atmosphere_maritime_weight(double weight);
+    double get_atmosphere_maritime_weight() const;
     // The lookups take ITRF metres and unit directions; before a successful load they return zeros.
     godot::Vector3 atmosphere_sun_transmittance(const godot::Vector3& position_itrf_m,
                                                 const godot::Vector3& sun_direction_itrf) const;
@@ -380,6 +386,7 @@ private:
     std::shared_ptr<const environment::Geoid> coarse_geoid_;  // load_terrain(): config's 1-degree grid; nullptr if unreadable
     mutable std::mutex atmosphere_mutex_;  // guards atmosphere_ (swapped by load_atmosphere on any thread)
     std::shared_ptr<const environment::AtmosphereScattering> atmosphere_;
+    std::atomic<double> atmosphere_maritime_weight_{0.0};
     using SnapshotPtr = std::shared_ptr<const environment::WeatherSnapshot>;
     SnapshotPtr weather_snapshot_cached(const std::string& file);  // load cache only (a hit becomes the newest); nullptr if absent
     SnapshotPtr weather_snapshot_of(const std::string& file);  // load cache, else reads off-lock; nullptr if unreadable

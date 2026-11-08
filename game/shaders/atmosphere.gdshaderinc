@@ -47,6 +47,14 @@ global uniform sampler2D atmosphere_transmittance : filter_linear, repeat_disabl
 global uniform sampler3D atmosphere_scattering : filter_linear, repeat_disable;
 global uniform sampler3D atmosphere_single_mie : filter_linear, repeat_disable;
 global uniform sampler2D atmosphere_irradiance : filter_linear, repeat_disable;
+// The maritime aerosol set (look-fixes T9b, earth_optics.toml [aerosol.maritime]): every table read below is
+// (1 - w) continental + w maritime with w = atmosphere_maritime_weight (the observer's, AerosolRegions), as the core's
+// AtmosphereScattering; w = 0 reads the continental set alone (a uniform branch).
+global uniform sampler2D atmosphere_transmittance_maritime : filter_linear, repeat_disable;
+global uniform sampler3D atmosphere_scattering_maritime : filter_linear, repeat_disable;
+global uniform sampler3D atmosphere_single_mie_maritime : filter_linear, repeat_disable;
+global uniform sampler2D atmosphere_irradiance_maritime : filter_linear, repeat_disable;
+global uniform float atmosphere_maritime_weight;
 
 // ---- Per-frame state (Atmosphere.update).
 global uniform vec3 atmosphere_camera_hi;           // camera, Earth-local render frame (m): float32 part
@@ -80,7 +88,9 @@ global uniform float atmosphere_sun_distance_m;
 global uniform float atmosphere_bottom_radius_m;    // model ground (a + ground_altitude_m)
 global uniform float atmosphere_top_radius_m;       // a + top_altitude_m
 global uniform float atmosphere_mu_s_min;
-global uniform float atmosphere_mie_phase_g;
+// The aerosol phase functions of the two sets: (w, g_forward, g_broad) of w HG(g_forward) + (1 - w) HG(g_broad).
+global uniform vec3 atmosphere_mie_phase;
+global uniform vec3 atmosphere_mie_phase_maritime;
 global uniform float atmosphere_sun_angular_radius_rad;
 global uniform vec3 atmosphere_sky_radiance_to_luminance;  // table units -> cd/m^2
 global uniform vec3 atmosphere_sun_illuminance_lux;  // TOA solar illuminance at 1 AU per channel (solar x sun factor)
@@ -140,7 +150,11 @@ vec3 atm_transmittance_to_top(float r, float rho, float mu) {
 	float x_r = rho / H;
 	vec2 uv = vec2(atm_texture_coord_from_unit_range(x_mu, atmosphere_table_sizes.x),
 			atm_texture_coord_from_unit_range(x_r, atmosphere_table_sizes.y));
-	return textureLod(atmosphere_transmittance, uv, 0.0).rgb;
+	vec3 t = textureLod(atmosphere_transmittance, uv, 0.0).rgb;
+	if (atmosphere_maritime_weight > 0.0) {
+		t = mix(t, textureLod(atmosphere_transmittance_maritime, uv, 0.0).rgb, atmosphere_maritime_weight);
+	}
+	return t;
 }
 
 float atm_rho_of(float r) {
@@ -224,8 +238,26 @@ vec4 atm_scattering_uvwz(float r, float rho, float mu, float mu_s, float nu, boo
 	return vec4((nu + 1.0) * 0.5, atm_u_mu_s(mu_s), u_mu, u_r);
 }
 
+// Aerosol phase functions (core atmosphere_tables.cpp mie_phase_function): two-term Henyey-Greenstein per steradian.
+float atm_henyey_greenstein(float g, float nu) {
+	float x = 1.0 + g * g - 2.0 * g * nu;
+	return (1.0 - g * g) / (4.0 * ATM_PI * x * sqrt(x));
+}
+float atm_two_term_phase(vec3 p, float nu) {
+	return p.x * atm_henyey_greenstein(p.y, nu) + (1.0 - p.x) * atm_henyey_greenstein(p.z, nu);
+}
+// The continental set's phase function: the one every caller multiplies single_mie by.
+float atm_mie_phase(float nu) { return atm_two_term_phase(atmosphere_mie_phase, nu); }
+// p_maritime / p_continental at nu.
+float atm_maritime_mie_ratio(float nu) {
+	return atm_two_term_phase(atmosphere_mie_phase_maritime, nu) / atm_mie_phase(nu);
+}
+
 // Scattering (RGB: Rayleigh + multiple, without the phase) and single Mie (RGB) at (r, mu, mu_s, nu): two trilinear
-// samples in the nu slices around u_nu, lerped (Bruneton's GetScattering).
+// samples in the nu slices around u_nu, lerped (Bruneton's GetScattering). With the maritime set the scattering is the
+// blend and single_mie is expressed against the continental phase function: (1 - w) M_c + w M_m p_m(nu) / p_c(nu), so
+// that single_mie x atm_mie_phase(nu) is each set's single Mie times its own phase function (exact: every caller uses
+// the same nu).
 void atm_combined_scattering(float r, float rho, float mu, float mu_s, float nu, bool ground,
 		out vec3 scattering, out vec3 single_mie) {
 	vec4 uvwz = atm_scattering_uvwz(r, rho, mu, mu_s, nu, ground);
@@ -239,6 +271,15 @@ void atm_combined_scattering(float r, float rho, float mu, float mu_s, float nu,
 			lerp_nu);
 	single_mie = mix(textureLod(atmosphere_single_mie, uvw0, 0.0).rgb, textureLod(atmosphere_single_mie, uvw1, 0.0).rgb,
 			lerp_nu);
+	if (atmosphere_maritime_weight > 0.0) {
+		float w = atmosphere_maritime_weight;
+		vec3 s_m = mix(textureLod(atmosphere_scattering_maritime, uvw0, 0.0).rgb,
+				textureLod(atmosphere_scattering_maritime, uvw1, 0.0).rgb, lerp_nu);
+		vec3 m_m = mix(textureLod(atmosphere_single_mie_maritime, uvw0, 0.0).rgb,
+				textureLod(atmosphere_single_mie_maritime, uvw1, 0.0).rgb, lerp_nu);
+		scattering = mix(scattering, s_m, w);
+		single_mie = (1.0 - w) * single_mie + w * m_m * atm_maritime_mie_ratio(nu);
+	}
 }
 
 // GetIrradiance (the sky irradiance table), from the height above the model ground.
@@ -247,15 +288,14 @@ vec3 atm_irradiance(float h, float mu_s) {
 	float x_mu_s = mu_s * 0.5 + 0.5;
 	vec2 uv = vec2(atm_texture_coord_from_unit_range(x_mu_s, atmosphere_table_sizes.z),
 			atm_texture_coord_from_unit_range(x_r, atmosphere_table_sizes.w));
-	return textureLod(atmosphere_irradiance, uv, 0.0).rgb;
+	vec3 e = textureLod(atmosphere_irradiance, uv, 0.0).rgb;
+	if (atmosphere_maritime_weight > 0.0) {
+		e = mix(e, textureLod(atmosphere_irradiance_maritime, uv, 0.0).rgb, atmosphere_maritime_weight);
+	}
+	return e;
 }
 
 float atm_rayleigh_phase(float nu) { return 3.0 / (16.0 * ATM_PI) * (1.0 + nu * nu); }
-float atm_mie_phase(float g, float nu) {
-	float k = 3.0 / (8.0 * ATM_PI) * (1.0 - g * g) / (2.0 + g * g);
-	float x = 1.0 + g * g - 2.0 * g * nu;
-	return k * (1.0 + nu * nu) / (x * sqrt(x));
-}
 
 vec3 atm_to_scene(vec3 radiance) {
 	return radiance * atmosphere_sky_radiance_to_luminance * atmosphere_luminance_scale;
@@ -417,7 +457,7 @@ vec3 atm_sky_from_light(vec3 up, float r, float rho, vec3 v, vec3 light_directio
 	} else {
 		atm_combined_scattering(r, rho, mu, mu_s, nu, ground, scattering, single_mie);
 	}
-	vec3 radiance = scattering * atm_rayleigh_phase(nu) + single_mie * atm_mie_phase(atmosphere_mie_phase_g, nu);
+	vec3 radiance = scattering * atm_rayleigh_phase(nu) + single_mie * atm_mie_phase(nu);
 	return atm_to_scene(radiance) + umbra;
 }
 
@@ -561,7 +601,7 @@ vec3 atm_to_point_model(vec3 offset_model, out vec3 transmittance) {
 	// Bruneton's hack against artefacts with the Sun below the horizon: fade the single Mie term out.
 	float mie_fade = smoothstep(0.0, 0.01, mu_s);
 	single_mie *= mie_fade;
-	vec3 radiance = scattering * atm_rayleigh_phase(nu) + single_mie * atm_mie_phase(atmosphere_mie_phase_g, nu);
+	vec3 radiance = scattering * atm_rayleigh_phase(nu) + single_mie * atm_mie_phase(nu);
 	return atm_to_scene(radiance) + umbra;
 }
 
@@ -662,7 +702,7 @@ vec3 atm_sky_eclipse_factor(vec3 point_local) {
 		atm_segmented_scattering(up * r, v, r, rho, mu, mu_s, nu, false, atm_distance_to_top(r, mu),
 				ATM_ECLIPSE_LIGHT_SEGMENTS, s, m, s_full, m_full, umbra_unused);
 		float phase_r = atm_rayleigh_phase(nu);
-		float phase_m = atm_mie_phase(atmosphere_mie_phase_g, nu);
+		float phase_m = atm_mie_phase(nu);
 		eclipsed += weight * (s * phase_r + m * phase_m);
 		full += weight * (s_full * phase_r + m_full * phase_m);
 	}

@@ -379,7 +379,12 @@ static var _hapke_theta_bar_rad := 0.0
 static var _hapke_norm := 0.0
 var _task_id := -1
 var _result := {}  ## written by the worker task, read after it completed
-var _textures: Array[Texture] = []  ## keeps the uploaded textures alive
+var _textures: Array[Texture] = []  ## keeps the uploaded textures alive (both aerosol sets)
+## The observer's maritime aerosol weight (AerosolRegions, look-fixes T9b): blends the continental and the maritime table
+## sets in the core lookups and the shaders (atmosphere_maritime_weight). Fixed (NAN: from the map) for checks.
+var maritime_weight := 0.0
+static var maritime_weight_override := NAN
+var _aerosol_regions: AerosolRegions = null
 
 
 ## Starts loading the tables in the background (config_dir/atmosphere/earth_optics.toml, cache in cache_dir).
@@ -388,6 +393,8 @@ func start_loading(core: StarsimCore, config_dir: String, cache_dir: String) -> 
 		return
 	_core = core
 	ShaderGlobals.set_value(&"atmosphere_enabled", false)
+	# The water map lives next to the tables' cache in the data set: data/textures/earth_water.png.
+	_aerosol_regions = AerosolRegions.from_file(cache_dir.get_base_dir().path_join("textures/earth_water.png"))
 	var cached := FileAccess.file_exists(cache_dir.path_join(CACHE_FILE))
 	status_key = "loading.atmosphere_load" if cached else "loading.atmosphere_compute"
 	loading = true
@@ -467,6 +474,7 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	_earth_center_gcrf_m = earth_center_gcrf_m
 	var gcrf_to_fixed := earth_fixed_to_gcrf.transposed()
 	var camera_fixed := gcrf_to_fixed * (camera_gcrf_m - earth_center_gcrf_m)
+	_update_maritime_weight(camera_fixed)
 	camera_local_m = Frames.to_render(camera_fixed)
 	var split := TerrainQuadtree.split_float32(camera_local_m)
 	var stretched := Vector3(camera_fixed.x, camera_fixed.y, camera_fixed.z * POLAR_STRETCH)
@@ -1758,14 +1766,54 @@ func _load_task(config_dir: String, cache_dir: String) -> void:
 		var t_size: Vector2i = result["transmittance_size"]
 		var s_size: Vector3i = result["scattering_size"]
 		var i_size: Vector2i = result["irradiance_size"]
-		result["transmittance_image"] = _image_2d(result["transmittance"], t_size, Image.FORMAT_RGBAF)
-		result["irradiance_image"] = _image_2d(result["irradiance"], i_size)
-		result["scattering_images"] = _images_3d(result["scattering"], s_size)
-		result["single_mie_images"] = _images_3d(result["single_mie"], s_size)
-		result["single_rayleigh_images"] = _images_3d(result["single_rayleigh"], s_size)
-		for key in ["transmittance", "irradiance", "scattering", "single_mie", "single_rayleigh"]:
-			result.erase(key)
+		_build_images(result, t_size, s_size, i_size)
+		# The maritime aerosol set (look-fixes T9b): the same layout, blended by the maritime weight.
+		_build_images(result["maritime"], t_size, s_size, i_size)
 	_result = result
+
+
+## The maritime weight of the eye at an ITRF point (m) to the core's lookups and the shaders.
+func _update_maritime_weight(eye_itrf_m: Vector3) -> void:
+	var w := maritime_weight_override
+	if is_nan(w):
+		var geo := SurfaceClearance.geodetic(eye_itrf_m, true)
+		w = _aerosol_regions.weight(geo.x, geo.y, geo.z) if _aerosol_regions != null else AerosolRegions.FALLBACK_WEIGHT
+	maritime_weight = clampf(w, 0.0, 1.0)
+	_core.set_atmosphere_maritime_weight(maritime_weight)
+	ShaderGlobals.set_value(&"atmosphere_maritime_weight", maritime_weight)
+
+
+## The tables of one aerosol set as images (in place: the packed arrays are replaced by *_image / *_images).
+func _build_images(tables: Dictionary, t_size: Vector2i, s_size: Vector3i, i_size: Vector2i) -> void:
+	tables["transmittance_image"] = _image_2d(tables["transmittance"], t_size, Image.FORMAT_RGBAF)
+	tables["irradiance_image"] = _image_2d(tables["irradiance"], i_size)
+	tables["scattering_images"] = _images_3d(tables["scattering"], s_size)
+	tables["single_mie_images"] = _images_3d(tables["single_mie"], s_size)
+	tables["single_rayleigh_images"] = _images_3d(tables["single_rayleigh"], s_size)
+	for key in ["transmittance", "irradiance", "scattering", "single_mie", "single_rayleigh"]:
+		tables.erase(key)
+
+
+## One aerosol set's textures to the shader globals atmosphere_<table><suffix> (suffix "" or "_maritime"), and its phase
+## function (w, g_forward, g_broad) to atmosphere_mie_phase<suffix>.
+func _upload_set(tables: Dictionary, s_size: Vector3i, suffix: String) -> void:
+	var transmittance := ImageTexture.create_from_image(tables["transmittance_image"])
+	var irradiance := ImageTexture.create_from_image(tables["irradiance_image"])
+	var scattering := ImageTexture3D.new()
+	scattering.create(table_format, s_size.x, s_size.y, s_size.z, false, tables["scattering_images"])
+	var single_mie := ImageTexture3D.new()
+	single_mie.create(table_format, s_size.x, s_size.y, s_size.z, false, tables["single_mie_images"])
+	# The single Rayleigh part (static clouds Task 9b): the cloud pass's cloud shadows on the air.
+	var single_rayleigh := ImageTexture3D.new()
+	single_rayleigh.create(table_format, s_size.x, s_size.y, s_size.z, false, tables["single_rayleigh_images"])
+	_textures.append_array([transmittance, irradiance, scattering, single_mie, single_rayleigh])
+	ShaderGlobals.set_value(StringName("atmosphere_transmittance" + suffix), transmittance)
+	ShaderGlobals.set_value(StringName("atmosphere_irradiance" + suffix), irradiance)
+	ShaderGlobals.set_value(StringName("atmosphere_scattering" + suffix), scattering)
+	ShaderGlobals.set_value(StringName("atmosphere_single_mie" + suffix), single_mie)
+	ShaderGlobals.set_value(StringName("atmosphere_single_rayleigh" + suffix), single_rayleigh)
+	ShaderGlobals.set_value(StringName("atmosphere_mie_phase" + suffix), tables["parameters"]["mie_phase"])
+
 
 func _image_2d(data: PackedFloat32Array, size: Vector2i, format := table_format) -> Image:
 	var image := Image.create_from_data(size.x, size.y, false, Image.FORMAT_RGBAF, data.to_byte_array())
@@ -1796,28 +1844,15 @@ func _upload(result: Dictionary) -> void:
 		return
 	parameters = result["parameters"]
 	var s_size: Vector3i = result["scattering_size"]
-	var transmittance := ImageTexture.create_from_image(result["transmittance_image"])
-	var irradiance := ImageTexture.create_from_image(result["irradiance_image"])
-	var scattering := ImageTexture3D.new()
-	scattering.create(table_format, s_size.x, s_size.y, s_size.z, false, result["scattering_images"])
-	var single_mie := ImageTexture3D.new()
-	single_mie.create(table_format, s_size.x, s_size.y, s_size.z, false, result["single_mie_images"])
-	# The single Rayleigh part (static clouds Task 9b): the cloud pass's cloud shadows on the air.
-	var single_rayleigh := ImageTexture3D.new()
-	single_rayleigh.create(table_format, s_size.x, s_size.y, s_size.z, false, result["single_rayleigh_images"])
-	_textures = [transmittance, irradiance, scattering, single_mie, single_rayleigh]
+	_textures = []
+	_upload_set(result, s_size, "")
+	_upload_set(result["maritime"], s_size, "_maritime")
 	var t_size: Vector2i = result["transmittance_size"]
 	var i_size: Vector2i = result["irradiance_size"]
 	var cells: Vector4i = result["scattering_cells"]  # (nu, mu_s, mu, r)
-	ShaderGlobals.set_value(&"atmosphere_transmittance", transmittance)
-	ShaderGlobals.set_value(&"atmosphere_irradiance", irradiance)
-	ShaderGlobals.set_value(&"atmosphere_scattering", scattering)
-	ShaderGlobals.set_value(&"atmosphere_single_mie", single_mie)
-	ShaderGlobals.set_value(&"atmosphere_single_rayleigh", single_rayleigh)
 	ShaderGlobals.set_value(&"atmosphere_bottom_radius_m", float(parameters["bottom_radius_m"]))
 	ShaderGlobals.set_value(&"atmosphere_top_radius_m", float(parameters["top_radius_m"]))
 	ShaderGlobals.set_value(&"atmosphere_mu_s_min", float(parameters["mu_s_min"]))
-	ShaderGlobals.set_value(&"atmosphere_mie_phase_g", float(parameters["mie_phase_g"]))
 	ShaderGlobals.set_value(&"atmosphere_sun_angular_radius_rad", float(parameters["sun_angular_radius_rad"]))
 	ShaderGlobals.set_value(&"atmosphere_sky_radiance_to_luminance", parameters["sky_radiance_to_luminance"])
 	var solar: Vector3 = parameters["solar_illuminance_rgb"]

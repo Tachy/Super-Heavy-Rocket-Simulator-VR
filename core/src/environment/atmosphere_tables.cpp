@@ -95,7 +95,7 @@ AtmosphereParameters atmosphere_parameters(const config::AtmosphereOpticsConfig&
     p.bottom_radius_m = a + optics.ground_altitude_m;
     p.top_radius_m = a + optics.top_altitude_m;
     p.mu_s_min = std::cos(max_sun_zenith_angle_rad);
-    p.mie_phase_g = optics.mie_phase_g;
+    p.mie_phase = {optics.mie_phase_weight, optics.mie_phase_g_forward, optics.mie_phase_g_broad};
     p.sun_angular_radius_rad = std::asin(constants::sun_radius_m / constants::astronomical_unit_m);
     p.solar_illuminance_rgb = {solar_irradiance_w_m2_per_m(spectra::lambda_r_nm * nm),
                                solar_irradiance_w_m2_per_m(spectra::lambda_g_nm * nm),
@@ -131,7 +131,8 @@ std::uint64_t atmosphere_input_hash(const config::AtmosphereOpticsConfig& optics
     hash_value(h, atmosphere_spectral_data_checksum());
     for (const double v : {optics.top_altitude_m, optics.ground_altitude_m, optics.aerosol_optical_depth_550nm,
                            optics.aerosol_angstrom_exponent, optics.aerosol_single_scattering_albedo,
-                           optics.aerosol_scale_height_m, optics.mie_phase_g, optics.ozone_column_du,
+                           optics.aerosol_scale_height_m, optics.mie_phase_weight, optics.mie_phase_g_forward,
+                           optics.mie_phase_g_broad, optics.ozone_column_du,
                            optics.ground_albedo}) {
         hash_value(h, v);
     }
@@ -151,10 +152,18 @@ double rayleigh_phase_function(double nu) {
     return k * (1.0 + nu * nu);
 }
 
-double mie_phase_function(double g, double nu) {
-    const double k = 3.0 / (8.0 * constants::pi) * (1.0 - g * g) / (2.0 + g * g);
+double henyey_greenstein_phase_function(double g, double nu) {
     const double x = 1.0 + g * g - 2.0 * g * nu;
-    return k * (1.0 + nu * nu) / (x * std::sqrt(x));  // x^1.5
+    return (1.0 - g * g) / (4.0 * constants::pi * x * std::sqrt(x));  // x^1.5
+}
+
+double mie_phase_asymmetry(const MiePhase& phase) {
+    return phase.weight * phase.g_forward + (1.0 - phase.weight) * phase.g_broad;
+}
+
+double mie_phase_function(const MiePhase& phase, double nu) {
+    return phase.weight * henyey_greenstein_phase_function(phase.g_forward, nu) +
+           (1.0 - phase.weight) * henyey_greenstein_phase_function(phase.g_broad, nu);
 }
 
 // ---- Ray geometry.

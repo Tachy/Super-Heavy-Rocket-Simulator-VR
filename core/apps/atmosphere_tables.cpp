@@ -1,4 +1,5 @@
-// atmosphere_tables (M8 atmosphere): precomputes the Earth atmosphere tables and writes the cache file. Usage:
+// atmosphere_tables (M8 atmosphere): precomputes the Earth atmosphere tables of both aerosol sets and writes their cache
+// files (earth_atmosphere.bin, earth_atmosphere_maritime.bin). Usage:
 //   atmosphere_tables [--config <config dir>] [--out <cache dir>]
 // Defaults: the repository's config/ and data/atmosphere/. Always recomputes (tools/package.ps1 ships the file);
 // prints the precompute time and the file. Exit code 0 on success, 1 on an error.
@@ -27,16 +28,20 @@ int main(int argc, char** argv) {
         }
     }
     try {
-        const auto optics = config::load_atmosphere_optics(config_dir / "atmosphere" / "earth_optics.toml");
-        const auto t0 = std::chrono::steady_clock::now();
-        const auto tables = environment::precompute_atmosphere(optics);
-        const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-        std::filesystem::create_directories(out_dir);
-        const std::filesystem::path file = out_dir / environment::atmosphere_cache_file_name;
-        environment::write_atmosphere_tables(file, tables);
-        std::printf("atmosphere tables: precompute %.1f s (%d scattering orders), hash %016llx\nwrote %s (%.1f MB)\n",
-                    seconds, optics.scattering_orders, static_cast<unsigned long long>(tables.input_hash),
-                    file.string().c_str(), std::filesystem::file_size(file) / 1e6);
+        for (const config::AerosolType aerosol : config::aerosol_types) {
+            const auto optics = config::load_atmosphere_optics(config_dir / "atmosphere" / "earth_optics.toml", aerosol);
+            const auto t0 = std::chrono::steady_clock::now();
+            const auto tables = environment::precompute_atmosphere(optics);
+            const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            std::filesystem::create_directories(out_dir);
+            const std::filesystem::path file = out_dir / environment::atmosphere_cache_file_name(aerosol);
+            environment::write_atmosphere_tables(file, tables);
+            std::printf("atmosphere tables (%s aerosol): precompute %.1f s (%d scattering orders), hash %016llx\n"
+                        "wrote %s (%.1f MB)\n",
+                        config::aerosol_type_name(aerosol), seconds, optics.scattering_orders,
+                        static_cast<unsigned long long>(tables.input_hash), file.string().c_str(),
+                        std::filesystem::file_size(file) / 1e6);
+        }
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "atmosphere_tables: " << e.what() << "\n";

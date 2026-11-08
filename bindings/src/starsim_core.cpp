@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 
+#include "starsim/config/atmosphere_optics_config.hpp"
 #include "starsim/environment/atmosphere_table_file.hpp"
 #include "starsim/environment/cloud_noise.hpp"
 #include "starsim/environment/cloud_optics.hpp"
@@ -101,7 +102,7 @@ godot::Dictionary atmosphere_parameters_dictionary(const environment::Atmosphere
     d["bottom_radius_m"] = p.bottom_radius_m;
     d["top_radius_m"] = p.top_radius_m;
     d["mu_s_min"] = p.mu_s_min;
-    d["mie_phase_g"] = p.mie_phase_g;
+    d["mie_phase"] = godot::Vector3(p.mie_phase.weight, p.mie_phase.g_forward, p.mie_phase.g_broad);
     d["sun_angular_radius_rad"] = p.sun_angular_radius_rad;
     d["solar_illuminance_rgb"] = to_godot(p.solar_illuminance_rgb);
     d["sky_radiance_to_luminance"] = to_godot(p.sky_radiance_to_luminance);
@@ -1045,9 +1046,11 @@ godot::Dictionary StarsimCore::load_atmosphere(const godot::String& config_dir, 
     godot::Dictionary result;
     try {
         // The slow part (cache read or precompute) runs off-lock; only the swap is locked.
-        const auto tables = environment::load_or_compute_atmosphere(
-            std::filesystem::path(config_dir.utf8().get_data()), std::filesystem::path(cache_dir.utf8().get_data()));
-        auto scattering = std::make_shared<const environment::AtmosphereScattering>(tables);
+        const std::filesystem::path config_path(config_dir.utf8().get_data()), cache_path(cache_dir.utf8().get_data());
+        const auto tables = environment::load_or_compute_atmosphere(config_path, cache_path);
+        const auto maritime = environment::load_or_compute_atmosphere(config_path, cache_path, {},
+                                                                      config::AerosolType::maritime);
+        auto scattering = std::make_shared<const environment::AtmosphereScattering>(tables, maritime);
         {
             const std::lock_guard<std::mutex> lock(atmosphere_mutex_);
             atmosphere_ = std::move(scattering);
@@ -1065,6 +1068,14 @@ godot::Dictionary StarsimCore::load_atmosphere(const godot::String& config_dir, 
         result["irradiance"] = to_packed(tables->irradiance);
         result["irradiance_size"] = godot::Vector2i(s.irradiance_mu_s, s.irradiance_r);
         result["parameters"] = atmosphere_parameters_dictionary(tables->parameters);
+        godot::Dictionary m;
+        m["transmittance"] = to_packed(maritime->transmittance);
+        m["scattering"] = to_packed(maritime->scattering);
+        m["single_mie"] = to_packed(maritime->single_mie);
+        m["single_rayleigh"] = to_packed(maritime->single_rayleigh);
+        m["irradiance"] = to_packed(maritime->irradiance);
+        m["parameters"] = atmosphere_parameters_dictionary(maritime->parameters);
+        result["maritime"] = m;
     } catch (const std::exception& e) {
         // The player sees the code (a table text); the developer text with the cause goes to the log and "error".
         const godot::String message = godot::String::utf8("Atmosphere could not be loaded: ") + godot::String::utf8(e.what());
@@ -1076,11 +1087,18 @@ godot::Dictionary StarsimCore::load_atmosphere(const godot::String& config_dir, 
     return result;
 }
 
+void StarsimCore::set_atmosphere_maritime_weight(double weight) {
+    atmosphere_maritime_weight_.store(std::clamp(weight, 0.0, 1.0));
+}
+
+double StarsimCore::get_atmosphere_maritime_weight() const { return atmosphere_maritime_weight_.load(); }
+
 godot::Vector3 StarsimCore::atmosphere_sun_transmittance(const godot::Vector3& position_itrf_m,
                                                          const godot::Vector3& sun_direction_itrf) const {
     const auto a = atmosphere();
     if (!a) return {};
-    return to_godot(a->sun_transmittance(to_core(position_itrf_m), to_core(sun_direction_itrf)));
+    return to_godot(a->sun_transmittance(to_core(position_itrf_m), to_core(sun_direction_itrf),
+                                         atmosphere_maritime_weight_.load()));
 }
 
 godot::Dictionary StarsimCore::atmosphere_sky_luminance(const godot::Vector3& camera_itrf_m,
@@ -1091,7 +1109,7 @@ godot::Dictionary StarsimCore::atmosphere_sky_luminance(const godot::Vector3& ca
     math::Vec3 luminance{};
     if (const auto a = atmosphere()) {
         luminance = a->sky_luminance(to_core(camera_itrf_m), to_core(view_direction_itrf),
-                                     to_core(sun_direction_itrf), &transmittance);
+                                     to_core(sun_direction_itrf), &transmittance, atmosphere_maritime_weight_.load());
     }
     d["luminance"] = to_godot(luminance);
     d["transmittance"] = to_godot(transmittance);
@@ -1106,7 +1124,7 @@ godot::Dictionary StarsimCore::atmosphere_sky_luminance_to_point(const godot::Ve
     math::Vec3 luminance{};
     if (const auto a = atmosphere()) {
         luminance = a->sky_luminance_to_point(to_core(camera_itrf_m), to_core(point_itrf_m),
-                                              to_core(sun_direction_itrf), &transmittance);
+                                              to_core(sun_direction_itrf), &transmittance, atmosphere_maritime_weight_.load());
     }
     d["luminance"] = to_godot(luminance);
     d["transmittance"] = to_godot(transmittance);
@@ -1119,7 +1137,8 @@ godot::Dictionary StarsimCore::atmosphere_illuminance(const godot::Vector3& poin
     godot::Dictionary d;
     environment::AtmosphereScattering::Illuminance lux{};
     if (const auto a = atmosphere()) {
-        lux = a->sun_and_sky_illuminance(to_core(point_itrf_m), to_core(normal_itrf), to_core(sun_direction_itrf));
+        lux = a->sun_and_sky_illuminance(to_core(point_itrf_m), to_core(normal_itrf), to_core(sun_direction_itrf),
+                                         atmosphere_maritime_weight_.load());
     }
     d["sun_lux"] = to_godot(lux.sun_lux);
     d["sky_lux"] = to_godot(lux.sky_lux);
@@ -1756,6 +1775,8 @@ void StarsimCore::_bind_methods() {
     ClassDB::bind_method(D_METHOD("surface_data_resolution_m", "body", "latitudes_deg", "longitudes_deg"),
                          &StarsimCore::surface_data_resolution_m);
     ClassDB::bind_method(D_METHOD("load_atmosphere", "config_dir", "cache_dir"), &StarsimCore::load_atmosphere);
+    ClassDB::bind_method(D_METHOD("set_atmosphere_maritime_weight", "weight"), &StarsimCore::set_atmosphere_maritime_weight);
+    ClassDB::bind_method(D_METHOD("get_atmosphere_maritime_weight"), &StarsimCore::get_atmosphere_maritime_weight);
     ClassDB::bind_method(D_METHOD("atmosphere_sun_transmittance", "position_itrf_m", "sun_direction_itrf"),
                          &StarsimCore::atmosphere_sun_transmittance);
     ClassDB::bind_method(D_METHOD("atmosphere_sky_luminance", "camera_itrf_m", "view_direction_itrf",

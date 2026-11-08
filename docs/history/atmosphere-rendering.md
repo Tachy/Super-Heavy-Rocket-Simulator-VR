@@ -571,3 +571,13 @@ optics they made the direct Sun too warm and, at low Sun, too bright: 4934 vs 51
 channel's sunlight-weighted response sits at an equivalent 628 nm, so T(680) overstated red transmittance (T9 report,
 `tools/validation/atmosphere_spectrum_check.py`). Rejected alternative: per-channel broadband transmittance (exact for
 the direct beam, but the table ratio T(p) / T(q) of path segments breaks: near-horizontal blue 0.50 vs 0.18 exact).
+
+## One aerosol set with Cornette-Shanks g 0.8, superseded 2026-11-08 (look fixes T9b)
+
+Until T9b the whole Earth had one aerosol: AOD 0.1 at 550 nm, Angstrom 1.3, single-scattering albedo 0.9, scale height
+1.2 km, Bruneton's Cornette-Shanks phase function with g 0.8 (`mie_phase_g`), one table cache. Against the Lorenz-Mie
+phase function of the AERONET size distributions (Dubovik et al. 2002) that phase function put P(5) / P(25 deg) at
+9.2 and P(10) / P(25) at 5.5 (Mie continental 3.0 / 1.6, maritime 5.7 / 2.3) and almost nothing to the side (P(90) / P(25)
+0.02 against 0.08): the lunar aureole ~3x Krisciunas & Schaefer at 5-10 deg (T13 fix 1, open point 3), a too clean side
+sky. The Gulf air with the continental Angstrom 1.3 made distant noon clouds salmon (bug-horizon report). Replaced by two
+sets (continental / maritime) with two-term Henyey-Greenstein phase functions, blended by the observer's water share.

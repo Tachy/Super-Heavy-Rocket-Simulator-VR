@@ -269,7 +269,7 @@ if (-not (Test-Path (Join-Path $package "data\textures\moon_detail\moon_detail.t
 if (-not (Test-Path (Join-Path $package "data\textures\earth_water.png"))) {
     throw "The package lacks data/textures/earth_water.png (the scaled-space sea mask: fetch.py earth_terrain geoid_egm2008, then prepare.py)"
 }
-if (-not (Test-Path (Join-Path $package "data\atmosphere\earth_atmosphere.bin"))) { throw "The package lacks data/atmosphere/earth_atmosphere.bin" }
+foreach ($bin in @("earth_atmosphere.bin", "earth_atmosphere_maritime.bin")) { if (-not (Test-Path (Join-Path $package "data\atmosphere\$bin"))) { throw "The package lacks data/atmosphere/$bin" } }
 # The Diviner rock abundance map (88 MB) is an optional data part (user 2026-11-06): the lunar landing mission and the
 # renderer fall back to the global statistical rock abundance with a log line when it is absent.
 foreach ($f in @("diviner_rock_abundance.toml", "diviner_rock_abundance.i16")) {

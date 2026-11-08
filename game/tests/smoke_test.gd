@@ -344,6 +344,11 @@ func _check_atmosphere(core: StarsimCore) -> bool:
 			and (loaded["single_rayleigh"] as PackedFloat32Array).size() == 4 * size.x * size.y * size.z
 			and (loaded["transmittance"] as PackedFloat32Array).size() == 4 * tsize.x * tsize.y,
 			"atmosphere table sizes %s, transmittance %s" % [size, tsize])
+	# The maritime aerosol set (look-fixes T9b): its own tables of the same sizes and its phase function.
+	var maritime: Dictionary = loaded.get("maritime", {})
+	_check(maritime.has("scattering") and (maritime["scattering"] as PackedFloat32Array).size() == 4 * size.x * size.y * size.z
+			and (maritime["parameters"]["mie_phase"] as Vector3) != (loaded["parameters"]["mie_phase"] as Vector3),
+			"atmosphere maritime aerosol set loaded")
 	var params: Dictionary = loaded["parameters"]
 	_check(absf(float(params["bottom_radius_m"]) - (6378137.0 - 150.0)) < 1.0, "atmosphere parameters: bottom radius")
 	# Pad on the equator (ITRF x axis), looking at the zenith with the Sun 60 deg high.
