@@ -95,6 +95,7 @@ func _setup() -> bool:
 	_world.atmosphere.field_key = float(_args.get("field_key", CABIN_FIELD_KEY))
 	DisplayTone.enabled = _args.get("tone", "chroma") != "agx"  # --tone=agx: Godot's AgX alone (look fixes T5)
 	EyeAdaptation.hunt_display_reference = _args.get("hunt", "display") != "day"  # --hunt=day: S <= 1 as before T5
+	EyeAdaptation.adopted_white_follows_scene = _args.get("white_balance", "on") != "toa"  # --white_balance=toa: the fixed TOA-Sun white
 	_rig.place(sim, 0, 62.0, Vector3(0.0, 15.0, 0.0), 40.0)  # the orbit camera near the capsule first: the views are placed only near the camera
 	RenderingServer.frame_pre_draw.connect(func() -> void: _world.camera.near = NEAR_M)
 	_stage = 1
@@ -180,9 +181,10 @@ func _shoot() -> bool:
 	print("cockpit_shots: %s adaptation rule %s: gain %.3f, L_a %s cd/m^2, field %s, anchor %s, field key %s, from the field %s" % [
 			shot["name"], "analytic" if not a.scene_referred_adaptation else a.field_rule_name(),
 			a.exposure_gain, a.adaptation_cd_m2, a.last_field_cd_m2, a.last_anchor_cd_m2, a.field_key, a.adaptation_from_field])
-	print("cockpit_shots: %s adaptation surround: frame alone %s cd/m^2, model in frame %s, visibility %.3f, out-of-frame share %.3f" % [
+	print("cockpit_shots: %s adaptation surround: frame (visibility statistic, whole-weight cut) %s cd/m^2, model in frame %s, visibility %.3f, out-of-frame share %.3f; field illuminant %s, D %.4f, interior %s" % [
 			shot["name"], a.adaptation_surround.last_frame_field_cd_m2, a.adaptation_surround.last_model_in_cd_m2,
-			a.adaptation_surround.last_visibility, a.adaptation_surround.last_out_share])
+			a.adaptation_surround.last_visibility, a.adaptation_surround.last_out_share, a.field_illuminant_rgb, a.white_degree,
+			a.interior_light_colour])
 	_index += 1
 	_wait = 0
 	return false

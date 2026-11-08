@@ -338,14 +338,27 @@ func update_world() -> void:
 	_camera_terrain_sun_fraction = _moon_terrain_sun_fraction(cam)
 	atmosphere.eye_terrain_sun_fraction = _camera_terrain_sun_fraction
 	var lamp_cd_m2 := 0.0
+	var lamp_colour := Vector3.ONE
 	for view in towers:  # the eye sees the lamp-lit surfaces of a site in front of it
-		lamp_cd_m2 = maxf(lamp_cd_m2, view.lamp_adaptation_cd_m2())
+		var lamp := view.lamp_adaptation_cd_m2()
+		if lamp > lamp_cd_m2:
+			lamp_cd_m2 = lamp
+			lamp_colour = view.lamp_light_colour()
 	atmosphere.lamp_adaptation_cd_m2 = lamp_cd_m2
+	atmosphere.lamp_light_colour = lamp_colour
+	# An eye inside a vehicle's cabin: its lamps light what it sees (the adopted white of an enclosed view).
+	atmosphere.interior_light_colour = Vector3.ZERO
+	var eye_camera := get_viewport().get_camera_3d()
+	if eye_camera != null:
+		for vehicle_view in flight.views:
+			if vehicle_view.cockpit != null and vehicle_view.cockpit.contains(eye_camera.global_position):
+				atmosphere.interior_light_colour = vehicle_view.cockpit.light_colour()
+				break
 	# A new view stays snapped to its field until the streamed terrain has loaded (scene-referred adaptation).
 	atmosphere.view_loading = int(earth_terrain.stats.get("nodes_loading", 0)) + int(moon_terrain.stats.get("nodes_loading", 0)) > 0
 	var camera_sun_fraction := 1.0 - core.solar_eclipse_fraction_gcrf(cam, t)
 	# The meter takes the view on its measuring frames only.
-	atmosphere.adaptation_view = _adaptation_view() if atmosphere.adaptation_meter.measures_next_frame() else {}
+	atmosphere.adaptation_view = _adaptation_view(sun_from_camera) if atmosphere.adaptation_meter.measures_next_frame() else {}
 	atmosphere.update(cam, Vector3.ZERO, earth.fixed_to_gcrf, sun_apparent_from_earth_m, adaptation_dt,
 			camera_sun_fraction, moon_apparent_from_earth_m, t, moon_gcrf_m)
 	display_tone.update(_environment, atmosphere.chroma)
@@ -825,7 +838,7 @@ func _local_ground_albedo(camera_gcrf_m: Vector3) -> PackedVector3Array:
 ## The eye adaptation's view for its surround (AdaptationSurround.combine): the head's orientation (render world) and each
 ## rendered view's orientation in the head's axes with its projection - both eyes in VR (the XR interface's views about
 ## the XROrigin), the viewport camera on the desktop. {} without a camera.
-func _adaptation_view() -> Dictionary:
+func _adaptation_view(sun_from_camera_m := Vector3.ZERO) -> Dictionary:
 	var viewport := get_viewport()
 	var cam := viewport.get_camera_3d()
 	if cam == null:
@@ -843,7 +856,11 @@ func _adaptation_view() -> Dictionary:
 					0.05, 1000.0)])
 	else:
 		eyes.append([Basis.IDENTITY, cam.get_camera_projection()])
-	return {"head": head, "eyes": eyes}
+	var view := {"head": head, "eyes": eyes}
+	if sun_from_camera_m != Vector3.ZERO:  # the Sun disc's mask in the meter (look fixes T5b fix round 1)
+		view["sun"] = Frames.to_render(sun_from_camera_m.normalized())
+		view["sun_mask_cos"] = cos(AdaptationMeter.SUN_MASK_RADIUS_FACTOR * asin(minf(SUN_RADIUS_M / sun_from_camera_m.length(), 1.0)))
+	return view
 
 
 ## The part of the Earth's disc an eye near the Moon sees: the terrain's horizon where the core has it (marched anew only

@@ -16,6 +16,8 @@ const CREW_ORDER: Array[String] = ["s2", "s3", "s1", "s4"]
 const LAMP_LUMENS := 3000.0
 const FILL_LUMENS := 7000.0
 const LAMP_RANGE_M := 6.0
+## [E] The cabin lamps' colour (sRGB-encoded Light3D colour): white LED panels, D65 (crew1_1 reads them neutral white).
+const LAMP_COLOUR := Color.WHITE
 ## [call] Look pass 2: the light the white walls bounce around the closed cabin (no GI): a flat illuminance on every cabin
 ## surface as emission albedo x E / pi, scene-referred like the lamps (so the eye adaptation sees a lit cabin at any hour).
 const FILL_LUX := 450.0
@@ -138,6 +140,32 @@ func set_hotas_props(enabled: bool) -> void:
 			node.visible = enabled
 
 
+## Whether a point (render world) lies inside the cabin's inner wall of revolution ([cabin] profile_m, [x, r] about the
+## capsule's x axis): the eye there sees the cabin lit by its lamps (World: Atmosphere.interior_light_colour).
+func contains(point_global: Vector3) -> bool:
+	if not is_inside_tree():
+		return false
+	var local := global_transform.affine_inverse() * point_global
+	var profile: Array = config.cabin.get("profile_m", []) if config != null else []
+	var radius := sqrt(local.y * local.y + local.z * local.z)
+	for k in range(profile.size() - 1):
+		var a: Array = profile[k]
+		var b: Array = profile[k + 1]
+		var x0 := float(a[0])
+		var x1 := float(b[0])
+		if x1 > x0 and local.x >= x0 and local.x <= x1:
+			return radius < lerpf(float(a[1]), float(b[1]), (local.x - x0) / (x1 - x0))
+	return false
+
+
+## The cabin lamps' colour (linear Rec.709 at luminance 1): the omnis' light_color (white: D65) - the adopted white of
+## the enclosed cabin (look fixes T5b fix round 1).
+func light_colour() -> Vector3:
+	var c := LAMP_COLOUR.srgb_to_linear()
+	var v := Vector3(c.r, c.g, c.b)
+	return v / v.dot(Vector3(0.2126, 0.7152, 0.0722))
+
+
 func _process(_delta: float) -> void:
 	var scene_per_cd: float = ShaderGlobals.value(&"atmosphere_scene_per_cd_m2")
 	for i in _lights.size():
@@ -179,6 +207,7 @@ func _add_omni(light_name: String, at: Vector3, lumens: float) -> OmniLight3D:
 	omni.omni_attenuation = 2.0
 	omni.omni_range = LAMP_RANGE_M
 	omni.light_specular = 0.4
+	omni.light_color = LAMP_COLOUR
 	omni.shadow_enabled = false
 	omni.position = at
 	add_child(omni)

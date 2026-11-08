@@ -74,7 +74,28 @@ const LUMINANCE_WEIGHTS := Vector3(0.2126, 0.7152, 0.0722)
 ## (CIECAM02's D = 1, which it reaches above ~100 cd/m^2; at night the rods dominate anyway). Fidelity flag
 ## white_balance_enabled (render_check --white_balance=off); with the eye adaptation off (fixed exposure, camera
 ## exposures) the image stays colourimetric.
+## Since look fixes T5b fix round 1 (user 2026-11-08) the adopted white follows the scene: the illuminant of the
+## adapting field (Atmosphere.field_illuminant_rgb: the light reaching the scene - Sun + sky at the eye, moonlight at
+## night, the lamps of an enclosure, the Sun above the air in space) with CIECAM02's degree of adaptation D
+## (degree_of_adaptation), the von Kries gains blended between the display white (D = 0) and that illuminant (D = 1),
+## paced with CHROMATIC_TIME_CONSTANT_S (advance_white). The fixed TOA-Sun white is the fallback without a light.
 static var white_balance_enabled := true
+## Fidelity flag (T5b fix round 1): the adopted white follows the field's illuminant with D (true) or is the fixed
+## TOA Sun at D = 1 as before (false; render_check / cockpit_shots --white_balance=toa).
+static var adopted_white_follows_scene := true
+## [S: CIE 159:2004 CIECAM02, Table 1 / eq. for D; Fairchild 2013, "Color Appearance Models" 3rd ed., sec. 16.4] The
+## surround factor F of the scene observer's viewing condition: the adapting field is the scene, surrounded by more of
+## the same scene (the surround ratio S_R of a natural scene, its surround luminance over its white, is that of a grey
+## world, ~0.2: "average", F = 1.0, c = 0.69, N_c = 1.0; dim F = 0.9 for S_R < 0.2, dark F = 0.8 for S_R = 0 - a film
+## or a slide in a dark room, not the world). The display observer is taken as fully adapted to the display's white
+## [call: the display is the only stimulus of a darkened room or an HMD].
+const SURROUND_F := 1.0
+## [S: Fairchild & Reniff 1995, "Time course of chromatic adaptation for color-appearance judgments", JOSA A 12(5),
+## 824-838: a fast phase of a few seconds and adaptation about 90 % complete after ~60 s; Rinner & Gegenfurtner 2000,
+## Vision Res. 40, 1813: the slow component's half-life ~20 s] The adopted white's time constant (s): one exponential in
+## the log von Kries gains reaching 90 % at 60 s (tau = 60 / ln 10). A view jump or a clock jump snaps it (as the
+## luminance's pacing).
+const CHROMATIC_TIME_CONSTANT_S := 26.0
 ## [S: IEC 61966-2-1 (sRGB), D65] linear sRGB -> CIE XYZ (Basis columns = the matrix's columns).
 const SRGB_TO_XYZ := Basis(Vector3(0.4124, 0.2126, 0.0193), Vector3(0.3576, 0.7152, 0.1192),
 		Vector3(0.1805, 0.0722, 0.9505))
@@ -185,7 +206,14 @@ var chroma := 1.0
 var adaptation_cd_m2 := LUMINANCE_FLOOR_CD_M2
 ## The paced scotopic adaptation luminance (scotopic cd/m^2): the rod gain.
 var scotopic_cd_m2 := LUMINANCE_FLOOR_CD_M2
+## The paced von Kries gains of the adopted white (CAT02 cone space, per cone; ONE: the display white) and the white
+## balance they give (white_from_gains), set by advance_white.
+var white_gains := Vector3.ONE
+var white := Basis.IDENTITY
+## The degree of adaptation D of the last advance_white (degree_of_adaptation of the paced L_a).
+var white_degree := 1.0
 var _snap_pending := true
+var _white_snap_pending := true
 
 
 ## The next step toward the target adaptation luminances (photopic cd/m^2, scotopic cd/m^2) over dt_s: exponential in
@@ -218,13 +246,53 @@ static func chroma_apply(c: Vector3, chroma_factor: float) -> Vector3:
 
 ## The von Kries transform (CAT02 cone space, linear sRGB in and out) that maps white_rgb (linear sRGB, any scale) to the
 ## display's white (R = G = B) of the same luminance: identity for an RGB grey (D65).
-static func white_balance(white_rgb: Vector3) -> Basis:
+## degree: CIECAM02's degree of adaptation D (1: full; 0: none, the identity) - the cone gains D grey / white + 1 - D
+## (CIE 159:2004's R_c = [D Y_w / R_w + 1 - D] R, with the display grey of the white's luminance as Y_w).
+static func white_balance(white_rgb: Vector3, degree := 1.0) -> Basis:
+	return white_from_gains(white_gains_of(white_rgb, degree))
+
+
+## The von Kries gains (CAT02 cone space) of white_balance; ONE for a non-positive cone response.
+static func white_gains_of(white_rgb: Vector3, degree := 1.0) -> Vector3:
 	var to_cones := XYZ_TO_CAT02 * SRGB_TO_XYZ
-	var white := to_cones * white_rgb
+	var cones := to_cones * white_rgb
 	var grey := to_cones * (Vector3.ONE * LUMINANCE_WEIGHTS.dot(white_rgb))
-	if not (white.x > 0.0 and white.y > 0.0 and white.z > 0.0):
-		return Basis.IDENTITY
-	return to_cones.inverse() * Basis.from_scale(grey / white) * to_cones
+	if not (cones.x > 0.0 and cones.y > 0.0 and cones.z > 0.0):
+		return Vector3.ONE
+	var d := clampf(degree, 0.0, 1.0)
+	return (grey / cones) * d + Vector3.ONE * (1.0 - d)
+
+
+## The white balance (linear sRGB in and out) of von Kries gains in CAT02 cone space.
+static func white_from_gains(gains: Vector3) -> Basis:
+	var to_cones := XYZ_TO_CAT02 * SRGB_TO_XYZ
+	return to_cones.inverse() * Basis.from_scale(gains) * to_cones
+
+
+## CIECAM02's degree of adaptation [S: CIE 159:2004; Moroney et al. 2002]: D = F (1 - (1 / 3.6) exp((-L_A - 42) / 92)),
+## L_A the adapting field's luminance (cd/m^2) = the white's x Y_b / 100 (as luminance_level_factor), F = SURROUND_F.
+## 0.82 F at L_A -> 0 (a moonlit night), 0.90 F at L_A 50 (the lamp-lit cabin), F above ~500 (daylight).
+static func degree_of_adaptation(white_cd_m2: float) -> float:
+	var l_a := maxf(white_cd_m2, 0.0) * APPEARANCE_BACKGROUND_PERCENT / 100.0
+	return clampf(SURROUND_F * (1.0 - exp((-l_a - 42.0) / 92.0) / 3.6), 0.0, 1.0)
+
+
+## The adopted white's next step toward the field's illuminant (linear sRGB, any scale; ZERO: no light known - the
+## gains stay) at the paced adaptation luminance: the target gains white_gains_of(illuminant, D(adaptation_cd_m2)),
+## paced in log over CHROMATIC_TIME_CONSTANT_S (a pending snap jumps). Call after advance.
+func advance_white(illuminant_rgb: Vector3, dt_s: float) -> void:
+	white_degree = degree_of_adaptation(adaptation_cd_m2) if adopted_white_follows_scene else 1.0
+	if LUMINANCE_WEIGHTS.dot(illuminant_rgb) > 0.0:
+		var target := white_gains_of(illuminant_rgb, white_degree)
+		if _white_snap_pending:
+			white_gains = target
+		else:
+			var weight := 1.0 - exp(-maxf(dt_s, 0.0) / CHROMATIC_TIME_CONSTANT_S)
+			white_gains = Vector3(exp(lerpf(log(white_gains.x), log(target.x), weight)),
+					exp(lerpf(log(white_gains.y), log(target.y), weight)),
+					exp(lerpf(log(white_gains.z), log(target.z), weight)))
+		_white_snap_pending = false
+	white = white_from_gains(white_gains)
 
 
 ## The post step's linear cone map C (VisionEffect): the white balance, then the chroma map (chroma_apply) of the
@@ -330,3 +398,4 @@ static func rod_share(adaptation_cd_m2: float) -> float:
 ## The next advance jumps to its targets (a new view: the viewer is taken as adapted to it).
 func snap() -> void:
 	_snap_pending = true
+	_white_snap_pending = true

@@ -169,6 +169,35 @@ var exposure_gain := 1.0
 ## Artificial light the eye sees (cd/m^2): the luminance of the lamp-lit surfaces of a site in view (World sets it each frame
 ## from TowerView.lamp_adaptation_cd_m2, 0 = none); enters L_a as one more candidate of the maximum, view-weighted by the caller.
 var lamp_adaptation_cd_m2 := 0.0
+## The colour of those lamps' light (linear Rec.709 at luminance 1; TowerView.lamp_light_colour): the field illuminant's
+## lamp part (look fixes T5b fix round 1).
+var lamp_light_colour := Vector3.ONE
+## An enclosure the eye is in and its own light (linear Rec.709 at luminance 1, World: the cabin lamps of a cockpit the
+## camera is inside, CockpitView.light_colour); ZERO: none. The field illuminant blends to it as the surround's
+## visibility V closes (V 0: the enclosed view is lit by its lamps).
+var interior_light_colour := Vector3.ZERO
+## The adopted white this frame (look fixes T5b fix round 1, user 2026-11-08): the field's illuminant (field_illuminant,
+## linear Rec.709 at luminance 1) and CIECAM02's degree of adaptation D toward it (EyeAdaptation.white_degree).
+var field_illuminant_rgb := Vector3.ONE
+var white_degree := 1.0
+## Disability glare (look fixes T5b fix round 1): the direct Sun's illuminance at the eye on a plane normal to it (lux;
+## transmittance, the clouds' direct beam and the visible fraction applied; adaptation_luminance), the veil of the last
+## field measurement (cd/m^2, photopic and scotopic; glare_veil), the Sun's angle from the view axis there (deg) and
+## the visibility applied to it (the meter's "seen" share with the Sun in the frame, else the surround's V).
+var last_sun_normal_lux := 0.0
+var last_veil_cd_m2 := 0.0
+var last_veil_scotopic_cd_m2 := 0.0
+var last_veil_angle_deg := -1.0
+var last_veil_visibility := 0.0
+## The meter's Sun mask at the last measurement: [masked weight, its weight that showed the disc].
+var last_sun_mask_weights := [0, 0]
+## Fidelity flag (look fixes T5b fix round 1): the Sun's disability glare veil on the field (render_check --glare=off:
+## none; the disc stays masked).
+static var glare_enabled := true
+var _sun_light_unit_rgb := Vector3.ONE  ## the direct Sun's colour at the eye (luminance 1): the scotopic veil
+var _sun_distance_au := 1.0  ## update: the Sun's distance (the veil's disc size)
+var _illuminant_down_rgb := Vector3.ZERO  ## adaptation_luminance: the light on a plate at the eye (RGB cd/m^2)
+var _illuminant_far_rgb := Vector3.ZERO  ## away from the air: the earthshine / Earth-in-view plate (RGB cd/m^2)
 ## A true luminance (cd/m^2, at the Sun's actual distance) -> scene value, incl. the exposure gain.
 var scene_per_cd_m2 := 0.0
 ## The luminance the eye is adapted to this frame (cd/m^2, EyeAdaptation.adaptation_cd_m2; 0 with the adaptation off):
@@ -398,6 +427,7 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	ShaderGlobals.set_value(&"moon_sun_color", moon_sun_color())
 	ShaderGlobals.set_value(&"moon_albedo_tint", moon_albedo_tint())
 	ShaderGlobals.set_value(&"moon_grey_tint", moon_grey_tint())
+	ShaderGlobals.set_value(&"atmosphere_moon_colour", moon_light_colour())
 	ShaderGlobals.set_value(&"moon_regolith_scale",
 			regolith_scale(float(parameters.get("toa_solar_illuminance_lux", NOMINAL_TOA_LUX))))
 	if not poll():
@@ -414,6 +444,7 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	camera_altitude_m = stretched.length() - float(parameters["bottom_radius_m"])
 	var sun_from_earth := sun_apparent_gcrf_m - earth_center_gcrf_m
 	var d_au := sun_from_earth.length() / ASTRONOMICAL_UNIT_M
+	_sun_distance_au = d_au
 	sun_direction_local = Frames.to_render(gcrf_to_fixed * sun_from_earth).normalized()
 	var sun_fixed := (gcrf_to_fixed * sun_from_earth).normalized()
 	# The Moon's shadow on other points than the camera only while its penumbra touches the atmosphere (review M1:
@@ -443,9 +474,6 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	moonlight_active = false
 	adaptation_from_field = false
 	if eye_adaptation_enabled:
-		if EyeAdaptation.white_balance_enabled:  # the daylight white: the Sun's colour above the atmosphere
-			white_balance = EyeAdaptation.white_balance(Vector3(parameters["solar_illuminance_rgb"])
-					* Vector3(parameters["sun_radiance_to_luminance"]))
 		var moon_fixed := gcrf_to_fixed * (moon_gcrf_m - earth_center_gcrf_m) if moon_gcrf_m != Vector3.ZERO else Vector3.ZERO
 		var luminance := adaptation_luminance(camera_fixed, sun_fixed, sun_visible_fraction, d_au, moon_fixed)
 		luminance = maxf(luminance, lamp_adaptation_cd_m2)  # lamp-lit surfaces in view (white)
@@ -483,6 +511,12 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 		rod_scale = _eye.rod_scale
 		brightness = _eye.brightness
 		chroma = _eye.chroma
+		# The adopted white (look fixes T5b fix round 1): the field's illuminant with CIECAM02's D, paced.
+		field_illuminant_rgb = field_illuminant()
+		_eye.advance_white(field_illuminant_rgb, adaptation_dt_s)
+		white_degree = _eye.white_degree
+		if EyeAdaptation.white_balance_enabled:
+			white_balance = _eye.white
 		moonlight_active = moonlight_relative_value * reference_luminance(d_au) >= MOONLIGHT_MIN_SHARE * adaptation_cd_m2
 		if field_probe_gain > 0.0:
 			exposure_gain = field_probe_gain
@@ -503,7 +537,7 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	ShaderGlobals.set_value(&"atmosphere_exposure_gain", display_gain)
 	# The field meter reads this frame back in true luminance (nothing measured with the adaptation off).
 	adaptation_meter.set_frame(scene_per_cd_m2 if eye_adaptation_enabled else 0.0, _field_epoch, view_loading,
-			adaptation_view)
+			adaptation_view, sun_seen_cd_m2(scene_per_cd_m2))
 	eclipse_segments = 0
 	if moon_apparent_gcrf_m != Vector3.ZERO:
 		var moon_from_earth := moon_apparent_gcrf_m - earth_center_gcrf_m
@@ -545,6 +579,105 @@ func moon_sun_color() -> Vector3:
 	return sun / luminance if luminance > 0.0 else Vector3.ONE
 
 
+## The field's illuminant (linear Rec.709 at luminance 1; look fixes T5b fix round 1, user 2026-11-08): the light that
+## reaches the scene the eye adapts to, estimated physically, not as a grey world of the frame. Of the plate at the eye
+## (Sun + sky through the clouds, the Moon + the moonlit sky at night, the tower lamps' lit surfaces in their colour) and,
+## away from the Earth's air, the earthshine at the Moon (the Earth in view elsewhere), the brighter: the Sun above the
+## air in space, Sun + sky on the ground, moonlight at night. An enclosure the eye is in (interior_light_colour, the
+## cabin) takes over as the surround's visibility V closes: colour = V x outside + (1 - V) x interior. Below
+## FIELD_ILLUMINANT_MIN_CD_M2 (a moonless night: nothing to adapt to, the rods see) ZERO: the adopted white is held.
+func field_illuminant() -> Vector3:
+	if not EyeAdaptation.adopted_white_follows_scene:
+		return moon_sun_color()
+	var down := _illuminant_down_rgb + lamp_light_colour * lamp_adaptation_cd_m2
+	var outside := down if down.dot(LUMINANCE_WEIGHTS) >= _illuminant_far_rgb.dot(LUMINANCE_WEIGHTS) else _illuminant_far_rgb
+	var luminance := outside.dot(LUMINANCE_WEIGHTS)
+	var colour := outside / luminance if luminance >= FIELD_ILLUMINANT_MIN_CD_M2 else Vector3.ZERO
+	if interior_light_colour != Vector3.ZERO:
+		if colour == Vector3.ZERO:
+			return interior_light_colour
+		var v := adaptation_surround.last_visibility if scene_referred_adaptation and AdaptationSurround.enabled else 0.0
+		colour = colour * v + interior_light_colour * (1.0 - v)
+	return colour
+
+
+## [S: Stiles 1929; Holladay 1926; CIE 146:2002 "CIE equations for disability glare", the Stiles-Holladay disability
+## glare formula L_veil = 10 sum_i E_gl,i / theta_i^2 (L_veil cd/m^2, E_gl lux at the eye in the plane normal to the
+## line of sight, theta deg from the line of sight; stated for 1 deg < theta < 30 deg)] The constant 10 of that form.
+const GLARE_VEIL_COEFFICIENT := 10.0
+## [call] Below this the angle is held (deg): the Sun's own apparent radius at 1 AU (16 arcmin); the form is extended
+## outside its 1-30 deg range in both directions, beyond 30 deg it falls with the plane-normal E's cos theta to 0 at 90
+## deg (the eye's field: nothing from behind).
+const GLARE_MIN_ANGLE_DEG := 0.2666
+## [call] A masked sample this fraction of the Sun disc's own (de-gained) luminance or brighter shows the disc (the
+## limb darkening 0.4 at the edge; the aureole is >= 1e3 x fainter): AdaptationMeter's "seen" counter.
+const SUN_SEEN_SHARE := 0.05
+## [call] The plate luminance (cd/m^2) below which the field has no illuminant to adapt to (field_illuminant: the white
+## is held): a crescent Moon's plate is ~3e-3, a moonless clear night's ~1e-4 (starlight, not modelled: 0 here).
+const FIELD_ILLUMINANT_MIN_CD_M2 := 1.0e-3
+## [call] The meter's sparse grid (a sample every ~5 px) puts only ~4-6 samples into the mask, half of them often on its
+## limb ring: a seen share of this fraction of the disc's area counts as the whole Sun visible (measured: the open Sun
+## in a 50 deg frame on the Moon gives 0.48 of the disc's share).
+const SUN_SEEN_FULL_SHARE := 0.5
+## [S: sun.gdshader] the Sun disc's scene value is clamped to this largest channel (half-float range).
+const SUN_DISC_SCENE_CLAMP := 6.0e4
+
+
+## The Sun disc's "seen" threshold for the meter (cd/m^2 de-gained): SUN_SEEN_SHARE of the disc's mean luminance at the
+## eye (the direct beam's normal illuminance over the disc's solid angle; through clouds and air), or of the clamped
+## value the shader draws; 1e30 without a direct Sun (no masked sample shows it).
+func sun_seen_cd_m2(scene_per_cd: float) -> float:
+	var visible := maxf(last_adaptation_visible_fraction, 1.0e-6)
+	var lux := last_sun_normal_lux / visible  # the visible part of the disc keeps its luminance
+	if lux <= 0.0 or scene_per_cd <= 0.0:
+		return 1.0e30
+	var d_m := ASTRONOMICAL_UNIT_M * _sun_distance_au
+	var solid_angle := TAU * (1.0 - sqrt(1.0 - pow(SUN_RADIUS_M / d_m, 2.0)))
+	var peak := _sun_light_unit_rgb.x if _sun_light_unit_rgb.x > _sun_light_unit_rgb.y else _sun_light_unit_rgb.y
+	peak = maxf(peak, _sun_light_unit_rgb.z)
+	var clamped := SUN_DISC_SCENE_CLAMP / maxf(peak, 1.0e-6) / scene_per_cd  # the clamp on the largest channel, in luminance
+	return SUN_SEEN_SHARE * minf(lux / solid_angle, clamped)
+
+
+## The Sun's disability glare veil over the field (look fixes T5b fix round 1, user 2026-11-08): [photopic, scotopic
+## cd/m^2]. L_veil = GLARE_VEIL_COEFFICIENT x E_gl / theta^2, theta (deg, at least GLARE_MIN_ANGLE_DEG) the Sun's angle
+## from the view axis of the view the histograms were measured in (view: AdaptationMeter's, "head" -Z), E_gl =
+## last_sun_normal_lux x cos theta (the plane normal to the line of sight; 0 beyond 90 deg). Whether the Sun reaches the
+## eye: with its direction in a rendered view, the meter's masked samples that show the disc (sun_weights [mask weight,
+## seen weight] / AdaptationMeter.SUN_DISC_SHARE, at most 1); outside the frame (or no masked sample) the surround's
+## visibility V (an open view: 1; an enclosure, whose walls the model does not know: 0). The scotopic veil takes the
+## direct Sun's colour through SCOTOPIC_WEIGHTS. The veil lies over the whole retinal image, so it is added to the
+## field's statistics, L_f + L_veil and L_anchor + L_veil (_take_field_measurement; a black field becomes the veil): looking
+## toward the Sun light-adapts the eye whatever the Sun's share of the pixels, inside the frame or just outside it, and
+## a veil never darkens the eye. (Added per sample instead, a veil below a lit field would bring the black sky back into
+## the field's mean and lower it: 400 km, Sun 70 deg off axis, L_a 2.0e4 -> 6.5e3 in a trial render.)
+func glare_veil(view: Dictionary, sun_weights: Array) -> Vector2:
+	last_veil_angle_deg = -1.0
+	last_veil_visibility = 0.0
+	if not view.has("sun") or not view.has("head") or last_sun_normal_lux <= 0.0:
+		return Vector2.ZERO
+	var head: Basis = view["head"]
+	var sun: Vector3 = (view["sun"] as Vector3).normalized()
+	var cos_theta := clampf((-head.z.normalized()).dot(sun), -1.0, 1.0)
+	last_veil_angle_deg = rad_to_deg(acos(cos_theta))
+	if cos_theta <= 0.0:
+		return Vector2.ZERO
+	var in_frame := false
+	var sun_head := head.transposed() * sun
+	for eye: Array in view.get("eyes", []):
+		if AdaptationSurround.in_view(sun_head, eye[0], eye[1]):
+			in_frame = true
+			break
+	var masked := float(sun_weights[0]) if sun_weights.size() >= 2 else 0.0
+	var visibility := adaptation_surround.last_visibility if scene_referred_adaptation and AdaptationSurround.enabled else 0.0
+	if in_frame and masked > 0.0:
+		visibility = clampf(float(sun_weights[1]) / (masked * AdaptationMeter.SUN_DISC_SHARE * SUN_SEEN_FULL_SHARE), 0.0, 1.0)
+	last_veil_visibility = visibility
+	var theta := maxf(last_veil_angle_deg, GLARE_MIN_ANGLE_DEG)
+	var veil := GLARE_VEIL_COEFFICIENT * last_sun_normal_lux * cos_theta / (theta * theta) * visibility
+	return Vector2(veil, veil * maxf(_sun_light_unit_rgb.dot(EyeAdaptation.SCOTOPIC_WEIGHTS), 0.0))
+
+
 ## The regolith colour factor for the albedo texture (global moon_albedo_tint): per channel, the measured mean
 ## reflectance colour (MOON_REGOLITH_COLOUR_RATIO) at the texture's mean luminance over the texture's mean colour
 ## (MOON_TEXTURE_MEAN_RGB). The mean of tint x texture is the measured colour at the unchanged mean luminance, so the
@@ -556,6 +689,20 @@ static func moon_albedo_tint() -> Vector3:
 	var luminance := EyeAdaptation.LUMINANCE_WEIGHTS.dot(MOON_TEXTURE_MEAN_RGB)
 	var target := MOON_REGOLITH_COLOUR_RATIO * (luminance / EyeAdaptation.LUMINANCE_WEIGHTS.dot(MOON_REGOLITH_COLOUR_RATIO))
 	return target / MOON_TEXTURE_MEAN_RGB
+
+
+## The moonlight's colour over the Sun's (global atmosphere_moon_colour; look fixes T5b fix round 1): the regolith's
+## mean colour (moon_grey_tint) scaled so that the Sun's light times it keeps the Sun's luminance - the measured
+## moonlight (moonlight_relative, Krisciunas & Schaefer) stays the photometric value, it only takes the regolith's red
+## slope (full Moon B-V 0.92 against the Sun's 0.65). Multiplies every moonlight term (atm_moon_* in
+## atmosphere.gdshaderinc, moon_light_at, adaptation_luminance). ONE with moon_colour_correction off.
+func moon_light_colour() -> Vector3:
+	var tint := moon_grey_tint()
+	if not (parameters.has("solar_illuminance_rgb") and parameters.has("sun_radiance_to_luminance")):
+		return tint
+	var sun := Vector3(parameters["solar_illuminance_rgb"]) * Vector3(parameters["sun_radiance_to_luminance"])
+	var tinted := (sun * tint).dot(LUMINANCE_WEIGHTS)
+	return tint * (sun.dot(LUMINANCE_WEIGHTS) / tinted) if tinted > 0.0 else tint
 
 
 ## The same colour factor for the grey Moon users (the sky radiance map's Moon, the eye adaptation's Moon in view),
@@ -622,6 +769,11 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 	var sun_plate: Vector3 = solar * sun_factor * transmittance
 	var down_rgb := (sun_plate * (clouds.x + clouds.y * maxf(sun_direction_itrf.dot(up), 0.0)) + sky * clouds.z) \
 			* visible / (PI * d_au * d_au)
+	# The direct Sun at the eye for its disability glare (glare_veil): normal illuminance, lux.
+	var direct := sun_plate * clouds.x
+	last_sun_normal_lux = direct.dot(LUMINANCE_WEIGHTS) * visible / (d_au * d_au)
+	if direct.dot(LUMINANCE_WEIGHTS) > 0.0:
+		_sun_light_unit_rgb = direct / direct.dot(LUMINANCE_WEIGHTS)
 	var earth_rgb := _earth_in_view_luminance(eye_itrf_m, sun_direction_itrf) / (d_au * d_au)
 	var moon_rgb := Vector3.ZERO
 	if lunar:
@@ -642,7 +794,8 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 			down_rgb.dot(LUMINANCE_WEIGHTS), earth_rgb.dot(LUMINANCE_WEIGHTS))
 	var nearer_earth := moon_itrf_m == Vector3.ZERO or (moon_itrf_m - eye_itrf_m).length() > eye_itrf_m.length()
 	if dim and _moon_direction_fixed != Vector3.ZERO and moonlight_relative_value > 0.0 and nearer_earth:
-		var moon_scale := moonlight_relative_value / (d_au * d_au)
+		# The moonlight's colour: the Sun's x the regolith's (moon_light_colour; as the shaders' atm_moon_*).
+		var moon_scale := moonlight_relative_value / (d_au * d_au) * moon_light_colour()
 		if outside:
 			earth_rgb += _earth_in_view_luminance(eye_itrf_m, _moon_direction_fixed) * moon_scale
 		else:
@@ -652,6 +805,18 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 			var moon_plate: Vector3 = solar * sun_factor * moon_t
 			down_rgb += (moon_plate * (moon_clouds.x + moon_clouds.y * maxf(_moon_direction_fixed.dot(up), 0.0))
 					+ moon_sky * moon_clouds.z) * (moon_scale / PI)
+	# The field's illuminant (field_illuminant): the light on a plate at the eye (Sun, sky, Moon), and away from the
+	# Earth's air the light of the Earth's side - near the Moon the earthshine (coloured as the Sun, as the shaders draw
+	# it), elsewhere the Earth in view (the orbit's night side). The Moon / Earth in view and the glow are what is seen,
+	# not what lights the scene, and stay out.
+	_illuminant_down_rgb = down_rgb
+	_illuminant_far_rgb = Vector3.ZERO
+	if outside:
+		_illuminant_far_rgb = earth_rgb
+		if lunar:
+			var solar_unit := solar * sun_factor / (solar * sun_factor).dot(LUMINANCE_WEIGHTS)
+			_illuminant_far_rgb = solar_unit * (last_earthshine_lux / PI) * (1.0 - occulted_fraction(-eye_itrf_m,
+					EARTH_MEAN_RADIUS_M, moon_itrf_m - eye_itrf_m, moon_ground_m))
 	# The glow (night vision), GLOW_ADAPTATION_SHARE of the brightest sky: inside the atmosphere with the Sun below the
 	# eye's horizon (twilight) or the eye in a solar eclipse (the ring around the umbra; review I2: the eye's own
 	# eclipse, not the global penumbra flag - a twilight eye far from the shadow keeps its glow); above it with the Sun
@@ -861,7 +1026,7 @@ func moon_light_at(position_itrf_m: Vector3) -> Array:
 	if not ready or not moonlight_active or _moon_direction_fixed == Vector3.ZERO:
 		return [Color.WHITE, 0.0]
 	# No probe key: S is baked toward the Sun only, the Moon takes the grid mean along its own direction.
-	return sun_light_at(position_itrf_m, _moon_direction_fixed, moonlight_relative_value, "")
+	return sun_light_at(position_itrf_m, _moon_direction_fixed, moonlight_relative_value, "", moon_light_colour())
 
 
 ## Night vision's state into the shaders and the post step: the rods' scale and the cones' map (white balance and chroma
@@ -1357,21 +1522,29 @@ func _take_field_measurement() -> void:
 	var counts: PackedInt32Array = result[0]
 	if scene_referred_adaptation:
 		counts = adaptation_surround.combine(counts, result[3])  # + the field beyond the frame (look fixes T4)
+	# The Sun's disability glare over the field (its disc is masked out of the histograms; T5b fix round 1).
+	var veil := glare_veil(result[3], result[4]) if glare_enabled else Vector2.ZERO
+	last_veil_cd_m2 = veil.x
+	last_veil_scotopic_cd_m2 = veil.y
 	var photopic := AdaptationMeter.field_log_average(counts, 0)
 	if photopic < 0.0:
 		return
-	last_field_cd_m2 = photopic
-	last_field_scotopic_cd_m2 = maxf(AdaptationMeter.field_log_average(counts, AdaptationMeter.HISTOGRAM_BINS), 0.0)
-	last_anchor_cd_m2 = maxf(AdaptationMeter.field_anchor(counts, 0), 0.0)
-	last_anchor_scotopic_cd_m2 = maxf(AdaptationMeter.field_anchor(counts, AdaptationMeter.HISTOGRAM_BINS), 0.0)
+	# The veil lies over the whole field: it raises the field and its anchor by itself (a black field becomes the veil).
+	last_field_cd_m2 = photopic + veil.x
+	last_field_scotopic_cd_m2 = maxf(AdaptationMeter.field_log_average(counts, AdaptationMeter.HISTOGRAM_BINS), 0.0) + veil.y
+	last_anchor_cd_m2 = maxf(AdaptationMeter.field_anchor(counts, 0), 0.0) + veil.x
+	last_anchor_scotopic_cd_m2 = maxf(AdaptationMeter.field_anchor(counts, AdaptationMeter.HISTOGRAM_BINS), 0.0) + veil.y
+	last_sun_mask_weights = result[4]
 	_field_loading = result[1]
 	_field_valid = true
 	if _log_adaptation and _field_serial % ADAPTATION_LOG_EVERY == 0:
-		print(("adaptation: field %s cd/m^2 (scotopic %s), anchor %s (scotopic %s), %s, white-plate rule %s cd/m^2; frame alone"
-				+ " %s, surround model in frame %s, visibility %.3f, out-of-frame share %.3f") % [
+		print(("adaptation: field %s cd/m^2 (scotopic %s), anchor %s (scotopic %s), %s, white-plate rule %s cd/m^2; frame"
+				+ " (visibility statistic, whole-weight cut) %s, surround model in frame %s, visibility %.3f, out-of-frame share"
+				+ " %.3f; glare veil %s cd/m^2 (Sun %.2f deg off axis, visibility %.2f, mask %s)") % [
 				last_field_cd_m2, last_field_scotopic_cd_m2, last_anchor_cd_m2, last_anchor_scotopic_cd_m2,
 				"loading" if _field_loading else "settled", last_target_cd_m2, adaptation_surround.last_frame_field_cd_m2,
-				adaptation_surround.last_model_in_cd_m2, adaptation_surround.last_visibility, adaptation_surround.last_out_share])
+				adaptation_surround.last_model_in_cd_m2, adaptation_surround.last_visibility, adaptation_surround.last_out_share,
+				last_veil_cd_m2, last_veil_angle_deg, last_veil_visibility, last_sun_mask_weights])
 
 
 ## The Sun light of Godot's lit materials (vehicles, structures: world.gd's DirectionalLight3D) at an Earth-fixed point:
@@ -1384,7 +1557,7 @@ func _take_field_measurement() -> void:
 ## colour = the channels over it, sRGB-encoded (Godot linearises light colours). Before the tables are loaded: the
 ## vacuum Sun (white, DAY_EXPOSURE). probe_key: the drawn shapes' S probe (Sun direction only; "" for other lights).
 func sun_light_at(position_itrf_m: Vector3, sun_direction_itrf: Vector3, visible_fraction: float,
-		probe_key := "sun_light") -> Array:
+		probe_key := "sun_light", tint := Vector3.ONE) -> Array:
 	var scene := Vector3.ONE * DAY_EXPOSURE
 	if ready:
 		var transmittance := _core.atmosphere_sun_transmittance(position_itrf_m, sun_direction_itrf)
@@ -1393,7 +1566,7 @@ func sun_light_at(position_itrf_m: Vector3, sun_direction_itrf: Vector3, visible
 		scene = solar * sun_factor * transmittance * (luminance_scale / PI)
 		# The direct beam through the clouds (the drawn shapes' S, else the grid mean along the ray; 1 with weather off).
 		scene *= cloud_light_at(position_itrf_m, sun_direction_itrf, probe_key).x
-	scene *= visible_fraction
+	scene *= tint * visible_fraction
 	var peak := maxf(scene.x, maxf(scene.y, scene.z))
 	var color := Color.WHITE
 	if peak > 0.0:

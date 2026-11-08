@@ -39,6 +39,11 @@ func _run() -> void:
 	_check_sun(sun)
 	_check_reddened(sun)
 	_check_inverse(EyeAdaptation.white_balance(sun))
+	_check_degree()
+	_check_partial(sun)
+	_check_moonlight(sun, atmosphere.moon_light_colour())
+	_check_pacing(sun)
+	_check_inverse(EyeAdaptation.white_balance(sun * atmosphere.moon_light_colour(), EyeAdaptation.degree_of_adaptation(0.05)))
 	atmosphere.shutdown()
 	print("white_balance_test: %s (%d failures)" % ["PASS" if _failures == 0 else "FAIL", _failures])
 	quit(1 if _failures > 0 else 0)
@@ -83,6 +88,87 @@ func _check_reddened(sun: Vector3) -> void:
 	var ratio := balanced.z / balanced.x
 	_check("air-reddened Sun stays warm", ratio < 0.75 and ratio > 0.3,
 			"B/R %.3f before, %.3f balanced" % [reddened.z / reddened.x, ratio])
+
+
+## CIECAM02's D (F 1, average surround): 1 - e^(-42/92) / 3.6 = 0.8241 at L_A -> 0, 0.9022 at the white 270 cd/m^2
+## (the cabin, L_A 54), 1 within 1e-6 by day (4.3e4); increasing.
+func _check_degree() -> void:
+	var dark := EyeAdaptation.degree_of_adaptation(0.0)
+	var cabin := EyeAdaptation.degree_of_adaptation(270.0)
+	var day := EyeAdaptation.degree_of_adaptation(4.3e4)
+	_check("D at L_A 0 (night)", absf(dark - 0.8241) < 1.0e-4, "%.5f (0.8241)" % dark)
+	_check("D at 270 cd/m^2 (cabin)", absf(cabin - 0.9022) < 1.0e-4, "%.5f (0.9022)" % cabin)
+	_check("D by day", absf(day - 1.0) < 1.0e-6, "%.8f" % day)
+	var last := 0.0
+	var monotonic := true
+	for k in range(-6, 6):
+		var d := EyeAdaptation.degree_of_adaptation(pow(10.0, k))
+		monotonic = monotonic and d >= last
+		last = d
+	_check("D increasing in L_a", monotonic, "1e-6 .. 1e5")
+
+
+## Partial adaptation: D = 0 is the identity, the cone gains are linear in D (CIE 159's D Y_w / R_w + 1 - D), D = 1 the
+## former full balance.
+func _check_partial(sun: Vector3) -> void:
+	var none := EyeAdaptation.white_balance(sun, 0.0)
+	var worst := 0.0
+	for k in range(3):
+		var d: Vector3 = (none[k] - Basis.IDENTITY[k]).abs()
+		worst = maxf(worst, maxf(d.x, maxf(d.y, d.z)))
+	_check("D 0: identity", worst < TOLERANCE, "largest element error %s" % worst)
+	var full := EyeAdaptation.white_gains_of(sun, 1.0)
+	var half := EyeAdaptation.white_gains_of(sun, 0.5)
+	var expected := (full + Vector3.ONE) * 0.5
+	_check("D 0.5: gains halfway", (half - expected).length() < TOLERANCE, "%s vs %s" % [half, expected])
+
+
+## The full Moon seen from the ground at night (look fixes T5b review Q3): its light is the Sun's x the regolith's colour
+## (moon_light_colour) x the air at elevation 83 deg (Rayleigh 0.0973 at 550 nm, lambda^-4.05; aerosol 0.1 at 550 nm,
+## Angstrom 1.3 - the config's values, review Q3), and so is the night's illuminant (moonlight). Adapted with the night's
+## D (0.82, L_a 0.05 cd/m^2) the disc's light is pale cream: B/R 0.80-0.92 [E: observers' "pale cream / silvery";
+## review Q3 0.83-0.89]; at D = 1 neutral (0.97-1.03); with the former fixed TOA-Sun white B/R about 0.52.
+func _check_moonlight(sun: Vector3, moon_colour: Vector3) -> void:
+	var lambdas := Vector3(0.680, 0.550, 0.440)
+	var air_mass := 1.0 / sin(deg_to_rad(83.0))
+	var t := Vector3.ZERO
+	for k in range(3):
+		var tau := 0.0973 * pow(lambdas[k] / 0.55, -4.05) + 0.1 * pow(lambdas[k] / 0.55, -1.3)
+		t[k] = exp(-air_mass * tau)
+	var moonlight := sun * moon_colour * t
+	var night := EyeAdaptation.white_balance(moonlight, EyeAdaptation.degree_of_adaptation(0.05)) * moonlight
+	var full := EyeAdaptation.white_balance(moonlight, 1.0) * moonlight
+	var toa := EyeAdaptation.white_balance(sun, 1.0) * moonlight
+	_check("full Moon at night: pale cream", night.z / night.x > 0.80 and night.z / night.x < 0.92,
+			"B/R %.3f (D 1: %.3f, TOA white: %.3f, colourimetric %.3f)" % [night.z / night.x, full.z / full.x,
+			toa.z / toa.x, moonlight.z / moonlight.x])
+	_check("moonlight at D 1: neutral", absf(full.z / full.x - 1.0) < 0.03, "B/R %.4f" % [full.z / full.x])
+	_check("moonlight colour keeps the Sun's luminance", absf(EyeAdaptation.LUMINANCE_WEIGHTS.dot(sun * moon_colour)
+			/ EyeAdaptation.LUMINANCE_WEIGHTS.dot(sun) - 1.0) < TOLERANCE, "%s" % moon_colour)
+	# Cabin lamps (D65 white, CockpitView.LAMP_COLOUR): adopted at any D, a white lamp is the display's white.
+	var lamp := EyeAdaptation.white_balance(Vector3.ONE, EyeAdaptation.degree_of_adaptation(270.0)) * Vector3.ONE
+	_check("cabin lamp (D65) neutral", (lamp - Vector3.ONE).length() < TOLERANCE, "%s" % lamp)
+
+
+## Pacing (EyeAdaptation.advance_white): from a snap on the TOA Sun to a D65 field, the log gains move 1 - e^-1 of the
+## way in CHROMATIC_TIME_CONSTANT_S and 90 % in 60 s (Fairchild & Reniff 1995); a snap jumps.
+func _check_pacing(sun: Vector3) -> void:
+	var eye := EyeAdaptation.new()
+	eye.adaptation_cd_m2 = 4.3e4  # D = 1
+	eye.advance_white(sun, 0.0)
+	var start := eye.white_gains
+	eye.advance_white(Vector3.ONE, EyeAdaptation.CHROMATIC_TIME_CONSTANT_S)
+	var share := log(eye.white_gains.z) / log(start.z)  # the target's log gain is 0 (D65)
+	_check("pacing: one time constant", absf(share - exp(-1.0)) < 1.0e-9, "left %.6f of the log distance" % share)
+	eye.advance_white(sun, 0.0)
+	eye.snap()
+	eye.advance_white(sun, 0.0)
+	eye.advance_white(Vector3.ONE, 60.0)
+	share = log(eye.white_gains.z) / log(start.z)
+	_check("pacing: 90 % in 60 s", absf(share - 0.1) < 0.005, "left %.4f" % share)
+	eye.snap()
+	eye.advance_white(Vector3.ONE, 0.0)
+	_check("snap jumps", (eye.white_gains - Vector3.ONE).length() < TOLERANCE, "%s" % eye.white_gains)
 
 
 func _check_inverse(white: Basis) -> void:

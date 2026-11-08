@@ -36,6 +36,10 @@ var _shadowed := 0
 ## Luminance (cd/m^2) of a lit white-ish surface (albedo DECK_ALBEDO) on the mount deck under all lamps at full power: the
 ## lamp light the eye adapts to when it looks at the site. From the fixture model (file lumens), set by build().
 var deck_luminance_cd := 0.0
+## The lamps' colour on that deck (linear Rec.709 at luminance 1; build()).
+var deck_light_colour := Vector3.ONE
+## [S: ITU-R BT.709] luminance weights of linear Rec.709.
+const LUMINANCE_WEIGHTS := Vector3(0.2126, 0.7152, 0.0722)
 ## [E] Weathered concrete / steel deck: a dark-grey surface (the lit mount in padb_night_floodlights_mount reads mid-grey).
 const DECK_ALBEDO := 0.3
 
@@ -187,15 +191,24 @@ func build(lamps: Dictionary, geometry: Dictionary) -> void:
 				last = site
 			if group.has("mast_m"):
 				_add_mast(group, first, last)
-	deck_luminance_cd = DECK_ALBEDO / PI * deck_illuminance_model_lux(Vector3(0.0, 0.0, float(geometry["mount_height_m"])))
+	var deck := deck_light_model_rgb(Vector3(0.0, 0.0, float(geometry["mount_height_m"])))
+	deck_luminance_cd = DECK_ALBEDO / PI * deck.dot(LUMINANCE_WEIGHTS)
+	deck_light_colour = deck / deck.dot(LUMINANCE_WEIGHTS) if deck.dot(LUMINANCE_WEIGHTS) > 0.0 else Vector3.ONE
 
 
 ## Fixture model: lux on the horizontal mount deck centre (mount_height_m) from every lamp that reaches it.
 func deck_illuminance_model_lux(deck_site: Vector3) -> float:
-	var lux := 0.0
+	return deck_light_model_rgb(deck_site).dot(LUMINANCE_WEIGHTS)
+
+
+## The same light per linear Rec.709 channel (each lamp's lux x its tint at luminance 1; luminance = the lux): the lamps'
+## colour on the deck for the eye's adopted white (Atmosphere.lamp_light_colour, look fixes T5b fix round 1).
+func deck_light_model_rgb(deck_site: Vector3) -> Vector3:
+	var rgb := Vector3.ZERO
 	for fixture: Dictionary in _fixtures:
 		if fixture["kind"] == "obstruction":
 			continue
+		var lux := 0.0
 		var to_deck: Vector3 = deck_site - fixture["site"]
 		var distance := to_deck.length()
 		var direction := to_deck / distance
@@ -204,10 +217,12 @@ func deck_illuminance_model_lux(deck_site: Vector3) -> float:
 			var half: float = fixture["half_angle_rad"]
 			if (fixture["aim"] as Vector3).dot(direction) <= cos(half):
 				continue
-			lux += illuminance_lux(float(fixture["lumens"]) / (TAU * (1.0 - cos(half))), distance, cos_incidence)
+			lux = illuminance_lux(float(fixture["lumens"]) / (TAU * (1.0 - cos(half))), distance, cos_incidence)
 		else:
-			lux += illuminance_lux(float(fixture["cd"]), distance, cos_incidence)
-	return lux
+			lux = illuminance_lux(float(fixture["cd"]), distance, cos_incidence)
+		var tint: Vector3 = fixture["tint"]
+		rgb += tint / maxf(tint.dot(LUMINANCE_WEIGHTS), 1.0e-6) * lux
+	return rgb
 
 
 ## A mast on the ground behind the middle of a lamp row and a cross arm along it (`mast_m` = the mast's width).

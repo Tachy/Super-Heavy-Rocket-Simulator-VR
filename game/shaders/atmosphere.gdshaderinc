@@ -67,6 +67,7 @@ global uniform float atmosphere_adaptation_cd_m2;
 // 1991); 0 while it cannot show (the eye adapted to daylight): every moonlight term is skipped.
 global uniform vec3 atmosphere_moon_direction;
 global uniform float atmosphere_moon_light;
+global uniform vec3 atmosphere_moon_colour;  // Atmosphere.moon_light_colour: the regolith's colour on the moonlight (luminance kept)
 global uniform bool atmosphere_enabled;             // false until the tables are uploaded
 // Solar eclipse in the sky (Atmosphere.update): the number of in-scattering segments while the Moon's penumbra touches
 // the Earth's atmosphere (0: off, the plain lookups), the Moon's apparent position and the Sun's distance from the
@@ -685,7 +686,7 @@ vec3 atm_sun_and_sky(vec3 point_local, vec3 normal_local, out vec3 sky) {
 }
 
 // ---- Moonlight (Atmosphere.moonlight_relative; 0 by day). The Moon is a second, much weaker light of the solar
-// spectrum [call: its slight reddening, B-V 0.92 against the Sun's 0.65, left out - rod vision dominates there]
+// spectrum x the regolith's colour (atmosphere_moon_colour, luminance kept: B-V 0.92 against the Sun's 0.65; look fixes T5b fix round 1)
 // through the same tables: the sky it lights, the direct light at a point and the sky light on a surface, x its
 // illuminance relative to the Sun's. No eclipse segments (the Moon is not eclipsed by itself).
 bool atm_moonlit() { return atmosphere_moon_light > 0.0; }
@@ -698,7 +699,7 @@ vec3 atm_moon_sky(vec3 camera_local, vec3 view_dir_local) {
 	atm_camera_model(camera_local, up, r, rho);
 	vec3 transmittance_unused;
 	return atm_sky_from_light(up, r, rho, normalize(view_dir_local * ATM_STRETCH), atmosphere_moon_direction, false,
-			transmittance_unused) * atmosphere_moon_light;
+			transmittance_unused) * atmosphere_moon_light * atmosphere_moon_colour;
 }
 
 // The moonlit sky seen from the point at camera + offset_local (the sea's reflected sky).
@@ -709,7 +710,7 @@ vec3 atm_moon_sky_at_offset(vec3 offset_local, vec3 view_dir_local) {
 	atm_point_model(offset_local, up_p, r_p, rho_p);
 	vec3 transmittance_unused;
 	return atm_sky_from_light(up_p, r_p, rho_p, normalize(view_dir_local * ATM_STRETCH), atmosphere_moon_direction,
-			false, transmittance_unused) * atmosphere_moon_light;
+			false, transmittance_unused) * atmosphere_moon_light * atmosphere_moon_colour;
 }
 
 // The direct Moon transmitted to the point at normal incidence (no cosine; atm_sun_at with the Moon).
@@ -718,7 +719,7 @@ vec3 atm_moon_at(vec3 point_local) {
 	float r = clamp(length(p), atmosphere_bottom_radius_m, atmosphere_top_radius_m);
 	float mu_m = atm_clamp_cosine(dot(normalize(p), normalize(atmosphere_moon_direction * ATM_STRETCH)));
 	return atmosphere_sun_illuminance_lux * atm_transmittance_to_sun(r, atm_rho_of(r), mu_m)
-			* (atmosphere_luminance_scale / ATM_PI * atmosphere_moon_light);
+			* (atmosphere_luminance_scale / ATM_PI * atmosphere_moon_light) * atmosphere_moon_colour;
 }
 
 // The moonlit sky's light on a surface (atm_sky_light with the Moon).
@@ -729,7 +730,7 @@ vec3 atm_moon_sky_light(vec3 point_local, vec3 normal_local) {
 	vec3 normal = normalize(normal_local / ATM_STRETCH);
 	float mu_m = atm_clamp_cosine(dot(up, normalize(atmosphere_moon_direction * ATM_STRETCH)));
 	return atm_irradiance(r - atmosphere_bottom_radius_m, mu_m) * (1.0 + dot(normal, up)) * 0.5
-			* atmosphere_sky_radiance_to_luminance * (atmosphere_luminance_scale / ATM_PI * atmosphere_moon_light);
+			* atmosphere_sky_radiance_to_luminance * (atmosphere_luminance_scale / ATM_PI * atmosphere_moon_light) * atmosphere_moon_colour;
 }
 
 // The moonlight on a surface: the direct Moon x the true cosine plus the moonlit sky's light (scene units of a white

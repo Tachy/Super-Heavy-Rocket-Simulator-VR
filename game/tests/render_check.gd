@@ -54,7 +54,9 @@
 #          --cloud_detail_levels=0..3 (the detail levels), --cloud_scattering=table|closed (the multiple-scattering
 #          model: Monte Carlo table, default; closed form).
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off;
-#          --white_balance=off: no chromatic adaptation to the Sun's white (EyeAdaptation.white_balance_enabled).
+#          --white_balance=off: no chromatic adaptation (EyeAdaptation.white_balance_enabled); --white_balance=toa: the
+#          fixed white of the Sun above the air at D = 1 as before T5b fix round 1 (EyeAdaptation.adopted_white_follows_scene).
+#          --glare=off: no Sun glare veil and the Sun disc not masked out of the field meter (Atmosphere.glare_enabled).
 #          --tone=agx: Godot's AgX alone, without the chroma-preserving display tone step (DisplayTone.enabled);
 #          --moon_colour=texture: the Moon's albedo texture colour as it is, without the regolith colour factor
 #          (Atmosphere.moon_colour_correction, look fixes T5b).
@@ -181,6 +183,9 @@ func _initialize() -> void:
 	MoonDetailShading.enabled = _args.get("moon_detail_shading", "on") != "off"  # read at the Moon terrain's setup
 	MoonRockLayer.geometry_enabled = _args.get("rocks", "on") != "off"
 	EyeAdaptation.white_balance_enabled = _args.get("white_balance", "on") != "off"
+	EyeAdaptation.adopted_white_follows_scene = _args.get("white_balance", "on") != "toa"  # the fixed TOA-Sun white (T5b fix 1)
+	Atmosphere.glare_enabled = _args.get("glare", "on") != "off"  # the Sun's glare veil and disc mask (T5b fix 1)
+	AdaptationMeter.sun_mask_enabled = Atmosphere.glare_enabled
 	DisplayTone.enabled = _args.get("tone", "chroma") != "agx"
 	EyeAdaptation.hunt_display_reference = _args.get("hunt", "display") != "day"
 	Atmosphere.moon_colour_correction = _args.get("moon_colour", "regolith") != "texture"
@@ -470,9 +475,15 @@ func _process(_delta: float) -> bool:
 				a.last_field_cd_m2, a.last_field_scotopic_cd_m2, a.last_anchor_cd_m2, a.last_anchor_scotopic_cd_m2,
 				a.field_key, a.adaptation_from_field])
 		var s := a.adaptation_surround
-		print("render_check: adaptation surround %s: frame alone %s cd/m^2, model in frame %s, visibility %.3f, out-of-frame share %.3f" % [
+		print("render_check: adaptation surround %s: frame (visibility statistic, whole-weight cut) %s cd/m^2, model in frame %s, visibility %.3f, out-of-frame share %.3f" % [
 				"on" if AdaptationSurround.enabled else "off", s.last_frame_field_cd_m2, s.last_model_in_cd_m2,
 				s.last_visibility, s.last_out_share])
+		var illuminant := a.field_illuminant_rgb
+		print("render_check: adopted white: field illuminant %s (B/R %.4f), D %.4f, white balance diagonal %s; glare veil %s cd/m^2 (scotopic %s), Sun %.2f deg off axis, visibility %.3f, Sun normal %s lux, mask %s" % [
+				illuminant, illuminant.z / maxf(illuminant.x, 1.0e-9), a.white_degree,
+				Vector3(a.white_balance.x.x, a.white_balance.y.y, a.white_balance.z.z), a.last_veil_cd_m2,
+				a.last_veil_scotopic_cd_m2, a.last_veil_angle_deg, a.last_veil_visibility, a.last_sun_normal_lux,
+				a.last_sun_mask_weights])
 		print("render_check: adaptation surround CPU: refresh %.3f ms per frame (%d), combine %.3f ms per measurement (%d)" % [
 				s.refresh_usec / 1000.0 / maxf(s.refresh_calls, 1), s.refresh_calls, s.combine_usec / 1000.0 / maxf(s.combine_calls, 1),
 				s.combine_calls])

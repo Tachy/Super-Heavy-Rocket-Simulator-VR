@@ -100,7 +100,14 @@ shaders:
   0.36 at its corner, 0.83 at its top edge against the Gaussian's 0.36 / 0.71; Moon & Spencer 1945's weight also falls
   with eccentricity]. In-frame weights stay as they are; the out-of-frame directions (rings of 10 deg, ~150 query
   directions, `in_view` against each rendered view's projection: in VR the union of both eyes) enter with the frame's
-  total weight x their share of the angular weight, sum_out / sum_in. Their luminance: Godot's sky radiance cube is
+  total weight x their share of the angular weight, sum_out / W_in. W_in, the frame's angular weight, is integrated
+  over the frame itself (`AdaptationSurround.frame_weight`: each view's frustum on 24 x 24 NDC cells, solid angle x the
+  Gaussian, the union of the eyes; T5b fix round 1, review I4), and the out-of-frame query weights are scaled to the
+  rest of the cap's integral - before, W_in came from the query directions inside the frame, so a frame narrower than
+  their 10 deg spacing (fov 2: the full Moon) had W_in 0 and the surround dropped out ("model in frame -1"). A frame
+  with fewer than 3 query directions inside (`MIN_QUERIES_IN_FRAME`, under ~15 deg) cannot be compared with the model
+  (its field may be the Moon's disc, which the model does not draw): it keeps the visibility judged last, a fresh view
+  starts open [call]; the model's in-frame field is then the store at the view axis (diagnostic). Their luminance: Godot's sky radiance cube is
   engine-internal (no script binding of `sky_get_radiance_texture_rd`), so the analytic model it is drawn from is
   evaluated on the CPU (`Atmosphere._surround_luminance`) into a store of 24 x 24 directions about the local vertical
   (7.5 deg bands, a band edge on the horizon; 8 cells per frame, a complete store swapped in every 0.8 s; a view jump
@@ -122,7 +129,9 @@ shaders:
   two VR eyes show more of the cap than one, the store's cells round-trip, V changes by small steps over a sweep of
   the frame's field and a bright structure closes it over seconds, not at once, the model's in-frame field excludes a
   ground 4.5 decades down like the frame, the scotopic histogram gets the out-of-frame content, a rebuild with a dear
-  luminance takes several frames. `game/tests/adaptation_surround_cost.gd` (headless, real atmosphere): the view jump's
+  luminance takes several frames, the frame weight of the 50 deg frame within 1 % of a fine integral and of a 2 deg
+  frame its solid angle, a 2 deg frame of a bright disc keeps the surround (share > 0.99, V open, its field the
+  surround's within 2 %). `game/tests/adaptation_surround_cost.gd` (headless, real atmosphere): the view jump's
   rebuild, worst frame / total: pad noon 2.0 / 3.7 ms (2 frames), Dallas totality 2024-04-08 (penumbra, 8 segments per
   ray, 56 us per cell) 2.4 / 32.0 ms (15 frames) - complete in one go the penumbra store would have cost 32 ms, three
   VR frames.
@@ -132,7 +141,10 @@ shaders:
   60 deg changes the gain x1.48 instead of x1.97; the model's field over the in-frame directions is within 1-13 % of
   the frame's there (2370 / 2640 / 4047 against 2354 / 2640 / 4642). Dusk (Sun -3.6 deg, view 250 deg el 5) 300 -> 415
   (the darker sky away from the glow). Apollo 11 lunar day down-Sun el 5 3.60 -> 2.98; el 60 12 650 (a black field)
-  -> 2.98. Start view 1.401 unchanged (space around the Earth adds nothing; V 0.25 with the drawn clouds). Cockpit
+  -> 2.98, since the lit-weight cut (2026-11-07) 1.93 (the Earth's disc near the view centre enters the field). Start
+  view 1.401 unchanged by the surround (space around the Earth adds nothing; V 0.25 with the drawn clouds), since the
+  lit-weight cut 1.269: the cut is 2 % of the ~30 % lit weight instead of the whole frame's, so more of the bright cloud
+  stays in the field (renders `screenshots/look_fixes/t5b/`). Cockpit
   (`--field_key=0.18`): pilot_eye 157.39, hatch 58.43, GoPro 87.43, helmet 85.74 unchanged (V 0: frame 16-130 against
   the model's 1600-2400 cd/m^2). Stereo mock (both eyes, 3534 x 2838): el 5 1.689 -> 1.732, el 60 2.657 -> 2.581 (the
   headset's frame covers most of the cap: out-of-frame share 0.13 against the desktop's 0.46). Cost: no GPU work (pad
@@ -267,33 +279,94 @@ shaders:
     the same tables (`atm_moon_sky`, `atm_moon_at`, `atm_moon_sky_light`, `atm_moon_light`): moonlit sky, ground
     (terrain, Earth mesh, model ground) and sea (a second sea pass: glitter path, moonlit sky reflected), vehicles
     (world.gd `moon_light`, a second DirectionalLight without shadows, `Atmosphere.moon_light_at`), the adaptation.
-    Active only while the Moon's plate is at least 0.1 % of the adaptation luminance. Left out [call]: the Moon's
-    reddening (B-V 0.92), in-scattered moonlight between ground point and eye, the Moon's parallax (up to 1 deg).
+    Active only while the Moon's plate is at least 0.1 % of the adaptation luminance. Its colour: the regolith's on the
+    Sun's (`moon_light_colour`, global `atmosphere_moon_colour`, luminance kept; T5b fix round 1). Left out [call]:
+    in-scattered moonlight between ground point and eye, the Moon's parallax (up to 1 deg).
   - Limits: one adaptation per view (no local / foveal adaptation: bright parts in a dim view still saturate - the
-    full Earth from the lunar night, the full Moon's disc, city lights take the rods' tint); no loss of acuity, no
-    glare; rods' slower dark adaptation (~30 min) paced like the cones' (110 s); no airglow, zodiacal light or
+    full Earth from the lunar night, the full Moon's disc, city lights take the rods' tint); no loss of acuity; glare
+    only of the Sun (the Moon's and the Earth's disability glare not modelled); rods' slower dark adaptation (~30 min) paced like the cones' (110 s); no airglow, zodiacal light or
     integrated starlight (a moonless sky is black); Jensen's k on the adaptation luminance, not per pixel; B and S one
     value per view, no Bezold-Bruecke hue shift (lunar day keeps B = 1, S 1.66).
 
-- **White balance: chromatic adaptation to the Sun's white** [look fixes T2, 2026-11-07; `EyeAdaptation.white_balance`,
-  `cone_map`, `Atmosphere.white_balance`; fidelity flag `EyeAdaptation.white_balance_enabled`, render_check
-  `--white_balance=off`]. The renderer's colours are colourimetric linear sRGB (white D65), but the Sun above the air is
-  warmer: the core's TOA spectrum in linear sRGB is (1.123, 1, 0.961), B/R 0.856. Without adaptation a sunlit white cloud
-  seen from space was drawn salmon (start view: cloud radiance B/R 0.79-0.84, physical - the TOA Sun x a cloud top's
-  near-flat reflectance under ~0.2 Rayleigh depth; displayed B/R 0.95-0.96 against EPIC's neutral (238, 243, 241)). The eye
-  adapts to the light it is in: a von Kries transform in CAT02's cone space [S: CIE 159:2004; Moroney et al. 2002] maps
-  the adopted white to the display's grey of the same luminance, W = M_rgb^-1 M_CAT02^-1 diag(grey / white) M_CAT02
-  M_rgb (diagonal-dominant: R x0.970, B x1.056, the green row 1.020). Adopted white [call]: the Sun's own colour above the
-  atmosphere (from the tables' `solar_illuminance_rgb` x `sun_radiance_to_luminance`), the same at every place and
-  hour - the daylight white: a sunlit white surface in space is white, light reddened by the air (low Sun, terminator,
-  sunset) keeps its colour (no adaptation to a sunset's own light), the ground's daylight (Sun + sky, CCT ~5500-6500 K)
-  is within ~5 % of it. Full adaptation (CIECAM02's D = 1, reached above ~100 cd/m^2; at night the rods dominate). With
-  the eye adaptation off (fixed exposure, `--camera_exposure`) the image stays colourimetric. Cost: the post step now
-  runs every frame (it was skipped by day): pad view 1600 x 900 not measurable (median 1.89 vs 1.89 ms), stereo mock
-  3534 x 2838 per eye +0.11 / +0.19 ms (5.70 / 5.80 vs 5.59 / 5.61 ms, two rounds). Test `game/tests/white_balance_test.gd` (headless): the D65 grey kept
-  (identity), the TOA Sun B/R 0.856 in 0.80-0.90 and drawn grey at its luminance (1e-6), the Sun through Rayleigh air
-  mass 4 at 700 hPa still warm (B/R 0.485 -> 0.564 < 0.75), post step o display-referred inverse = identity (1e-6).
-  A/B numbers: `.superpowers/sdd/2026-11-07-look-fixes/t1-t2-report.md`.
+- **White balance: the adopted white follows the scene** [look fixes T2, 2026-11-07; T5b fix round 1, user 2026-11-08;
+  `EyeAdaptation.white_balance`, `degree_of_adaptation`, `advance_white`, `cone_map`; `Atmosphere.field_illuminant`,
+  `white_balance`; fidelity flags `EyeAdaptation.white_balance_enabled` (render_check `--white_balance=off`) and
+  `EyeAdaptation.adopted_white_follows_scene` (`--white_balance=toa`, render_check and cockpit_shots: the former fixed
+  white of the Sun above the air at D = 1)].
+  - Field illuminant (`Atmosphere.field_illuminant`, linear Rec.709 at luminance 1): the light reaching the scene,
+    estimated physically from the analytic terms, not a grey world of the frame - of the plate at the eye (the direct
+    Sun at normal incidence through air and clouds + the sky's horizontal light, at night + the Moon's plate and the
+    moonlit sky, + the tower lamps' lit surfaces in their lumen-weighted CCT colour, `TowerLights.deck_light_colour`)
+    and, above the air, the Earth's side (near the Moon the earthshine in the Sun's colour, as the shaders draw it;
+    elsewhere the Earth in view), the brighter. So: the Sun above the air in space and on the Moon, Sun + sky on the
+    ground, moonlight at night, the twilight sky at dusk. An enclosure the eye is in (`interior_light_colour`; World:
+    the cabin of a `CockpitView` that `contains` the camera, its lamps' `LAMP_COLOUR`, D65) takes over as the surround's
+    visibility V closes: V x outside + (1 - V) x interior. A plate below `FIELD_ILLUMINANT_MIN_CD_M2` 1e-3 cd/m^2 [call]
+    (a moonless night) has nothing to adapt to: the white is held.
+  - Degree of adaptation [S: CIE 159:2004; Moroney et al. 2002]: D = F (1 - (1 / 3.6) exp((-L_A - 42) / 92)), L_A = the
+    paced L_a x Y_b / 100 (Y_b 20), F = `SURROUND_F` 1.0: the scene observer's surround is the scene itself, CIECAM02's
+    "average" (S_R >= 0.2; dim 0.9 and dark 0.8 are films / slides in a dim / dark room) [S: CIE 159:2004 Table 1;
+    Fairchild 2013, Color Appearance Models 3rd ed., 16.4]; the display observer fully adapted to the display white
+    [call]. D 0.824 at a moonlit night, 0.90 in the lamp-lit cabin (L_a ~270), 1.000 by day and in space.
+  - Transform: von Kries in CAT02's cone space with CIE 159's partial form, gains D grey / white + 1 - D (grey: the
+    display's grey at the illuminant's luminance), W = M^-1 diag(gains) M - D = 0 the identity (the display white
+    D65), D = 1 the illuminant drawn grey.
+  - Pacing [S: Fairchild & Reniff 1995, JOSA A 12, 824: ~90 % after ~60 s; Rinner & Gegenfurtner 2000]:
+    `CHROMATIC_TIME_CONSTANT_S` 26 s (one exponential in the log gains, 90 % at 60 s), snapped with the luminance's
+    snap (a view or clock jump). The display-referred emitters keep the exact inverse (`vision_cone_inverse` from the
+    same W).
+  - Moonlight's colour (`Atmosphere.moon_light_colour`, global `atmosphere_moon_colour`): the moonlit sky, ground, sea
+    and vehicles take the regolith's mean colour on the Sun's light (`moon_grey_tint`, luminance kept: K&S's moonlight
+    stays the photometric value) - the full Moon's B-V 0.92 against the Sun's 0.65, before left out [call].
+  Numbers, A (HEAD 3dd8340a) / B (this round), display sRGB of named regions, `screenshots/look_fixes/t5b_fix1/`
+  (numbers.txt, sheet_*_ab.png): see the T5b report's "Fix round 1" (`.superpowers/sdd/2026-11-07-look-fixes/t5b-report.md`).
+  Test `white_balance_test.gd` (below).
+  Why a white balance at all (T2): the renderer's colours are colourimetric linear sRGB (white D65), but the Sun above
+  the air is warmer: the core's TOA spectrum in linear sRGB is (1.123, 1, 0.961), B/R 0.856. Without adaptation a sunlit
+  white cloud seen from space was drawn salmon (start view: cloud radiance B/R 0.79-0.84, physical; displayed B/R
+  0.95-0.96 against EPIC's neutral). With the eye adaptation off (fixed exposure, `--camera_exposure`) the image stays
+  colourimetric. Cost: the post step runs every frame: pad view 1600 x 900 not measurable, stereo mock 3534 x 2838 per
+  eye +0.11 / +0.19 ms (T2). Test `game/tests/white_balance_test.gd` (headless): the D65 grey kept (identity), the TOA
+  Sun B/R 0.856 drawn grey at its luminance (1e-6), the Sun through Rayleigh air mass 4 at 700 hPa still warm at D = 1
+  toward the TOA Sun (B/R 0.485 -> 0.564), post step o display-referred inverse = identity (1e-6, also at D 0.82 toward
+  the moonlight); D = 0.8240 at L_A 0, 0.9022 at a 270 cd/m^2 white, 1 by day, increasing; D 0 the identity, gains
+  linear in D; the full Moon's light (Sun x regolith colour x air at el 83) adapted with the night's D: B/R 0.874 (pale
+  cream, band 0.80-0.92; D 1: 1.000; the former TOA white 0.505; colourimetric 0.436); the moonlight colour keeps the
+  Sun's luminance (1e-6); a D65 cabin lamp neutral (1e-6); pacing one time constant e^-1 (1e-9), 90 % in 60 s (0.0995),
+  a snap jumps. T2's A/B numbers: `.superpowers/sdd/2026-11-07-look-fixes/t1-t2-report.md`.
+
+- **Sun glare: the disc masked, its disability glare a veil** [look fixes T5b fix round 1, user 2026-11-08;
+  `AdaptationMeter` (shader mask, `sun_mask_parameters`), `Atmosphere.glare_veil`; fidelity flags
+  `Atmosphere.glare_enabled` / `AdaptationMeter.sun_mask_enabled`, render_check `--glare=off`]. Before, the Sun's disc
+  entered the histograms and only the 2 % highlight cut removed it: whether a disc alone in a black field was cut (the
+  eye dark-adapted next to the Sun, stars beside it) or set the field depended on its pixel share (fov, resolution,
+  desktop vs headset), and a Sun just outside the frame did not count at all.
+  - Mask: the meter's compute skips every sample whose view ray lies within `SUN_MASK_RADIUS_FACTOR` 1.2 [call: limb
+    and the sparse grid] x the Sun's apparent radius of its direction (World `_adaptation_view`: "sun", "sun_mask_cos";
+    per rendered view the ray (x a + b, y c + d, -1) from that eye's projection and the Sun in that eye's axes: both VR
+    eyes). Two counters after the histograms: the masked weight and its part at least `SUN_SEEN_SHARE` 0.05 of the
+    disc's own (de-gained) luminance (`sun_seen_cd_m2`: the direct beam's normal illuminance / the disc's solid angle,
+    or the shader's 6e4 clamp): the disc seen, not hidden behind something.
+  - Veil [S: Stiles 1929, Holladay 1926; CIE 146:2002, the Stiles-Holladay disability glare formula]: L_veil = 10 E_gl
+    / theta^2 (cd/m^2, E_gl lux at the eye in the plane normal to the line of sight, theta deg from the view axis; the
+    form is stated for 1-30 deg, [call] extended: theta held at the Sun's radius 0.267 deg, beyond 30 deg it falls with
+    E_gl = E_n cos theta to 0 at 90 deg - nothing from behind). E_n = `last_sun_normal_lux`, the direct Sun's normal
+    illuminance at the eye (TOA / d^2 x the transmittance x the clouds' direct beam x the visible fraction). Whether it
+    reaches the eye: with the Sun's direction in a rendered view the meter's seen share (seen / (mask x 1/1.44 x
+    `SUN_SEEN_FULL_SHARE` 0.5 [call: the sparse grid puts ~4-6 samples into the mask, measured 0.48 for an open Sun]),
+    at most 1); outside the frame the surround's V (open 1; an enclosure, whose walls the model does not know, 0).
+    Scotopic veil: the direct Sun's colour through the scotopic weights. The veil lies over the whole retinal image, so
+    the field's statistics take it as L_f + L_veil and L_anchor + L_veil (a black field becomes the veil; added per
+    sample instead, a weak veil brought the black sky back into the mean and lowered L_a: 400 km, Sun 70 deg off axis,
+    2.0e4 -> 6.5e3 in a trial render). theta is taken from the view the histograms were measured in.
+  - Values (renders `screenshots/look_fixes/t5b_fix1/`, A HEAD / B; gain, L_a cd/m^2, veil): see the T5b report's "Fix
+    round 1". Test `game/tests/glare_veil_test.gd` (headless): the form at 10 deg (1e-6); a Sun alone in a black frame
+    (masked, seen) and the same Sun 20 deg off axis just outside a narrower frame give the same L_a (16 575 cd/m^2, 1e-6);
+    across the frame edge (25.47 +- 0.1 deg) within 2 %; a hidden Sun (no seen sample), a Sun behind the eye, an
+    enclosed view's out-of-frame Sun: no veil; the Sun at the axis finite; stars vanish 20 deg from the Sun (Schaefer
+    limiting magnitude -5.3 at that L_a) and stay with the Sun behind (7.9). `adaptation_meter_test.gd`: the mask's
+    parameters (image-centre ray, Sun along -Z, no Sun no mask) and the masked Sun's black frame field 0. Stereo mock
+    (both eyes, Moon, Sun 12 deg above the view centre): mask 710 / seen 710, veil 8627 cd/m^2, gain 1.000.
 
 - **Display tone step: chroma-preserving tone curve** [look fixes T5, 2026-11-07; `display_tone.gd` `DisplayTone` (model
   and CPU mirror), `display_tone_effect.gd` `DisplayToneEffect` (compute step); fidelity flag `DisplayTone.enabled`,
@@ -385,9 +458,9 @@ shaders:
   Side effects (renders `screenshots/look_fixes/t5b/`): the visibility V keeps the old cut of the whole weight
   (`field_log_average(.., cut_of_whole)`), else a small lit object only the frame has (the Earth's disc in the lunar
   sky, absent from the model) closes V (first render: gain 12.99). A lone small lit object now enters the combined field
-  (lunar day el 60: the Earth disc, near the view centre, field 2617 -> 4048 cd/m^2, gain 2.98 -> 1.93); a Sun disc
-  with lit ground or surround in view is still cut (Moon, looking at the Sun: gain 8.34 -> 8.30). A Sun disc alone in a
-  fully black field is not cut any more (not rendered, open).
+  (lunar day el 60: the Earth disc, near the view centre, field 2617 -> 4048 cd/m^2, gain 2.98 -> 1.93); the start view
+  1.401 -> 1.269 (the cut of the ~30 % lit weight leaves more bright cloud in the field). The Sun's disc no longer
+  depends on this cut: it is masked out by its direction and its glare is added as a veil ("Sun glare" above).
 
 - Eye model: Ferwerda 1996 cone/rod t.v.i. with Jensen 2000 rod saturation, CIECAM02 brightness / chroma terms,
   Schaefer 1990 star threshold (user decision 2026-10-25, "like the eye").
@@ -403,8 +476,11 @@ shaders:
   70 deg about the view axis from the analytic surround model, gated by its agreement with the frame (enclosed views
   keep the frame alone). Rule D, the highlight cut and the anchor percentile unchanged.
 - City lights scene-referred with scale [E] (user ruling 2026-10-25).
-- White balance to the TOA Sun's white, fixed (not to the plate's current light: a sunset stays red) (look fixes plan,
-  user 2026-11-07 "Alles wie vorgeschlagen umsetzen", proposal F7).
+- Adopted white = the field's illuminant, estimated physically (Sun + sky, moonlight, the enclosure's lamps, the Sun
+  above the air in space; not a grey world of the frame), with CIECAM02's D (average surround, F 1), paced 26 s (user
+  2026-11-08, after review T5b Q3; it replaces the fixed TOA-Sun white of proposal F7, 2026-11-07).
+- The Sun's disc is masked out of the field meter by its direction and size, its disability glare added as a veil
+  (Stiles-Holladay, CIE 146:2002) - in the frame and just outside it, both eyes; no solid-angle floor (user 2026-11-08).
 - Hunt factor against the display's white (100 cd/m^2), no cap at 1 by day, and the chroma-preserving display tone
   step on AgX's grey curve, hue-stable in OkLab (look fixes plan, user 2026-11-07 "Alles wie vorgeschlagen umsetzen",
   proposals F2 + F3).
@@ -415,12 +491,20 @@ shaders:
   shows - cloud radiance B/R 0.93-0.95 of the TOA Sun's white (start view / 400 km), displayed B/R 0.88-0.92 against
   AgX's 0.97-0.98 and EPIC's 1.00-1.04: the clouds read pink. Candidates: the adopted white (the eye adapting to the
   scene's bright field, the clouds, rather than the TOA Sun) or the clouds' TOA colour (T7; review: a missing cloud /
-  air coupling, so the TOA Sun stays the adopted white). The lunar regolith's teal (white Moon light under the Sun-
-  coloured white balance) is fixed (fix round 1: `moon_sun_color`, moon-surface.md); the albedo mosaic carries about a
-  third of the real regolith's red slope (moon-surface.md, open). The S reference moved civil dusk from S 0.68 to ~1.0
+  air coupling). The lunar regolith's teal is fixed (T5 fix round 1: `moon_sun_color`) and its red slope set to the
+  measured colour (T5b: `moon_albedo_tint`, moon-surface.md). The S reference moved civil dusk from S 0.68 to ~1.0
   (more colourful twilight) - user's verdict open. Glow: with the bound, emitters at S > 1 (the plume by day) glow
   somewhat less than with AgX alone (their S = 1 value is their former c through the Hunt inverse, less saturated).
 
+- Adopted white (T5b fix round 1): the pad's daylight plate (direct Sun at normal incidence + sky, Sun 48 deg) is B/R
+  0.72 against the TOA Sun's 0.856, so by day the ground reads more neutral and the sky bluer than with the fixed white
+  (pad noon el 5: ground B/R 0.55 -> 0.74, sky 7.5 -> 11.3); at dusk (Sun -5.5 deg) the twilight sky light (B/R 2.9) at
+  D 0.83 turns the blue hour nearly grey (sky B/R 3.1 -> 1.25, the horizon glow orange). Both follow the model; whether
+  the plate (normal incidence) or the horizontal illuminance is the scene's light is a [call] for the user's eye. The full
+  Moon at a VR fov stays display white (B/R 1.00 in A and B): adapted to the moonlit night (L_a 0.04 cd/m^2, gain 1.2e4)
+  the disc is far above white - the Moon's own disability glare (10 x 0.3 lux / 0.27^2 ~ 40 cd/m^2 looking at it) and
+  local adaptation are not modelled; pale cream shows where the disc is in range (fov 2: B/R 0.33 -> 0.77). The surround
+  model has no moonlit sky (black at night), so at night the fov-2 frame still stands alone (out-of-frame share 0).
 - Earth in view for a Moon eye at partial phases underestimates up to ~2x; the eclipse-time Earth renders several
   times its day brightness (AgX rolls it toward white) - kept physical.
 - Earth in view and the earthshine ignore the clouds the Earth is drawn with (Task 10: the scaled-space Earth shows

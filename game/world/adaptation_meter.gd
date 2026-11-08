@@ -73,7 +73,9 @@ layout(rgba16f, set = 0, binding = 2) uniform restrict readonly image2D cloud_im
 layout(push_constant, std430) uniform Params {
 	vec4 size;    // width, height, stride (px), cd/m^2 per scene value
 	vec4 shape;   // 1 / (2 sigma^2), bins per histogram, log10 min, bins per decade
-	vec4 shape2;  // clouds (1 / 0), -, -, -
+	vec4 shape2;  // clouds (1 / 0), the Sun disc's "seen" threshold (cd/m^2), -, -
+	vec4 ray;     // view ray of NDC (x, y): (x a + b, y c + d, -1) - a, b, c, d from the eye's projection
+	vec4 sun;     // the Sun's direction in the eye's view axes, cos of the mask radius (> 1: no mask)
 } params;
 
 const vec3 LUMINANCE_WEIGHTS = vec3(0.2126, 0.7152, 0.0722);  // [S: ITU-R BT.709]
@@ -111,9 +113,20 @@ void main() {
 		c = clamp(c, vec3(0.0), vec3(65000.0));
 		vec2 offset = (vec2(pixel) + 0.5 - 0.5 * params.size.xy) / (0.5 * length(params.size.xy));
 		uint weight = uint(255.0 * exp(-dot(offset, offset) * params.shape.x) + 0.5);
-		if (weight > 0u) {
+		// The Sun disc by its known direction (look fixes T5b fix round 1): masked out of the histograms; its weight
+		// and the part that shows the disc (above the threshold: not hidden) go to the two counters after them.
+		vec2 ndc = vec2(2.0 * (float(pixel.x) + 0.5) / params.size.x - 1.0, 1.0 - 2.0 * (float(pixel.y) + 0.5) / params.size.y);
+		vec3 ray = normalize(vec3(ndc.x * params.ray.x + params.ray.y, ndc.y * params.ray.z + params.ray.w, -1.0));
+		bool masked = dot(ray, params.sun.xyz) > params.sun.w;
+		float luminance = dot(LUMINANCE_WEIGHTS, c) * params.size.w;
+		if (weight > 0u && masked) {
+			atomicAdd(histogram.bins[TOTAL_BINS], weight);
+			if (luminance >= params.shape2.y) {
+				atomicAdd(histogram.bins[TOTAL_BINS + 1], weight);
+			}
+		} else if (weight > 0u) {
 			uint bins = uint(params.shape.y);
-			atomicAdd(local_bins[bin_of(dot(LUMINANCE_WEIGHTS, c) * params.size.w)], weight);
+			atomicAdd(local_bins[bin_of(luminance)], weight);
 			atomicAdd(local_bins[bins + bin_of(dot(SCOTOPIC_WEIGHTS, c) * params.size.w)], weight);
 		}
 	}
@@ -126,7 +139,15 @@ void main() {
 }
 """
 
-const _BYTES := HISTOGRAM_BINS * 2 * 4
+## The two histograms, then the Sun mask's two counters (its weight, the part above the "seen" threshold).
+const _BYTES := (HISTOGRAM_BINS * 2 + 2) * 4
+## [call] The Sun's mask radius over its apparent radius (the limb's glow and the sparse grid's aliasing; look fixes T5b
+## fix round 1). The disc covers 1 / 1.2^2 of the mask (SUN_DISC_SHARE).
+const SUN_MASK_RADIUS_FACTOR := 1.2
+const SUN_DISC_SHARE := 1.0 / (SUN_MASK_RADIUS_FACTOR * SUN_MASK_RADIUS_FACTOR)
+## Fidelity flag: the Sun disc masked out of the histograms (render_check --glare=off: counted as before, the 2 %
+## highlight cut alone).
+static var sun_mask_enabled := true
 
 ## The cloud pass whose result the meter composites over the scene (world.gd; before it in the Compositor, same stage);
 ## null: no clouds composited.
@@ -150,6 +171,7 @@ var _epoch := 0
 var _loading := false
 var _in_flight := false
 var _view := {}
+var _sun_seen_cd_m2 := 0.0
 ## Results (written on the render thread by the read-back callback, read on the main thread).
 var _mutex := Mutex.new()
 var _result := PackedInt32Array()
@@ -169,7 +191,8 @@ func _init() -> void:
 ## nothing), the adaptation's epoch (a new view: results of older epochs are dropped) and whether the view is still
 ## loading (streamed terrain: the result is not the settled view yet). view: the frame's view for AdaptationSurround
 ## (returned with its result: the out-of-frame part belongs to the view the histograms were measured in).
-func set_frame(scene_per_cd_m2: float, epoch: int, loading: bool, view := {}) -> void:
+## sun_seen_cd_m2: a masked sample at least this bright shows the Sun disc (not hidden behind something).
+func set_frame(scene_per_cd_m2: float, epoch: int, loading: bool, view := {}, sun_seen_cd_m2 := 0.0) -> void:
 	var cd_per_scene := 1.0 / scene_per_cd_m2 if scene_per_cd_m2 > 0.0 else 0.0
 	# Only every MEASURE_EVERY-th frame asks for the resolved colour (MSAA: an extra resolve before the transparent pass);
 	# the flag and this frame's state go through the same render-thread queue, so they belong to the same frame.
@@ -178,7 +201,7 @@ func set_frame(scene_per_cd_m2: float, epoch: int, loading: bool, view := {}) ->
 	if access_resolved_color != measure:
 		access_resolved_color = measure
 	RenderingServer.call_on_render_thread(_set_on_render_thread.bind(cd_per_scene if measure else 0.0, epoch, loading,
-			view))
+			view, sun_seen_cd_m2))
 
 
 ## Whether the next set_frame is a measuring frame (the view is only needed then).
@@ -186,12 +209,14 @@ func measures_next_frame() -> bool:
 	return (_frame + 1) % MEASURE_EVERY == 0
 
 
-## Main thread: the newest histogram pair of that epoch not taken yet ([counts, loading, serial, view]), else [].
+## Main thread: the newest histogram pair of that epoch not taken yet ([counts, loading, serial, view, [Sun mask weight,
+## its weight above the "seen" threshold]]), else [].
 func take_result(epoch: int, after_serial: int) -> Array:
 	_mutex.lock()
 	var out := []
-	if _result_epoch == epoch and _result_serial > after_serial and _result.size() == HISTOGRAM_BINS * 2:
-		out = [_result, _result_loading, _result_serial, _result_view]
+	if _result_epoch == epoch and _result_serial > after_serial and _result.size() == HISTOGRAM_BINS * 2 + 2:
+		out = [_result.slice(0, HISTOGRAM_BINS * 2), _result_loading, _result_serial, _result_view,
+				[_result[HISTOGRAM_BINS * 2], _result[HISTOGRAM_BINS * 2 + 1]]]
 	_mutex.unlock()
 	return out
 
@@ -298,12 +323,32 @@ static func shader_source() -> String:
 	return SHADER_CODE.replace("TOTAL_BINS", str(HISTOGRAM_BINS * 2)).replace("GROUP_EDGE", str(GROUP))
 
 
-func _set_on_render_thread(cd_per_scene: float, epoch: int, loading: bool, view: Dictionary) -> void:
+## The shader's Sun mask for one rendered view (index into the view's "eyes"): [ray a, b, c, d, Sun x, y, z in the eye's
+## view axes, cos of the mask radius]; the cosine 2 (no mask) without a Sun or an eye. The view ray of NDC (x, y) is
+## (x a + b, y c + d, -1): Godot's Projection maps a view direction v (w = 0) to clip x = P00 v.x + P20 v.z, w = -v.z, so
+## at v.z = -1 v.x = (x + P20) / P00 (y likewise with P11, P21; NDC y up, image row 0 at the top).
+static func sun_mask_parameters(view: Dictionary, eye_index: int) -> PackedFloat32Array:
+	var none := PackedFloat32Array([1.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0, 2.0])
+	var eyes: Array = view.get("eyes", [])
+	if not sun_mask_enabled or not view.has("sun") or eye_index >= eyes.size():
+		return none
+	var eye: Array = eyes[eye_index]
+	var p: Projection = eye[1]
+	if p.x.x == 0.0 or p.y.y == 0.0:
+		return none
+	var to_eye: Basis = ((view["head"] as Basis) * (eye[0] as Basis)).transposed()
+	var sun: Vector3 = (to_eye * (view["sun"] as Vector3)).normalized()
+	return PackedFloat32Array([1.0 / p.x.x, p.z.x / p.x.x, 1.0 / p.y.y, p.z.y / p.y.y, sun.x, sun.y, sun.z,
+			float(view.get("sun_mask_cos", 2.0))])
+
+
+func _set_on_render_thread(cd_per_scene: float, epoch: int, loading: bool, view: Dictionary, sun_seen: float) -> void:
 	_cd_per_scene = cd_per_scene
 	_epoch = epoch
 	_loading = loading
 	if cd_per_scene > 0.0:
 		_view = view
+		_sun_seen_cd_m2 = sun_seen
 
 
 func _create_pipeline() -> void:
@@ -361,9 +406,11 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 	for view in range(buffers.get_view_count()):  # both VR eyes into one histogram
 		# The cloud composite (before the transparent pass the image has no clouds yet; after it, it has them).
 		var cloud := cloud_effect.frame_output_layer(view) if cloud_effect != null and not post_transparent else RID()
+		var mask := sun_mask_parameters(_view, view)
 		var push := PackedFloat32Array([float(size.x), float(size.y), float(stride), _cd_per_scene,
 				1.0 / (2.0 * CENTRE_SIGMA * CENTRE_SIGMA), float(HISTOGRAM_BINS), LOG_MIN,
-				float(HISTOGRAM_BINS - 1) / (LOG_MAX - LOG_MIN), 1.0 if cloud.is_valid() else 0.0, 0.0, 0.0, 0.0])
+				float(HISTOGRAM_BINS - 1) / (LOG_MAX - LOG_MIN), 1.0 if cloud.is_valid() else 0.0, _sun_seen_cd_m2, 0.0, 0.0])
+		push.append_array(mask)
 		var bytes := push.to_byte_array()
 		var image_uniform := RDUniform.new()
 		image_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE

@@ -1356,7 +1356,8 @@ func _night_vision_samples() -> void:
 	var normal := _geodetic_up(point)
 	var moon_lux: Dictionary = _core.atmosphere_illuminance(point, normal, moon_dir)
 	var to_point: Dictionary = _core.atmosphere_sky_luminance_to_point(cape, point, sun_full)
-	var moon_light: Vector3 = (moon_lux["sun_lux"] + moon_lux["sky_lux"]) / PI * _atmosphere.moonlight_relative_value
+	var moon_light: Vector3 = (moon_lux["sun_lux"] + moon_lux["sky_lux"]) / PI * _atmosphere.moonlight_relative_value \
+			* _atmosphere.moon_light_colour()  # the regolith's colour on the moonlight (T5b fix round 1)
 	var view_t: Vector3 = to_point["transmittance"]
 	var expected_cones: Vector3 = (albedo * moon_light * view_t + to_point["luminance"]) * _atmosphere.luminance_scale
 	_compare("night vision: full-Moon ground, cone image", expected_cones, cones, SURFACE_TOLERANCE)

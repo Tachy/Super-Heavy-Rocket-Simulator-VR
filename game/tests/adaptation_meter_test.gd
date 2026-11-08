@@ -57,7 +57,6 @@ func _initialize() -> void:
 	var k_shade := AdaptationMeter.bin_of(500.0 * pow(10.0, -2.0))
 	_near("inside the simultaneous range", AdaptationMeter.field_log_average(_histogram({k_shade: 980, k500: 980, BINS - 1: 40})),
 			sqrt(_centre(k500) * _centre(k_shade)), 1e-9)
-	# No samples: -1; nothing above black: 0 (a dark field).
 	# The cut is 2 % of the lit weight (user 2026-11-07): a lit area of 2.4 % of a mostly black field stays the field, the
 	# Sun disc (1 % of the lit weight) in it is still cut.
 	_near("1.5 % lit area stays the field (lit-weight cut)", AdaptationMeter.field_log_average(_histogram({0: 9850, k500: 150})), _centre(k500), 1e-9)
@@ -65,8 +64,20 @@ func _initialize() -> void:
 	_near("lunar-like anchor", float(AdaptationMeter.bin_of(AdaptationMeter.field_anchor(_histogram({0: 9760, k500: 240})))), float(k500), 0.0)
 	_near("sun disc cut in a black field", AdaptationMeter.field_log_average(_histogram({0: 9000, BINS - 1: 10, k500: 990})), _centre(k500), 1e-9)
 	_near("cut of the whole weight: a small lit area is cut", AdaptationMeter.field_log_average(_histogram({0: 9850, k500: 150}), 0, true), 0.0, 0.0)
+	# No samples: -1; nothing above black: 0 (a dark field).
 	_near("no samples", AdaptationMeter.field_log_average(_histogram({})), -1.0, 0.0)
 	_near("dark field", AdaptationMeter.field_log_average(_histogram({0: 1000})), 0.0, 0.0)
+	# The Sun alone in a black field (review T5b M3 / I3): the meter masks the disc out (its samples never reach the
+	# histograms: the shader skips them), so the frame is black and its field 0 whatever the disc's pixel share; the
+	# glare veil (Atmosphere.glare_veil, glare_veil_test) then is the field. The mask's parameters: the Sun at the view
+	# axis of a desktop view is the image centre's ray, a missing Sun masks nothing (cosine 2).
+	var view := {"head": Basis.IDENTITY, "eyes": [[Basis.IDENTITY, Projection.create_perspective(50.0, 16.0 / 9.0, 0.05, 1000.0)]],
+			"sun": Vector3(0, 0, -1), "sun_mask_cos": 0.99999}
+	var mask := AdaptationMeter.sun_mask_parameters(view, 0)
+	_near("Sun mask: ray at the image centre", float(mask[1]) * float(mask[1]) + float(mask[3]) * float(mask[3]), 0.0, 0.0)
+	_near("Sun mask: Sun along -Z", float(mask[6]), -1.0, 1e-6)
+	_near("Sun mask: no Sun, no mask", float(AdaptationMeter.sun_mask_parameters({"eyes": view["eyes"]}, 0)[7]), 2.0, 0.0)
+	_near("Sun masked: the black frame's field", AdaptationMeter.field_log_average(_histogram({0: 1000})), 0.0, 0.0)
 	# The scotopic histogram at its offset.
 	var both := _histogram({k500: 10, BINS + k50: 10})
 	_near("scotopic offset", AdaptationMeter.field_log_average(both, BINS), _centre(k50), 1e-9)

@@ -517,3 +517,16 @@ frame-only measurements.
 The meter cut the brightest 2 % of the whole histogram weight (black bin included); a lit surround of less than 2 % of a
 mostly black field (lunar day looking up 60 deg: 2.4 %, fragile) was removed whole. Now 2 % of the lit weight
 (`eye-adaptation.md`, Standing decisions).
+
+## Fixed TOA-Sun adopted white, Sun disc by the highlight cut, surround dropped at narrow fov (until 2026-11-08)
+- Adopted white (look fixes T2 until T5b fix round 1): the Sun's colour above the atmosphere, the same at every place
+  and hour, full adaptation (D = 1), unpaced. A full Moon seen from the ground kept its regolith slope and the air's
+  reddening against it (displayed B/R 0.33 at fov 2, review T5b Q3), the D65 cabin lamps read ~10 % bluer. Still
+  available: `EyeAdaptation.adopted_white_follows_scene = false` (render_check / cockpit_shots `--white_balance=toa`).
+- The Sun's disc entered the meter's histograms and was removed only by the 2 % highlight cut: in a black field (a Sun
+  alone) the disc's pixel share decided whether it was cut (field 0, dark-adapted eye, stars beside the Sun) or set the
+  field (clamped to the reference plate); a Sun just outside the frame did not count at all. Now the disc is masked by
+  its direction and its glare is a veil (eye-adaptation.md "Sun glare"; `--glare=off` restores the former).
+- Moonlight drawn in the Sun's colour ([call] "reddening B-V 0.92 left out"); now with the regolith's colour.
+- AdaptationSurround took the frame's weight from the ~150 query directions inside it: a frame narrower than their
+  10 deg spacing had weight 0 and the surround dropped out (fov 2: "model in frame -1", the Moon disc the whole field).

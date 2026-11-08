@@ -262,6 +262,10 @@ atmosphere_moon_light={
 "type": "float",
 "value": 0.0
 }
+atmosphere_moon_colour={
+"type": "vec3",
+"value": Vector3(1, 1, 1)
+}
 vision_rod_weights={
 "type": "vec3",
 "value": Vector3(0, 0, 0)

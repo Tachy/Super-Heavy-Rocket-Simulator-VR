@@ -425,6 +425,9 @@ on top of that relief.
   Moon-in-view term (`adaptation_luminance`). The mean luminance is exactly kept (the calibrated albedo, regolith_scale,
   moon_disc_calibration unchanged: luminance only); the mosaic's local colour variation stays. Fidelity flag
   `Atmosphere.moon_colour_correction` (render_check `--moon_colour=texture` = the former look). Test `moon_colour_test.gd`.
+  [call] The rocks (moon_rock.gdshader) take the same mature-regolith tint; fresh rock and immature ejecta are less red
+  (a smaller slope), not modelled. The moonlight on the Earth takes the same colour (`Atmosphere.moon_light_colour`,
+  luminance kept; global `atmosphere_moon_colour`, eye-adaptation.md "Moonlight", T5b fix round 1).
 - Albedo map (Task 11 fix C, ruling T11-C4): `data/textures/moon_color.png` is the CGI Moon Kit colour mosaic with its
   large-scale brightness tied to the LROC WAC Hapke w map (Sato et al. 2014, 1 deg, +-70 deg;
   `tools/data_pipeline/moon_albedo.py`, run by `prepare.py`; source `lroc_wac_hapke_parameter_map`): per 1-deg cell

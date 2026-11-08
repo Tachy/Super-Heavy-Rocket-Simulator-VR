@@ -139,7 +139,7 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   `--lat= --lon= --look_at_moon --fov=`; clouds with `--weather=<abs path .wthr>` or `--weather=slab:<bottom>,<top>,<liquid>,<fraction>`
   and `--cloud_quality=desktop|vr`, `--cloud_divisor=<x>` (`docs/subsystems/weather-clouds.md` "Diagnostics"). The
   game's first view: `--start_view` (implies `--weather=analog`, the game's weather being on by default; `--weather=off`
-  for the cloudless Earth); `--white_balance=off` drops the eye's adaptation to the Sun's white. `--tone=agx` shows Godot's AgX alone (no display tone step), `--hunt=day` the former Hunt reference (S <= 1); the GPU check of the display tone step: `res://tests/display_tone_check.gd` (headless model test `display_tone_test.gd`). Read the PNG to verify rendering changes.
+  for the cloudless Earth); `--white_balance=off` drops the eye's chromatic adaptation, `--white_balance=toa` keeps the former fixed white (the Sun above the air, D = 1); `--glare=off` drops the Sun's glare veil and its disc mask in the field meter; `--moon_colour=texture` shows the Moon's albedo texture colour without the regolith colour factor. `--tone=agx` shows Godot's AgX alone (no display tone step), `--hunt=day` the former Hunt reference (S <= 1); the GPU check of the display tone step: `res://tests/display_tone_check.gd` (headless model test `display_tone_test.gd`). Read the PNG to verify rendering changes.
 - Sky radiance checks (GPU, `res://tests/sky_radiance_check.gd`, `--stale` in any mode freezes the cube: must exit 1): no
   options (phases against references; `-- --only=<phase>`), `-- --steady`,
   `-- --timelapse`, `-- --flight --utc=2026-10-12T17:30:00 --expect=lit --t_plus=1`, `-- --flight

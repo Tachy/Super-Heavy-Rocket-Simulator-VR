@@ -154,6 +154,12 @@ func _build_lights(geometry: Dictionary) -> void:
 	tower_lights.build(lamps, geometry)
 
 
+## The lamps' colour on the lit deck (linear Rec.709 at luminance 1; white without lamps): the eye's adopted white
+## where the lamps light the view (Atmosphere.lamp_light_colour).
+func lamp_light_colour() -> Vector3:
+	return tower_lights.deck_light_colour if tower_lights != null else Vector3.ONE
+
+
 ## What the eye adapts to from the lamps (cd/m^2): the lit deck's luminance (TowerLights.deck_luminance_cd) while the lamps
 ## burn, weighted by what the eye sees: the camera within the lamps' reach (full inside NEAR, none beyond FAR) and the
 ## site in front of it (full within VIEW_FULL_DEG of the view axis, none beyond VIEW_NONE_DEG).
