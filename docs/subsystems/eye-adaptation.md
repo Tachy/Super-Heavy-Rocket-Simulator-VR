@@ -319,6 +319,13 @@ shaders:
     the cabin of a `CockpitView` that `contains` the camera, its lamps' `LAMP_COLOUR`, D65) takes over as the surround's
     visibility V closes: V x outside + (1 - V) x interior. A plate below `FIELD_ILLUMINANT_MIN_CD_M2` 1e-3 cd/m^2 [call]
     (a moonless night) has nothing to adapt to: the white is held.
+    Near the Moon (bug hunt 2026-11-08, user-approved; `Atmosphere.moon_field_tint`, flag
+    `Atmosphere.moon_field_adaptation`): the eye's field there is regolith-reflected light against a black sky, so both
+    plates move toward the regolith's colour (`moon_grey_tint`) by `MOON_FIELD_MEAN_WEIGHT` 0.6 [call: mixed / partial
+    adaptation, Katoh & Nakabayashi 1997, CIE 162:2004; Helson-Judd effect] x the Moon's share of the surroundings
+    1 - cos(theta) (1 on the ground, 0.48 at 300 km, 0.23 at 1000 km, ~1e-5 from the Earth: the full Moon from the Earth
+    is unchanged). Ground tint B/R 0.786; lunar day ground (suite `lunar_day_apollo11`) displayed B/R 0.638 -> 0.922, full Moon from the Earth 0.788 unchanged; see the
+    bug-moon report, gate 0.75-0.95 [Apollo crews: grey, brownish-grey at low Sun]. Test `moon_colour_test.gd`.
     Why horizontal (fix round 2, review I1): CIECAM02's adopted white is the illuminant of the scene; the scene is
     mostly horizontal (ground, deck, sea) and daylight is measured as global horizontal light [S: CIE 015:2018 daylight;
     Judd et al. 1964; Hernandez-Andres et al. 2001, JOSA A 18, 1325]. The luminance plate (Sun at normal incidence +

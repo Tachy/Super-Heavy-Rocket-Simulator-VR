@@ -311,7 +311,10 @@ SCENES = {
     "lunar_day_apollo11": (MOON + ["--azimuth_from_sun=180", "--elevation=5", "--fov=100"], m_moon_day, {
         "ground_luma": (115, 175, "[user 2026-11-08: the Moon day stays bright (T6 old 128 accepted, 108 too dark); "
                                   "S: AS11-40-5903 regolith 117-147 8-bit luma at metered exposure]"),
-        "clipped": (0.0, 0.01, "[call] regolith not clipped")}),
+        "clipped": (0.0, 0.01, "[call] regolith not clipped"),
+        "ground_b_over_r": (0.75, 0.95, "[user 2026-11-08: the close-up Moon grey, not cream; S: Apollo crews - regolith "
+                                        "grey, brownish-grey at low Sun; model: adopted white 0.6 toward the regolith field "
+                                        "(Atmosphere.moon_field_tint): measured 0.922; before 0.638]")}),
     "lunar_night_full_earth": (LUNAR_NIGHT + ["--lon=45", "--utc=2026-11-07T14:00:00", "--azimuth=270",
                                               "--elevation=20", "--fov=100"], m_disc, {
         "disc_clipped": (0.0, 0.25, "[user 2026-11-08: the Earth from the lunar night shows detail, not overexposed]"),

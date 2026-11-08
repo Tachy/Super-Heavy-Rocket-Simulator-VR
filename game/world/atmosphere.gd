@@ -58,6 +58,14 @@ const MOON_REGOLITH_COLOUR_RATIO := Vector3(1.0, 0.85, 0.66)
 ## Fidelity flag (user 2026-11-07): the regolith colour factor on. Off: the texture's own colour (the former look;
 ## render_check --moon_colour=texture).
 static var moon_colour_correction := true
+## Fidelity flag (bug hunt 2026-11-08, user-approved): near the Moon the eye adapts partly to the regolith's own light
+## (moon_field_tint). Off: the adopted white keeps the Sun's colour above the air (the T5b look).
+static var moon_field_adaptation := true
+## [call: Katoh & Nakabayashi 1997 / CIE 162:2004 mixed adaptation - an observer's adopted white lies between the
+## illuminant's white and the field's mean (ratios ~0.6 measured for display vs ambient); Helson-Judd effect (Helson
+## 1938, Judd 1940): a field of one surface colour is seen toward neutral, not fully] The share of the adopted white
+## near the Moon taken from the regolith field's mean light (moon_field_tint); the rest stays the illuminant's.
+const MOON_FIELD_MEAN_WEIGHT := 0.6
 ## Fidelity flag (bug hunt 2026-11-08, user: "the Moon is cream, not grey"): near the Moon the field's illuminant takes
 ## the regolith's colour by the share of the field the Moon fills (moon_field_tint). Off: the Sun's colour above the air
 ## (the T5b look; render_check --moon_field=off).
@@ -765,6 +773,24 @@ static func moon_field_tint(eye_from_moon_m: float, ground_radius_m: float) -> V
 	return Vector3.ONE.lerp(moon_grey_tint(), share)
 
 
+## The adapting field near the Moon (bug hunt 2026-11-08; user: the close-up Moon read cream, approved: the eye partly
+## adapts to the regolith's own light). CIECAM02's adopted white is the adapting field's [S: CIE 159:2004]; on the Earth
+## the field is daylight off a near-neutral world and the illuminant stands for it (field_illuminant), but on and near
+## the Moon every bit of light the eye gets (the Sun's disc masked) is regolith-reflected, red-sloped light against a
+## black sky. The adopted white moves toward that field mean (moon_grey_tint, luminance 1) by MOON_FIELD_MEAN_WEIGHT x
+## the share of the eye's surroundings the Moon fills, 1 - cos(theta) (theta: the lunar ground sphere's angular radius;
+## 1 on the ground, 0.48 at 300 km, 0.23 at 1000 km, ~1e-5 from the Earth, so the full Moon from the Earth keeps its
+## look) [call: the hemisphere-normalised solid-angle share - view-independent (both VR eyes, head turns), continuous].
+## CIECAM02 D (white_degree) applies on top; the regolith keeps a slight warmth (Apollo crews: grey, brownish-grey at
+## low Sun). Luminance 1. ONE with moon_field_adaptation or moon_colour_correction off.
+static func moon_field_tint(eye_from_moon_m: float, ground_radius_m: float) -> Vector3:
+	if not (moon_field_adaptation and moon_colour_correction) or eye_from_moon_m <= 0.0:
+		return Vector3.ONE
+	var s := clampf(ground_radius_m / eye_from_moon_m, 0.0, 1.0)
+	var share := 1.0 - sqrt(1.0 - s * s)
+	return Vector3.ONE.lerp(moon_grey_tint(), MOON_FIELD_MEAN_WEIGHT * share)
+
+
 ## The same colour factor for the grey Moon users (the sky radiance map's Moon, the eye adaptation's Moon in view),
 ## normalised to luminance 1 (global moon_grey_tint): the mean regolith's colour without a texture.
 static func moon_grey_tint() -> Vector3:
@@ -892,6 +918,11 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 			var solar_unit := solar * sun_factor / (solar * sun_factor).dot(LUMINANCE_WEIGHTS)
 			_illuminant_far_rgb = solar_unit * (last_earthshine_lux / PI) * (1.0 - occulted_fraction(-eye_itrf_m,
 					EARTH_MEAN_RADIUS_M, moon_itrf_m - eye_itrf_m, moon_ground_m))
+			# Near the Moon the field the eye adapts to is the regolith's light (moon_field_tint): both plates take part
+			# of its colour by the share of the field the Moon fills.
+			var tint := moon_field_tint((moon_itrf_m - eye_itrf_m).length(), moon_ground_m)
+			_illuminant_down_rgb *= tint
+			_illuminant_far_rgb *= tint
 			# Near the Moon the field the eye adapts to is the regolith's light (moon_field_tint): both plates take its
 			# colour by the share of the field the Moon fills (luminance kept).
 			var tint := moon_field_tint((moon_itrf_m - eye_itrf_m).length(), moon_ground_m)
