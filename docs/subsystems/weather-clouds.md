@@ -689,7 +689,8 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   2025-03-20 14:28 UTC against EPIC; `screenshots/look_fixes/t7/sheet_stepCB_epic1430.png`, `crop_stepCB.png`; disc
   statistics of the display PNG, linear Y over the disc's p99 - dark < 0.15 / grey / white >= 0.5 - and the Y
   correlation with EPIC; scripts `screenshots/look_fixes/t7/scripts/`): EPIC 0.37 / 0.50 / 0.13. ERA5 0.25 deg: before
-  T7 0.03 / 0.35 / 0.62 (corr 0.41), cumulus cap 0.03 / 0.43 / 0.54 (0.50), + sub-grid 0.06 / 0.50 / 0.44 (0.47).
+  T7 0.03 / 0.35 / 0.62 (corr 0.43), cumulus cap 0.03 / 0.43 / 0.54 (0.53), + sub-grid 0.06 / 0.50 / 0.44 (0.50); the
+  linear camera (f/16 1/800 ISO 100) 0.34 / 0.45 / 0.21 - the display's white excess is its tone curve, not the scene.
   Analog (Mar 15 12 UTC): before 0.01 / 0.29 / 0.71 (corr 0.16), cap + fine column 0.02 / 0.45 / 0.53 (0.20), +
   sub-grid 0.06 / 0.51 / 0.43 (0.18) - the analog's 0.25 deg column draws the same structure detail as an ERA5 hour.
   Insolation-weighted cloud albedo effect of the column model (independent columns, `scripts/cre.py`): 0.32 before,
