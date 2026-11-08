@@ -236,12 +236,14 @@ void main() {
 		if ((flags & 2) != 0) {
 			// A pixel that is itself a source the local adaptation compresses (GlareSpread.self_compression): its veil
 			// goes with it; the dark surround keeps the full veil.
-			// the largest of the four texels around: a limb pixel (a part of its texel covered) is compressed as the disc
+			// the largest of the four texels around
 			float excess = max(max(dot(LUMINANCE, imageLoad(source_image, clamp_low(i0)).rgb),
 							dot(LUMINANCE, imageLoad(source_image, clamp_low(i0 + ivec2(1, 0))).rgb)),
 					max(dot(LUMINANCE, imageLoad(source_image, clamp_low(i0 + ivec2(0, 1))).rgb),
 							dot(LUMINANCE, imageLoad(source_image, clamp_low(i0 + ivec2(1, 1))).rgb)));
-			veil *= excess > 0.0 ? min(1.0, params.low.z / (params.low.w + excess)) : 1.0;
+			// GlareSpread.veil_factor: weighted by how much of the pixel is the source (its shown luminance / the plateau)
+			float coverage = clamp(dot(LUMINANCE, imageLoad(color_image, pixel).rgb) / (@COVERAGE@ * params.low.z), 0.0, 1.0);
+			veil *= mix(1.0, excess > 0.0 ? min(1.0, params.low.z / (params.low.w + excess)) : 1.0, coverage);
 			// The halo next to a source lies over a retina adapted to it: the local adaptation shows such a region at
 			// most at its plateau; the veil saturates softly there (monotonic in the veil, no ring at the limb).
 			veil *= params.low.z / (params.low.z + dot(LUMINANCE, veil));
@@ -280,7 +282,7 @@ static func _fill(template: String) -> String:
 		"P_TERM": 0.1 * GlareSpreadKernel.PIGMENTATION,
 		"AGE_FACTOR": GlareSpread.age_factor(),
 		"CONSTANT_TERM": 0.0025 * GlareSpreadKernel.PIGMENTATION,
-		"MIN_ANGLE": Atmosphere.GLARE_MIN_ANGLE_DEG,
+		"MIN_ANGLE": Atmosphere.GLARE_MIN_ANGLE_DEG, "COVERAGE": GlareSpread.COVERAGE_SHARE,
 	}
 	for key: String in values:
 		template = template.replace("@" + key + "@", glsl_float(values[key]))

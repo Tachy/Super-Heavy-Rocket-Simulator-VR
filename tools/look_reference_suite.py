@@ -242,8 +242,9 @@ SCENES = {
     "full_moon_from_earth": (["--utc=2026-11-24T02:00:00"] + PAD + ["--look_at_moon", "--fov=12"], m_disc, {
         "disc_clipped": (0.0, 0.25, "[user 2026-11-08: maria visible]"),
         "disc_luma_sd": (8, 999, "[maria / highlands contrast: geometric albedo 0.07 vs 0.12-0.16]"),
-        "disc_b_over_r": (0.85, 99, "[user 2026-11-08: not cream (T10 0.81); E: the full Moon is seen near neutral "
-                                    "grey-white at mesopic adaptation]")}),
+        "disc_b_over_r": (0.70, 99, "[user 2026-11-08: not cream - T10 (233,211,189) = linear B/R 0.63; "
+                                    "call: the disc (maria + highlands + limb veil) at least 0.70, a warm off-white; the "
+                                    "regolith is reddish, B/R ~0.8 under sunlight, Lane & Irvine 1973]")}),
     "earth_from_space_epic": (["--utc=2025-03-20T14:28:03", "--focus=earth",
                                "--view_from=gcrf:1548878.149868,49983.227147,173343.826562", "--distance=4e8",
                                "--fov=2.4", "--hide_ui", "--weather=" + EPIC_WTHR], "epic", {

@@ -160,6 +160,14 @@ func _shaders() -> void:
 		left += source.count("@")
 	_check("no placeholder left in the shaders", left == 0, "%d" % left)
 	_check("self compression: no source = 1", GlareSpread.self_compression(0.0) == 1.0, "")
+	# T13: the veil factor across a limb - sky (shown 0) keeps the veil, the disc (shown at the plateau) is compressed,
+	# a half-covered limb pixel lies between (no dip below either side)
+	var sky_f := GlareSpread.veil_factor(1000.0, 0.0)
+	var limb_f := GlareSpread.veil_factor(1000.0, 0.5 * GlareSpread.COVERAGE_SHARE * GlareSpread.PLATEAU_SCENE)
+	var disc_f := GlareSpread.veil_factor(1000.0, GlareSpread.PLATEAU_SCENE)
+	_check("veil factor: sky 1, disc compressed, limb between", sky_f == 1.0 and absf(disc_f
+			- GlareSpread.self_compression(1000.0)) < 1e-12 and limb_f < sky_f and limb_f > disc_f,
+			"%.4f / %.4f / %.4f" % [sky_f, limb_f, disc_f])
 	_check("self compression: a source of 1000 goes to the plateau",
 			absf(GlareSpread.self_compression(1000.0) * (GlareSpread.SOURCE_WHITE + 1000.0) - GlareSpread.PLATEAU_SCENE) < 1.0e-9,
 			"%.5f" % GlareSpread.self_compression(1000.0))

@@ -355,6 +355,21 @@ static func self_compression(excess: float) -> float:
 	return minf(1.0, PLATEAU_SCENE / (SOURCE_WHITE + excess)) if excess > 0.0 else 1.0
 
 
+## The veil factor of a pixel near a source (T13 lead, VR-scale review: the low-res texel's compression on every pixel
+## of it drew a dark ring of up to a texel at the limb, the antialiased edge pixels and the first sky pixels compressed
+## like the disc while the halo beyond kept its veil): the texel's compression weighted by how much of the pixel is the
+## source, estimated from its displayed (locally adapted) luminance against the plateau the disc is shown at:
+## mix(1, self_compression(excess), clamp(y_shown / (COVERAGE_SHARE x PLATEAU))). [call] The sky beside the disc keeps
+## its veil, the disc (also its darker parts: the ocean at ~0.3-0.5 of the plateau) its compressed veil, the limb
+## between - the radial profile has no dip and the disc's contrast is kept.
+static func veil_factor(excess: float, y_shown: float) -> float:
+	return lerpf(1.0, self_compression(excess), clampf(y_shown / (COVERAGE_SHARE * PLATEAU_SCENE), 0.0, 1.0))
+
+
+## [call] The share of the plateau from which a pixel counts as wholly the source (veil_factor).
+const COVERAGE_SHARE := 0.25
+
+
 ## The source term of a pixel of scene luminance y_scene (colour kept: the caller scales rgb by this over y_scene).
 static func excess_luminance(y_scene: float) -> float:
 	return maxf(minf(y_scene, MAX_SCENE) - SOURCE_WHITE, 0.0)
