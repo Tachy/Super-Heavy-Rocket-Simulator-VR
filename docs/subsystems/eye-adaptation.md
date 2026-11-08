@@ -391,6 +391,11 @@ shaders:
   5200-6500 K (5510 K; [S] Hernandez-Andres et al. 2001 clear-sky global daylight, lower edge [call] -300 K for the
   model's spectrum). T2's A/B numbers: `.superpowers/sdd/2026-11-07-look-fixes/t1-t2-report.md`.
 
+  Under broken clouds (look fixes T13, 2026-11-08) the illuminant's colour takes the weather grid's MEAN cloud light at
+  the eye (`cloud_light_at` without the shaped "eye" probe): standing in a cumulus' shadow the plate had the sky alone
+  (B/R 1.44, D 1) and the sunlit clouds in view went orange (pad noon el 60 cloud B/R 0.61); now B/R 0.74 as without
+  weather and the cumulus white (`screenshots/look_fixes/t13/suite/C_pad_noon_e60.png`). The luminance terms keep the
+  shaped probe.
 - **Sun glare: the disc masked, its disability glare a veil** [look fixes T5b fix round 1, user 2026-11-08;
   `AdaptationMeter` (shader mask, `sun_mask_parameters`), `Atmosphere.glare_veil`; fidelity flags
   `Atmosphere.glare_enabled` / `AdaptationMeter.sun_mask_enabled`, render_check `--glare=off`]. Before, the Sun's disc

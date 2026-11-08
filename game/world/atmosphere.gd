@@ -807,9 +807,13 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 	# made of, as daylight is measured: CIE 015 / Judd et al. 1964, Hernandez-Andres et al. 2001); the luminance's
 	# plate above takes the Sun at normal incidence (1 / mu0 more Sun: 4940 K-coloured direct beam over the 10 500 K
 	# sky). Above the air (no ground, no sky) the Sun's own colour, the normal plate.
-	var illuminant_rgb := down_rgb
+	# Under broken clouds the eye adapts to the scene it sees, lit on average by the cloud field's mean direct beam, not to the
+	# light at its own point (look fixes T13: in a cumulus' shadow the eye's plate had the sky alone, B/R 1.44, and the
+	# sunlit clouds in view went orange): the colour takes the weather grid's mean cloud light (no shaped probe).
+	var clouds_mean := cloud_light_at(eye_itrf_m, sun_direction_itrf)
+	var illuminant_rgb := (sun_plate * (clouds_mean.x + clouds_mean.y * mu0) + sky * clouds_mean.z) * visible 			/ (PI * d_au * d_au)
 	if not outside:
-		illuminant_rgb = (sun_plate * ((clouds.x + clouds.y) * mu0) + sky * clouds.z) * visible / (PI * d_au * d_au)
+		illuminant_rgb = (sun_plate * ((clouds_mean.x + clouds_mean.y) * mu0) + sky * clouds_mean.z) * visible 				/ (PI * d_au * d_au)
 	# The direct Sun at the eye for its disability glare (glare_veil): normal illuminance, lux.
 	var direct := sun_plate * clouds.x
 	last_sun_normal_lux = direct.dot(LUMINANCE_WEIGHTS) * visible / (d_au * d_au)
