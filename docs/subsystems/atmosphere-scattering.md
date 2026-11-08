@@ -30,8 +30,8 @@ vehicles still fly through `Us76Atmosphere`).
   Each set has its own tables (cache `earth_atmosphere.bin` / `earth_atmosphere_maritime.bin`, ~2 x 61 s once) and its
   own phase function, a two-term Henyey-Greenstein w HG(g_forward) + (1 - w) HG(g_broad) fitted to the Lorenz-Mie phase
   function of the type's AERONET size distribution and refractive index (`tools/validation/aerosol_mie_check.py`:
-  continental w 0.06, 0.965 / 0.575, asymmetry 0.60; maritime 0.12, 0.965 / 0.675, 0.71; fit within -18 / +29 % at
-  0.5-90 deg). The multiple-scattering passes take one HG of the same asymmetry (similarity principle; the 2-deg forward
+  continental w 0.05, 0.965 / 0.58, asymmetry 0.60; maritime 0.14, 0.96 / 0.66, 0.70; fit within -2 / +14 % at
+  0.5-5 deg, -17 / +32 % at 5-90 deg). The multiple-scattering passes take one HG of the same asymmetry (similarity principle; the 2-deg forward
   peak is narrower than the direction quadrature); the single scattering keeps the full function at run time. Every
   lookup (core `AtmosphereScattering`, shader include) is (1 - w) continental + w maritime with the observer's maritime
   weight w (`AerosolRegions`): the water share of `data/textures/earth_water.png` around the eye's sub-point, averaged

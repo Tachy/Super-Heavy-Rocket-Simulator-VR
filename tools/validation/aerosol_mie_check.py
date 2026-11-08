@@ -103,16 +103,20 @@ def cornette_shanks(g, mu):
     return 1.5 * (1.0 - g * g) / (2.0 + g * g) * (1.0 + mu * mu) / (1.0 + g * g - 2.0 * g * mu) ** 1.5
 
 
-def fit_tthg(p, mu, th):
-    """Least squares in log P over 0.5-180 deg with sin weighting for w, g1, g2 (grid + refine)."""
+def fit_tthg(p, mu, th, g_mie):
+    """Least squares in log P for w, g1, g2 on a grid: the aureole 0.5-30 deg at full weight (the visible part around the
+    Sun and the Moon), the rest of the sphere by sin(theta); the fit's asymmetry within 0.02 of the Mie value."""
     sel = np.radians(ANGLES_DEG) >= np.radians(0.5)
+    weight = np.where(ANGLES_DEG <= 30.0, 1.0, 0.2 + np.sin(th))[sel]
     best = None
-    for g1 in np.linspace(0.70, 0.98, 57):
-        for g2 in np.linspace(0.0, 0.75, 31):
+    for g1 in np.linspace(0.80, 0.995, 40):
+        for g2 in np.linspace(0.0, 0.80, 41):
             h1, h2 = hg(g1, mu), hg(g2, mu)
-            for w in np.linspace(0.02, 0.9, 45):
+            for w in np.linspace(0.01, 0.6, 60):
+                if abs(w * g1 + (1 - w) * g2 - g_mie) > 0.02:
+                    continue
                 q = w * h1 + (1 - w) * h2
-                e = np.sum((np.log(q[sel]) - np.log(p[sel])) ** 2 * (0.2 + np.sin(th[sel])))
+                e = np.sum((np.log(q[sel]) - np.log(p[sel])) ** 2 * weight)
                 if best is None or e < best[0]:
                     best = (e, w, g1, g2)
     return best[1:]
@@ -139,7 +143,7 @@ def main():
         for gg in (0.8, round(g, 2)):
             c = cornette_shanks(gg, mu)
             print(f"  Cornette-Shanks g {gg:.2f}:  " + "  ".join(f"{a:g}: {c[i] / c[idx[25]]:6.2f}" for a, i in idx.items()))
-        w, g1, g2 = fit_tthg(p, mu, th)
+        w, g1, g2 = fit_tthg(p, mu, th, g)
         q = w * hg(g1, mu) + (1 - w) * hg(g2, mu)
         gq = w * g1 + (1 - w) * g2
         print(f"  TTHG fit w {w:.3f} g1 {g1:.3f} g2 {g2:.3f} (g {gq:.3f}):  "

@@ -17,9 +17,9 @@ extends SceneTree
 const TOLERANCE := 1.0e-6
 ## [S: Hernandez-Andres, Romero, Nieves & Lee 2001, JOSA A 18(6) 1325 - clear-sky global daylight at Sun elevations
 ## above ~40 deg about 5500-6500 K; CIE 015:2018 D55 .. D65; Judd et al. 1964 daylight] The noon band of the global
-## horizontal illuminant's CCT. [call] Lower edge 300 K below: the model's three-wavelength (680 / 550 / 440 nm)
-## spectrum and its aerosol (tau 0.1 at 550 nm, Angstrom 1.3) give 5510 K (direct beam 4940 K, sky 10 500 K, sky 17.5 %
-## of the horizontal illuminance).
+## horizontal illuminant's CCT. [call] Lower edge 300 K below. Measured since look-fixes T9b (channel wavelengths
+## 628 / 546 / 444 nm, the pad's aerosol blend, Mie-fitted phase functions): 5706 K (direct beam 5135 K, sky 10 726 K,
+## sky 17.3 % of the horizontal illuminance); before T9b 5510 K.
 const NOON_CCT_MIN_K := 5200.0
 const NOON_CCT_MAX_K := 6500.0
 ## Starbase pad (as sunset_adaptation_test), the Sun at 48 deg elevation (noon in early November).

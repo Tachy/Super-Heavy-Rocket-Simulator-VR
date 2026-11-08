@@ -332,12 +332,14 @@ shaders:
     horizontal sky, below) is unchanged; as a colour it weighted the Sun 1 / mu0 too much (1.35 at Sun 48 deg). Units
     checked (headless print at the pad): `sky_lux` and E_sun are both lux (sky 15 834 lx, Sun 74 646 lx horizontal /
     100 446 lx normal at Sun 48 deg; sky 17.5 % of the horizontal), so the sky had its weight; the white was warm
-    because the direct beam is (AOD 0.1 at 550 nm, air mass 1.35: T 0.84 / 0.74 / 0.60, B/R 0.612, 4940 K = D50).
-    Illuminant B/R and CCT [linear Rec.709, McCamy]: pad Sun 90 deg 0.784 / 5620 K, 60 deg 0.772 / 5570 K, 48 deg
-    0.758 / 5510 K (was 0.724 / 5370 K), 30 deg 0.718, 15 deg 0.654, 5 deg 0.753 (sky-dominated; was 0.181), 0 deg
+    because the direct beam is (AOD 0.1 at 550 nm, air mass 1.35; with the T9b channel wavelengths 628 / 546 / 444 nm the
+    direct beam is 5135 K, B/R 0.657, as a 1 nm spectrum; before T9b 4940 K = D50).
+    Illuminant B/R and CCT [linear Rec.709, McCamy]: pad Sun 48 deg 0.803 / 5706 K since T9b (direct 5135 K, sky 10 726 K,
+    sky 17.3 %; white_balance_test, maritime weight of the pad 0.55); before T9b (the values below): 90 deg 0.784 /
+    5620 K, 60 deg 0.772 / 5570 K, 48 deg 0.758 / 5510 K (was 0.724 / 5370 K), 30 deg 0.718, 15 deg 0.654, 5 deg 0.753 (sky-dominated; was 0.181), 0 deg
     1.52, dusk -5.5 deg 2.93 (unchanged, sky only); 400 km and the Moon 0.856 / 5920 K (the TOA Sun, unchanged).
     Reference: D55 = B/R 0.745, D60 0.874, D65 1.0 in linear Rec.709; measured clear-sky global daylight at high Sun
-    ~5500-6500 K - the model sits at the band's warm edge [call: three-wavelength spectrum, AOD 0.1]. Known limit: an
+    ~5500-6500 K - the model sits in the band's lower half (before T9b at its warm edge: the 680 nm red channel). Known limit: an
     eye high in the air with the Sun below its local horizontal but still visible (the horizon dip) takes the sky's
     colour only (the scene below it is in twilight).
   - Degree of adaptation [S: CIE 159:2004; Moroney et al. 2002]: D = F (1 - (1 / 3.6) exp((-L_A - 42) / 92)), L_A = the
@@ -395,7 +397,7 @@ shaders:
   night's mesopic D between colourimetric and that cream; the moonlight colour keeps the
   Sun's luminance (1e-6); a D65 cabin lamp neutral (1e-6); pacing one time constant e^-1 (1e-9), 90 % in 60 s (0.0995),
   a snap jumps; the field illuminant at the pad at noon (Sun 48 deg) = the horizontal Sun + sky (1e-6) with its CCT in
-  5200-6500 K (5510 K; [S] Hernandez-Andres et al. 2001 clear-sky global daylight, lower edge [call] -300 K for the
+  5200-6500 K (5706 K; [S] Hernandez-Andres et al. 2001 clear-sky global daylight, lower edge [call] -300 K for the
   model's spectrum). T2's A/B numbers: `.superpowers/sdd/2026-11-07-look-fixes/t1-t2-report.md`.
 
   Under broken clouds (look fixes T13, 2026-11-08) the illuminant's colour takes the weather grid's MEAN cloud light at
@@ -711,7 +713,7 @@ shaders:
   (more colourful twilight) - user's verdict open. Glow: with the bound, emitters at S > 1 (the plume by day) glow
   somewhat less than with AgX alone (their S = 1 value is their former c through the Hunt inverse, less saturated).
 
-- Adopted white: the pad's global horizontal daylight (Sun 48 deg) is B/R 0.758 / 5510 K against the TOA Sun's 0.856
+- Adopted white: the pad's global horizontal daylight (Sun 48 deg) is B/R 0.803 / 5706 K (T9b; before 0.758 / 5510 K) against the TOA Sun's 0.856
   / 5920 K, so by day the ground reads more neutral and the sky bluer than with the former fixed white (pad noon el 5:
   ground B/R 0.55 (TOA white) -> 0.68, sky 7.5 -> 10.3; el 60 sky 9.5); at dusk the twilight sky light (B/R 2.9) is
   the adopted white, with the mesopic D (fix round 3) only partly: see "Mesopic degree of adaptation" and the fix

@@ -248,7 +248,7 @@ TEST_CASE("Input hash covers the spectral data", "[atmosphere]") {
     std::printf("atmosphere spectral data checksum: 0x%016llx, input hash 0x%016llx\n",
                 static_cast<unsigned long long>(checksum), static_cast<unsigned long long>(hash));
     CHECK(checksum == 0x34af73121d46b1aaull);
-    CHECK(hash == 0x45dfae10e94fe313ull);  // code version 5, channels 628 / 546 / 444 nm, continental aerosol set
+    CHECK(hash == 0x841ab5a6c9e9448bull);  // code version 5, channels 628 / 546 / 444 nm, continental aerosol set
 }
 
 TEST_CASE("The aerosol phase functions are normalised and follow the Mie aureole", "[atmosphere]") {
