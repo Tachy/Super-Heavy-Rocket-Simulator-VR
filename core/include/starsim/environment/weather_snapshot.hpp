@@ -223,6 +223,10 @@ struct GfsFields {
     std::vector<double> levels_pa;
 };
 
+// Whether a fine column of fine_rows x fine_columns refines a snapshot grid of rows x columns (the same nodes and k - 1
+// between each pair: fine_columns = k columns, fine_rows - 1 = k (rows - 1), k >= 1); 0 x 0 (none) matches.
+bool fine_column_grid_matches(int rows, int columns, int fine_rows, int fine_columns);
+
 class WeatherSnapshot {
 public:
     // Throw std::invalid_argument when the grids do not share one shape.
@@ -300,7 +304,8 @@ public:
     int fine_rows() const { return fine_rows_; }
     int fine_columns() const { return fine_columns_; }
     const std::vector<std::uint8_t>& fine_column_texels() const { return fine_column_; }
-    // Throws std::invalid_argument unless texels.size() == 2 rows columns (or all three 0).
+    // Throws std::invalid_argument unless texels.size() == 2 rows columns (or all three 0) and the grid refines this
+    // snapshot's (fine_column_grid_matches).
     void set_fine_column(int rows, int columns, std::vector<std::uint8_t> texels);
 
 private:

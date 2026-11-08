@@ -4,7 +4,9 @@
 # fixed exposure, UI hidden.
 #   1. the far field's slab radiance (cloud_far_light_radiance with the Monte Carlo table, tests/cloud_far_probe
 #      .gdshader) vs the core's slab_reflected_radiance_mc at 72 geometries (tau 0.5-30, Sun 0-80 deg, views 0-75 deg,
-#      forward / side / back), 3 %;
+#      forward / side / back), 3 %; 1b. the air above a bright top (cloud_far_bright_top_transmittance) against its
+#      two-stream form, its limits and the cloud's blue / red increment; 1c. the cover pattern (cloud_far_meso_cover)
+#      keeps the cell's cover as its mean over 4096 random points (look fixes T7b, T7 review I2);
 #   2. weather off: the scaled-space Earth drawn with earth.gdshader, bit-identical to the pre-Task-10 shader (one
 #      file: earth_surface.gdshaderinc without its EARTH_CLOUDS parts);
 #   3. the scaled-space hand-over (the no-pop rule): decks of tau ~10 and ~2 (cf 1) seen from just inside and just
@@ -15,7 +17,8 @@
 #      tolerance at all seven points (look fixes T3: the scaled-space sea has the terrain's sea model, glint included);
 #      the volume pass draws only inside (cloud_enabled), the far field only outside (earth_clouds.gdshader); the
 #      CPU light factors are (1, 0, 1) outside; the ground is measured in the runs that get a snapshot, with the
-#      weather cleared first;
+#      weather cleared first; 3b. the same with the shipped analog snapshot of the month (1 deg, 0.25 deg fine
+#      column: the far field and the flat levels' even cells read the fine column; look fixes T7b);
 #   4. from the Moon's distance (3.844e8 m) with an ERA5 snapshot (cached 2024-04-08 18:00 UTC, else the
 #      service fetches the epoch's pair, 14:00 UTC, see _era5_file): five cells the snapshot
 #      has cloudy are brighter with the weather on than off (ratio >= 1.3), five clear cells unchanged (2 %);
@@ -25,7 +28,7 @@
 #      flat bake's turned / tile-breaking readings followed the camera's tile: the pattern jumped at the geometry's
 #      re-bakes on a climb, 27 % here);
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_far_check.gd [-- --save=<dir>] (PNGs of
-# the renders) [--no_3d_light] (CloudLayer.far_3d_light off) [--only_rebake] (section 5 alone). Exit code 1 on failure.
+# the renders) [--no_3d_light] (CloudLayer.far_3d_light off) [--only_rebake] (section 5 alone) [--only_probe] (section 1 alone). Exit code 1 on failure.
 extends SceneTree
 
 const EPOCH_UTC := "2024-04-08T14:00:00"  ## no eclipse; the Sun over the Atlantic
@@ -48,6 +51,20 @@ const SETTLE_FRAMES := 8
 const MAX_FRAMES := 6000
 const PROBE_TOLERANCE := 0.03
 const PROBE_FLOOR := 1.0e-3  ## /sr: below it the absolute difference counts
+const PROBE_ROW := 1024  ## the probe image's width (cases per row)
+## Section 1b (T7b): the GPU bright-top factor against its two-stream form (the probe's half-float target rounds by
+## up to 4.9e-4 relative; 2026-11-08 worst 0.09 %);
+## the cloud's blue / red increment band [E] about review I2's +8-10 % estimate (the form gives +10 / +11 % at A 0.6 /
+## 0.75); the tables' ground albedo (cloud_far.gdshaderinc CLOUD_FAR_TABLE_GROUND_ALBEDO).
+const BRIGHT_TOP_TOLERANCE := 1.5e-3
+const BRIGHT_TOP_BR_RANGE := Vector2(1.07, 1.13)
+const TABLE_GROUND_ALBEDO := 0.1
+## Section 1c (T7b): random points per cover and footprint, the mean's tolerance [E] (sampling SD <= 0.35 / sqrt(4096)
+## = 0.006 plus the noise's departure from a Gaussian z in the tails: 2026-11-08 C 0.1 -> 0.079 / 0.086 at 8 / 32 km,
+## C 0.9 -> 0.921 / 0.920, 0.3-0.7 within 0.005) and the least spread of a working pattern at C 0.5 (measured 0.35).
+const MESO_POINTS := 4096
+const MESO_MEAN_TOLERANCE := 0.03
+const MESO_SPREAD_MIN := 0.15
 const HANDOVER_TOLERANCE := 0.05
 const CLOUDY_RATIO_MIN := 1.3
 ## Section 5 (look fixes T8): the first height (above the 40-60 km takeover and the volume's 62 km top: the flat levels
@@ -62,6 +79,9 @@ const REBAKE_GRID_DEG := 0.12
 const REBAKE_BLOCK_RADIUS := 10
 const REBAKE_TOLERANCE := 0.03
 const CLEAR_TOLERANCE := 0.02
+## Section 3b (T7b): the analog hour of the epoch's month (2024-04-08 14 UTC -> April, 12 UTC).
+const ANALOG_MONTH := 4
+const ANALOG_HOUR := 12
 const EARTH_CLOUDS_SHADER := "res://shaders/earth_clouds.gdshader"
 const EARTH_SURFACE_INCLUDE := "res://shaders/earth_surface.gdshaderinc"
 const WGS84_A_M := 6378137.0
@@ -74,9 +94,8 @@ var _samples := 0
 var _save_dir := ""
 var _no_3d_light := false  ## --no_3d_light: CloudLayer.far_3d_light off (the plane-parallel slab alone)
 var _only_rebake := false  ## --only_rebake: section 5 alone
+var _only_probe := false  ## --only_probe: section 1 (1, 1b, 1c) alone
 var _files: Array[String] = []
-var _probe_viewport := SubViewport.new()
-var _probe_material := ShaderMaterial.new()
 
 
 func _initialize() -> void:
@@ -87,6 +106,8 @@ func _initialize() -> void:
 			_no_3d_light = true
 		elif arg == "--only_rebake":
 			_only_rebake = true
+		elif arg == "--only_probe":
+			_only_probe = true
 	_run.call_deferred()
 
 
@@ -124,6 +145,11 @@ func _run() -> void:
 
 	# 1. The far field's slab radiance vs the core.
 	await _probe_samples()
+	await _bright_top_samples()
+	await _meso_samples()
+	if _only_probe:
+		_finish()
+		return
 	# 2. Weather off: bit-identical to the shader without its cloud blocks (scaled space, outside the limit).
 	await _identity_sample()
 	# 3. The scaled-space hand-over: the game's cloud pass (the baked volume's flat levels, which follow the far
@@ -134,6 +160,22 @@ func _run() -> void:
 		await _handover_sample(deck[0] + ", the cloud pass", 2, HANDOVER_TOLERANCE, snapshot)
 	_show(broken)
 	await _handover_sample("broken cf 0.4, the cloud pass", 10, HANDOVER_TOLERANCE, broken)
+	# 3b. The shipped analog set (1 deg, its 0.25 deg fine column; look fixes T7b, review I2): the far field and the
+	# flat levels' even cells read the fine column, the placement the coarse layers.
+	var analog := _analog_snapshot()
+	if analog.is_empty():
+		print("  SKIP  analog hand-over: no analog file for month %d %02d UTC under data/weather/analog" % [
+				ANALOG_MONTH, ANALOG_HOUR])
+	else:
+		var rows := int(analog.get("rows", 0))
+		var fine_rows := int(analog.get("fine_rows", 0))
+		_check("analog snapshot %s carries its fine column" % String(analog["file"]).get_file(),
+				fine_rows > rows and (fine_rows - 1) % (rows - 1) == 0
+				and int(analog.get("fine_columns", 0)) == int(analog.get("columns", 0)) * ((fine_rows - 1) / (rows - 1)),
+				"coarse %d x %d, fine %d x %d" % [rows, int(analog.get("columns", 0)), fine_rows,
+				int(analog.get("fine_columns", 0))])
+		_show(analog)
+		await _handover_sample("analog 1 deg + fine column, the cloud pass", 10, HANDOVER_TOLERANCE, analog)
 	# 4. From the Moon.
 	await _moon_samples()
 	# 5. The flat levels across a re-bake whose camera is in another shape tile (look fixes T8).
@@ -156,37 +198,13 @@ func _probe_samples() -> void:
 		for mu0 in [1.0, 0.5, 0.17]:
 			for view in [[1.0, 0.0], [0.7, 0.0], [0.7, PI], [0.26, 0.0], [0.26, PI], [0.5, 0.5 * PI]]:
 				cases.append([tau, mu0, view[0], view[1]])
-	var params := Image.create(cases.size(), 1, false, Image.FORMAT_RGBAF)
-	for i in range(cases.size()):
-		params.set_pixel(i, 0, Color(cases[i][0], cases[i][1], cases[i][2], cases[i][3]))
-	_probe_viewport.size = Vector2i(cases.size(), 1)
-	_probe_viewport.use_hdr_2d = true
-	_probe_viewport.own_world_3d = true
-	_probe_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	root.add_child(_probe_viewport)
-	var camera := Camera3D.new()
-	camera.current = true
-	_probe_viewport.add_child(camera)
-	_probe_material.shader = load("res://tests/cloud_far_probe.gdshader") as Shader
-	_probe_material.set_shader_parameter("params", ImageTexture.create_from_image(params))
-	var quad := MeshInstance3D.new()
-	var mesh := QuadMesh.new()
-	mesh.size = Vector2(2.0, 2.0)
-	quad.mesh = mesh
-	quad.material_override = _probe_material
-	quad.position = Vector3(0.0, 0.0, -1.0)
-	quad.extra_cull_margin = 16384.0
-	_probe_viewport.add_child(quad)
-	for i in range(4):
-		await process_frame
-	var image := _probe_viewport.get_texture().get_image()
-	_probe_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	var values := await _probe(0, cases)
 	var worst := 0.0
 	var worst_case := ""
 	var bad := 0
 	for i in range(cases.size()):
 		var c: Array = cases[i]
-		var gpu := image.get_pixel(i, 0).r
+		var gpu := values[i]
 		var cpu := _world.core.cloud_slab_radiance_mc(c[0], c[1], c[2], c[3])
 		var error := absf(gpu - cpu) / maxf(cpu, PROBE_FLOOR)
 		if error > PROBE_TOLERANCE:
@@ -196,6 +214,160 @@ func _probe_samples() -> void:
 			worst_case = "tau %.1f mu0 %.2f mu %.2f phi %.2f: GPU %.5f CPU %.5f" % [c[0], c[1], c[2], c[3], gpu, cpu]
 	_check("far-field slab radiance vs slab_reflected_radiance_mc (%d geometries)" % cases.size(), bad == 0,
 			"%d outside %.0f %%, worst %.2f %% (%s)" % [bad, PROBE_TOLERANCE * 100.0, worst * 100.0, worst_case])
+
+
+## The probe shader's mode over the cases (four values each, one pixel per case); the red channel per case.
+func _probe(mode: int, cases: Array) -> PackedFloat32Array:
+	var width := mini(cases.size(), PROBE_ROW)
+	var height := ceili(float(cases.size()) / width)
+	var params := Image.create(width, height, false, Image.FORMAT_RGBAF)
+	for i in range(cases.size()):
+		var c: Array = cases[i]
+		params.set_pixel(i % width, i / width, Color(c[0], c[1], c[2], c[3]))
+	# a new viewport per call, sized before it enters the tree (a resized one read back its first frame's image)
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(width, height)
+	viewport.use_hdr_2d = true
+	viewport.own_world_3d = true
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	root.add_child(viewport)
+	var camera := Camera3D.new()
+	camera.current = true
+	viewport.add_child(camera)
+	var material := ShaderMaterial.new()
+	material.shader = load("res://tests/cloud_far_probe.gdshader") as Shader
+	material.set_shader_parameter("mode", mode)
+	material.set_shader_parameter("params", ImageTexture.create_from_image(params))
+	var quad := MeshInstance3D.new()
+	var mesh := QuadMesh.new()
+	mesh.size = Vector2(2.0, 2.0)
+	quad.mesh = mesh
+	quad.material_override = material
+	quad.position = Vector3(0.0, 0.0, -1.0)
+	quad.extra_cull_margin = 16384.0
+	viewport.add_child(quad)
+	for i in range(4):
+		await process_frame
+	var image := viewport.get_texture().get_image()
+	viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	viewport.queue_free()
+	var out := PackedFloat32Array()
+	out.resize(cases.size())
+	for i in range(cases.size()):
+		out[i] = image.get_pixel(i % width, i / width).r
+	return out
+
+
+## The two-stream factor of cloud_far_bright_top_transmittance (one channel), the reference for 1b.
+static func _bright_top_reference(t: float, mu: float, cover: float, tau_cloud: float, g: float) -> float:
+	var tc := clampf(t, 1.0e-6, 1.0)
+	var tau := -log(tc) * mu
+	var s := tau / (4.0 / 3.0 + tau)
+	var x := 0.75 * (1.0 - g) * tau_cloud
+	var albedo := lerpf(TABLE_GROUND_ALBEDO, x / (1.0 + x), clampf(cover, 0.0, 1.0))
+	var down := (1.0 - TABLE_GROUND_ALBEDO * s) / (1.0 - albedo * s)
+	var total := ((2.0 / 3.0 + mu) + (2.0 / 3.0 - mu) * tc) / (4.0 / 3.0 + tau)
+	return maxf(total, t) * down
+
+
+## 1b. The air above a bright top (look fixes T7 step 3, T7b review I2): the GPU function against its two-stream form
+## over a grid, its limits (1 without air above; the Beer term alone at the tables' ground albedo, between T and 1;
+## never below T) and the cloud's blue / red increment of review I2's estimate (+8-10 % for A 0.6-0.75 under the
+## Rayleigh depth above a 2 km top, 0.15 blue / 0.04 red, nadir: BRIGHT_TOP_BR_RANGE).
+func _bright_top_samples() -> void:
+	var g := float(ShaderGlobals.value(&"cloud_asymmetry_g"))
+	var cases: Array = []
+	for t in [1.0, 0.99, 0.9, 0.5, 0.1, 0.01]:
+		for mu in [0.02, 0.05, 0.3, 0.7, 1.0]:
+			for cover in [0.0, 0.5, 1.0]:
+				for tau_cloud in [0.0, 2.0, 30.0]:
+					cases.append([t, mu, cover, tau_cloud])
+	# blue and red at A 0.6 and 0.75 (x = A / (1 - A) = 0.75 (1 - g) tau)
+	var grid := cases.size()
+	var albedos := [0.6, 0.75]
+	for albedo: float in albedos:
+		var tau_a := albedo / (1.0 - albedo) / (0.75 * (1.0 - g))
+		cases.append([exp(-0.15), 1.0, 1.0, tau_a])
+		cases.append([exp(-0.04), 1.0, 1.0, tau_a])
+	var values := await _probe(1, cases)
+	var worst := 0.0
+	var worst_case := ""
+	var limits_ok := true
+	var limit_case := ""
+	for i in range(grid):
+		var c: Array = cases[i]
+		var gpu := values[i]
+		var reference := _bright_top_reference(c[0], c[1], c[2], c[3], g)
+		var error := absf(gpu - reference) / maxf(reference, 1.0e-6)
+		if error > worst or is_nan(gpu):
+			worst = error if not is_nan(gpu) else INF
+			worst_case = "T %.2f mu %.2f cover %.1f tau %.0f: GPU %.6f ref %.6f" % [c[0], c[1], c[2], c[3], gpu, reference]
+		var ok := gpu >= float(c[0]) * (1.0 - BRIGHT_TOP_TOLERANCE)  # never below the Beer term
+		if c[0] == 1.0:
+			ok = ok and absf(gpu - 1.0) <= BRIGHT_TOP_TOLERANCE  # no air above: 1
+		if c[2] == 0.0 or c[3] == 0.0:
+			ok = ok and gpu <= 1.0 + BRIGHT_TOP_TOLERANCE  # the tables' ground: transmission only, at most 1
+		if not ok and limit_case == "":
+			limit_case = "T %.2f mu %.2f cover %.1f tau %.0f: %.6f" % [c[0], c[1], c[2], c[3], gpu]
+		limits_ok = limits_ok and ok
+	_check("bright top vs its two-stream form (%d cases)" % grid, worst <= BRIGHT_TOP_TOLERANCE,
+			"worst %.4f %% (%s)" % [worst * 100.0, worst_case])
+	_check("bright top limits: 1 without air, <= 1 over the tables' ground, >= the Beer term", limits_ok,
+			"first violation: %s" % (limit_case if limit_case != "" else "none"))
+	var parts: Array[String] = []
+	var in_range := true
+	for k in range(albedos.size()):
+		var i := grid + 2 * k
+		var ratio := (values[i] / exp(-0.15)) / (values[i + 1] / exp(-0.04))
+		in_range = in_range and ratio >= BRIGHT_TOP_BR_RANGE.x and ratio <= BRIGHT_TOP_BR_RANGE.y
+		parts.append("A %.2f: B/R x%.4f" % [albedos[k], ratio])
+	_check("bright top: the cloud's blue / red increment (review I2 estimate)", in_range,
+			"%s (range %.2f-%.2f)" % [", ".join(parts), BRIGHT_TOP_BR_RANGE.x, BRIGHT_TOP_BR_RANGE.y])
+
+
+## 1c. The cover pattern's mean (look fixes T7 B, T7b review I2): cloud_far_meso_cover over MESO_POINTS random points on
+## the sphere keeps the cell's cover as its mean (f = Phi(a + k z), a = Phi^-1(C) sqrt(1 + k^2): E[f] = C for a Gaussian
+## z; the noise's quantile-normalised z is near Gaussian), stays in [0, 1], and draws a pattern (its spread at C 0.5
+## > MESO_SPREAD_MIN, else the sub-grid is off); at the footprints of one and four pattern texels (8 / 32 km: levels
+## 0 and 2, contrast full).
+func _meso_samples() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20261108
+	var points: Array[Vector2] = []
+	for i in range(MESO_POINTS):
+		points.append(Vector2(rng.randf_range(-PI, PI), rng.randf_range(-1.0, 1.0)))
+	var covers := [0.1, 0.3, 0.5, 0.7, 0.9]
+	var footprints := [8000.0, 32000.0]
+	var cases: Array = []
+	for footprint: float in footprints:
+		for cover: float in covers:
+			for q in points:
+				cases.append([cover, q.x, q.y, footprint])
+	var values := await _probe(2, cases)
+	var worst := 0.0
+	var parts: Array[String] = []
+	var bounded := true
+	var spread_ok := true
+	for fi in range(footprints.size()):
+		for ci in range(covers.size()):
+			var base := (fi * covers.size() + ci) * MESO_POINTS
+			var sum := 0.0
+			var sum2 := 0.0
+			for j in range(MESO_POINTS):
+				var v := values[base + j]
+				bounded = bounded and v >= 0.0 and v <= 1.0 and not is_nan(v)
+				sum += v
+				sum2 += v * v
+			var mean := sum / MESO_POINTS
+			var spread := sqrt(maxf(sum2 / MESO_POINTS - mean * mean, 0.0))
+			worst = maxf(worst, absf(mean - float(covers[ci])))
+			if covers[ci] == 0.5:
+				spread_ok = spread_ok and spread > MESO_SPREAD_MIN
+			parts.append("%.0f km C %.1f: %.4f (sd %.3f)" % [float(footprints[fi]) / 1000.0, covers[ci], mean, spread])
+	_check("meso cover pattern keeps the cell's cover as its mean (%d points)" % MESO_POINTS,
+			worst <= MESO_MEAN_TOLERANCE and bounded and spread_ok,
+			"worst |mean - C| %.4f (tolerance %.3f), in [0, 1] %s, pattern %s; %s" % [worst, MESO_MEAN_TOLERANCE, bounded,
+			spread_ok, "; ".join(parts)])
 
 
 ## 2. Weather off, outside the limit: the world's Earth (earth.gdshader) against the pre-Task-10 shader as one file.
@@ -338,6 +510,25 @@ func _moon_samples() -> void:
 ## the clock's epoch (EPOCH_UTC, the "before" file of its ERA5 pair; online, ~1-3 min). "" when there is none within
 ## ERA5_WAIT_S. The service is switched off again (a few frames, so that it clears the core's pair) before the check
 ## sets its own.
+## The shipped analog snapshot of ANALOG_MONTH / ANALOG_HOUR (data/weather/analog/index.json), {} when absent.
+func _analog_snapshot() -> Dictionary:
+	var dir := Paths.data_dir().path_join("weather/analog")
+	var index: Variant = JSON.parse_string(FileAccess.get_file_as_string(dir.path_join("index.json")))
+	if not (index is Dictionary):
+		return {}
+	for entry: Dictionary in (index as Dictionary).get("entries", []):
+		if int(entry["month"]) == ANALOG_MONTH and int(entry["hour_utc"]) == ANALOG_HOUR:
+			var file := dir.path_join(String(entry["file"]))
+			if not FileAccess.file_exists(file):
+				return {}
+			var loaded: Dictionary = _world.core.weather_load_snapshot(file)
+			if not loaded.get("ok", false):
+				return {}
+			loaded["file"] = file
+			return loaded
+	return {}
+
+
 func _era5_file() -> String:
 	var cached := Paths.data_dir().path_join(ERA5_FILE)
 	if FileAccess.file_exists(cached):

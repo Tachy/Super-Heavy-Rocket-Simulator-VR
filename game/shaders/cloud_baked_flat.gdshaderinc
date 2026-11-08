@@ -336,6 +336,20 @@ const float CLOUD_BAKED_FLAT_SCENE_DEPTH_M = 3000.0;
 const int CLOUD_BAKED_FLAT_HEIGHT_STEPS = 4;
 const float CLOUD_BAKED_FLAT_HEIGHT_TOLERANCE_M = 10.0;
 
+// [E] Camera heights (m) over which the air above a bright top (cloud_far_bright_top_transmittance) is applied: none
+// from the ground and in the cloud layer, fully where the flat levels take over (40 km). The volume and the flat levels
+// both use cloud_baked_bright_top_weight (look fixes T7b, T7 review I1: the flat levels took it unconditionally, so a
+// ground camera's horizon clouds and a base seen from below got a term of a top lit from above - at grazing slant
+// paths T_tot / T up to ~46x in blue).
+const vec2 CLOUD_BAKED_BRIGHT_TOP_HEIGHT_M = vec2(20000.0, 40000.0);
+
+// The bright-top term's weight (0..1) for a view of a cloud with mu_down = -dot(dir, up) at the cloud (> 0: seen from
+// above): the camera-height fade times a view from above.
+float cloud_baked_bright_top_weight(float mu_down) {
+	return smoothstep(CLOUD_BAKED_BRIGHT_TOP_HEIGHT_M.x, CLOUD_BAKED_BRIGHT_TOP_HEIGHT_M.y, cloud_camera_height_m)
+			* step(CLOUD_FAR_MU_MIN, mu_down);
+}
+
 // The flat levels along the ray from t_from (inside the 20 km shell): the far field's placement (cloud_far_layer) - the
 // point where the ray crosses the column's seen-depth height (cloud_baked_flat_height; a first fetch where the ray
 // crosses the guess height, then the fetched height's crossing until bracketed, then false position), the light evaluated there. The pixel's cover and
@@ -516,8 +530,14 @@ bool cloud_baked_flat_shade(int si, CloudRay ray, vec3 dir, vec3 eye, float t_fr
 	}
 	vec3 air_transmittance;
 	vec3 air_light = atm_to_point_offset(eye + dir * t_hit, air_transmittance);
-	// the air above the bright top (cloud_far_bright_top_transmittance, look fixes T7 step 3)
-	color = cloud_far_bright_top_transmittance(air_transmittance, mu, cov, tau_light) * radiance * cov + alpha * air_light;
+	// the air above the bright top (cloud_far_bright_top_transmittance, look fixes T7 step 3), gated as the volume's:
+	// a view from above, faded in with the camera's height (cloud_baked_bright_top_weight; none from the ground)
+	vec3 seen = air_transmittance;
+	float w_top = cloud_baked_bright_top_weight(-dot(dir, up));
+	if (w_top > 0.0) {
+		seen = mix(air_transmittance, cloud_far_bright_top_transmittance(air_transmittance, mu, cov, tau_light), w_top);
+	}
+	color = seen * radiance * cov + alpha * air_light;
 #ifdef CLOUD_BAKED_DIAG_LEVEL
 	color = alpha * vec3(fract(cloud_baked_diag_level), floor(cloud_baked_diag_level) / 3.0, t_col.y / 10000.0);
 #endif

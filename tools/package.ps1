@@ -247,7 +247,21 @@ Copy-PresetSiteTiles $presetKeys (Join-Path $package "data\terrain\sites")
 # the offline weather analog set (M8: 48 ERA5 hours downsampled to 1 deg, a few hundred MB) rides in the base data so the
 # typical-weather fallback works on a first start without internet; downloaded weather caches (data/weather/cache) do not
 $analog = Join-Path $Data "weather\analog"
-if (Test-Path (Join-Path $analog "index.json")) { Mirror $analog (Join-Path $package "data\weather\analog") @() }
+if (Test-Path (Join-Path $analog "index.json")) {
+    # every file in the core's current snapshot format (the game refuses others: no offline weather; T7 review M5)
+    $formatHeader = Get-Content (Join-Path $Root "core\include\starsim\environment\weather_snapshot_file.hpp") -Raw
+    if ($formatHeader -notmatch 'weather_snapshot_file_version\s*=\s*(\d+)') { throw "weather_snapshot_file_version not found" }
+    $formatVersion = [uint32]$Matches[1]
+    foreach ($file in Get-ChildItem $analog -Filter "*.wthr") {
+        $stream = [System.IO.File]::OpenRead($file.FullName)
+        try { $head = New-Object byte[] 12; $read = $stream.Read($head, 0, 12) } finally { $stream.Dispose() }
+        $magic = [System.Text.Encoding]::ASCII.GetString($head, 0, 8)
+        if ($read -lt 12 -or $magic -ne "STARWTHR" -or [BitConverter]::ToUInt32($head, 8) -ne $formatVersion) {
+            throw "data/weather/analog/$($file.Name) is not in snapshot format $formatVersion (python tools/data_pipeline/fetch.py weather_analog rebuilds stale files)"
+        }
+    }
+    Mirror $analog (Join-Path $package "data\weather\analog") @()
+}
 else { Write-Warning "data/weather/analog is missing (python tools/data_pipeline/fetch.py weather_analog): the package has no offline weather" }
 if (-not (Test-Path (Join-Path $package "data\textures\moon_detail\moon_detail.toml"))) {
     throw "The package lacks data/textures/moon_detail (python tools/data_pipeline/fetch.py moon_detail)"

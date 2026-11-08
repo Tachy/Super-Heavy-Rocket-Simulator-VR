@@ -102,6 +102,8 @@ std::optional<WeatherSnapshot> read_weather_snapshot(const std::filesystem::path
         return std::nullopt;
     }
     if (r.at != payload) return std::nullopt;
+    // a fine grid that does not refine the coarse one (a writer mismatch; the checksum covers damage only)
+    if (!fine_column_grid_matches(rows, columns, fine_rows, fine_columns)) return std::nullopt;
 
     WeatherSnapshotId id;
     id.kind = static_cast<WeatherSourceKind>(kind);

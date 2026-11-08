@@ -18,6 +18,7 @@ from __future__ import annotations
 import datetime as dt
 import http.client
 import json
+import re
 import subprocess
 import sys
 import time
@@ -36,6 +37,10 @@ RAW_DIR = Path("data/raw/weather")
 OUT_DIR = Path("data/weather/analog")
 SNAPSHOT_EXE = Path("build/core/weather_snapshot.exe")
 STATIC_OROGRAPHY_FILE = "era5_geopotential_at_surface.blosc"
+# The core's snapshot file format (magic "STARWTHR", then uint32 version): files of another version are rebuilt, the game
+# refuses them (look fixes T7b, T7 review M5: a present v7 / v8 set was kept and shipped).
+FORMAT_HEADER = Path("core/include/starsim/environment/weather_snapshot_file.hpp")
+FILE_MAGIC = b"STARWTHR"
 
 # (variable, four-dimensional (pressure levels), time independent) - the order of the core's era5_variables
 VARIABLES = (
@@ -121,6 +126,24 @@ def download_resumable(url: str, target: Path, retries: int = 5) -> None:
     raise RuntimeError(f"download failed: {url}")
 
 
+def current_format_version(root: Path) -> int:
+    """The core's weather_snapshot_file_version, read from its header."""
+    text = (root / FORMAT_HEADER).read_text(encoding="utf-8")
+    match = re.search(r"weather_snapshot_file_version\s*=\s*(\d+)", text)
+    if not match:
+        raise SystemExit(f"weather_snapshot_file_version not found in {FORMAT_HEADER}")
+    return int(match.group(1))
+
+
+def file_format_version(path: Path) -> int | None:
+    """The format version in a snapshot file's header; None when it is not one."""
+    with path.open("rb") as f:
+        head = f.read(12)
+    if len(head) < 12 or head[:8] != FILE_MAGIC:
+        return None
+    return int.from_bytes(head[8:12], "little")
+
+
 def fetch(source: dict, root: Path, force: bool = False) -> None:
     exe = root / SNAPSHOT_EXE
     if not exe.exists():
@@ -128,12 +151,16 @@ def fetch(source: dict, root: Path, force: bool = False) -> None:
     raw, out_dir = root / RAW_DIR, root / OUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     year = int(source.get("reference_year", REFERENCE_YEAR))
+    version = current_format_version(root)
     for month, slot, hour in analog_hours(year):
         key = cache_key(hour)
         target = out_dir / (key + ".wthr")
         if target.exists() and not force:
-            print(f"  {key}: present")
-            continue
+            have = file_format_version(target)
+            if have == version:
+                print(f"  {key}: present")
+                continue
+            print(f"  {key}: format {have}, current {version}: rebuilt")
         print(f"  {key} ({year}-{month:02d}-{REFERENCE_DAY} {slot:02d} UTC)")
         requests = era5_requests(hour)
         for url, file_name in requests:

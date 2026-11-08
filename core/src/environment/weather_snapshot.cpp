@@ -998,10 +998,20 @@ WeatherCell WeatherSnapshot::at(double latitude_rad, double longitude_rad, doubl
     return out;
 }
 
+bool fine_column_grid_matches(int rows, int columns, int fine_rows, int fine_columns) {
+    if (fine_rows == 0 && fine_columns == 0) return true;
+    if (rows < 2 || columns < 1 || fine_rows < 2 || fine_columns < columns || fine_columns % columns != 0) return false;
+    const long long k = fine_columns / columns;  // the refinement factor: the same nodes, k - 1 between each pair
+    return static_cast<long long>(fine_rows) - 1 == k * (rows - 1);
+}
+
 void WeatherSnapshot::set_fine_column(int rows, int columns, std::vector<std::uint8_t> texels) {
     if (rows < 0 || columns < 0 || texels.size() != static_cast<std::size_t>(rows) * columns * 2 ||
         ((rows == 0) != (columns == 0))) {
         throw std::invalid_argument("weather snapshot: fine column size does not match its grid");
+    }
+    if (!fine_column_grid_matches(rows_, columns_, rows, columns)) {
+        throw std::invalid_argument("weather snapshot: fine column grid is not a refinement of the snapshot's grid");
     }
     fine_rows_ = rows;
     fine_columns_ = columns;
@@ -1074,7 +1084,13 @@ WeatherSnapshot WeatherSnapshot::downsampled(int factor) const {
         }
     });
     out.make_poles_uniform();
-    if (factor > 1) out.set_fine_column(rows_, columns_, cloud_render_fine_column_texels(*this));
+    // An already downsampled snapshot hands on its stored fine column (the original full-resolution grid; T7 review
+    // M3: it threw on its own column's size), otherwise this grid's column when the grid gets coarser.
+    if (!fine_column_.empty()) {
+        out.set_fine_column(fine_rows_, fine_columns_, fine_column_);
+    } else if (factor > 1) {
+        out.set_fine_column(rows_, columns_, cloud_render_fine_column_texels(*this));
+    }
     return out;
 }
 

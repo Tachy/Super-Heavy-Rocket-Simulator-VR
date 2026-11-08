@@ -517,6 +517,20 @@ TEST_CASE("A downsampled snapshot keeps the full-resolution column and writes it
     // A size that does not match is refused.
     WeatherSnapshot copy = coarse;
     CHECK_THROWS_AS(copy.set_fine_column(2, 2, std::vector<std::uint8_t>(7, 0)), std::invalid_argument);
+    // T7b (review M4): a grid that does not refine the snapshot's (3 x 4 here: k columns, k (rows - 1) + 1 rows) is
+    // refused, a refining one taken.
+    CHECK_THROWS_AS(copy.set_fine_column(6, 8, std::vector<std::uint8_t>(6 * 8 * 2, 0)), std::invalid_argument);
+    CHECK_THROWS_AS(copy.set_fine_column(5, 6, std::vector<std::uint8_t>(5 * 6 * 2, 0)), std::invalid_argument);
+    CHECK_NOTHROW(copy.set_fine_column(5, 8, std::vector<std::uint8_t>(5 * 8 * 2, 0)));
+    CHECK(fine_column_grid_matches(3, 4, 0, 0));
+    CHECK_FALSE(fine_column_grid_matches(3, 4, 9, 18));
+    // T7b (review M3): downsampling a downsampled snapshot hands on the stored full-resolution column.
+    const auto twice = coarse.downsampled(2);
+    CHECK(twice.rows() == 2);
+    CHECK(twice.fine_rows() == rows);
+    CHECK(twice.fine_columns() == columns);
+    CHECK(twice.fine_column_texels() == own);
+    CHECK(coarse.downsampled(1).fine_column_texels() == own);
 }
 
 TEST_CASE("Snapshot files round-trip; damaged ones are refused", "[weather]") {

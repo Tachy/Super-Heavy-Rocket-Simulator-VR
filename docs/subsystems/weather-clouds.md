@@ -60,7 +60,7 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   (Everest 8.85 km + the 3 km boundary layer, rounded up).
 - **Cover from the total cloud cover, cumulus water from an adiabatic parcel** (static clouds Task 9c and its fix round
   1, user 2026-10-27 "Cumulus sind nie flach", ruling "Bedeckung nach ERA5 + Wasser ergaenzen"; `weather_snapshot.hpp`,
-  file format 7; capped since format 8). Every snapshot carries the data's total cloud cover per column (ERA5 single-level
+  file format 7; capped since format 8, current 9). Every snapshot carries the data's total cloud cover per column (ERA5 single-level
   `total_cloud_cover`, GFS `TCDC` entire atmosphere instantaneous; `WeatherSnapshot::total_cloud_cover`, -1 unknown).
   The column build (`ColumnLayers::build`) runs, after the LCL raise:
   - `scale_cloud_cover_to_total`: the fractions of the layers that count for the cover (stored condensate, a non-zero
@@ -394,10 +394,15 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
     replaces T_air for the cloud's radiance: conservative Eddington two-stream for the air above (tau = -mu ln T_air per
     channel, ozone counted as scattering), spherical albedo s = tau / (4/3 + tau), (1 - 0.1 s) / (1 - A s) with A the
     albedo the air sees (cover x the Eddington slab's of the in-cloud depth + the clear part's 0.1), total transmission
-    ((2/3 + mu) + (2/3 - mu) T) / (4/3 + tau) [S: Eddington solution, Liou 2002 ch. 6]. In the far field, the flat
-    levels and - faded in over camera heights 20-40 km for views downward (`CLOUD_BAKED_BRIGHT_TOP_HEIGHT_M` [E]; cover
-    = the march's alpha, depth -ln(1 - alpha): a broken field's albedo underestimated) - the baked volume, so it meets
-    the flat levels at the 40-60 km takeover; no change from the ground. EPIC 2025-03-20: the brightest 5 % of the disc
+    ((2/3 + mu) + (2/3 - mu) T) / (4/3 + tau) [S: Eddington solution, Liou 2002 ch. 6]. In the far field; in the flat
+    levels and the baked volume faded in over camera heights 20-40 km for views from above
+    (`cloud_baked_bright_top_weight`: `CLOUD_BAKED_BRIGHT_TOP_HEIGHT_M` [E] times dot(view, up) < 0 at the cloud - the
+    flat levels took it unconditionally until T7b, so a ground camera's flat-level horizon clouds and bases seen from
+    below got a top-lit term, at grazing paths up to ~46x the Beer term in blue; volume cover = the march's alpha,
+    vertical depth -mu ln(1 - alpha): a broken field's albedo underestimated), so volume and flat levels meet at the
+    40-60 km takeover; no change from the ground (T7b: flat levels alone from the sea at a low Sun 22 % of the pixels
+    changed by > 2 codes, the full render identical - the volume covers them there; a 30 km horizon band now at the
+    volume's half weight; `screenshots/look_fixes/t7b/sheet_i1_ground.png`, `sheet_i1_b.png`). EPIC 2025-03-20: the brightest 5 % of the disc
     B/R 0.960 -> 1.008 (EPIC 1.008), `screenshots/look_fixes/t7/sheet_step3_pink_epic1430.png`; a tau-10 deck from
     8600 km +7.5 % luminance; the TOA Sun unchanged;
   - composite as the cloud pass: alpha = C_v (1 - exp(-tau / (C_v mu))), colour = T_air C_v L + alpha S_air over
@@ -695,7 +700,12 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   sub-grid 0.06 / 0.51 / 0.43 (0.18) - the analog's 0.25 deg column draws the same structure detail as an ERA5 hour.
   Insolation-weighted cloud albedo effect of the column model (independent columns, `scripts/cre.py`): 0.32 before,
   0.27 capped, 0.24 at the effective thickness (CERES ~0.14; the rest: conservative slabs, r_e 10 um, no absorption).
-  The pattern's mean cover (numpy model of the transform on 400 000 sphere points): within 0.007 of C. cloud_far_check
+  The pattern's mean cover (numpy model of the transform on 400 000 sphere points): within 0.007 of C; on the GPU
+  (cloud_far_check 1c, the shapes' noise, 4096 random points, footprints 8 / 32 km): C 0.3-0.7 within 0.005, C 0.1 ->
+  0.079 / 0.086 and C 0.9 -> 0.921 / 0.920 (the noise's tails are not Gaussian), tolerance 0.03; the bright-top factor
+  against its two-stream form within 0.09 % (the probe's half-float target), its limits and the cloud's B/R increment
+  x1.100 / x1.113 at A 0.6 / 0.75 (review estimate +8-10 %, band 1.07-1.13) (1b); the analog snapshot (1 deg + its
+  0.25 deg fine column) across the scaled-space switch worst 3.69 % (3b, 5 %). cloud_far_check
   PASS: section 3 broken cf 0.4 across the scaled-space switch worst 1.24 % (a contrast that faded with the renderer's
   pixel size gave 10 %: the flat levels' march and the far field differ in footprint), decks 0.15 / 0.42 %; section 5
   (the 40-60 km flat re-bake) 1.42 % mean as before.

@@ -57,6 +57,7 @@ func _run() -> void:
 	_check(_drive(camera, 0.0, 8.0), "weather off: continuous")
 	_check(_state_is(["", ""], -1.0), "weather off: nothing resident: %s" % _layer.state())
 
+	_test_fine_column(camera)
 	_test_light_follows_fade(core, camera)
 	_check(ShaderGlobals.value(&"cloud_column_before") == _layer._empty_column and _layer._empty_column.get_format() == Image.FORMAT_LA8,
 			"an empty slot binds the zero LA8 column texture (cover 0, not an R8 read as 1)")
@@ -117,6 +118,45 @@ func _test_light_follows_fade(core: StarsimCore, camera: Vector3) -> void:
 	core.weather_set_active("", "", 0.0)
 	DirAccess.remove_absolute(slab_file)
 	DirAccess.remove_absolute(clear_file)
+
+
+## Look fixes T7b (T7 review I2): the fine column (the analog's 0.25 deg column, RG8) - a slot takes it when its keys
+## and size match (fine_columns x fine_rows), else none (null, size 2 x 2); a resident slot binds its texture and size to
+## cloud_fine_before / _after, a slot without one the zero 2 x 2 texture.
+func _test_fine_column(camera: Vector3) -> void:
+	var with_fine := _fake("fine")
+	var fine := PackedByteArray()
+	fine.resize(6 * 5 * 2)
+	fine[0] = 200
+	with_fine["fine_rows"] = 5
+	with_fine["fine_columns"] = 6
+	with_fine["cloud_fine_column_texels"] = fine
+	var slot: Dictionary = _layer._new_slot(with_fine.duplicate())
+	var texture: Texture2D = slot.get("fine")
+	_check(texture != null and texture.get_size() == Vector2(6, 5) and slot["fine_size"] == Vector2(6, 5)
+			and texture.get_image().get_format() == Image.FORMAT_RG8,
+			"fine column keys present: an RG8 texture of 6 x 5 (%s)" % [slot["fine_size"]])
+	var missing: Dictionary = _layer._new_slot(_fake("nofine"))
+	_check(missing.get("fine") == null and missing["fine_size"] == Vector2(2, 2), "fine column keys missing: none, size 2 x 2")
+	var wrong := with_fine.duplicate()
+	wrong["fine_columns"] = 7
+	var bad: Dictionary = _layer._new_slot(wrong)
+	_check(bad.get("fine") == null and bad["fine_size"] == Vector2(2, 2), "fine column of the wrong size: none")
+	# bound when resident: the pair (fine, nofine) - one slot with its texture, the other the zero one
+	_announce(with_fine, _fake("nofine"))
+	_check(_drive(camera, 0.5, 8.0), "fine column pair: continuous")
+	var bound := []
+	for names: Array in [[&"cloud_fine_before", &"cloud_fine_before_size"], [&"cloud_fine_after", &"cloud_fine_after_size"]]:
+		var t: Texture2D = ShaderGlobals.value(names[0])
+		bound.append([t.get_size() if t != null else Vector2.ZERO, ShaderGlobals.value(names[1]), t == _layer._empty_fine])
+	var has_fine := false
+	var has_empty := false
+	for b: Array in bound:
+		has_fine = has_fine or (b[0] == Vector2(6, 5) and b[1] == Vector2(6, 5) and not b[2])
+		has_empty = has_empty or (b[0] == Vector2(2, 2) and b[1] == Vector2(2, 2) and b[2])
+	_check(has_fine and has_empty, "fine column bound: the slot's texture and size, the empty slot's zero 2 x 2 (%s)" % [bound])
+	_layer.set_target({}, {})
+	_check(_drive(camera, 0.0, 8.0), "fine column pair off: continuous")
 
 
 ## What the service does: every announcement carries snapshot dictionaries with their texels (the layer strips them once

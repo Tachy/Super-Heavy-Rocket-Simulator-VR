@@ -60,11 +60,12 @@ only with HTTP 206 (a 200 full-file answer is rejected), an unranged one only wi
   "0-6 hour ave"; ~0.8 MB). The build scales the layers' cover to it and adds the cumulus water
   (`weather-clouds.md`). Stored in the `.wthr` file: format version 9 (8: no fine column; 7: the cumulus water uncapped) = ground block, the float32 LCL block, the float32
   tcc block (-1 unknown), the float32 added-cumulus-water block and the float32 dropped-condensate block (kg/m^2,
-  diagnostics; +16 MB at 0.25 deg for the four), then the texels, then the fine column (look fixes T7 C: int32 rows, columns, RG8 per cell; a downsampled set carries its full-resolution column there - the analog files 0.25 deg, +2.1 MB each, 48 files 442 -> 562 MB; 0 x 0 at full resolution). Older versions are refused (earlier versions:
+  diagnostics; +16 MB at 0.25 deg for the four), then the texels, then the fine column (look fixes T7 C: int32 rows, columns, RG8 per cell; a downsampled set carries its full-resolution column there - the analog files 0.25 deg, +2.1 MB each, 48 files 442 -> 563 MB; 0 x 0 at full resolution). Older versions are refused (earlier versions:
   `docs/history/weather-clouds.md`).
 - **Old files heal**: `read_weather_snapshot` refuses version-1 .. -8 files (and anything else of another version). A
   runtime-cache file is then treated as unloadable: deleted and rebuilt from a fresh download (the existing retry path,
   "a snapshot file that cannot be loaded is deleted and rebuilt"), the analog baseline is the shipped
-  `data/weather/analog` (regenerated with `python tools/data_pipeline/fetch.py --force weather_analog`; the installer
+  `data/weather/analog` (regenerated with `python tools/data_pipeline/fetch.py --force weather_analog`; without `--force` files of another
+  snapshot format version are rebuilt, present current ones kept, and `tools/package.ps1` refuses a set with a stale file; the installer
   ships the new files). The raw ERA5 files of an earlier download are deleted after every build, so the rebuild
   downloads the 9 timed files again (the static orography stays cached).
