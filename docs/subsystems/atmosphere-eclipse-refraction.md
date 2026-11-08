@@ -18,6 +18,12 @@ threshold:
   4.2e4 cd/m^2 at 400 km, limiting magnitude about -6; GPU check: magnitude 0 and 4 hidden beside the limb); stars show
   on the night side, in the Earth's shadow, in twilight and in totality. Moon and Sun disc need no threshold; planets
   are not drawn. At night the moonlit sky behind a star counts too.
+- **Star shape** (`stars.gdshader`): each star is a flux-conserving Gaussian PSF on a point sprite, the sprite centred
+  exactly on the star (centre from the projected vertex, `FRAGCOORD` minus centre; `POINT_COORD` makes an invalid
+  D3D12 pipeline in the multiview/VR path, stars vanish). sigma = max(eye PSF 1 arcmin FWHM [S: Westheimer 1986] via the
+  projection, 0.62 px floor [E], 0.30 x the former square's side for bright stars [E]); the integrated flux equals the
+  former square's, the tone path is unchanged. Result: round bright stars instead of squares, no size/flux jumps when a
+  star crosses a pixel (shimmer check: 0.48 px steps at fov 10, flux CV 1-2 % against 5-9 % before). Look-fix sheets: `screenshots/look_fixes/stars/`.
 - **Solar eclipses.** While the Moon's penumbra touches the atmosphere (`Atmosphere.penumbra_touches`), the
   in-scattering along a ray is split into segments at d (i/n)^2 (8 for the sky, Moon, Sun, stars and the sea's
   reflected sky; ceil(d / 12.5 km) clamped to 1..8 for the aerial perspective [call, performance]), each

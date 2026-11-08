@@ -437,6 +437,7 @@ func _space_star_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector
 ## atmosphere plus the sky, 5 %), VISIBLE (twilight: the pixel's luminance > STAR_VISIBLE_FACTOR x the sky's).
 enum StarCase { HIDDEN, UNCHANGED, VISIBLE }
 const STAR_UNCHANGED_TOLERANCE := 0.05
+const STAR_POINT_SCALE := 2.4  # stars.gdshader point_scale
 const STAR_VISIBLE_FACTOR := 2.0
 const STAR_COLOR_INDEX := 0.6  ## B-V of the test star (near white)
 const SUN_RENDER_DISTANCE_M := 2.0e7  ## World.SUN_RENDER_DISTANCE_M
@@ -470,7 +471,13 @@ func _star_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun
 			var color8 := Vector3(floorf(c.r * 255.0), floorf(c.g * 255.0), floorf(c.b * 255.0)) / 255.0
 			var relative := minf(StarField.illuminance_lux(magnitude)
 					/ StarField.illuminance_lux(StarField.REFERENCE_MAGNITUDE), 1.0)
-			_compare(label + " = before + sky", color8 * clampf(relative, 0.04, 1.0) + sky, got, STAR_UNCHANGED_TOLERANCE)
+			# The star is a flux-conserving Gaussian (stars.gdshader): its centre pixel is the former square's level
+			# x size^2 / (2 pi sigma^2), sigma = max(pixel floor 0.62, 0.30 size) (the eye PSF is smaller here); no fade.
+			var size_px := clampf(STAR_POINT_SCALE * sqrt(relative) * 2.0, 1.0, 5.0)
+			var sigma_px := maxf(0.62, 0.30 * size_px)
+			var peak := size_px * size_px / (TAU * sigma_px * sigma_px)
+			_compare(label + " = before x PSF peak + sky", color8 * clampf(relative, 0.04, 1.0) * peak + sky, got,
+					STAR_UNCHANGED_TOLERANCE)
 		StarCase.VISIBLE:
 			sky = rendered_sky
 			var ratio := got.dot(LUMINANCE_WEIGHTS) / sky.dot(LUMINANCE_WEIGHTS)
