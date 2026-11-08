@@ -236,6 +236,9 @@ var _sim_target_tdb_s := NAN  ## the instant the flight sim was asked for last f
 var _environment: Environment  ## the WorldEnvironment's (ambient energy under the clouds, Task 9)
 ## The display tone step after the eye's post step (look fixes T5: chroma-preserving tone curve, daylight Hunt factor).
 var display_tone := DisplayToneEffect.new()
+## Local adaptation (look fixes T10, LocalAdaptation): the map before the transparent pass, the factor after the eye's post step.
+var local_adaptation_map := LocalAdaptationEffect.new(LocalAdaptationEffect.Stage.MAP)
+var local_adaptation_apply := LocalAdaptationEffect.new(LocalAdaptationEffect.Stage.APPLY, local_adaptation_map)
 
 
 ## The atmosphere's worker tasks write into it and use the core: finished before both go away (review M2); the ground albedo
@@ -362,6 +365,9 @@ func update_world() -> void:
 	atmosphere.update(cam, Vector3.ZERO, earth.fixed_to_gcrf, sun_apparent_from_earth_m, adaptation_dt,
 			camera_sun_fraction, moon_apparent_from_earth_m, t, moon_gcrf_m)
 	display_tone.update(_environment, atmosphere.chroma)
+	local_adaptation_map.update(atmosphere.scene_per_cd_m2, atmosphere.exposure_gain * atmosphere.brightness,
+			atmosphere.reference_luminance_now(), atmosphere.eye_adaptation_enabled, atmosphere.rod_scale,
+			EyeAdaptation.cone_map(atmosphere.chroma, atmosphere.white_balance))
 	_update_sky_radiance(cam, camera_sun_fraction)
 	FrameProfiler.end(&"atmosphere")
 
@@ -1177,9 +1183,11 @@ func _setup_environment() -> void:
 	# The field meter of the eye adaptation (AdaptationMeter, Task 14) reads the cones' image before the transparent pass
 	# (after the cloud pass, whose result it composites itself) and before the rod step.
 	atmosphere.adaptation_meter.cloud_effect = clouds.effect
-	# Then the display tone step (DisplayToneEffect), the last before glow and AgX.
+	# Local adaptation (LocalAdaptationEffect, look fixes T10): its map from the opaque image after the meter, its factor
+	# after the rod step. Then the display tone step (DisplayToneEffect), the last before glow and AgX.
+	local_adaptation_map.cloud_effect = clouds.effect
 	compositor.compositor_effects = [clouds.shadow_effect, clouds.effect, atmosphere.adaptation_meter,
-			atmosphere.vision_effect, display_tone]
+			local_adaptation_map, atmosphere.vision_effect, local_adaptation_apply, display_tone]
 	world_environment.compositor = compositor
 	add_child(world_environment)
 

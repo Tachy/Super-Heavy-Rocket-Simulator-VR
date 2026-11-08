@@ -416,6 +416,66 @@ shaders:
     parameters (image-centre ray, Sun along -Z, no Sun no mask) and the masked Sun's black frame field 0. Stereo mock
     (both eyes, Moon, Sun 12 deg above the view centre): mask 710 / seen 710, veil 8627 cd/m^2, gain 1.000.
 
+- **Local adaptation: small bright objects keep their detail** [look fixes T10, user 2026-11-08; `local_adaptation.gd`
+  `LocalAdaptation` (model, CPU mirror), `local_adaptation_effect.gd` `LocalAdaptationEffect` (two compositor stages);
+  fidelity flag `LocalAdaptation.enabled`, user argument `--local_adaptation=off` (game, render_check, cockpit_shots)].
+  The global rule D sets one gain for the view; a small object far brighter than the field - the Earth from the lunar
+  night (~1e4 cd/m^2 at gain 7557: scene ~1000, display white with Godot's glow around it), the full Moon in the Earth's
+  night sky, lamps in a dark cabin - clipped. The eye adapts locally [S: Vangorp, Myszkowski, Graf & Mantiuk 2015, "A
+  model of local adaptation", ACM TOG 34(6) 166: the adapting luminance is pooled over a Gaussian of sigma 0.428 deg
+  (Eq. 10; the adapting field levels off at a ~0.5 deg disc, rings beyond ~6 deg have no effect)], and light
+  adaptation is fast while dark adaptation is slow (Pattanaik et al. 2000), so local adaptation only lowers the gain:
+  g_px = min(g, G(L_eff)), G the global rule's cone gain (`EyeAdaptation.cone_gain`, Ferwerda, [1, 1e5]), L_eff = L_loc
+  x DAY_EXPOSURE / (PLATEAU d^2), L_loc the pooled local luminance. In the Weber range a locally adapted region shows its
+  local mean at the scene value PLATEAU = `EyeAdaptation.ANCHOR_WHITE` x DAY_EXPOSURE = 1.35 [E: anchoring, Gilchrist
+  et al. 1999 as in the anchored rule - the bright region is the anchor of its neighbourhood, seen as white of
+  reflectance 0.9 under the TOA Sun; sRGB ~213, below AgX's shoulder, so the detail stays]; the displayed local mean
+  rises with L_loc up to PLATEAU, stays there and rises again where G reaches its floor 1 (above the white plate under
+  the TOA Sun: the Sun's disc stays display white) - monotonic, no inversion. A region whose global display value is at
+  most PLATEAU is untouched (pad noon, lunar day, the Earth from orbit by day: gain 1, nothing to lower). The rods'
+  part of the post step (VisionEffect, 38 % of the Earth's displayed Y at lunar night) is scaled by c^2 (the cones' by
+  c): rod saturation [E: Aguilar & Stiles 1954] - a region the cones adapt to locally is photopic and has no rod signal.
+  Image pipeline [call]: the MAP stage (before the transparent pass, after the field meter, which measures the unchanged
+  image; it asks for the MSAA resolve every frame) averages the opaque image with the cloud composite into blocks of
+  mean log2 luminance (block edge a power of two with >= 1.5 blocks per pooling sigma: 1 px on a 900 px high desktop
+  frame at fov 100, 8 px for the headset; above 4 px a 4 x 4 sample grid per block), pools them bilaterally (spatial sigma 0.428 deg, range sigma 0.4 decades
+  [S: Durand & Dorsey 2002], radius 2 sigma) and evaluates log2 c per block; the APPLY stage (after VisionEffect, before
+  the display tone step, glow and AgX) multiplies each pixel by c, joint-bilaterally upsampled against the pixel's own
+  luminance (Kopf et al. 2007; 4 x 4 blocks, spatial sigma 1 block, the same range sigma). The edge-aware pooling is a
+  display requirement, not the eye's: Vangorp's plain Gaussian darkens a 0.4 deg ring of the dark field around a bright
+  disc and brightens its limb (the local tone mapper's halo); here the dark field beside the disc keeps c = 1 exactly
+  and the limb no more than the interior (test). A pixel unlike every block near it (range weight < 1 % of the
+  spatial: an emitter drawn in the transparent pass over a dark field, a sub-block glint) keeps c = 1; over a locally
+  adapted region (a label on the Earth's disc from the lunar night) a display-referred emitter takes that region's c.
+  Per view (both VR eyes, each its own map). Off with the eye adaptation off, at a display gain <= 1 and before the
+  tables have loaded.
+  - The halo (the user's "blur rim", 2026-11-08): Godot's glow (world.gd: threshold 4, intensity 0.6, its input capped
+    at luminance 12 - independent of the source's luminance and of the eye), not the glare veil (that is the Sun's alone
+    and enters only the adaptation) nor the Earth shader: with `render_check --glow=off` the rim is gone (A, lunar night
+    under the Earth, luma at 3 / 6 deg from the disc's centre 172 / 55 with glow, 0 / 0 without). For comparison the
+    CIE 146:2002 disability glare of that Earth (E 6.9 lux at the eye, young eye, p 0.5) displayed at the view's gain
+    would be sRGB 223 / 186 / 103 / 57 at 2 / 3 / 6 / 10 deg against the glow's 213 / 172 / 55 / 8: the glow is of the
+    veil's order out to ~5 deg but falls off faster, and it is not tied to it. With local adaptation the disc is written
+    below the glow threshold, so Godot's glow no longer fires on it (B: 0.7 / 0 luma at 2-3 / 5-6 deg); no veil of the
+    Earth or the Moon is drawn (open points).
+  - Values (A `--local_adaptation=off` / B; sheets and crops `screenshots/look_fixes/t10/`, all numbers in the report
+    `.superpowers/sdd/2026-11-07-look-fixes/t10-report.md`): lunar night 0 N 45 E under a ~97 % Earth (gain 7557) disc
+    sRGB (254, 254, 254), 96 % clipped -> (188, 209, 244), luma sd 3 -> 18 (ocean, Africa, clouds); gibbous / half Earth
+    likewise (half disc kept); full Moon over Starbase at fov 12 (gain 6645) (255, 255, 255) -> (233, 211, 189) with the
+    maria, also in the stereo mock; Earth from space (gain 1) pixel-identical; pad noon el 5 and Apollo 11 lunar day el
+    5: run noise only (0.04 % / 0.1 % of the pixels differ by > 2, both signs); cabin pilot_eye (gain 157): the daylit
+    windows show the sky (saturated pixels 1.9 % -> 0.08 %), walls and screens unchanged. Cost (RTX 4090, stereo mock at
+    the headset's 5294 x 4250 per eye, GPU timestamps, median of 300 frames, two rounds, GPU shared with other renders):
+    MAP 0.27 ms, APPLY 0.33 ms (pixels with no compression near them are not read), plus the MSAA resolve before the
+    transparent pass every frame (0.26 ms at 3534 x 2838, Task 14); first version 0.60 / 0.46 ms.
+  Test: `game/tests/local_adaptation_test.gd` (headless, CPU mirror): pad noon's sky untouched; a bright region at the
+  plateau (1e-9); the displayed local mean monotonic over 1e-3 .. 1e10 cd/m^2; the Sun at the gain floor; no change at
+  fixed exposure; the block size; the rods' part (c = 1 leaves the pixel, strong compression leaves c x the cones'
+  image); an image of the Earth from the lunar night (2 deg disc of 1e4 cd/m^2 with +-40 % detail, blocks of 2 and of
+  the step's own 4 px at 20 px/deg): its displayed mean 1.349 / 1.368 (tolerance 25 %), detail ratios within 0.3 / 0.7 %
+  (5 %), the 864 ground / sky pixels beside it untouched, limb max 1.908 / 2.034 against the interior's 1.904 / 1.962
+  (1.25x), an emitter over the black sky c = 1; the flag.
+
 - **Display tone step: chroma-preserving tone curve** [look fixes T5, 2026-11-07; `display_tone.gd` `DisplayTone` (model
   and CPU mirror), `display_tone_effect.gd` `DisplayToneEffect` (compute step); fidelity flag `DisplayTone.enabled`,
   render_check / cockpit_shots `--tone=agx`]. Godot's AgX (inset matrix, the allenwp curve per channel, outset) took
@@ -514,8 +574,10 @@ shaders:
   Schaefer 1990 star threshold (user decision 2026-10-25, "like the eye").
 - Field statistic: highlight protection D, the darker of the mean-grey and the anchor exposures (user 2026-11-07,
   after comparing mean grey, white plate, anchored; the mean grey alone washed out the cabin, the white plate was too
-  dark outside and black in the cabin, the anchor alone washed out sky / limb scenes). Next step offered: local
-  (retinal) adaptation for small bright objects (the Earth from the lunar night still clips).
+  dark outside and black in the cabin, the anchor alone washed out sky / limb scenes).
+- Local adaptation for small bright objects (user 2026-11-08, look fixes T10): only ever lowers the gain, the local
+  mean of a bright region at the anchored white (1.35), edge-aware pooling (no halo), switchable
+  (`--local_adaptation=off`).
 - Scene-referred adaptation to the measured field (user 2026-11-05, Task 14): one rule for every scene, one value for
   both VR eyes (formerly view-independent; the white-plate rule is the fallback). Earth-in-view stays physical (no
   display-side highlight treatment). Display-referred emitters never set the adaptation (the meter runs before the
@@ -551,8 +613,11 @@ shaders:
   the adopted white, with the mesopic D (fix round 3) only partly: see "Mesopic degree of adaptation" and the fix
   round 3 numbers. The full
   Moon at a VR fov stays display white (B/R 1.00 in A and B): adapted to the moonlit night (L_a 0.04 cd/m^2, gain 1.2e4)
-  the disc is far above white - the Moon's own disability glare (10 x 0.3 lux / 0.27^2 ~ 40 cd/m^2 looking at it) and
-  local adaptation are not modelled; pale cream shows where the disc is in range (fov 2: B/R 0.33 -> 0.77). The surround
+  the disc is far above white - the Moon's own disability glare (10 x 0.3 lux / 0.27^2 ~ 40 cd/m^2 looking at it) is
+  not modelled; local adaptation (T10) now brings a disc that is resolved (>= ~2 blocks wide) into range: fov 12 at
+  gain 6645, disc sRGB (255, 255, 255) -> (233, 211, 189) with the maria; pale cream (B/R 0.81) is the white balance's
+  (the adopted white of the moonlit night with the mesopic D), not the local step's. At fov 100 the 3-4 px disc keeps
+  its look. The surround
   model has no moonlit sky (black at night), so at night the fov-2 frame still stands alone (out-of-frame share 0).
 - Earth in view for a Moon eye at partial phases underestimates up to ~2x; the eclipse-time Earth renders several
   times its day brightness (AgX rolls it toward white) - kept physical.
@@ -560,7 +625,8 @@ shaders:
   them): the eye adapts to the cloud-free model ground (the Sun's plate dominates wherever the eye is sunlit; on the
   lunar night side the cloudy Earth is brighter than adapted to); the earthshine's Bond albedo 0.306 holds the clouds
   on average. Follow-up: the 13 directions through the cloud column.
-- Eclipsed-Moon corona not modelled; no per-pixel / foveal adaptation.
+- Eclipsed-Moon corona not modelled. Local adaptation (T10) is gaze-free (every region adapts locally at once; no foveal
+  weighting or eye tracking).
 - Field beyond the frame (T4): the surround model knows no structures, vehicles, terrain relief, drawn cloud shapes
   (only the cube's uniform cloud factors) or the Earth's disc in the lunar sky; an open view next to a tower or a hull
   counts open sky / ground there. The model's regolith is ~2x the rendered one (Apollo 11 view: model 4375 against frame
@@ -576,8 +642,17 @@ shaders:
   drawn rocks stay at gain 1 while the regolith follows the gain (dark rocks on the lunar day at gain 11-17, black at
   night); the rocks also bias the field measurement low (IM-2: 586 -> 456 cd/m^2). Fix: `ALBEDO *= atmosphere_exposure_gain`
   as terrain_moon does (the file was in another task's hands, not changed here).
-- No per-pixel / foveal term in the field rule: a small bright object (a gibbous Earth of ~2 deg in a lunar-night
-  view, a distant plume) stays inside the 2 % highlight cut, so a gaze at it does not adapt to it.
+- Local adaptation (T10): a small bright object stays inside the field rule's 2 % highlight cut (the global gain is
+  unchanged) and is brought into range by the local step instead. Its limits: (1) a structure narrower than ~2 blocks
+  (a thin Earth crescent at desktop resolution, 1-2 px; a 3-4 px full Moon at fov 100) finds no like block and keeps c
+  = 1 (stays white; the headset has ~4.8x the desktop's pixels per degree); (2) no disability glare of the Earth or the
+  Moon is drawn: Godot's glow no longer fires on a locally adapted disc, while CIE 146 predicts for the full Earth from
+  the lunar night (6.9 lux at the eye, L_a 0.49 cd/m^2) a veil of 18 / 6.4 / 1.3 / 0.46 cd/m^2 at 2 / 3 / 6 / 10 deg (13x
+  L_a at 3 deg; for the full Moon from the Earth, 0.25 lux, ~40x less) - a physical glare spread function on the image
+  (Sun, Earth, Moon; replacing Godot's luminance-capped glow) is the follow-up (user decision); (3) display-referred
+  emitters over a locally adapted region take its factor; (4) Godot's glow on other sources (Sun disc, plume, lamp
+  lenses) is unchanged and still not tied to CIE 146; (5) the Earth's locally adapted disc is light blue with the
+  ocean at the gamut edge (blue channel 254 in ~55 % of its pixels at fov 100), as when the Earth fills the view.
 - The VR panel was not in the stereo mock's lunar-night view (`--keep_vr_panel`), and the night plume seen from
   500 m (fov 25 deg) stays inside the 2 % highlight cut; the run-away the meter now avoids was therefore not
   reproduced in a render, only excluded by construction (display-referred shaders in the transparent pass, test).

@@ -1506,6 +1506,13 @@ static func _unstretch(v: Vector3) -> Vector3:
 
 ## Eye adaptation's reference luminance (cd/m^2): the white Lambertian under the top-of-atmosphere Sun at d_AU, the state
 ## DAY_EXPOSURE is defined for (same channels and weights as adaptation_luminance).
+## The white plate under the TOA Sun at this frame's Sun distance (cd/m^2); 0 before the tables have loaded.
+func reference_luminance_now() -> float:
+	if not (parameters.has("solar_illuminance_rgb") and parameters.has("sun_radiance_to_luminance")):
+		return 0.0
+	return reference_luminance(_sun_distance_au)
+
+
 func reference_luminance(d_au: float) -> float:
 	var solar: Vector3 = parameters["solar_illuminance_rgb"]
 	var sun_factor: Vector3 = parameters["sun_radiance_to_luminance"]

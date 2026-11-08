@@ -50,4 +50,4 @@ threshold:
 
 ## Open points and known limits
 
-- Eclipsed-Moon corona not modelled; no per-pixel / foveal adaptation.
+- Eclipsed-Moon corona not modelled. Local adaptation (look fixes T10, eye-adaptation.md) is gaze-free (no foveal weighting).

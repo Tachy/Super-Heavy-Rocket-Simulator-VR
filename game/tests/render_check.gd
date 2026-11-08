@@ -57,6 +57,8 @@
 #          --white_balance=off: no chromatic adaptation (EyeAdaptation.white_balance_enabled); --white_balance=toa: the
 #          fixed white of the Sun above the air at D = 1 as before T5b fix round 1 (EyeAdaptation.adopted_white_follows_scene).
 #          --day_exposure=1.5: the field rule as before look fixes T6 (the field renders at 0.27, DAY_EXPOSURE in it; default 0.18).
+#          --local_adaptation=off: no local adaptation (LocalAdaptation.enabled, look fixes T10; read from the arguments);
+#          --glow=off: Godot's glow off (look fixes T10: the halo's cause).
 #          --glare=off: no Sun glare veil and the Sun disc not masked out of the field meter (Atmosphere.glare_enabled).
 #          --tone=agx: Godot's AgX alone, without the chroma-preserving display tone step (DisplayTone.enabled);
 #          --moon_colour=texture: the Moon's albedo texture colour as it is, without the regolith colour factor
@@ -329,6 +331,8 @@ func _process(_delta: float) -> bool:
 			TimePanel.show_frame_rate = false
 		world.clock.set_time(world.core.utc_to_tdb_s(_args.get("utc", "2024-04-08T18:42:00")))
 		world.atmosphere.eye_adaptation_enabled = not _args.has("fixed_exposure")
+		if _args.get("glow", "on") == "off":  # Godot's glow off (look fixes T10: the halo's cause)
+			world._environment.glow_enabled = false
 		if _args.has("meter_post_transparent"):  # the field meter after the transparent pass (Task 14's first placement)
 			world.atmosphere.adaptation_meter.post_transparent = true
 		if _args.get("meter", "on") == "off":  # the field meter detached (its cost; the white-plate rule then)
