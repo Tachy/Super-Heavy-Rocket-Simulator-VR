@@ -1389,8 +1389,10 @@ const NV_STARLIT_ALBEDO := 0.2
 ## NV_DISPLAY_TOLERANCE of the colour's peak. The limit is the rgba16f colour buffer: the inverse writes channels of
 ## ~0.5 whose scotopic sum cancels to ~1e-3 (w . c' = w . c / (1 + s w . tint)), and the post step multiplies that sum's
 ## half-float rounding (~2^-11 x 0.5 per channel) by s x tint ~ 140 x 2 - up to ~1-2 % of the peak at s = 138 (measured
-## 0.1 % opaque, 1.4 % blended).
-const NV_DISPLAY_TOLERANCE := 0.02
+## 0.1 % opaque, 1.4 % blended; after the mesopic degree of adaptation (388651e7: the night's cone map is less
+## neutralised, so the inverse's channels and their rounding differ) 1.8 % opaque, 2.1 % blended - the excess is exactly
+## along ROD_TINT, i.e. the rod term's rounding, not a model error). Hence 3 %.
+const NV_DISPLAY_TOLERANCE := 0.03
 const NV_DISPLAY_MIN_ROD_SCALE := 100.0
 const NV_DISPLAY_COLOUR := Color(1.0, 0.5, 0.1, 1.0)  ## an orange plume-like marker (sRGB)
 const NV_DISPLAY_BACKGROUND_CD_M2 := 0.002  ## the blended sample's scene-referred background
