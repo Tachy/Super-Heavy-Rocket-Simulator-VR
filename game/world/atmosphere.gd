@@ -267,8 +267,28 @@ var scene_referred_adaptation := not OS.get_cmdline_user_args().has("--analytic_
 ## Everything downstream (gains, pacing, clamps, fallbacks) is the same.
 enum FieldRule { MEAN_GREY, ANCHOR, PROTECT }
 var field_rule := _field_rule_from_arguments(OS.get_cmdline_user_args())
+## The day exposure the field rule's grey is metered with (look fixes T6, 2026-11-08): the scene value of a field at the
+## key is key x DAY_EXPOSURE x gain, so with a key of 0.18 the field rendered at 0.27 (DAY_EXPOSURE 1.5). The rule takes
+## DAY_EXPOSURE out: L_a = L_f x (DAY_EXPOSURE / field_day_exposure) / key, the field lands at the key. Default 1.0;
+## user argument --day_exposure=1.5 restores the earlier rule (the field at key x 1.5).
+var field_day_exposure := _field_day_exposure_from_arguments(OS.get_cmdline_user_args())
+
+
 func field_rule_name() -> String:
 	return ["field", "anchor", "protect"][field_rule]
+
+
+## The key the field rule divides the metered field by: field_key x field_day_exposure / DAY_EXPOSURE (0.18 / 1.5 = 0.12 by
+## default, so the field renders at 0.18; with --day_exposure=1.5 the plain field_key).
+func rule_key() -> float:
+	return field_key * field_day_exposure / DAY_EXPOSURE
+
+
+static func _field_day_exposure_from_arguments(arguments: PackedStringArray) -> float:
+	for argument in arguments:
+		if argument.begins_with("--day_exposure="):
+			return maxf(float(argument.get_slice("=", 1)), 1.0e-3)
+	return 1.0
 
 
 static func _field_rule_from_arguments(arguments: PackedStringArray) -> FieldRule:
@@ -495,9 +515,10 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 			adaptation_from_field = true
 			if _field_snap:
 				_eye.snap()
-			var rule_cd_m2 := field_adaptation_luminance(field_rule, last_field_cd_m2, last_anchor_cd_m2, field_key)
+			var rule_cd_m2 := field_adaptation_luminance(field_rule, last_field_cd_m2, last_anchor_cd_m2,
+					rule_key())
 			var rule_scotopic_cd_m2 := field_adaptation_luminance(field_rule, last_field_scotopic_cd_m2,
-					last_anchor_scotopic_cd_m2, field_key)
+					last_anchor_scotopic_cd_m2, rule_key())
 			_eye.advance(rule_cd_m2, rule_scotopic_cd_m2, reference_luminance(d_au), adaptation_dt_s)
 			# A new view stays snapped while it is still streaming in, and at least FIELD_SNAP_MIN_S after the jump
 			# (the streaming may not have started on its first frames).

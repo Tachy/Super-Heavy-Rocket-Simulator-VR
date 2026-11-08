@@ -56,6 +56,7 @@
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off;
 #          --white_balance=off: no chromatic adaptation (EyeAdaptation.white_balance_enabled); --white_balance=toa: the
 #          fixed white of the Sun above the air at D = 1 as before T5b fix round 1 (EyeAdaptation.adopted_white_follows_scene).
+#          --day_exposure=1.5: the field rule as before look fixes T6 (the field renders at 0.27, DAY_EXPOSURE in it; default 0.18).
 #          --glare=off: no Sun glare veil and the Sun disc not masked out of the field meter (Atmosphere.glare_enabled).
 #          --tone=agx: Godot's AgX alone, without the chroma-preserving display tone step (DisplayTone.enabled);
 #          --moon_colour=texture: the Moon's albedo texture colour as it is, without the regolith colour factor

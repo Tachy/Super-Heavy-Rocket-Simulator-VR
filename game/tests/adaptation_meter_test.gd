@@ -136,6 +136,12 @@ func _initialize() -> void:
 			100.0 / key, 1e-9)
 	_near("rule protect, scotopic pair", Atmosphere.field_adaptation_luminance(Atmosphere.FieldRule.PROTECT, 0.01, 0.2, key),
 			0.2 / white, 1e-9)
+	# Look fixes T6: DAY_EXPOSURE out of the field rule - the field renders at the key (scene value = L x DAY_EXPOSURE x gain,
+	# gain = L_ref / L_a), --day_exposure=1.5 restores the earlier rendering at key x 1.5.
+	var atmosphere := Atmosphere.new()
+	_near("T6 rule key default", atmosphere.rule_key(), key / Atmosphere.DAY_EXPOSURE, 1e-12)
+	atmosphere.field_day_exposure = Atmosphere.DAY_EXPOSURE
+	_near("T6 rule key old", atmosphere.rule_key(), key, 1e-12)
 	_near("rule protect, dark field", Atmosphere.field_adaptation_luminance(Atmosphere.FieldRule.PROTECT, 0.0, 0.0, key), 0.0, 0.0)
 
 	# The start view (World.start_view_angles): the camera sits 60 deg from the Sun as seen from the Earth's centre

@@ -85,6 +85,13 @@ shaders:
   `--mean_grey_adaptation` / `--anchored_adaptation` select the others; `Atmosphere.field_adaptation_luminance`]: L_a = max(L_f / `field_key`, L_anchor /
   `ANCHOR_WHITE`) - the stricter (darker) of the mean-grey and the anchor exposures, the scotopic pair likewise; everything
   downstream unchanged. Intent: the anchored white where a bright area would clip, the mean grey elsewhere (dark scenes).
+  **DAY_EXPOSURE out of the field rule** [look fixes T6, 2026-11-08, `Atmosphere.rule_key()`, `field_day_exposure`,
+  user argument `--day_exposure=1.5` = the earlier rule]: a field at the key renders at key x `DAY_EXPOSURE` x gain, so
+  the field used to land at 0.27 instead of the documented 0.18. The grey term now divides by key / `DAY_EXPOSURE`
+  (0.12), the field renders at 0.18; the anchor (white-plate) term is unchanged. Effect (-0.58 EV where the grey term
+  decides): pad noon el 5 gain 1.65 -> 1.10, Apollo 11 down-Sun el 5 4.94 -> 3.29 (ground mean sRGB 128 -> 108),
+  lunar night under the Earth 8342 -> 7557 (the anchor decides), dusk 1996 -> 1706; cockpit (anchor) and the Earth from
+  space (gain at the floor 1: L_a above the white plate's) unchanged. Sheets `screenshots/look_fixes/t6/`.
   Test: `adaptation_meter_test.gd`. Comparison A field / C anchored / D protected:
   `screenshots/eye_adaptation/protected/`: D equals the mean-grey rule in every outdoor scene (Moon day, lunar night,
   pad noon, dusk, 400 km, start view: the anchor / 0.9 is 2-4x the field, the field / 0.18 5.5x) and the anchored rule
