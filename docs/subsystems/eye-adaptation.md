@@ -479,6 +479,13 @@ shaders:
   block grid 0.27 + 0.33 ms), plus the MSAA resolve before the transparent pass. In-game (lunar night, A T10 grid / B
   bands; `screenshots/look_fixes/t13/la/`): Earth at fov 100 (12 px) 50.8 % -> 8.5 % of the disc clipped; full Moon fov
   12 17 % -> 0 % clipped, no glow rim; crescent identical (sub-block).
+  Local chromatic adaptation (T13, iCAM06-style [S: Kuang, Johnson & Fairchild 2007: the chromatic adaptation's white
+  and degree are local]): a locally adapted region is photopic, so its cones take the white balance at D = 1 to the
+  same adopted illuminant: cones' = mix(cones, K cones, 1 - c), K = the cones' map at D = 1 over the frame's
+  (`LocalAdaptation.local_white`, `apply_pixel`) [call: the weight 1 - c]. The full Moon over the moonlit night
+  (illuminant moonlight, global D 0.15-0.73) goes from cream to a warm off-white (disc centre sRGB (237, 232, 220));
+  the Earth from the lunar night (illuminant earthshine in the Sun's colour) keeps its blue. Test `local_adaptation_test`
+  (a white under a warm illuminant at D 0.15, locally adapted: neutral within 1 %).
   - The halo (the user's "blur rim", 2026-11-08): Godot's glow (world.gd: threshold 4, intensity 0.6, its input capped
     at luminance 12 - independent of the source's luminance and of the eye), not the glare veil (that is the Sun's alone
     and enters only the adaptation) nor the Earth shader: with `render_check --glow=off` the rim is gone (A, lunar night
@@ -522,7 +529,9 @@ shaders:
   pixel (CIE f x normal illuminance x cos x visibility, in and out of frame). SPREAD stage post-transparent before
   VisionEffect (tent-filtered pyramid, a Gaussian per level, coarse-to-fine; frames under 15 px/deg merge the sub-texel
   levels into level 0); ADD stage after the local adaptation's APPLY, through VisionEffect's map (rods and cones see the
-  veil): on a source the veil is compressed as the source is, beside it the image part saturates softly at the plateau
+  veil): on a source the veil is compressed as the source is - weighted by how much of the pixel is the source, its
+  shown luminance over a quarter of the plateau (`GlareSpread.veil_factor`; the low-res texel's compression on every
+  pixel drew a dark ring at the limb at VR scale) - beside it the image part saturates softly at the plateau
   (veil x P / (P + veil)) [call], so the radial profile falls monotonically (no ring at the limb). The adaptation meter
   adds the last frame's mean image veil to the field and the anchor like the Sun's scalar veil (per sample it lowered
   the log average under a black sky). Measured (`screenshots/look_fixes/t13/glare/`): the lunar-night Earth's pyramid

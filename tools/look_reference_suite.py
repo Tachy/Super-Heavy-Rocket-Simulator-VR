@@ -252,7 +252,8 @@ SCENES = {
                              "camera 0.213; display before T13 0.444]"),
         "dark": (0.15, 0.6, "[S: EPIC dark share 0.375; T7 linear camera 0.338]"),
         "corr": (0.40, 1.0, "[S: EPIC Y correlation; T7 display 0.49]")}),
-    "sun_in_view": (NOON + ["--look_at_sun", "--fov=100"], m_sun, {
+    # the Sun in view needs a clear line to it: the analog weather puts the pad in a cumulus' shadow at this hour
+    "sun_in_view": ([a if a != WEATHER else "--weather=off" for a in NOON] + ["--look_at_sun", "--fov=100"], m_sun, {
         "white_px": (1, 10 ** 9, "[call] the Sun's disc is display white"),
         "frame_luma": (20, 230, "[call] the frame is not black / not blown out around the Sun")}),
     "cockpit_day": ("cockpit", m_cockpit, {
@@ -310,7 +311,8 @@ for _fov in ("60", "10"):
     SCENES[f"sun_lunar_orbit_f{_fov}"] = (["--body=moon", "--lat=0.674", "--lon=23.473", "--height=100000",
                                            "--utc=2026-11-17T08:00:00", "--hide_ui", WEATHER, "--look_at_sun",
                                            f"--fov={_fov}"], m_sun_profile(float(_fov)), _sun_gates)
-SCENES["sun_in_view_profile_f10"] = (NOON + ["--look_at_sun", "--fov=10"], m_sun_profile(10.0), {})
+SCENES["sun_in_view_profile_f10"] = ([a if a != WEATHER else "--weather=off" for a in NOON] + ["--look_at_sun", "--fov=10"],
+                                     m_sun_profile(10.0), {})
 SCENES["terminator_400km"] = (["--lat=0", "--lon=0", "--height=400000", "--utc=2026-11-07T18:15:00", "--hide_ui", WEATHER,
                                "--azimuth=90", "--elevation=-30", "--fov=60"], m_terminator, {})
 CROP_SCENES = [n for n in SCENES if n.endswith(("_vr", "_f10"))]
