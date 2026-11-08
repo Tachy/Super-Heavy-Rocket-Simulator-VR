@@ -104,11 +104,38 @@ def m_moon_day(a):
     return {"ground_luma": float(luma(ground).mean()), "clipped": clipped(ground)}
 
 
+def halo_bump(a):
+    """Rings / bands around the brightest object: the radial mean luma profile (1 px annuli) beyond the disc's limb
+    (+3 px) must fall monotonically; returns the largest rise above the running minimum (8-bit luma)."""
+    y = luma(a)
+    threshold = max(40.0, 0.5 * np.percentile(y, 99.9))
+    ys, xs = np.nonzero(y > threshold)
+    if len(ys) == 0:
+        return 0.0
+    iy, ix = np.unravel_index(np.argmax(y), y.shape)
+    near = (np.abs(ys - iy) < 200) & (np.abs(xs - ix) < 200)
+    cy, cx = ys[near].mean(), xs[near].mean()
+    r_disc = np.sqrt(near.sum() / np.pi)
+    yy, xx = np.mgrid[0:y.shape[0], 0:y.shape[1]]
+    r = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2).astype(int)
+    r_max = int(min(cy, cx, y.shape[0] - cy, y.shape[1] - cx)) - 1
+    prof = np.bincount(r.ravel(), y.ravel())[:r_max] / np.maximum(np.bincount(r.ravel())[:r_max], 1)
+    start = int(r_disc + 3)
+    bump, low = 0.0, float("inf")
+    for v in prof[start:]:
+        low = min(low, v)
+        bump = max(bump, v - low)
+    inner = y[r < 0.6 * r_disc].mean() if (r < 0.6 * r_disc).any() else 1.0
+    rim = y[(r >= 0.85 * r_disc) & (r <= 1.15 * r_disc)].mean()
+    return float(bump), float(rim / max(inner, 1e-6))
+
+
 def m_disc(a):
     d = blob(a)
     y = luma(d)
     return {"disc_px": int(len(d)), "disc_clipped": clipped(d), "disc_luma_sd": float(y.std()),
-            "disc_max_channel": float(d.max(axis=1).mean()), "disc_b_over_r": br(d)}
+            "disc_max_channel": float(d.max(axis=1).mean()), "disc_b_over_r": br(d), "halo_bump": halo_bump(a)[0],
+            "limb_ratio": halo_bump(a)[1]}
 
 
 def m_epic(a, path):
@@ -174,6 +201,41 @@ SCENES = {
         "clipped": (0.0, 0.03, "[T10: windows show the sky, 0.08 % saturated]"),
         "frame_luma": (90, 210, "[D: crew photos crew1_1 / discovery: white cabin ~0.85-0.9 sRGB walls, dark console]")}),
 }
+# Small bright objects also at the headset's angular resolution and at a normal desktop field of view (user 2026-11-08):
+# the local adaptation and glare kernels are in degrees, so the gates must hold at all three. render_check's 1600 x 900
+# frame, vertical fov: 22.2 deg = 40 px/deg at the centre [E: Pimax Dream Air 5294 px per eye over ~100-130 deg],
+# 60 deg = 13.6 px/deg, 10 deg (central vision: the object as attended, user 2026-11-08) = 90 px/deg; the base scenes' 100 deg = 6.6 px/deg (the Earth from the Moon, 1.9 deg, ~12 px).
+FOV_VARIANTS = {"vr": "22.2", "d60": "60", "f10": "10"}
+
+
+def _variants():
+    out = {}
+    for name, (args, measure, gates) in SCENES.items():
+        aim = None
+        if name.startswith("lunar_night_"):
+            aim = "--look_at_earth"
+        elif name in ("full_moon_from_earth", "sun_in_view"):
+            aim = "--look_at_moon" if name == "full_moon_from_earth" else "--look_at_sun"
+        if aim is None:
+            continue
+        base = [a for a in args if not a.startswith(("--azimuth", "--elevation", "--fov"))]
+        if aim not in base:
+            base.append(aim)
+        for tag, fov in FOV_VARIANTS.items():
+            g = dict(gates)
+            if name == "sun_in_view":
+                g = {"white_px": gates["white_px"]}
+            else:
+                g["halo_bump"] = (0.0, 3.0, "[orchestrator / user 2026-11-08: a smooth CIE 146 veil, no ring, no bands: "
+                                            "radial profile beyond the limb falls monotonically within 3 luma]")
+                if not name.startswith("lunar_night_crescent"):
+                    g["limb_ratio"] = (0.0, 1.2, "[T10 test: limb no brighter than the interior x1.25; no bright ring]")
+            out[f"{name}_{tag}"] = (base + ["--fov=" + fov], measure, g)
+    return out
+
+
+SCENES.update(_variants())
+CROP_SCENES = [n for n in SCENES if n.endswith(("_vr", "_f10"))]
 GAPS = ["cockpit_night_lamps: cockpit_shots.gd has no --utc / night case (T10 note) - not automated yet"]
 
 
@@ -260,6 +322,8 @@ def main():
         results[name] = {"metrics": m, "gates": checks, "log": gain_of(png[:-4] + ".log")}
         print(f"{name}: " + ", ".join(f"{k} {v['value']:.3f} {'ok' if v['ok'] else 'FAIL'}" for k, v in checks.items()),
               flush=True)
+        if name in CROP_SCENES:
+            crop(png, os.path.join(OUT, f"{o.label}_crop_{name}.png"))
         if o.compare:
             sheet(name, o.compare, o.label)
     results["_gaps"] = GAPS
@@ -268,6 +332,22 @@ def main():
         json.dump(results, f, indent=1)
     print("FAILED: " + ", ".join(failed) if failed else "ALL GATES PASS", "| gaps:", "; ".join(GAPS))
     return 1 if failed else 0
+
+
+def crop(png, out, half=160):
+    """A 1:1 crop (320 x 320) around the brightest object and a x3 zoom of its centre, side by side."""
+    im = Image.open(png).convert("RGB")
+    a = np.asarray(im).astype(float)
+    y = luma(a)
+    iy, ix = np.unravel_index(np.argmax(y), y.shape)
+    box = (max(0, ix - half), max(0, iy - half), min(im.width, ix + half), min(im.height, iy + half))
+    c = im.crop(box)
+    z = im.crop((max(0, ix - half // 3), max(0, iy - half // 3), min(im.width, ix + half // 3),
+                 min(im.height, iy + half // 3))).resize((c.width, c.height), Image.NEAREST)
+    s = Image.new("RGB", (2 * c.width, c.height))
+    s.paste(c, (0, 0))
+    s.paste(z, (c.width, 0))
+    s.save(out)
 
 
 def sheet(name, a_label, b_label):
