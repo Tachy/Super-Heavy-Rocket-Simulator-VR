@@ -30,6 +30,16 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float
 	vec3 diff = sun_dir - dir;  // Sun propagation (-sun_dir) . view propagation (-dir): the scattering angle
 	float one_minus_cos = 0.5 * dot(diff, diff);
 	float phase = cloud_phase_function(1.0 - one_minus_cos, one_minus_cos);
+	// The Moon (night vision; atmosphere_moon_light is 0 by day: no cost): a second direct light in its own colour, not
+	// baked - its beam's transmittance is the weather column above the sample slanted to the Moon (cloud_column_direct,
+	// the CPU's moon_light_at likewise) and its phase function's forward lobe lines the clouds near it silver;
+	// the multiple scattering takes the Sun bake's isotropic part (light.y) as a stand-in [E], the sky ambient light.z.
+	bool moonlit = atm_moonlit();
+	vec3 moon_dir = normalize(atmosphere_moon_direction);
+	vec3 moon_diff = moon_dir - dir;
+	float moon_one_minus_cos = 0.5 * dot(moon_diff, moon_diff);
+	float moon_phase = cloud_phase_function(1.0 - moon_one_minus_cos, moon_one_minus_cos);
+	vec3 moon_irradiance = vec3(0.0);
 	float transmittance_sc = 1.0;
 	float transmittance_l = 1.0;
 	vec3 sun_irradiance = vec3(-1.0);  // set at the first cloud sample (one air lookup per ray)
@@ -209,6 +219,10 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float
 					1.0);
 			sky_irradiance = ATM_PI * atm_sky_light(p, normal)
 					* mix(cloud_group_eclipse_near, cloud_group_eclipse_far, eclipse_x);
+			if (moonlit) {
+				moon_irradiance = ATM_PI * atm_moon_at(p);
+				sky_irradiance += ATM_PI * atm_moon_sky_light(p, normal);
+			}
 #ifdef CLOUD_DIAG_SUN_ONLY
 			sky_irradiance = vec3(0.0);
 #endif
@@ -224,6 +238,13 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float
 			float j_sun = phase * light.x + CLOUD_BAKED_J_MAX * light.y;
 			radiance += keep * (transmittance_sc * sky_irradiance * (CLOUD_BAKED_J_MAX * light.z) * (1.0 - scaled_step)
 					/ k_sc + transmittance_l * sun_irradiance * j_sun * (1.0 - light_step) / w_light);
+			if (moonlit) {
+				vec3 p_m = camera + eye + dir * d;
+				float mu_m = dot(cloud_geodetic_up(p_m), moon_dir);
+				vec2 column = cloud_column_mean_depth(cloud_lat_lon(p_m), cloud_height_of(p_m));
+				float j_moon = moon_phase * cloud_column_direct(column, mu_m) + CLOUD_BAKED_J_MAX * light.y;
+				radiance += keep * transmittance_l * moon_irradiance * j_moon * (1.0 - light_step) / w_light;
+			}
 		}
 		transmittance_sc *= scaled_step;
 		transmittance_l *= light_step;

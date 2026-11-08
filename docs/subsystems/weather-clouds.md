@@ -529,7 +529,11 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   is 3.2 km from the anchor, the Sun turns 0.5 deg or the weather changes; the new set is cross-faded in over 8 frames
   (both sets marched, the renders mixed). Memory 216 MB per set (two sets). Beyond level 5: the flat outer levels (next
   bullet). Moon light not
-  baked. Stereo mock, divisor 2, equiangular, 120 frames (frame / cloud pass / march ms): old G 35.8 / 28.4 / 20.8,
+  baked as a field, but marched (look fixes T13, 2026-11-08): while `atm_moonlit()` the march adds, per in-cloud step, the Moon's
+  direct beam (`atm_moon_at`, same terms and colour as `cloud_far`) x (its phase function's forward lobe x the weather column above the
+  sample slanted to the Moon, `cloud_column_direct`; the CPU's `moon_light_at` likewise) + the Sun bake's multiple-scattering part
+  `J_MAX x light.y` as an isotropic stand-in [E], and the moonlit sky `atm_moon_sky_light` into the sky ambient (x light.z). Before, the
+  near clouds were black at night (no Moon term in the march). Open: no self-shadowing beyond the column, no GPU luminance check yet. Stereo mock, divisor 2, equiangular, 120 frames (frame / cloud pass / march ms): old G 35.8 / 28.4 / 20.8,
   D 78.0 / 60.6 / 48.0, H 58.5 / 45.0 / 35.3; baked G 22.0 / 8.6 / 5.1, D 27.2 / 9.7 / 5.8, H 22.1 / 8.4 / 4.8 (the
   upsample's ~3.3 ms is in both). Details, images and rulings: `.superpowers/sdd/2026-10-28-cloud-world-volume/
   baked-proto-report.md`; every kernel in `tests/cloud_compile_check.gd`.
