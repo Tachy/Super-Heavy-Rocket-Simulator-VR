@@ -773,6 +773,15 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   analog Gulf 45 deg 0.10, analog cumulus low Sun 60 deg 0.00; single points 10-24 % (reported: the volume's view of
   its 3-D shapes changes with the distance as much below the band - 25.8 -> 39.5 km worst 14-50 %). Section 5 (the
   re-bake across a shape tile at 69 km, now with the volume): mean 0.70 %, worst 2.8 % (tolerance 1.5 % mean).
+  Oblique fly-up (fix 2, `t7c_fix2/fly/`, `fly_stats.txt`, sheets `sheet_<seq>.png`; the camera on the ray to a fixed
+  aim point, one process per height, 35-70 km, the area seen from 35 km; 4 x 4 region step per 5 km / global luma per
+  km): Gulf 45 deg 2.2 codes / 0.32 %, Gulf low Sun 60 deg 5.1 (35 -> 40 km), 3.7 (40 -> 45) / 0.78 %, cumulus 30 deg
+  1.8 / 0.11 %, cumulus low Sun 45 deg 3.3 / 0.66 %, Sc deck 60 deg 8.6 (35 -> 40), 7.3 (40 -> 45), then <= 3.5 /
+  0.96 %, Sc deck low Sun 30 deg 2.5 / 0.31 %; over 50-70 km every step <= 2.5 codes and <= 0.46 % / km.
+  GPU (fix 2 against T7c, 1600 x 900 / Pimax stereo VR preset, cloud_pass_march median): 56 km nadir 0.672 -> 0.547 ms,
+  45 deg 0.718 -> 0.603, VR 45 deg 2.76 -> 2.26; 70 km nadir 0.399 -> 0.644, VR 45 deg 1.40 -> 2.14 (the volume's
+  march now at every height: as at 56 km); 400 km nadir 0.230 -> 0.398, VR 45 deg 0.55 -> 0.80; 2000 km 0.117 ->
+  0.114. The Earth from scaled space (20 000 km, VR): opaque pass 1.44 -> 1.22 ms with the clear-ratio texture.
   Nadir cover (centre dumps, alpha > 0.05): uniform slabs (bottom 1 km, in-cloud tau 10) 0.5-2 km, f 0.2 / 0.4 / 0.7:
   from 15 km 0.21 / 0.42 / 0.75 (1 km), from 50 km 0.21 / 0.43 / 0.73, from 100 km 0.18-0.23 / 0.39-0.44 / 0.69-0.75,
   from 400 km 0.34 / 0.60 / 0.87 with mean alpha 0.19 / 0.43 / 0.77 (the coarsest levels smear: a wider faint margin,
@@ -968,6 +977,17 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   cloud_far_check 1e), the cumulus spread's thin clouds (physical, Jensen) and level 0's 100 m voxels (50 m cells raise
   the shadow 0.211 -> 0.229). A level-0 cover gain (like `CLOUD_BAKED_LEVEL_COVER_GAIN` of the coarse levels) would push
   the view's cover above the data's - not made (T7c review I3a).
+- **The view's slow drift with the height and off nadir (look fixes T7c / fix 2)**: no hand-over is left at 40-60 km
+  (the volume at every height), but the volume's own view changes with the camera height - its footprint levels and,
+  off nadir, the 3-D shapes seen from another distance: straight down Gulf -4 %, cumulus +2.5-3.2 % luma over 40-80
+  km (<= 0.36 codes / km); the Sc deck 80 -> 100 km -4 %; obliquely up to 0.96 % / km, the Sc deck at 60 deg off nadir
+  8.6 / 7.3 codes per 5 km at 35-45 km (the haze and the far deck toward the horizon) - gradual, no step. Single ground
+  points move 10-24 % over 39.5 -> 60.5 km off nadir, as much below the band (cloud_far_check 5b).
+- **The volume's coarse levels from orbit (look fixes T7c / fix 2)**: from ~400 km the volume's coarse voxel levels
+  draw blocky small cumulus within its +-410 km and meet the flat levels' softer pattern beyond - a visible change of
+  texture across the volume's extent (`t7c_fix2/sheet_edge_410km.png`; T7c's column showed the same, before T7c the
+  flat pattern drew everything above 60 km). The march there costs +0.25 ms in VR at 400 km. Open: a smoother coarse
+  level (or the flat pattern within the extent from a footprint on).
 - **The volume's cover depends on its level (look fixes T7c)**: the fine level matches the data, the coarse levels
   carry a gain fitted to slabs (`CLOUD_BAKED_LEVEL_COVER_GAIN`), the coarsest (from ~400 km) smear a faint margin over a
   wider area (alpha > 0.05 cover 0.34 at f 0.2, mean alpha kept). Real sites from 50 km within -14 / +11 % of the
