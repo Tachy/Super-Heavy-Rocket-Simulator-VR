@@ -250,6 +250,27 @@ def m_sun_profile(fov_deg):
     return measure
 
 
+def _cloud_br(a, x0, y0, x1, y1):
+    """Linear B/R of the cloud pixels of a region (image fractions): per-pixel B/R < 1.2 (not the blue sky / sea),
+    unclipped, luma above the cloud pixels' median (the lit cloud, not its shaded base)."""
+    h, w, _ = a.shape
+    r = a[int(y0 * h):int(y1 * h), int(x0 * w):int(x1 * w)].reshape(-1, 3)
+    l = lin(r)
+    y = luma(l)
+    m = (l[:, 2] / np.maximum(l[:, 0], 1e-6) < 1.2) & (r.max(axis=1) < 250)
+    if m.sum() < 50:
+        return float("nan")
+    m &= y > np.median(y[m])
+    return float(l[m, 2].mean() / max(l[m, 0].mean(), 1e-9))
+
+
+def m_horizon_clouds(a):
+    """Bug hunt 2026-11-08 (red horizon clouds): the far cloud band at the horizon (from 2 km, el 2, fov 60: rows
+    0.50-0.58 between the near cumulus) against the near cumulus (upper left), displayed linear B/R."""
+    near, far = _cloud_br(a, 0.00, 0.33, 0.30, 0.50), _cloud_br(a, 0.28, 0.50, 0.75, 0.58)
+    return {"horizon_cloud_b_over_r": far, "near_cloud_b_over_r": near, "horizon_over_near": far / near}
+
+
 def m_cockpit(a):
     return {"frame_luma": float(luma(a.reshape(-1, 3)).mean()), "clipped": clipped(a.reshape(-1, 3))}
 
@@ -262,6 +283,16 @@ SCENES = {
     "pad_noon_e60": (NOON + ["--azimuth=90", "--elevation=60", "--fov=100"], m_sky, {
         "sky_b_over_r": (1.6, 99, "[S: clear sky blue looking up]"),
         "frame_luma": (70, 200, "[call] the sky looking up is neither grey-dark nor white")}),
+    # bug hunt 2026-11-08 (user: noon clouds near the horizon red-shifted, esp. from ~2000 m): .superpowers/sdd/
+    # 2026-11-07-look-fixes/bug-horizon-report.md. Expected value: the core's own composite of a WHITE Lambertian cloud
+    # lit by Sun + sky 30 km away from a 2 km eye is 0.845 of the plate white's B/R (60 km 1.0), through the white
+    # balance and the Hunt step (S 1.50) 0.775 displayed; the near cumulus' sunlit sides show 0.85.
+    "horizon_clouds_noon_2km": (NOON + ["--height=2000", "--azimuth=90", "--elevation=2", "--fov=60"], m_horizon_clouds, {
+        "horizon_cloud_b_over_r": (0.75, 99, "[D: core composite of a white cloud 30 km from 2 km (0.845 of the plate "
+                                             "white) shown at S 1.5 -> 0.775; call: real distant noon cumulus white to "
+                                             "slightly yellowish, not salmon; 2026-11-08 0.64]"),
+        "horizon_over_near": (0.85, 99, "[D: the same white cloud 0.775 over the near cumulus 0.85-0.90: the haze "
+                                        "warms the far band by at most ~10-15 %; 2026-11-08 0.755]")}),
     "dusk_m5_5": (["--utc=2026-11-08T00:05:00"] + PAD + ["--azimuth=250", "--elevation=5", "--fov=100"], m_sky, {
         "sky_b_over_r": (1.2, 99, "[T5b fix 3: dusk B/R 1.36; user: twilight bluish]")}),
     "blue_hour_m7_7": (["--utc=2026-11-08T00:15:00"] + PAD + ["--azimuth=250", "--elevation=5", "--fov=100"], m_sky, {

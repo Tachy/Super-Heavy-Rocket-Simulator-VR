@@ -269,3 +269,23 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   ring, no bright edge); fly-up region steps above the 4-code target up to 10-12.6 codes at 29-41 km (Gulf, cumulus)
   and 5-8 codes at 150-1100 km; the Sun beam rule is fitted with detail levels off (game's near shadows 4-10 % darker,
   `STARSIM_GAME_DETAIL=1` cloud_check fails 4). Details: `docs/subsystems/weather-clouds.md` open points.
+
+## Horizon clouds at noon (bug hunt 2026-11-08, open: model decision)
+
+- Noon cumulus near the horizon show salmon / peach (pad, 2 km, displayed linear B/R 0.64; far / near 0.755), also on
+  the desktop; `tools/look_reference_suite.py` scene `horizon_clouds_noon_2km` fails until decided. No code defect
+  found: the display chain reproduces the measured colour exactly from the scene value (white balance + Hunt S 1.50:
+  0.652 computed vs 0.639 measured), local chromatic adaptation is inactive at noon (D = 1, K = identity), the
+  bright-top term is gated off below 20 km, the short-path form acts below 200 m only, the air shadow adds 3 %, and a
+  uniform deck rendered from 2 km follows the core's `sky_luminance_to_point` composite within the per-row noise
+  (render no redder). The colour is the model's physics: sunlit cumulus sides (scene B/R 0.90 of the plate white:
+  direct-beam dominated) x the 20-60 km boundary-layer path (Rayleigh + aerosol AOD 0.1, Angstrom 1.3, 1.2 km scale
+  height: T_B / T_R 0.39 at 30 km, exact spectrum 0.42) + the bluish air light -> scene 0.76 of the plate white, then
+  the Hunt step's OkLab chroma x 1.5 (0.755 -> 0.652). Levers (measured with the core): Angstrom 1.3 -> 0.5 (maritime,
+  the coastal pad) raises a white cloud 30 km away 0.845 -> 0.937 of the plate white (60 km 1.0 -> 1.13); T9b channel
+  wavelengths +~7 % on the direct beam (largely cancelled by the bluer plate white) and over-corrects long paths
+  (T_B / T_R 30 km 0.444 vs exact 0.416); Mie g 0.8 -> 0.7 +6-10 % air light only; the Hunt factor's chroma boost.
+  Suspected model defect (to check): the volume's sky-lit part of the clouds is 5-7 % of their luminance (diag
+  sun-only / sky-only renders at 5 km) against the plate's 14 % expected for a thick top (Sun and sky light reflected
+  alike) - clouds lit in the direct beam's colour.
+  Report: `.superpowers/sdd/2026-11-07-look-fixes/bug-horizon-report.md`.

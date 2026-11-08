@@ -561,8 +561,11 @@ shaders:
   full Moon from the Earth and full Earth from the lunar night, every fov): linear display luminance of rings at 1 / 2 /
   5 / 10 deg over the disc's (`halo_<d>deg_rel`) against CIE 146 x the disc's solid angle (Earth 2 deg 0.001-0.006, 5
   deg <= 1e-3, 10 deg <= 3e-4; Moon 1 and 2 deg <= 0.03 incl. the sky / aureole floor) and `halo_rise` (8-bit radial
-  profile from 1.15 radii falls within 3 luma: no limb / plateau rings). Gap: no night cabin with lamps (cockpit_shots
-  has no night case).
+  profile from 1.15 radii falls within 3 luma: no limb / plateau rings). Horizon clouds at noon from 2 km
+  (`horizon_clouds_noon_2km`, bug hunt 2026-11-08, user: red-shifted horizon clouds): displayed linear B/R of the far
+  cloud band >= 0.75 and far / near cumulus >= 0.85 [D: the core's composite of a white cloud 30 km away, 0.845 of the
+  plate white, shown at S 1.5 -> 0.775]; FAILS on 2026-11-08 (0.64 / 0.755) - open, cause and options in
+  `known-issues.md` (Horizon clouds at noon). Gap: no night cabin with lamps (cockpit_shots has no night case).
 - **Display tone step: chroma-preserving tone curve** [look fixes T5, 2026-11-07; `display_tone.gd` `DisplayTone` (model
   and CPU mirror), `display_tone_effect.gd` `DisplayToneEffect` (compute step); fidelity flag `DisplayTone.enabled`,
   render_check / cockpit_shots `--tone=agx`]. Godot's AgX (inset matrix, the allenwp curve per channel, outset) took
