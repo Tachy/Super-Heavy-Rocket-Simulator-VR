@@ -636,7 +636,8 @@ double add_cumulus_adiabatic_water(std::span<const double> cloud_fraction, std::
     }
     if (!(in_cloud_path > 0.0) || !(floor_path > in_cloud_path)) return 0.0;
     const double ratio_to_floor = floor_path / in_cloud_path;
-    double added = 0.0;
+    double added = 0.0, run_path = 0.0;  // grid-mean liquid water paths: added, and the run path layers' data
+    std::array<double, weather_layer_count> raised{};
     for (int k = first; k < end && k < weather_layer_count; ++k) {
         if (!(cumulus[i(k)] > 0.0)) continue;
         const double thickness = top_of(k) - bottom_of(k);
@@ -646,11 +647,19 @@ double add_cumulus_adiabatic_water(std::span<const double> cloud_fraction, std::
         const double factor = 1.0 + cumulus[i(k)] * (ratio_to_floor - 1.0);
         const double in_cloud = liquid_kg_m3[i(k)] * thickness / (cloud_fraction[i(k)] * part);
         const double ratio = std::max(1.0, std::min(factor, c::cumulus_liquid_water_max_kg_m3 / in_cloud));
-        const double liquid = liquid_kg_m3[i(k)] * ratio;
-        added += (liquid - liquid_kg_m3[i(k)]) * thickness;
-        liquid_kg_m3[i(k)] = liquid;
+        raised[i(k)] = liquid_kg_m3[i(k)] * ratio;
+        added += (raised[i(k)] - liquid_kg_m3[i(k)]) * thickness;
+        run_path += liquid_kg_m3[i(k)] * thickness;
     }
-    return added;
+    // The added path at most profile.added_path_ratio_max x the run path layers' own (look fixes T7, climatology cap):
+    // every layer's increment scaled by one factor.
+    const double cap = std::max(profile.added_path_ratio_max, 0.0) * run_path;
+    const double share = added > cap ? cap / added : 1.0;
+    for (int k = first; k < end && k < weather_layer_count; ++k) {
+        if (!(cumulus[i(k)] > 0.0)) continue;
+        liquid_kg_m3[i(k)] += share * (raised[i(k)] - liquid_kg_m3[i(k)]);
+    }
+    return share * added;
 }
 
 WeatherSnapshot::WeatherSnapshot(const WeatherSnapshotId& id, int rows, int columns)

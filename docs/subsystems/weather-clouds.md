@@ -60,7 +60,7 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   (Everest 8.85 km + the 3 km boundary layer, rounded up).
 - **Cover from the total cloud cover, cumulus water from an adiabatic parcel** (static clouds Task 9c and its fix round
   1, user 2026-10-27 "Cumulus sind nie flach", ruling "Bedeckung nach ERA5 + Wasser ergaenzen"; `weather_snapshot.hpp`,
-  file format 7). Every snapshot carries the data's total cloud cover per column (ERA5 single-level
+  file format 7; capped since format 8). Every snapshot carries the data's total cloud cover per column (ERA5 single-level
   `total_cloud_cover`, GFS `TCDC` entire atmosphere instantaneous; `WeatherSnapshot::total_cloud_cover`, -1 unknown).
   The column build (`ColumnLayers::build`) runs, after the LCL raise:
   - `scale_cloud_cover_to_total`: the fractions of the layers that count for the cover (stored condensate, a non-zero
@@ -95,15 +95,19 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
     (`added_liquid_path_kg_m2`, diagnostic). The layer means carry T and p for it (`LevelSample` 5 fields).
   - Order: LCL raise, cover, bound, water - the cloud types follow the final fractions, the water floor holds on them.
     CPU light, far field, shadow maps, air shadow and the GPU field read the same layer means (one source).
-  - Measured on four analog hours (Jan / Apr / Jul / Oct 2025 15th 00 UTC, 1 deg, `tau_inv/t9c_*.py`), fix round 1
-    against the first 9c state (f_ad 0.4 constant): grid-mean liquid water path 50.2 -> 140.4 -> 111.1 g/m^2 (ice 20.4;
-    the 48-hour set 117.5 g/m^2, ice 21.6); added water 96 -> 61 g/m^2; low boundary-layer cumulus (area-resolved
-    vertical in-cloud tau, maximal overlap) p10 / p50 / p90 6.2 / 30.6 / 144 -> 6.0 / 27.4 / 106, thin area (tau < 7.07)
-    16.6 % in the data -> 11.8 -> 12.4 %; in-cloud LWC p50 / p90 / p99 0.117 / 0.303 / 0.516 (data) -> 0.233 / 0.629 /
-    1.054 -> 0.189 / 0.488 / 0.823 g/m^3; dropped condensate 0.002 g/m^2 grid mean (0.25 deg: 0.44 % of the columns,
-    at most 36 g/m^2 in one). Cover deficit vs tcc 0.196-0.203 (data) -> 0.004-0.009. The mean liquid water path is
-    still above the ocean climatology the reviewer quoted from memory (MAC-LWP, O'Dell et al. 2008 / Elsaesser et al.
-    2017: order 60-90 g/m^2, not verified here), see `known-issues.md`.
+  - **Climatology cap** (look fixes T7, user 2026-11-08 "A: cap"; file format 8): the added grid-mean path is at most
+    `cumulus_added_liquid_path_ratio_max` 1.0 [E] x the data's own grid-mean liquid path of the run's path layers (each
+    layer's increment scaled by one factor; columns below the cap unchanged). Grid-mean liquid water path (ERA5
+    2025-03-20 14 UTC 0.25 deg / 2025-01-15 06 UTC 1 deg): data 50 / 53, uncapped (format 7) 109-126, capped 76 / 78
+    g/m^2 (0.5 gave 65 / 67) - inside the ocean climatology range ~60-90 g/m^2 the project owner set (MAC-LWP,
+    Elsaesser et al. 2017; O'Dell et al. 2008; the range not re-read from the papers; AMSR-E warm-cloud 41 g/m^2,
+    Greenwald et al. 2018, is lower). In-cloud tau p50 (cover-weighted, far-field column) 8.5 data / 21 uncapped / 13-15
+    capped; insolation-weighted cloud albedo effect 0.32 -> 0.27 (data 0.23; CERES ~0.14 - the rest is the
+    plane-parallel slab, see "Sub-grid" when done). Look from below (`screenshots/look_fixes/t7/sheet_stepA_cumulus_ground.png`,
+    15 N 45 W, Sun ~70 deg): the cumulus are flatter and lighter at their bases - less self-shadowed relief (cloud
+    pixels with Y < 0.35: 2.0 % -> 6.1 % at 12 deg elevation is the grey sides; dark cores gone).
+    Earlier measurement (Task 9c fix round 1, uncapped): grid-mean liquid water path 50.2 -> 111.1 g/m^2 on four analog
+    hours, low boundary-layer cumulus tau p50 27.4; history file.
 - **Vertical profile rule** (`cloud_render_texels.hpp` `cloud_profile_value`, port in `clouds.gdshaderinc`): the two
   layer centres around a point are fetched apart; where cloud starts above a clear layer the base is flat and sharp
   (50 m transition, `cloud_base_transition_m` [E]) in the middle of the gap, partly so where cloud only thickens upward;
@@ -823,7 +827,8 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
 - **Planned: milestone M11 (after M7 cockpit and M10 sound design)**: the rest of the weather. Part 2: rain, snow, fog,
   lightning, weather-dependent haze (the small variant: climatology AOD plus humidity growth with a few precomputed
   table sets), city light on clouds. Part 3: GOES cloud patterns. Part 4: wind / density and launch rules. Open
-  action: compare the grid-mean liquid water path with the MAC-LWP monthly climatology (same months / ocean regions).
+  action: compare the grid-mean liquid water path with the MAC-LWP monthly climatology (same months / ocean regions;
+  the cap of look fixes T7 holds the global mean at 76-78 g/m^2).
 - **Deferred minors (static clouds final review)**, none of them blocking:
   
   

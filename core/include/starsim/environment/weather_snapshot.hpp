@@ -170,6 +170,9 @@ double adiabatic_liquid_water_gradient_kg_m3_per_m(double temperature_k, double 
 struct AdiabaticFractionProfile {
     double at_base = constants::cumulus_adiabatic_fraction_base;
     double at_reference = constants::cumulus_adiabatic_fraction_at_reference;
+    // The added grid-mean liquid path at most this x the run path layers' own (constants.hpp
+    // cumulus_added_liquid_path_ratio_max; infinity = no cap).
+    double added_path_ratio_max = constants::cumulus_added_liquid_path_ratio_max;
 };
 
 // Cumulus water from an adiabatic parcel (static clouds Task 9c, user 2026-10-27: the reanalysis lacks the updraft
@@ -185,7 +188,9 @@ struct AdiabaticFractionProfile {
 // layer's liquid is multiplied by
 // 1 + w_k (s - 1), s = that ratio when it is above 1, so the layers that get water meet the floor (no layer is raised
 // above cumulus_liquid_water_max_kg_m3 in-cloud, which can leave the sum below it). Cloud fractions, ice, every other run and
-// a run already as deep in water are unchanged; the grid-mean water rises (intended). Returns the added liquid water
+// a run already as deep in water are unchanged; the grid-mean water rises (intended). The added grid-mean path is
+// capped at profile.added_path_ratio_max x the path layers' own grid-mean liquid path (each layer's increment scaled
+// by one factor; look fixes T7: the climatology's liquid water path). Returns the added liquid water
 // path (grid mean, kg/m^2). One entry per layer in every span.
 double add_cumulus_adiabatic_water(std::span<const double> cloud_fraction, std::span<double> liquid_kg_m3,
                                    std::span<const double> ice_kg_m3, std::span<const double> temperature_k,

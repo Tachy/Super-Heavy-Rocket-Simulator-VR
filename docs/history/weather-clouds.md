@@ -2618,3 +2618,17 @@ texels bilinearly (`cloud_column_mean_depth`). With the cover's non-linear alpha
 edges showed the field's grid as rectangular blocks - most visible with the 1 deg analog from the start view (2e7 m,
 ~5 pixels a cell; `screenshots/look_investigation/start_wx_game.png`). Since look fixes T2 the column is the B-spline
 (`cloud_column_mean_depth_smooth`), as the cloud pass's far tier had since static clouds Task 8.
+
+## Uncapped cumulus water (file format 7, until 2026-11-08)
+
+Superseded by the climatology cap (look fixes T7). Verbatim from the subsystem file:
+
+>   - Measured on four analog hours (Jan / Apr / Jul / Oct 2025 15th 00 UTC, 1 deg, `tau_inv/t9c_*.py`), fix round 1
+>     against the first 9c state (f_ad 0.4 constant): grid-mean liquid water path 50.2 -> 140.4 -> 111.1 g/m^2 (ice 20.4;
+>     the 48-hour set 117.5 g/m^2, ice 21.6); added water 96 -> 61 g/m^2; low boundary-layer cumulus (area-resolved
+>     vertical in-cloud tau, maximal overlap) p10 / p50 / p90 6.2 / 30.6 / 144 -> 6.0 / 27.4 / 106, thin area (tau < 7.07)
+>     16.6 % in the data -> 11.8 -> 12.4 %; in-cloud LWC p50 / p90 / p99 0.117 / 0.303 / 0.516 (data) -> 0.233 / 0.629 /
+>     1.054 -> 0.189 / 0.488 / 0.823 g/m^3; dropped condensate 0.002 g/m^2 grid mean (0.25 deg: 0.44 % of the columns,
+>     at most 36 g/m^2 in one). Cover deficit vs tcc 0.196-0.203 (data) -> 0.004-0.009. The mean liquid water path is
+>     still above the ocean climatology the reviewer quoted from memory (MAC-LWP, O'Dell et al. 2008 / Elsaesser et al.
+>     2017: order 60-90 g/m^2, not verified here), see `known-issues.md`.

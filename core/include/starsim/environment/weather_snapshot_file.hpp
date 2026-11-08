@@ -17,7 +17,7 @@
 // liquid run redistributed, a trace counted as cloud; downsampled levels averaged instead of the box's lowest base), 4
 // (a deck far above merged into the lifted cloud), 5 (no total cloud cover, the cover not scaled to it, no cumulus
 // water from the adiabatic parcel) and 6 (constant adiabatic fraction, no in-cloud bound, trace layers scaled, no
-// dropped-condensate block) are refused like any other version: the caller rebuilds / re-downloads it.
+// dropped-condensate block) and 7 (the cumulus water uncapped) are refused like any other version: the caller rebuilds / re-downloads it.
 // A file that is short, long, damaged (checksum) or of another version is never read.
 
 #include <cstdint>
@@ -28,7 +28,7 @@
 
 namespace starsim::environment {
 
-inline constexpr std::uint32_t weather_snapshot_file_version = 7;
+inline constexpr std::uint32_t weather_snapshot_file_version = 8;
 inline constexpr const char* weather_snapshot_file_extension = ".wthr";
 
 // Writes to a unique temp file next to `file` and renames it into place; first removes the stale temp files of killed

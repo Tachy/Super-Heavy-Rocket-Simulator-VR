@@ -109,8 +109,9 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - Weather and clouds (M8): the snapshot's layers are scaled to the data's total cloud cover (static clouds Task 9c;
   the 37 pressure levels lose the overlap of the model levels, 0.14-0.20 below tcc before), keeping the grid-mean
   water: the in-cloud water of decks and cirrus is thinner by that factor; the boundary-layer cumulus get a
-  sub-adiabatic parcel's water (grid-mean liquid water path 50 -> 111 g/m^2 on the analog hours - still above the ocean
-  climatology of order 60-90 g/m^2 quoted from memory for MAC-LWP, so the mean water is deliberately high (open: compare against the MAC-LWP monthly climatology on the same months / ocean regions); f_ad falls
+  sub-adiabatic parcel's water, capped at the run's own path (grid-mean liquid water path 50 -> 76-78 g/m^2, inside the
+  ocean climatology range ~60-90 g/m^2 set by the project owner, look fixes T7; open: compare against the MAC-LWP
+  monthly climatology on the same months / ocean regions; the capped cumulus look flatter from below); f_ad falls
   from 0.50 at the base to 0.20 at 2 km); low stratiform is not too dark by its renderer (body-core tau median 97 on the
   analog set, carried by > 4 km frontal runs; the < 1 km runs median 20, Task 10 - `weather-clouds.md` Validation); the limits (light between columns, shadow darkness under broken cloud, plumes always draw
   over clouds, earthshine at the constant Bond albedo, half-resolution staircase at sharp dark edges, no rain / fog /

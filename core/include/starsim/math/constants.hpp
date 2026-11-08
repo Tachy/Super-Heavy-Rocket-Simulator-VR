@@ -218,6 +218,14 @@ inline constexpr double cumulus_adiabatic_fraction_base = 0.50;
 inline constexpr double cumulus_adiabatic_fraction_at_reference = 0.20;
 inline constexpr double cumulus_adiabatic_fraction_reference_height_m = 2000.0;
 inline constexpr double cumulus_liquid_water_max_kg_m3 = 1.5e-3;
+// Cap of the added cumulus water (look fixes T7, user 2026-11-08 "A: cap"): the grid-mean liquid path the parcel adds
+// to a column at most this x the data's own grid-mean liquid path of the run's path layers (at most doubled). [E: 1.0
+// gives a global grid-mean liquid water path of 76-78 g/m^2 (ERA5 2025-03-20 14 UTC 0.25 deg, 2025-01-15 06 UTC 1 deg;
+// the data alone 50-53, uncapped 109-126), inside the ocean climatology range ~60-90 g/m^2 the project owner set
+// (MAC-LWP, Elsaesser et al. 2017, J. Climate 30, 10193; O'Dell et al. 2008, J. Climate 21, 1721 - the range not
+// re-read from the papers; AMSR-E warm-cloud LWP 41 g/m^2 global mean, Greenwald et al. 2018, JGR 123, 3668, is lower);
+// 0.5 gave 65-67. Insolation-weighted cloud albedo effect 0.32 -> 0.27 (data alone 0.23; CERES ~0.14).]
+inline constexpr double cumulus_added_liquid_path_ratio_max = 1.0;
 // Bounds of the in-cloud condensate of any layer (weather_snapshot.hpp: bound_incloud_condensate): the cover scaling
 // can put the grid-mean water of a layer on a far smaller cloud fraction (a column the data calls clear), which would
 // be a dense speck; the excess is dropped. Liquid [E: 3e-3 kg/m^3, ~2-4 g/m^3 are the aircraft maxima of deep

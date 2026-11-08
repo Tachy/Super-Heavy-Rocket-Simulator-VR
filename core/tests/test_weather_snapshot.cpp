@@ -628,7 +628,7 @@ TEST_CASE("A format version 1 snapshot file is refused", "[weather]") {
     // The same bytes with the right version number (and the missing block) are not a valid version 2 file either.
     const std::uint32_t two = 2;
     // Version 2 stored unknown levels as 0 and had no base redistribution; version 3 moved only the lowest liquid run; version 4 merged a deck far above the lifted cloud.
-    CHECK(weather_snapshot_file_version == 7);  // 6: no dropped-condensate block; 5: no total cloud cover / cumulus water
+    CHECK(weather_snapshot_file_version == 8);  // 7: cumulus water uncapped; 6: no dropped-condensate block; 5: no total cloud cover / cumulus water
     std::memcpy(bytes.data() + 8, &two, sizeof(two));
     bytes.resize(bytes.size() - sizeof(std::uint64_t));
     hash = 14695981039346656037ull;

@@ -45,7 +45,9 @@ struct Column {
             ice[static_cast<std::size_t>(k)] = f * ice_in_cloud;
         }
     }
-    double add(double lcl_m, AdiabaticFractionProfile profile = {}) {
+    // The floor rule alone (the climatology cap off) unless `capped`.
+    double add(double lcl_m, AdiabaticFractionProfile profile = {}, bool capped = false) {
+        if (!capped) profile.added_path_ratio_max = std::numeric_limits<double>::infinity();
         return add_cumulus_adiabatic_water(fraction, liquid, ice, temperature, pressure, 0.0, lcl_m, profile);
     }
     double cover() const { return cloud_column_cover_max_random(fraction, liquid, ice, 0.0); }
@@ -584,4 +586,40 @@ TEST_CASE("A downsampled box keeps the total cloud cover of its cells", "[weathe
             CHECK(cloud_column_cover_max_random(fraction, liquid, ice, 0.0) == Catch::Approx(0.5).margin(0.005));
         }
     }
+}
+
+TEST_CASE("The added cumulus water is capped at a multiple of the run's own path", "[weather]") {
+    // Thin data cumulus (in-cloud 0.05 g/m^3, 750 m .. 2 km, LCL 800 m): the floor asks for several times its water.
+    Column uncapped;
+    uncapped.cloud(3, 7, 0.3, 5e-5);
+    const Column before = uncapped;
+    Column capped = uncapped;
+    const double free_added = uncapped.add(800.0);
+    REQUIRE(free_added > 2.0 * before.liquid_path());
+    // Default cap (constants.hpp cumulus_added_liquid_path_ratio_max): the added path is that ratio x the run path.
+    const double added = capped.add(800.0, {}, true);
+    CHECK(added == Catch::Approx(c::cumulus_added_liquid_path_ratio_max * before.liquid_path()).epsilon(1e-9));
+    CHECK(added == Catch::Approx(capped.liquid_path() - before.liquid_path()).epsilon(1e-12));
+    // Every layer's increment scaled by one factor (the floor rule's profile of the increments kept).
+    const double share = added / free_added;
+    for (int k = 3; k <= 7; ++k) {
+        const auto i = static_cast<std::size_t>(k);
+        CHECK(capped.liquid[i] - before.liquid[i] ==
+              Catch::Approx(share * (uncapped.liquid[i] - before.liquid[i])).epsilon(1e-9));
+    }
+    // A column whose floor stays under the cap is untouched by it.
+    Column small;
+    small.cloud(3, 7, 0.3, 3e-4);
+    const double small_path = small.liquid_path();
+    Column small_capped = small;
+    const double small_added = small.add(800.0);
+    REQUIRE(small_added > 0.0);
+    REQUIRE(small_added < c::cumulus_added_liquid_path_ratio_max * small_path);
+    CHECK(small_capped.add(800.0, {}, true) == Catch::Approx(small_added).epsilon(1e-12));
+    // Cap 0: nothing added.
+    Column none = before;
+    AdiabaticFractionProfile zero{};
+    zero.added_path_ratio_max = 0.0;
+    CHECK(none.add(800.0, zero, true) == 0.0);
+    CHECK(none.liquid == before.liquid);
 }
