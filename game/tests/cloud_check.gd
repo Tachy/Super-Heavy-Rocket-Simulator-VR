@@ -20,12 +20,12 @@
 #      a cf 0.3 layer and a deck, Sun 45 / 8 deg: steps <= 0.05 + 3 standard errors (0.03 for the far tiers on the
 #      deck; the broken layer's far tiers reported: S's coarse levels at 110 km shadow more than the column); over the
 #      disc inside the near tier the shapes' area mean of the direct Sun vs the CPU's cell (cf 0.15 / 0.3 / 0.4, Sun
-#      45 / 8 deg; the beam-cover overlap model, constants.hpp cloud_overlap_*: STARSIM_SLANT_TABLE=1 prints the fit
+#      45 / 8 deg; the Sun beam rule, constants.hpp cloud_sun_beam_*: STARSIM_SLANT_TABLE=1 prints the fit
 #      table), the near map vs the far map over the same receivers, the column terms vs the CPU, the CPU's total light
 #      vs the ground's mean;
 #   3. the vehicles' direct Sun from the drawn shapes (CloudLayer.direct_sun_transmittance, Atmosphere.sun_light_at;
-#      2026-10-30): under a broken layer (cf 0.4) at a 45 deg Sun, points 10 m up along a 4 km line: one in a cumulus'
-#      shadow and one in the gap beside it (by the probe) get direct Sun light differing by at least 0.5 of the clear
+#      2026-10-30): under a broken layer (cf 0.4) at a 45 deg Sun, points 10 m up along a 4 km line (centred on the
+#      darkest near-map point of a 16 km scan): one in a cumulus' shadow and one in the gap beside it (by the probe) get direct Sun light differing by at least 0.5 of the clear
 #      value while the CPU's grid mean gives both the same; the probe agrees with the near shadow map at the same
 #      points (both read S): mean |dT| <= 0.02, worst <= 0.15 (the map's texels at the shadows' edges).
 # Detail levels off for the numbers (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
@@ -73,8 +73,11 @@ const HANDOVER_TOLERANCE := 0.05
 const FAR_HANDOVER_TOLERANCE := 0.03  ## the far map and the slanted column on a deck (both smooth)
 ## [E] The S maps' slant optical depth through a closed slab against the core's (S is baked through the voxelised
 ## shapes: measured 0.927-0.937 x the core's on the 1 km slabs, 2026-10-30 - an open point of the bake, not of this
-## check; the grid-mean map it replaced agreed within 3 % in T).
-const S_DEPTH_TOLERANCE := 0.10
+## check; the grid-mean map it replaced agreed within 3 % in T). Since look fixes T7c 0.898-0.915: the slab's rim
+## heights (the profile's fraction below 1 between the layer centres) are drawn at their depth-aware fraction, patchy -
+## a line through them passes more light than their grid-mean depth (Jensen; with the flag volume_depth_cover off
+## 0.927-0.937 again, 2026-11-08).
+const S_DEPTH_TOLERANCE := 0.12
 const VIEW_SIZE := 33  ## odd: the centre pixel's ray is the camera axis
 ## [E] Frames a render waits at most for the baked volume to settle (a bake, a cross-fade) - the probe's read-back too.
 const BAKE_MAX_FRAMES := 3000
@@ -82,6 +85,11 @@ const BAKE_MAX_FRAMES := 3000
 ## smallest difference of shadow and gap in units of the clear direct light.
 const VEHICLE_LINE_M := 4000.0
 const VEHICLE_POINTS := 41
+## [E] The line is centred on the darkest near-map point of a 16 km scan east-west through the site (161 points): the
+## depth-aware shapes (look fixes T7c) are smaller and the fixed 4 km line about the site lay in one gap; the probe
+## takes at most 64 keys, so the line itself stays short.
+const VEHICLE_SCAN_M := 16000.0
+const VEHICLE_SCAN_POINTS := 161
 const VEHICLE_HEIGHT_M := 10.0
 const VEHICLE_MAP_TOLERANCE := Vector2(0.02, 0.15)  ## mean and worst |probe - map| (the map's 62.5 m texels at edges)
 const VEHICLE_MIN_CONTRAST := 0.5
@@ -678,11 +686,21 @@ func _vehicle_samples() -> void:
 	var sun := _local_direction(45.0, 135.0)
 	var camera := _point(2.0)
 	await _render(camera, sun, sun, 0)
+	var scan_offsets := PackedVector3Array()
+	for i in range(VEHICLE_SCAN_POINTS):
+		var along := (float(i) / float(VEHICLE_SCAN_POINTS - 1) - 0.5) * VEHICLE_SCAN_M
+		scan_offsets.append(Frames.to_render(_vehicle_point(along) - camera))
+	var scan := await _probe(scan_offsets, 0)
+	var centre := 0.0
+	var darkest := INF
+	for i in range(VEHICLE_SCAN_POINTS):
+		var along := (float(i) / float(VEHICLE_SCAN_POINTS - 1) - 0.5) * VEHICLE_SCAN_M
+		if absf(along) <= 0.5 * (VEHICLE_SCAN_M - VEHICLE_LINE_M) and scan[i].y < darkest:
+			darkest = scan[i].y
+			centre = along
 	var points: Array[Vector3] = []
 	for i in range(VEHICLE_POINTS):
-		var along := (float(i) / float(VEHICLE_POINTS - 1) - 0.5) * VEHICLE_LINE_M
-		points.append(_destination(LAT_DEG, LON_DEG, absf(along), deg_to_rad(90.0 if along >= 0.0 else 270.0))
-				+ _local_direction(90.0, 0.0) * VEHICLE_HEIGHT_M)
+		points.append(_vehicle_point(centre + (float(i) / float(VEHICLE_POINTS - 1) - 0.5) * VEHICLE_LINE_M))
 	var probe := await _probe_points(camera, points)
 	var offsets := PackedVector3Array()
 	for p in points:
@@ -728,14 +746,26 @@ func _vehicle_samples() -> void:
 	_atmosphere.moonlight_relative_value = 1.0
 	_atmosphere._moon_direction_fixed = sun
 	var moon: float = _atmosphere.moon_light_at(points[dark])[1]
+	# the keyless light in the Moon light's own colour (moon_light_colour: the TOA Sun's colour x the regolith's, since
+	# 04bd4d24 - the energy is the brightest channel's, so the uncoloured light differs from it)
+	var keyless_moon: float = _atmosphere.sun_light_at(points[dark], sun, 1.0, "", _atmosphere.moon_light_colour())[1]
 	var keyless: float = _atmosphere.sun_light_at(points[dark], sun, 1.0, "")[1]
-	var keyed: float = _atmosphere.sun_light_at(points[dark], sun, 1.0)[1]
+	# the Sun's light at the point through its probe key, read once the key held this point (_vehicle_light: the key
+	# now holds the clearest point, read last)
+	var keyed: float = lit[0]
 	_atmosphere.moonlight_active = saved[0]
 	_atmosphere.moonlight_relative_value = saved[1]
 	_atmosphere._moon_direction_fixed = saved[2]
 	_check("moonlight under the deck: the grid mean along the Moon's ray, not the Sun probe's S",
-			absf(moon - keyless) <= 1.0e-9 * maxf(keyless, 1.0) and absf(keyless - keyed) > 1.0e-6 * maxf(keyed, 1.0),
-			"moon %.4f keyless %.4f (CPU T %.3f) keyed %.4f (probe T %.3f)" % [moon, keyless, cpu[0], keyed, probe[dark]])
+			absf(moon - keyless_moon) <= 1.0e-9 * maxf(keyless_moon, 1.0)
+			and absf(keyless - keyed) > 1.0e-6 * maxf(keyed, 1.0),
+			"moon %.4f keyless %.4f in the Moon's colour, %.4f white (CPU T %.3f) keyed %.4f (probe T %.3f)" % [moon,
+			keyless_moon, keyless, cpu[0], keyed, probe[dark]])
+
+
+## The point VEHICLE_HEIGHT_M up, along m east (west if negative) of the check site.
+func _vehicle_point(along: float) -> Vector3:
+	return _destination(LAT_DEG, LON_DEG, absf(along), deg_to_rad(90.0 if along >= 0.0 else 270.0)) 			+ _local_direction(90.0, 0.0) * VEHICLE_HEIGHT_M
 
 
 ## The Sun probe at each point (Earth-fixed m; one key each), read back after a few frames; NAN where none came.

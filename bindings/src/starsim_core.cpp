@@ -1544,6 +1544,9 @@ godot::Dictionary StarsimCore::cloud_noise() const {
         field_constants["CLOUD_OVERLAP_VERTICAL"] = constants::cloud_overlap_vertical;
         field_constants["CLOUD_OVERLAP_SLANT"] = constants::cloud_overlap_slant;
         field_constants["CLOUD_OVERLAP_ONSET_COT"] = constants::cloud_overlap_slant_onset_cot;
+        field_constants["CLOUD_SUN_BEAM_ZENITH_EXPONENT"] = constants::cloud_sun_beam_zenith_exponent;
+        field_constants["CLOUD_SUN_BEAM_SLANT"] = constants::cloud_sun_beam_slant;
+        field_constants["CLOUD_SUN_BEAM_SLANT_POWER"] = constants::cloud_sun_beam_slant_power;
         result["field_constants"] = field_constants;
         result["type_constants"] = types;
         result["detail_mean"] = noise.detail_mean;

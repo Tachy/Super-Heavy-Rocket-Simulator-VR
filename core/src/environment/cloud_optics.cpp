@@ -569,8 +569,8 @@ double cloud_beam_cover(double cloud_fraction, double sun_cos_zenith) {
     if (f >= 1.0) return 1.0;
     const double mu0 = std::clamp(sun_cos_zenith, 0.02, 1.0);
     const double cot = std::sqrt(1.0 - mu0 * mu0) / mu0;
-    const double n = 1.0 + c::cloud_overlap_vertical * (1.0 - f) +
-                     c::cloud_overlap_slant * std::max(cot - c::cloud_overlap_slant_onset_cot, 0.0);
+    const double n =
+        c::cloud_sun_beam_zenith_exponent + c::cloud_sun_beam_slant * std::pow(cot, c::cloud_sun_beam_slant_power);
     return 1.0 - std::pow(1.0 - f, n);
 }
 

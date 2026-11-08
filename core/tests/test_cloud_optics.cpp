@@ -1336,7 +1336,7 @@ TEST_CASE("Broken cloud lights the ground as independent columns", "[weather]") 
         const double mu0 = std::cos(zenith_deg * c::deg_to_rad);
         const math::Vec3 sun = sun_at_zenith_angle(ground, zenith_deg * c::deg_to_rad);
         const double beam = cloud_beam_cover(column, mu0);
-        CHECK(beam > cover);  // the shapes' shadows cover more than the cloud fraction
+        CHECK(beam < cover);  // the drawn shapes' effective shadow: lighter than an opaque cover of the fraction
         const double tau_beam = column.mean / beam;
         CHECK(cloud_sun_transmittance(slab, ground.position, sun) ==
               Approx(1.0 - beam + beam * std::exp(-tau_beam / mu0)).epsilon(0.01));
@@ -1348,24 +1348,29 @@ TEST_CASE("Broken cloud lights the ground as independent columns", "[weather]") 
           Approx(1.0 - cover + cover * two_stream_diffuse_transmittance(tau_in, g)).epsilon(1e-3));
 }
 
-TEST_CASE("The beam's cover follows the fitted overlap of the shapes' shadows", "[weather]") {
-    // cloud_beam_cover = 1 - (1 - f)^n with n = 1 + 0.66 (1 - f) + 0.21 max(cot e - 1.8, 0): more than f even at the
-    // zenith, growing as the Sun sinks, 1 for a deck, 0 without cloud, bounded below the horizon by mu0 >= 0.02.
+TEST_CASE("The beam's cover follows the fitted shadows of the drawn shapes", "[weather]") {
+    // cloud_beam_cover = 1 - (1 - f)^n with n = 0.62 + 0.018 cot(e)^1.85 (constants.hpp cloud_sun_beam_*): below f at
+    // the zenith (the depth-aware shapes' shadows are lighter than an opaque f), growing as the Sun sinks, 1 for a deck,
+    // 0 without cloud, bounded below the horizon by mu0 >= 0.02.
     CHECK(cloud_beam_cover(1.0, 0.5) == 1.0);
     CHECK(cloud_beam_cover(CloudColumnDepths{}, 0.5) == 0.0);
     const double f = 0.3;
-    CHECK(cloud_beam_cover(f, 1.0) == Approx(1.0 - std::pow(1.0 - f, 1.0 + 0.66 * (1.0 - f))).epsilon(1e-12));
-    double previous = f;
+    CHECK(cloud_beam_cover(f, 1.0) == Approx(1.0 - std::pow(1.0 - f, 0.62)).epsilon(1e-12));
+    double previous = 0.0;
     for (double elevation_deg : {90.0, 60.0, 30.0, 15.0, 8.0, 3.0, 0.5}) {
         const double cover = cloud_beam_cover(f, std::sin(elevation_deg * c::deg_to_rad));
         CHECK(cover >= previous - 1e-12);
         CHECK(cover <= 1.0);
         previous = cover;
     }
-    // Shape fit (the shipped shapes' shadows, cloud_check.gd section 7): cf 0.3 at 8 deg: the shadows of the shapes
-    // leave 0.404 of the Sun (tau_in 3: no light through the cloud), the model 1 - C within 0.02.
-    CHECK(1.0 - cloud_beam_cover(0.3, std::sin(8.0 * c::deg_to_rad)) == Approx(0.404).margin(0.03));
-    CHECK(1.0 - cloud_beam_cover(0.4, std::sin(45.0 * c::deg_to_rad)) == Approx(0.517).margin(0.03));
+    // Shape fit (the drawn shapes' shadows, cloud_check.gd STARSIM_SLANT_TABLE=1, 2026-11-08: area means of the direct
+    // Sun over eight sites, a 1 km layer of grid-mean depth 3 - its in-cloud depth 7.5-20 passes no direct light): the
+    // shapes leave 0.794 of the Sun at cf 0.3 / 45 deg, 0.632 at cf 0.3 / 8 deg, 0.518 at cf 0.4 / 8 deg, 0.128 at
+    // cf 0.6 / 5 deg; the model 1 - C within the fit's worst 0.013 (margin 0.02).
+    CHECK(1.0 - cloud_beam_cover(0.3, std::sin(45.0 * c::deg_to_rad)) == Approx(0.794).margin(0.02));
+    CHECK(1.0 - cloud_beam_cover(0.3, std::sin(8.0 * c::deg_to_rad)) == Approx(0.632).margin(0.02));
+    CHECK(1.0 - cloud_beam_cover(0.4, std::sin(8.0 * c::deg_to_rad)) == Approx(0.518).margin(0.02));
+    CHECK(1.0 - cloud_beam_cover(0.6, std::sin(5.0 * c::deg_to_rad)) == Approx(0.128).margin(0.02));
 }
 
 TEST_CASE("Mid-blend light follows the renderer's order (blend the column, then the transmittance)", "[weather]") {

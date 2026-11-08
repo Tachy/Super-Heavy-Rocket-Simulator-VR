@@ -190,16 +190,29 @@ inline constexpr double cloud_base_snap_m = 2.0 * cloud_march_min_step_m;
 // A cloud fraction below this counts as none: half a step of the 8-bit cloud-fraction code (the same constant as
 // CLOUD_MIN_FRACTION in shaders/clouds.gdshaderinc; the shadow lookup and the column cover use it too).
 inline constexpr double cloud_min_cover = 0.5 / 255.0;
-// Cover of the direct Sun's beam through a broken layer of cloud fraction f: 1 - (1 - f)^n, n = 1 + a (1 - f) + b max(cot
-// e - k, 0) for the Sun at elevation e (cloud_optics.hpp: cloud_beam_cover). The shipped shapes' 3D noise does not
-// overlap maximally: the clouds of the layers' heights are displaced against each other (a: the vertical part, the
-// shadow's cover above f at the zenith), and a slanted beam crosses further, independent cells (b, k: its horizontal
-// run through the layer, ~cot e times the layer's depth, beyond the cells' correlation length). [E] Fitted to the
-// shapes' shadows (cloud_check.gd section 7, area means over eight independent sites, f 0.15-0.6, e 5-75 deg, a layer
-// of 1 km): within 0.02 of the transmittance. The cloud-fraction 1 (decks) is untouched.
+// The renderer's projected cover of a broken layer seen along a line of cosine mu (the far field's and the flat levels'
+// view, clouds.gdshaderinc cloud_beam_cover_of / cloud_beam_fraction_of; mirrored there as CLOUD_OVERLAP_*, compared by
+// smoke_test.gd): 1 - (1 - f)^n, n = 1 + a (1 - f) + b max(cot e - k, 0). [E] Fitted 2026-10-30 to the shapes' shadows
+// before the depth-aware fraction (look fixes T7c): a the undeflated shapes' cover above f at the zenith, b, k the
+// slanted line's further, independent cells. Since T7c the view takes the data's total cover at the nadir and only the
+// slant growth from this rule; the core's light no longer uses it (cloud_sun_beam_* below).
 inline constexpr double cloud_overlap_vertical = 0.66;
 inline constexpr double cloud_overlap_slant = 0.21;
 inline constexpr double cloud_overlap_slant_onset_cot = 1.8;
+// Cover of the direct Sun's beam through a broken layer of cloud fraction f (cloud_optics.hpp: cloud_beam_cover; the
+// shader's cloud_sun_beam_cover_of, CLOUD_SUN_BEAM_*): 1 - (1 - f)^n, n = n0 + b cot(e)^p for the Sun at elevation e -
+// the drawn shapes' effective shadow, so that the core's light (vehicles, the far tier's column) equals the near
+// shadow map's mean. At the zenith n0 < 1: the shadows of the depth-aware shapes (look fixes T7c) are lighter than an
+// opaque cover of f - the cumulus cloud-to-cloud spread (FSD 1, Jensen: thin clouds pass light; measured 0.08 of the
+// shadow at f 0.3), their thin margins, and the drawn cover's own losses (level 0's 100 m voxels ~0.09, the layer
+// profile's tapered rims); a slanted beam crosses further cells (b, p: growing about with the square of its run through
+// the layer). [E] Least-squares fitted to the shapes' shadows (cloud_check.gd STARSIM_SLANT_TABLE=1: area means of the
+// direct Sun over eight sites, f 0.15 / 0.3 / 0.4 / 0.6 x e 5-75 deg, a 1 km layer of grid-mean depth 3, detail
+// levels off; screenshots/look_fixes/t7c_fix1/scripts/fit_beam.py, 2026-11-08): rms 0.006, worst 0.013 in the
+// transmittance. Decks (f = 1) are untouched.
+inline constexpr double cloud_sun_beam_zenith_exponent = 0.62;
+inline constexpr double cloud_sun_beam_slant = 0.018;
+inline constexpr double cloud_sun_beam_slant_power = 1.85;
 // Cumulus water from an adiabatic parcel (weather_snapshot.hpp: add_cumulus_adiabatic_water; static clouds Task 9c).
 // The reanalysis holds the grid-box mean of the condensate, not the updraft cores of its sub-grid cumulus: their
 // in-cloud water is raised to a fraction of the moist-adiabatic parcel's.

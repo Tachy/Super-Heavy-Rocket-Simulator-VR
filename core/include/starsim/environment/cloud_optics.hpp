@@ -241,7 +241,7 @@ double cloud_slab_total_transmittance(const CloudSlabTransmittanceLut& lut, doub
 // Its mean transmittance is 1 - C + C T(tau / C) - not T(tau), which for broken cloud would turn a sunny cumulus field
 // into an overcast (the plane-parallel bias: cf 0.15, in-cloud tau 27 gives exp(-4) direct instead of ~0.85). For C = 1
 // both are the same (a deck). The vertical column (the sky) takes C = the largest cloud fraction in it (maximum
-// overlap); the direct beam takes cloud_beam_cover (the shapes' shadows overlap less, more so for a slanted beam).
+// overlap); the direct beam takes cloud_beam_cover (the drawn shapes' effective shadow, larger for a slanted beam).
 // Transmittance of the direct Sun along the ray from position toward the Sun, so averaged over the cell (Beer-Lambert
 // with the unscaled extinction: the Sun disc). No detail noise: a vehicle in a gap between cumuli gets its cell's mean. The ray ends where it leaves the cloud volume (above 20 km and climbing) or where it enters the solid
 // Earth (2 km below the ellipsoid: the Sun is below the horizon there, the Earth's shadow is not a cloud matter).
@@ -268,7 +268,8 @@ struct CloudColumnDepths {
     double in_cloud_depth() const;
 };
 // The cover of the direct beam (cloud fraction f along it, the Sun's cosine to the vertical mu0): 1 - (1 - f)^n, n from
-// constants.hpp cloud_overlap_* (the shipped shapes' shadows: neither maximum nor random overlap); f = 1 gives 1.
+// constants.hpp cloud_sun_beam_* (the drawn shapes' effective shadows: lighter than an opaque f at the zenith, growing
+// as the Sun sinks); f = 1 gives 1.
 // mu0 is taken at least 0.02. For a column's beam: 0 without cloud, f at least cloud_min_cover.
 double cloud_beam_cover(double cloud_fraction, double sun_cos_zenith);
 double cloud_beam_cover(const CloudColumnDepths& column, double sun_cos_zenith);

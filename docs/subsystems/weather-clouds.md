@@ -258,18 +258,25 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
     column; for broken cloud the plane-parallel column would turn a sunny cumulus field into an overcast (cf 0.15,
     in-cloud tau 27: exp(-4) direct instead of ~0.85 - seen in the first Task 9 renders, fixed). The sky (vertical
     column) takes C = the largest cloud fraction in it (maximum overlap). The direct beam and the Sun's diffuse part take
-    the beam's cover (fix round 1): `cloud_beam_cover(f, mu0)` = 1 - (1 - f)^n, n = 1 + 0.66 (1 - f) + 0.21 max(cot e -
-    1.8, 0) (`constants.hpp cloud_overlap_*`, `CLOUD_OVERLAP_*` in the shader, [E]). The shapes' shadows overlap neither
-    maximally nor randomly: the 3D noise displaces the layers' clouds against each other (cover above f at the zenith,
-    a) and a slanted beam crosses further cells (b, k). Fitted to the shipped shapes' shadows (the near map, area means
-    over eight independent sites, `cloud_check.gd` `STARSIM_SLANT_TABLE=1`, f 0.15-0.6, e 5-75 deg, the layer 1 km
-    deep, in-cloud tau 3 - a synthetic test layer, far thinner than the data's low cumulus, Validation "In-cloud optical
-    depths"): the direct Sun's transmittance within 0.018. Measured, f 0.3: 0.629 at 75 deg, 0.627 at 45,
-    0.571 at 20, 0.404 at 8, 0.278 at 5 (maximum overlap would give 0.70 at every elevation). Without it the near map
-    (the shapes) and the far map / CPU light disagreed by 10 % at 45 deg and 40 % at 8 deg (a ring at the 9-11 km
-    hand-over at sunset, seen by the first tests of fix round 1). Limits: the layer depth (1 km) and the in-cloud tau
-    are those of the fit; the sky factor keeps the maximum-overlap cover (its hemisphere average would see ~4 % more
-    cover at cf 0.3).
+    the beam's cover: `cloud_beam_cover(f, mu0)` = 1 - (1 - f)^n, n = 0.62 + 0.018 cot(e)^1.85 (`constants.hpp
+    cloud_sun_beam_*`, `CLOUD_SUN_BEAM_*` / `cloud_sun_beam_cover_of` in the shader, [E]; look fixes T7c fix 1) - the
+    drawn shapes' effective shadow, so that the core's light (vehicles, the far tier's slanted column, the air's shadow
+    beyond the levels) equals the near shadow map's mean. Below f at the zenith: the depth-aware shapes' shadows are
+    lighter than an opaque cover of f (cf 0.3, Sun 89 deg: 0.211 shadow; parts measured on the check's sites: the
+    cumulus cloud-to-cloud spread 0.018 (0.229 without it, Jensen), level 0's 100 m voxels ~0.02 (50 m cells: +8-10 %),
+    the remainder the thin margins and the slab profile's tapered rims; three regions of eight sites 0.211 / 0.218 /
+    0.243). A slanted beam crosses further cells: the growth about with the square of its run through the layer.
+    Least-squares fitted to the shapes' shadows (the near map, area means over eight independent sites, `cloud_check.gd`
+    `STARSIM_SLANT_TABLE=1`, f 0.15 / 0.3 / 0.4 / 0.6 x e 5-75 deg, the layer 1 km deep, grid-mean depth 3 - in-cloud
+    7.5-20, no direct light through a cloud -, detail levels off; `screenshots/look_fixes/t7c_fix1/scripts/fit_beam.py`):
+    the direct Sun's transmittance rms 0.006, worst 0.013. Measured, f 0.3: 0.794 at 75 deg, 0.794 at 45, 0.766 at 20,
+    0.632 at 8, 0.442 at 5. With the detail levels on (the game's presets) the shadows are darker at low f (cf 0.15 /
+    0.3 / 0.6, Sun 89 deg: 0.142 / 0.242 / 0.446 shadow, off at 75-89 deg 0.099 / 0.211 / 0.424) - the check and the fit take them off
+    (the CPU references have the shapes of state 0). The renderer's view keeps its own projected-cover rule for the
+    slant growth (`constants.hpp cloud_overlap_*`, `CLOUD_OVERLAP_*`: n = 1 + 0.66 (1 - f) + 0.21 max(cot e - 1.8, 0),
+    fitted 2026-10-30 to the undeflated shapes; the far field and the flat levels take the data's total cover at the
+    nadir and only its slant growth). Limits: the layer depth (1 km) and the in-cloud depth are those of the fit; the sky
+    factor keeps the maximum-overlap cover.
   - Column per pixel: `environment::cloud_render_column_texels` (RG8 per cell and layer: R the grid-mean depth from
     20 km to the layer centre, the A channel's log code; G the largest cloud fraction above; +66 MB per snapshot, two
     bytes per texel) - the centre above (four decoded texels, bilinear: linear in tau as the CPU) + the trapezoid of the
@@ -617,7 +624,8 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   scaled-space far field take 1 - (1 - f_max) E, E = (1 - C_mr) / (1 - f_max) of the layers' maximum-random cover (core
   `cloud_column_cover_max_random`, which the snapshot's fractions are scaled to: ERA5 tcc) - before, the beam rule's
   nadir cover of the largest fraction (20-40 % above a single block). The slant growth stays the beam rule's
-  (`cloud_beam_fraction_of`). The Sun's beam cover (shadows, ground light; `cloud_beam_cover`) is unchanged.
+  (`cloud_beam_fraction_of`). The Sun's beam cover (shadows, ground light; `cloud_beam_cover`) has its own rule, the
+  drawn shapes' effective shadow (T7c fix 1, "Light under the clouds" above).
   Numbers: Validation "Takeover and nadir cover (T7c)".
 - **Baked volume step 6: beyond the cap, the terminator (2026-10-30)**: (a) beyond the shown flat geometry's cap
   the far field's column draws the clouds (`cloud_baked_flat_far_weight` / `_layer`: `cloud_far_layer` at the ray's
@@ -696,7 +704,7 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   outlived the scripts at the engine's exit and crashed it) through `CloudLayer.direct_sun_transmittance(key, point)`
   into `Atmosphere.cloud_light_at`'s direct beam (`Atmosphere.direct_sun`, wired by `World`; keys "sun_light" - the
   vehicles' DirectionalLight - and "eye" - the adaptation's plate); NAN (the CPU's grid mean) beyond the levels or
-  without a set. cloud_check section 3: a vehicle in a cumulus' shadow 0.119 vs 1.375 in the gap beside it (Sun light
+  without a set. cloud_check section 3 (2026-10-30): a vehicle in a cumulus' shadow 0.119 vs 1.375 in the gap beside it (Sun light
   energy), the grid mean 0.490 at both.
 - **Divisor (F8)** (2026-10-29 / 10-30): `CloudLayer.divisor_override` (F8 cycles 1, 1.5, 2, 3, 4;
   `--cloud_divisor=<x>`, fractional allowed) - the one live toggle; the HUD line (`status_line`) shows the divisor and
@@ -829,22 +837,23 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   a uniform slab = T_total - exp(-tau / mu0) (table and delta-Eddington), none above it or with the Sun down; a broken
   layer (cf 0.4) as independent columns (direct, diffuse, sky); column texels = `cloud_column_depths_above` at the
   centres within the code's 3 % (depth) and 0.003 (cover).
-- GPU `cloud_check.gd` (2026-10-30: the ground light and the shadow maps on the baked volume's S; 62 checks PASS,
-  79 s): section 1 (terrain_earth.gdshader on a quad 300 m from a camera 2 m up; slabs tau 1 / deck tau 3 / broken cf
-  0.4, Sun 45 / 20 deg): the S maps' direct Sun on the closed slabs at 0.927-0.937 x the core's slant optical depth
-  (tolerance `S_DEPTH_TOLERANCE` 10 % [E]; open point), the Sun's diffuse share and the sky's within 0.6 % of the CPU,
+- GPU `cloud_check.gd` (2026-10-30, re-measured 2026-11-08 after look fixes T7c fix 1: the ground light and the shadow
+  maps on the baked volume's S; 63 checks PASS): section 1 (terrain_earth.gdshader on a quad 300 m from a camera 2 m up; slabs tau 1 / deck tau 3 / broken cf
+  0.4, Sun 45 / 20 deg): the S maps' direct Sun on the closed slabs at 0.898-0.915 x the core's slant optical depth
+  (tolerance `S_DEPTH_TOLERANCE` 12 % [E]; open point), the Sun's diffuse share and the sky's within 0.6 % of the CPU,
   the weather on / off luminance ratio within 2.7 % (closed slabs), the ground's total light vs the CPU's within 2.4 %;
   the broken layer's spot reported (Sun 45 deg: in a cumulus' shadow, S 0.31 vs the cell's 0.49; Sun 20 deg: in a
   gap, 1.0 vs 0.44); a deck -> empty cross-fade: column terms within 3 % of the pushed pair's CPU light, the light with
   the grid mean's direct Sun monotonic (0.79 -> 0.99); weather off bit-identical (land and sea). Section 2 (the probe
   shader, eight sites): near -> far map hand-over 9-11 km steps <= 0.058 (allowed 0.18-0.24), far map -> column
   120-140 km on the deck <= 0.008; the broken layer's 120-140 km reported (open point: S's coarse levels); the shapes'
-  disc mean vs the CPU's cell cf 0.15 / 0.3 / 0.4 at Sun 45 / 8 deg 0.793 / 0.777, 0.658 / 0.649, 0.626 / 0.592, 0.405
-  / 0.396, 0.515 / 0.490, 0.278 / 0.277 (tolerance 8 %), near vs far map within 0.03, column terms within 0.6 %.
-  Section 3 (the vehicles' direct Sun): along a 4 km line under the cf 0.4 layer at a 45 deg Sun the probe reads T
-  0.086 in a cumulus' shadow and 1.000 in the gap 1.2 km away, the Sun light energy 0.119 / 1.375 (0.91 of the clear
-  value), the CPU's grid mean 0.490 at both; probe vs near map at 41 points mean |dT| 0.0045, worst 0.055 (a shadow's
-  edge, the map's 62.5 m texels).
+  disc mean vs the CPU's cell cf 0.15 / 0.3 / 0.4 at Sun 45 / 8 deg 0.904 / 0.902, 0.809 / 0.811, 0.794 / 0.795, 0.632
+  / 0.627, 0.725 / 0.722, 0.518 / 0.515 (tolerance 8 %; within 0.005), near vs far map within 0.03, column terms within 0.6 %.
+  Section 3 (the vehicles' direct Sun): along a 4 km line under the cf 0.4 layer at a 45 deg Sun (centred on the
+  darkest near-map point of a 16 km scan: the fixed line about the site lay in one gap of the depth-aware shapes) the
+  probe reads T 0.000 in a cumulus' shadow and 1.000 in the gap, the Sun light energy 0.000 / 1.375 (1.00 of the clear
+  value), the CPU's grid mean 0.722 at both; probe vs near map at 41 points mean |dT| 0.0033, worst 0.092 (a shadow's
+  edge, the map's 62.5 m texels); the Moon's light = the keyless light in the Moon's colour (moon_light_colour).
 - GPU `cloud_far_check.gd` (2026-10-30, sections 1-4, 14 checks PASS): the far field's slab radiance vs Monte Carlo
   (72 geometries), weather off bit-identical, the scaled-space hand-over against the baked volume's flat levels: deck
   tau 10 / tau 2 worst 0.26 / 0.51 %, broken cf 0.4 (21 x 21 blocks) 2.27 % (tolerance 5 %), the Moon's distance.
@@ -932,14 +941,14 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
 
 ## Open points and known limits
 
-- **The Sun's beam rule against the depth-aware shapes (look fixes T7c; open)**: the core's beam cover
-  (`constants.hpp` cloud_overlap_vertical / slant, fitted to the shapes' shadows) still assumes the undeflated shapes;
-  the volume now draws each block at its depth-aware fraction, so its shadows cover less than the rule (cloud_check
-  section 2, broken 1 km layers: area mean of the direct Sun cf 0.15 / 0.3 / 0.4 at 45 deg 0.904 / 0.794 / 0.725 against
-  the CPU's 0.777 / 0.592 / 0.490). cloud_check: 14 FAIL (5 of them already with the T7b state: cf 0.3 / 0.4 shapes vs
-  CPU and the moonlight probe; new: the cf 0.15 cases, the CPU light vs the ground's mean, the tau-1 slab's slant depth
-  at a 20 deg Sun 0.898 x, the vehicle shadow / gap probe). Next: refit the rule to the shapes (a core constant change,
-  core + bindings rebuild) - the vertical term goes toward 0 with the nadir cover the data's.
+- **The drawn nadir cover of a broken slab below the data's (look fixes T7c fix 1)**: the Sun beam rule follows the
+  drawn shapes' shadows, which at the zenith are ~0.66-0.81 of an opaque f on the check's 1 km slab (detail levels
+  off; 0.74-0.94 with them on) - partly physical (the cumulus spread's thin clouds, the thin margins), partly a loss of
+  the drawn cover against T7c's depth-aware fraction (fitted to the shapes' analytic union, cloud_far_check 1e): level
+  0's 100 m voxels (~8-10 %: 50 m cells raise the shadow 0.211 -> 0.229) and the profile's tapered rims at the block's
+  top and bottom (estimated, not measured). A level-0 cover gain (like `CLOUD_BAKED_LEVEL_COVER_GAIN` of the coarse
+  levels) would bring the near look to the data's cover - a look change, not made; the beam rule would then be refitted
+  (`STARSIM_SLANT_TABLE=1`, fit_beam.py).
 - **The volume's cover depends on its level (look fixes T7c)**: the fine level matches the data, the coarse levels
   carry a gain fitted to slabs (`CLOUD_BAKED_LEVEL_COVER_GAIN`), the coarsest (from ~400 km) smear a faint margin over a
   wider area (alpha > 0.05 cover 0.34 at f 0.2, mean alpha kept). Real sites from 50 km within -14 / +11 % of the
@@ -1026,11 +1035,13 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   The ground under it is lit through the bilinear column (`cloud_ground_light`), the cloud drawn from the B-spline: at
   cloud edges the two differ within a cell (seen as no artefact in the start view). A column with several layers is one slab (placed by its seen light's mean
   depth): from the ground, a high layer far out and a low one share one crossing.
-- **S against the core on a closed slab (2026-10-30, cloud_check section 1)**: the maps' S gives 0.927-0.937 x the
-  core's slant optical depth through the 1 km slabs (tau 1 and 3, Sun 45 / 20 deg; T 0.266 vs 0.242 at tau 1 / 45 deg)
-  - a property of the bake through the voxelised shapes (cause not pinned: the levels' vertical cells at the slab's
-  faces, the edge ramp's mean), also in the air shadow and the vehicles' direct Sun. The check holds it at 10 % in
-  depth; open: whether to correct the bake.
+- **S against the core on a closed slab (2026-10-30, cloud_check section 1)**: the maps' S gives 0.898-0.915 x the
+  core's slant optical depth through the 1 km slabs (tau 1 and 3, Sun 45 / 20 deg; T 0.274 vs 0.242 at tau 1 / 45 deg;
+  0.927-0.937 before look fixes T7c and with `volume_depth_cover` off: the slab's rim heights, whose profile fraction
+  lies below 1 between the layer centres, are drawn at their depth-aware fraction and pass more light than their
+  grid-mean depth) - a property of the bake through the voxelised shapes (the rest not pinned: the levels' vertical
+  cells at the slab's faces, the edge ramp's mean), also in the air shadow and the vehicles' direct Sun. The check holds
+  it at 12 % in depth (10 % before T7c); open: whether to correct the bake.
 - **S's coarse levels on broken cloud (2026-10-30, cloud_check section 2)**: at 110 km from the camera the far map's S
   comes from volume level 4 (1.6 km cells, S at 800 m), whose smoothed shapes shadow more than the shapes do - cf 0.3
   at a 45 / 8 deg Sun 0.556 / 0.226 against the slanted column's 0.591 / 0.395, so the 120-140 km hand-over to the

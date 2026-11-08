@@ -2686,3 +2686,24 @@ total cover as the drawn nadir cover). Verbatim from the subsystem file:
 >   cover (or the column rule), then the flat slab's light against the volume's. Six T8 sites (50 km, mean alpha
 >   volume / flat): 0.92 / 0.70 / 0.71 / 0.81 / 0.49 / 1.04 before, 1.01 / 0.82 / 0.87 / 0.93 / 0.60 / 1.20 with the
 >   inflation (sites 24.5 N 96.3 W, 25.2 N 93.8 W, 26.0 N 95.5 W, 26.0 N 97.157 W, 26.8 N 93.8 W, 27.5 N 96.3 W).
+
+## The Sun's beam rule from the undeflated shapes (until 2026-11-08)
+
+Superseded by look fixes T7c fix 1 (the rule refitted to the depth-aware shapes' shadows: n = 0.62 + 0.018 cot^1.85,
+`constants.hpp cloud_sun_beam_*`; the view keeps the old constants for its slant growth). The core's and the shader's
+beam cover was 1 - (1 - f)^n, n = 1 + 0.66 (1 - f) + 0.21 max(cot e - 1.8, 0) (`cloud_overlap_*`), fitted 2026-10-30 to
+the shapes' shadows (cloud_check `STARSIM_SLANT_TABLE=1`, f 0.15-0.6, e 5-75 deg; within 0.018): measured then, f 0.3,
+0.629 at 75 deg, 0.627 at 45, 0.571 at 20, 0.404 at 8, 0.278 at 5 (more cover than f at the zenith: the shapes' heights
+displaced against each other). With the cumulus spread (T7b, 01397b72) the cf 0.3 / 0.4 shadows were already lighter
+than the rule (cloud_check at the T7b state: 0.641 / 0.541 at 45 deg against 0.592 / 0.490; the spread takes ~8 % of
+the shadow, measured at T7c's FSD 1), with T7c's depth-aware fraction 0.794 / 0.725 (cloud_check 14 FAIL).
+The open point verbatim:
+
+> - **The Sun's beam rule against the depth-aware shapes (look fixes T7c; open)**: the core's beam cover
+>   (`constants.hpp` cloud_overlap_vertical / slant, fitted to the shapes' shadows) still assumes the undeflated shapes;
+>   the volume now draws each block at its depth-aware fraction, so its shadows cover less than the rule (cloud_check
+>   section 2, broken 1 km layers: area mean of the direct Sun cf 0.15 / 0.3 / 0.4 at 45 deg 0.904 / 0.794 / 0.725 against
+>   the CPU's 0.777 / 0.592 / 0.490). cloud_check: 14 FAIL (5 of them already with the T7b state: cf 0.3 / 0.4 shapes vs
+>   CPU and the moonlight probe; new: the cf 0.15 cases, the CPU light vs the ground's mean, the tau-1 slab's slant depth
+>   at a 20 deg Sun 0.898 x, the vehicle shadow / gap probe). Next: refit the rule to the shapes (a core constant change,
+>   core + bindings rebuild) - the vertical term goes toward 0 with the nadir cover the data's.

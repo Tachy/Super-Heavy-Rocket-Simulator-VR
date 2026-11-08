@@ -477,10 +477,10 @@ func _check_weather(core: StarsimCore) -> bool:
 			and float(types["CLOUD_STRATIFORM_STRETCH"]) == CloudLayer.STRATIFORM_STRETCH,
 			"clouds.gdshaderinc / CloudLayer cloud type constants equal the core's")
 	var field: Dictionary = noise["field_constants"]
-	var field_ok := field.size() == 5
+	var field_ok := field.size() == 8
 	for constant: String in field:
 		field_ok = field_ok and is_equal_approx(_shader_constant(constant), float(field[constant]))
-	_check(field_ok, "clouds.gdshaderinc cloud field constants (LCL ramp, base transition, overlap) equal the core's")
+	_check(field_ok, "clouds.gdshaderinc cloud field constants (LCL ramp, base transition, overlap, Sun beam) equal the core's")
 	var optics: Dictionary = core.cloud_optics_parameters()
 	_check(absf(float(optics.get("asymmetry_g", 0.0)) - 0.8793) < 1e-3 and float(optics["extinction_step_per_m"]) > 0.0,
 			"cloud_optics_parameters (g %.4f)" % float(optics.get("asymmetry_g", 0.0)))
