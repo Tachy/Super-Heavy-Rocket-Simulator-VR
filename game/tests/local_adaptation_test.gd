@@ -97,6 +97,7 @@ func _initialize() -> void:
 	_gradient_case(base, reference)
 	_odd_size_case(base, reference)
 	_generated_constants_case()
+	_local_white_case()
 	_check("flag from the arguments", not LocalAdaptation._enabled_from_arguments(
 			PackedStringArray(["--local_adaptation=off"])) and LocalAdaptation._enabled_from_arguments(
 			PackedStringArray(["--protect_adaptation"])), "")
@@ -277,3 +278,21 @@ func _generated_constants_case() -> void:
 			and pool.contains(LocalAdaptationEffect.glsl_float(EyeAdaptation.CONE_LOG_LOW)), "")
 	_check("glsl_float round trip", is_equal_approx(LocalAdaptationEffect.glsl_float(0.249).to_float(), 0.249)
 			and LocalAdaptationEffect.glsl_float(3.0).contains("."), LocalAdaptationEffect.glsl_float(3.0))
+
+
+## Local chromatic adaptation (T13): a white surface under a warm night illuminant, white-balanced by the global step at
+## a mesopic D 0.15, shows the illuminant's colour; locally adapted (c -> 0) it is balanced at D = 1 (neutral within 1 %);
+## at c = 1 the pixel is untouched by K.
+func _local_white_case() -> void:
+	var illuminant := Vector3(1.15, 0.97, 0.75)
+	var frame := EyeAdaptation.white_balance(illuminant, 0.15)
+	var full := EyeAdaptation.white_balance(illuminant, 1.0)
+	var k := LocalAdaptation.local_white(frame, full)
+	var pixel := frame * illuminant
+	var c := 1.0e-4
+	var shown := LocalAdaptation.apply_pixel(pixel, c, Basis.IDENTITY, k) / c
+	var spread := maxf(shown.x, maxf(shown.y, shown.z)) / minf(shown.x, minf(shown.y, shown.z)) - 1.0
+	_check("local white: locally adapted white neutral", spread < 0.01, "spread %s, global B/R %s" % [spread,
+			pixel.z / pixel.x])
+	_check("local white: c = 1 untouched", (LocalAdaptation.apply_pixel(pixel, 1.0, Basis.IDENTITY, k) - pixel).length()
+			< 1e-12, "")

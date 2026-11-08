@@ -297,9 +297,24 @@ static func cone_part(rod_scale: float, cone: Basis) -> Basis:
 ## photopic by construction (its local mean at PLATEAU), has no rod signal]. [call: the SHAPE c^2 - only "the rods' share
 ## vanishes under strong compression and the step is continuous at c = 1" is justified; any steeper-than-c law that is 1 at
 ## c = 1 and small by c ~ 1e-2 would do, c^2 is the simplest].
-static func apply_pixel(p: Vector3, c: float, cone_part_basis: Basis) -> Vector3:
+##
+## Local chromatic adaptation (look fixes T13, iCAM06-style [S: Kuang, Johnson & Fairchild 2007, iCAM06: the chromatic
+## adaptation's white and degree are local]): a region the cones adapt to locally is photopic (its local mean at
+## PLATEAU), so its degree of adaptation is the photopic one, ~1 at those levels [S: CIE 159:2004 D at L_A >= ~300
+## cd/m^2 > 0.97], while the global (mesopic) D of a night view is low (CIE 191). The cones' part is taken toward the
+## fully adapted white balance of the same adopted illuminant: cones' = mix(cones, K cones, 1 - c), K = the cones' map at
+## D = 1 over the frame's (local_white). [call: the weight 1 - c - how much the region is adapted locally; 0 at c = 1,
+## so the global image is unchanged.] The full Moon over a moonlit night (illuminant = moonlight) shows near neutral, the
+## Earth from the lunar night (illuminant = earthshine in the Sun's colour) keeps its blue.
+static func apply_pixel(p: Vector3, c: float, cone_part_basis: Basis, local_white := Basis.IDENTITY) -> Vector3:
 	var cones := cone_part_basis * p
-	return c * (cones + c * (p - cones))
+	var local := cones.lerp(local_white * cones, 1.0 - c)
+	return c * (local + c * (p - cones))
+
+
+## K of apply_pixel: the cones' map at full adaptation over the frame's (both EyeAdaptation.cone_map of the same chroma).
+static func local_white(cone_frame: Basis, cone_full: Basis) -> Basis:
+	return cone_full * cone_frame.inverse()
 
 
 ## The blend of log c in from 0 (c = 1) with the like share (smoothstep from MIN_WEIGHT_SHARE to

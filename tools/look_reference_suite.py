@@ -69,6 +69,13 @@ def br(pixels):
     return float(l[:, 2].mean() / max(l[:, 0].mean(), 1e-9))
 
 
+def sky_br(pixels):
+    """B/R of the clear sky between clouds: the 75th percentile of the per-pixel linear B/R (weather is on; cumulus is
+    near neutral and would pull a region mean toward 1)."""
+    l = lin(pixels)
+    return float(np.percentile(l[:, 2] / np.maximum(l[:, 0], 1e-6), 75))
+
+
 def clipped(pixels):
     return float((pixels.max(axis=1) >= 254).mean())
 
@@ -94,13 +101,13 @@ def epic_stats(path):
 # Each scene: render arguments and a measure function returning {metric: value}; gates: metric -> (low, high, source).
 def m_ground_sky(a):
     ground, sky = rows(a, 0.80, 0.98), rows(a, 0.05, 0.30)
-    return {"ground_luma": float(luma(ground).mean()), "sky_b_over_r": br(sky), "clipped": clipped(a.reshape(-1, 3)),
+    return {"ground_luma": float(luma(ground).mean()), "sky_b_over_r": sky_br(sky), "clipped": clipped(a.reshape(-1, 3)),
             "frame_luma": float(luma(a.reshape(-1, 3)).mean())}
 
 
 def m_sky(a):
     sky = rows(a, 0.05, 0.40)
-    return {"sky_b_over_r": br(sky), "ground_luma": float(luma(rows(a, 0.80, 0.98)).mean()),
+    return {"sky_b_over_r": sky_br(sky), "ground_luma": float(luma(rows(a, 0.80, 0.98)).mean()),
             "frame_luma": float(luma(a.reshape(-1, 3)).mean())}
 
 

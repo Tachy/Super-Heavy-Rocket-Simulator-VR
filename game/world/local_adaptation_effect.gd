@@ -134,10 +134,13 @@ layout(push_constant, std430) uniform Params {
 	vec4 size;    // width, height, block, block columns
 	vec4 shape;   // block rows, lowest band centre (log2), band spacing (log2), band count
 	vec4 factor;  // scene per cd/m^2, display gain, L_ref (cd/m^2), L_eff per L_loc
-	vec4 extra;   // GAIN_MAX, MIN_WEIGHT_SHARE, FULL_WEIGHT_SHARE_RATIO, -
-	vec4 cone_x;  // N = C M^-1: the cones' part of the post step's pixel (LocalAdaptation.cone_part), its columns
-	vec4 cone_y;
-	vec4 cone_z;
+	// N = C M^-1, the cones' part of the post step's pixel (LocalAdaptation.cone_part), then K, the cones' map at full
+	// (photopic) adaptation over the frame's (LocalAdaptation.local_white): both column-major, packed (128-byte limit)
+	vec4 m0;
+	vec4 m1;
+	vec4 m2;
+	vec4 m3;
+	vec4 m4;
 } params;
 const vec3 LUMINANCE = vec3(@LW_R@, @LW_G@, @LW_B@);
 
@@ -201,18 +204,22 @@ void main() {
 		share += weight * v.y;
 	}
 	// LocalAdaptation.smooth_share, then the factor of the pooled local luminance
-	float blend = clamp((share / params.extra.y - 1.0) / (params.extra.z - 1.0), 0.0, 1.0);
+	float blend = clamp((share / @MIN_SHARE@ - 1.0) / (@FULL_RATIO@ - 1.0), 0.0, 1.0);
 	blend = blend * blend * (3.0 - 2.0 * blend);
 	if (blend <= 0.0) {
 		return;
 	}
 	float local_cd_m2 = loc / params.factor.x;
 	float g = clamp(params.factor.z / pow(10.0, @WEBER_OFFSET@ + cone_log_threshold(local_cd_m2 * params.factor.w)), 1.0,
-			params.extra.x);
+			@GAIN_MAX@);
 	float c = exp2(blend * log2(min(1.0, g / params.factor.y)));
 	// LocalAdaptation.apply_pixel: the cones' part x c, the rods' part x c^2 (saturated where the cones adapt locally)
-	vec3 cones = mat3(params.cone_x.rgb, params.cone_y.rgb, params.cone_z.rgb) * x;
-	imageStore(color_image, pixel, vec4(clamp(c * (cones + c * (x - cones)), vec3(0.0), vec3(@MAXL@)), color.a));
+	mat3 cone_part = mat3(params.m0.xyz, vec3(params.m0.w, params.m1.xy), vec3(params.m1.zw, params.m2.x));
+	mat3 local_white = mat3(params.m2.yzw, params.m3.xyz, vec3(params.m3.w, params.m4.xy));
+	vec3 cones = cone_part * x;
+	// local chromatic adaptation (LocalAdaptation.apply_pixel): the locally adapted region toward the photopic white balance
+	vec3 local_cones = mix(cones, local_white * cones, 1.0 - c);
+	imageStore(color_image, pixel, vec4(clamp(c * (local_cones + c * (x - cones)), vec3(0.0), vec3(@MAXL@)), color.a));
 }
 """
 
@@ -237,6 +244,8 @@ static func _fill(template: String) -> String:
 		"CONE_WEBER": EyeAdaptation.CONE_LOG_WEBER, "WEBER_OFFSET": EyeAdaptation.CONE_WEBER_OFFSET,
 		"MID_SLOPE": EyeAdaptation.CONE_MID_SLOPE, "MID_OFFSET": EyeAdaptation.CONE_MID_OFFSET,
 		"MID_EXPONENT": EyeAdaptation.CONE_MID_EXPONENT,
+		"GAIN_MAX": EyeAdaptation.GAIN_MAX, "MIN_SHARE": LocalAdaptation.MIN_WEIGHT_SHARE,
+		"FULL_RATIO": LocalAdaptation.FULL_WEIGHT_SHARE_RATIO,
 	}
 	for key: String in values:
 		template = template.replace("@" + key + "@", glsl_float(values[key]))
@@ -275,15 +284,14 @@ static func blur_push(low: Vector2i, sigma_blocks: float, horizontal: bool) -> P
 
 
 static func apply_push(size: Vector2i, block: int, low: Vector2i, scene_per_cd_m2: float, display_gain: float,
-		reference_cd_m2: float, cone_part: Basis) -> PackedFloat32Array:
+		reference_cd_m2: float, cone_part: Basis, white := Basis.IDENTITY) -> PackedFloat32Array:
 	return PackedFloat32Array([size.x, size.y, block, low.x,
 			low.y, LocalAdaptation.band_lowest_log2(), LocalAdaptation.band_step_log2(), LocalAdaptation.band_count(),
 			scene_per_cd_m2, display_gain, reference_cd_m2,
 			LocalAdaptation.effective_per_local(scene_per_cd_m2, display_gain, reference_cd_m2),
-			EyeAdaptation.GAIN_MAX, LocalAdaptation.MIN_WEIGHT_SHARE, LocalAdaptation.FULL_WEIGHT_SHARE_RATIO, 0.0,
-			cone_part.x.x, cone_part.x.y, cone_part.x.z, 0.0,
-			cone_part.y.x, cone_part.y.y, cone_part.y.z, 0.0,
-			cone_part.z.x, cone_part.z.y, cone_part.z.z, 0.0])
+			cone_part.x.x, cone_part.x.y, cone_part.x.z, cone_part.y.x, cone_part.y.y, cone_part.y.z,
+			cone_part.z.x, cone_part.z.y, cone_part.z.z, white.x.x, white.x.y, white.x.z,
+			white.y.x, white.y.y, white.y.z, white.z.x, white.z.y, white.z.z, 0.0, 0.0])
 
 
 var stage := Stage.MAP
@@ -302,6 +310,7 @@ var _spc := 0.0
 var _display_gain := 0.0
 var _reference_cd_m2 := 0.0
 var _cone_part := Basis.IDENTITY
+var _local_white := Basis.IDENTITY
 ## MAP results, render thread: per view {"atlas": RID, "tmp": RID, "size": Vector2i, "low": Vector2i}, and the frame's
 ## block edge (px). The APPLY stage of the same frame reads them (same thread, after the transparent pass).
 var _views := []
@@ -322,19 +331,21 @@ func _init(effect_stage := Stage.MAP, map_source: LocalAdaptationEffect = null) 
 ## display gain (cone gain x brightness) and the white plate under the TOA Sun (cd/m^2). Off (no work, no resolve) while
 ## the eye adaptation is off or LocalAdaptation.enabled is false. rod_scale and cone: the post step's (VisionEffect).
 func update(scene_per_cd_m2: float, display_gain: float, reference_cd_m2: float, adaptation_on: bool,
-		rod_scale := 0.0, cone := Basis.IDENTITY) -> void:
+		rod_scale := 0.0, cone := Basis.IDENTITY, cone_full := Basis.IDENTITY) -> void:
 	var active := enabled and LocalAdaptation.enabled and adaptation_on and scene_per_cd_m2 > 0.0 \
 			and display_gain > 1.0 and reference_cd_m2 > 0.0
 	if access_resolved_color != active:
 		access_resolved_color = active
 	RenderingServer.call_on_render_thread(_set_on_render_thread.bind(active, scene_per_cd_m2, display_gain,
-			reference_cd_m2, LocalAdaptation.cone_part(rod_scale, cone)))
+			reference_cd_m2, LocalAdaptation.cone_part(rod_scale, cone),
+			LocalAdaptation.local_white(cone, cone_full) if cone_full != Basis.IDENTITY else Basis.IDENTITY))
 
 
 func _set_on_render_thread(active: bool, spc: float, display_gain: float, reference_cd_m2: float,
-		cone_part: Basis) -> void:
+		cone_part: Basis, local_white := Basis.IDENTITY) -> void:
 	_active = active
 	_cone_part = cone_part
+	_local_white = local_white
 	_spc = spc
 	_display_gain = display_gain
 	_reference_cd_m2 = reference_cd_m2
@@ -481,6 +492,6 @@ func _apply(render_data: RenderData) -> void:
 		var low: Vector2i = view["low"]
 		_dispatch(0, [_image_uniform(0, buffers.get_color_layer(index)), _image_uniform(1, view["atlas"])],
 				apply_push(size, source._block, low, source._spc, source._display_gain, source._reference_cd_m2,
-				source._cone_part), groups)
+				source._cone_part, source._local_white), groups)
 	if CloudEffect.capture_timestamps:
 		_rd.capture_timestamp("after_local_adaptation_apply")

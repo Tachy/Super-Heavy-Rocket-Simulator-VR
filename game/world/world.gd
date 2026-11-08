@@ -367,7 +367,9 @@ func update_world() -> void:
 	display_tone.update(_environment, atmosphere.chroma)
 	local_adaptation_map.update(atmosphere.scene_per_cd_m2, atmosphere.exposure_gain * atmosphere.brightness,
 			atmosphere.reference_luminance_now(), atmosphere.eye_adaptation_enabled, atmosphere.rod_scale,
-			EyeAdaptation.cone_map(atmosphere.chroma, atmosphere.white_balance))
+			EyeAdaptation.cone_map(atmosphere.chroma, atmosphere.white_balance),
+			EyeAdaptation.cone_map(atmosphere.chroma, EyeAdaptation.white_balance(atmosphere.field_illuminant_rgb, 1.0))
+			if EyeAdaptation.white_balance_enabled and atmosphere.field_illuminant_rgb != Vector3.ZERO else Basis.IDENTITY)
 	_update_sky_radiance(cam, camera_sun_fraction)
 	FrameProfiler.end(&"atmosphere")
 
