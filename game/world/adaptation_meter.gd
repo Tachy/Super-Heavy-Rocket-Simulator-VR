@@ -59,7 +59,8 @@ const WEIGHT_SCALE := 255.0
 ## The compute's workgroup edge (GROUP x GROUP invocations; each clears and flushes every GROUP^2-th shared bin).
 const GROUP := 16
 
-## TOTAL_BINS and GROUP_EDGE are set from HISTOGRAM_BINS and GROUP (shader_source).
+## TOTAL_BINS (the shared bins: the field's two histograms and the veil's two), COUNTER_BASE (the Sun counters' index in the
+## buffer, after the field's two) and GROUP_EDGE are set from HISTOGRAM_BINS and GROUP (shader_source).
 const SHADER_CODE := """
 #version 450
 layout(local_size_x = GROUP_EDGE, local_size_y = GROUP_EDGE, local_size_z = 1) in;
@@ -70,12 +71,16 @@ layout(set = 0, binding = 1, std430) restrict buffer Histogram {
 // The cloud pass's result (CloudEffect: premultiplied colour, .a the background's transmittance); params.shape2.x = 0:
 // no clouds this frame (then bound to the colour image itself, unread).
 layout(rgba16f, set = 0, binding = 2) uniform restrict readonly image2D cloud_image;
+// The glare spread's veil of the last frame (GlareSpreadEffect: A_0, the image part, the Sun's analytic part is not in it);
+// params.veil.x = 0: none (then bound to the colour image itself, unread).
+layout(rgba16f, set = 0, binding = 3) uniform restrict readonly image2D veil_image;
 layout(push_constant, std430) uniform Params {
 	vec4 size;    // width, height, stride (px), cd/m^2 per scene value
 	vec4 shape;   // 1 / (2 sigma^2), bins per histogram, log10 min, bins per decade
 	vec4 shape2;  // clouds (1 / 0), the Sun disc's "seen" threshold (cd/m^2), -, -
 	vec4 ray;     // view ray of NDC (x, y): (x a + b, y c + d, -1) - a, b, c, d from the eye's projection
 	vec4 sun;     // the Sun's direction in the eye's view axes, cos of the mask radius (> 1: no mask)
+	vec4 veil;    // veil image present (1 / 0), its pixels per texel, its columns, rows
 } params;
 
 const vec3 LUMINANCE_WEIGHTS = vec3(0.2126, 0.7152, 0.0722);  // [S: ITU-R BT.709]
@@ -119,10 +124,18 @@ void main() {
 		vec3 ray = normalize(vec3(ndc.x * params.ray.x + params.ray.y, ndc.y * params.ray.z + params.ray.w, -1.0));
 		bool masked = dot(ray, params.sun.xyz) > params.sun.w;
 		float luminance = dot(LUMINANCE_WEIGHTS, c) * params.size.w;
+		if (weight > 0u && !masked && params.veil.x > 0.5) {
+			// The eye's own scatter of the sources the display cannot show (the glare spread, one frame old): its own
+			// histograms (the mean veil over the field, MEAN_VEIL), not added to the sample - a veil under a black sky would
+			// bring the black back into the log average and lower it.
+			vec3 veil = imageLoad(veil_image, min(pixel / int(params.veil.y), ivec2(int(params.veil.z) - 1, int(params.veil.w) - 1))).rgb;
+			atomicAdd(local_bins[2u * uint(params.shape.y) + bin_of(dot(LUMINANCE_WEIGHTS, veil) * params.size.w)], weight);
+			atomicAdd(local_bins[3u * uint(params.shape.y) + bin_of(dot(SCOTOPIC_WEIGHTS, veil) * params.size.w)], weight);
+		}
 		if (weight > 0u && masked) {
-			atomicAdd(histogram.bins[TOTAL_BINS], weight);
+			atomicAdd(histogram.bins[COUNTER_BASE], weight);
 			if (luminance >= params.shape2.y) {
-				atomicAdd(histogram.bins[TOTAL_BINS + 1], weight);
+				atomicAdd(histogram.bins[COUNTER_BASE + 1], weight);
 			}
 		} else if (weight > 0u) {
 			uint bins = uint(params.shape.y);
@@ -133,14 +146,15 @@ void main() {
 	barrier();
 	for (uint k = index; k < uint(TOTAL_BINS); k += uint(GROUP_EDGE * GROUP_EDGE)) {
 		if (local_bins[k] != 0u) {
-			atomicAdd(histogram.bins[k], local_bins[k]);
+			atomicAdd(histogram.bins[k < uint(COUNTER_BASE) ? k : k + 2u], local_bins[k]);  // the Sun's counters lie between
 		}
 	}
 }
 """
 
-## The two histograms, then the Sun mask's two counters (its weight, the part above the "seen" threshold).
-const _BYTES := (HISTOGRAM_BINS * 2 + 2) * 4
+## The two histograms, then the Sun mask's two counters (its weight, the part above the "seen" threshold), then the veil's
+## two histograms (photopic, scotopic; the glare spread's image part, one frame old).
+const _BYTES := (HISTOGRAM_BINS * 4 + 2) * 4
 ## [call] The Sun's mask radius over its apparent radius (the limb's glow and the sparse grid's aliasing; look fixes T5b
 ## fix round 1). The disc covers 1 / 1.2^2 of the mask (SUN_DISC_SHARE).
 const SUN_MASK_RADIUS_FACTOR := 1.2
@@ -152,6 +166,9 @@ static var sun_mask_enabled := true
 ## The cloud pass whose result the meter composites over the scene (world.gd; before it in the Compositor, same stage);
 ## null: no clouds composited.
 var cloud_effect: CloudEffect
+## The glare spread (look fixes T13): its veil image of the last frame goes into the veil histograms (the Earth's / Moon's
+## veil raises the field as it does on the retina: Atmosphere adds veil_mean to the field); null: none.
+var glare_effect: GlareSpreadEffect
 ## Diagnostics (render_check --meter_post_transparent): measure after the transparent pass as Task 14 first did (the
 ## display-referred emitters counted, the cloud composite already in the image); set before the effect is attached.
 var post_transparent := false:
@@ -210,13 +227,13 @@ func measures_next_frame() -> bool:
 
 
 ## Main thread: the newest histogram pair of that epoch not taken yet ([counts, loading, serial, view, [Sun mask weight,
-## its weight above the "seen" threshold]]), else [].
+## its weight above the "seen" threshold], the veil's two histograms (photopic then scotopic, HISTOGRAM_BINS each)]), else [].
 func take_result(epoch: int, after_serial: int) -> Array:
 	_mutex.lock()
 	var out := []
-	if _result_epoch == epoch and _result_serial > after_serial and _result.size() == HISTOGRAM_BINS * 2 + 2:
+	if _result_epoch == epoch and _result_serial > after_serial and _result.size() == HISTOGRAM_BINS * 4 + 2:
 		out = [_result.slice(0, HISTOGRAM_BINS * 2), _result_loading, _result_serial, _result_view,
-				[_result[HISTOGRAM_BINS * 2], _result[HISTOGRAM_BINS * 2 + 1]]]
+				[_result[HISTOGRAM_BINS * 2], _result[HISTOGRAM_BINS * 2 + 1]], _result.slice(HISTOGRAM_BINS * 2 + 2)]
 	_mutex.unlock()
 	return out
 
@@ -239,6 +256,20 @@ static func field_log_average(counts: PackedInt32Array, offset := 0, cut_of_whol
 	if sum_w <= 0.0:
 		return 0.0
 	return pow(10.0, sum_log / sum_w)
+
+
+## The mean veil over the field of one veil histogram (cd/m^2, arithmetic: the veil is light added over the whole retinal
+## image): the bins' linear centre luminances over the whole weight (black included: no veil there), counts[offset ..
+## offset + HISTOGRAM_BINS). 0 without samples. The bin width (0.094 decades) is a 5 % error of the mean at most.
+static func veil_mean(counts: PackedInt32Array, offset := 0) -> float:
+	var total := 0.0
+	var sum := 0.0
+	for k in range(HISTOGRAM_BINS):
+		var w := float(counts[offset + k])
+		total += w
+		if k >= 1:
+			sum += w * pow(10.0, bin_log_centre(k))
+	return sum / total if total > 0.0 else 0.0
 
 
 ## The anchor luminance of one histogram (Atmosphere.FieldRule.ANCHOR and the default PROTECT): the
@@ -320,7 +351,8 @@ static func bin_of(luminance_cd_m2: float) -> int:
 ## The compute's GLSL with its sizes from HISTOGRAM_BINS and GROUP (review M-1: the shared histogram follows the
 ## constant; no tie between the bin count and the workgroup size).
 static func shader_source() -> String:
-	return SHADER_CODE.replace("TOTAL_BINS", str(HISTOGRAM_BINS * 2)).replace("GROUP_EDGE", str(GROUP))
+	return SHADER_CODE.replace("TOTAL_BINS", str(HISTOGRAM_BINS * 4)).replace("COUNTER_BASE", str(HISTOGRAM_BINS * 2)) \
+			.replace("GROUP_EDGE", str(GROUP))
 
 
 ## The shader's Sun mask for one rendered view (index into the view's "eyes"): [ray a, b, c, d, Sun x, y, z in the eye's
@@ -340,6 +372,14 @@ static func sun_mask_parameters(view: Dictionary, eye_index: int) -> PackedFloat
 	var sun: Vector3 = (to_eye * (view["sun"] as Vector3)).normalized()
 	return PackedFloat32Array([1.0 / p.x.x, p.z.x / p.x.x, 1.0 / p.y.y, p.z.y / p.y.y, sun.x, sun.y, sun.z,
 			float(view.get("sun_mask_cos", 2.0))])
+
+
+## Render thread: the orientation of rendered view `index` in the head's axes (the last measured view; identity before one).
+func eye_basis_in_head(index: int) -> Basis:
+	var eyes: Array = _view.get("eyes", [])
+	if index < eyes.size():
+		return eyes[index][0]
+	return Basis.IDENTITY
 
 
 func _set_on_render_thread(cd_per_scene: float, epoch: int, loading: bool, view: Dictionary, sun_seen: float) -> void:
@@ -411,6 +451,9 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 				1.0 / (2.0 * CENTRE_SIGMA * CENTRE_SIGMA), float(HISTOGRAM_BINS), LOG_MIN,
 				float(HISTOGRAM_BINS - 1) / (LOG_MAX - LOG_MIN), 1.0 if cloud.is_valid() else 0.0, _sun_seen_cd_m2, 0.0, 0.0])
 		push.append_array(mask)
+		var veil: Array = glare_effect.veil_image(view) if glare_effect != null and not post_transparent else []
+		push.append_array(PackedFloat32Array([1.0 if not veil.is_empty() else 0.0, float(veil[1]) if not veil.is_empty() else 1.0,
+				float(veil[2]) if not veil.is_empty() else 1.0, float(veil[3]) if not veil.is_empty() else 1.0]))
 		var bytes := push.to_byte_array()
 		var image_uniform := RDUniform.new()
 		image_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
@@ -424,7 +467,11 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 		cloud_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
 		cloud_uniform.binding = 2
 		cloud_uniform.add_id(cloud if cloud.is_valid() else _no_cloud)
-		var uniform_set := UniformSetCacheRD.get_cache(_shader, 0, [image_uniform, buffer_uniform, cloud_uniform])
+		var veil_uniform := RDUniform.new()
+		veil_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_IMAGE
+		veil_uniform.binding = 3
+		veil_uniform.add_id(veil[0] if not veil.is_empty() else _no_cloud)
+		var uniform_set := UniformSetCacheRD.get_cache(_shader, 0, [image_uniform, buffer_uniform, cloud_uniform, veil_uniform])
 		if CloudEffect.capture_timestamps and view == 0:  # render_check --gpu_passes
 			_rd.capture_timestamp("adaptation_meter")
 		var list := _rd.compute_list_begin()

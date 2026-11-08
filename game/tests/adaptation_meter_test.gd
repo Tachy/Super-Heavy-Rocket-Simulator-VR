@@ -171,7 +171,18 @@ func _initialize() -> void:
 	# The compute's sizes follow the constants (review M-1): the shared histogram holds both histograms, no placeholder
 	# is left, and the placement is before the transparent pass (review I-1: display-referred emitters not counted).
 	var source := AdaptationMeter.shader_source()
-	_near("shared histogram size", float(source.contains("local_bins[%d]" % (BINS * 2))), 1.0, 0.0)
+	_near("shared histogram size", float(source.contains("local_bins[%d]" % (BINS * 4))), 1.0, 0.0)  # the field's two + the veil's two
+	_near("counter base", float(source.contains("histogram.bins[%d]" % (BINS * 2))), 1.0, 0.0)
+	_near("no COUNTER_BASE left", float(source.contains("COUNTER_BASE")), 0.0, 0.0)
+	# The veil's mean over the field (the glare spread's image part): 1 cd/m^2 over a quarter of the weight, black for the rest.
+	var veil := PackedInt32Array()
+	veil.resize(BINS)
+	veil[0] = 300
+	veil[AdaptationMeter.bin_of(1.0)] = 100
+	_near("veil mean", AdaptationMeter.veil_mean(veil), 0.25, 0.06)  # the bin's width: 5 %
+	var empty := PackedInt32Array()
+	empty.resize(BINS)
+	_near("veil mean of nothing", AdaptationMeter.veil_mean(empty), 0.0, 0.0)
 	_near("no placeholder left", float(source.contains("TOTAL_BINS") or source.contains("GROUP_EDGE")), 0.0, 0.0)
 	# Every display-referred emitter (vision_display_referred) draws in the transparent pass (a blend mode), so the
 	# meter, before that pass, never counts it: the field does not feed back on the gain.

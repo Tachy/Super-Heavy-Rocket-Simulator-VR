@@ -1172,7 +1172,9 @@ func _setup_environment() -> void:
 	environment.ambient_light_energy = 1.0
 	environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	environment.tonemap_mode = Environment.TONE_MAPPER_AGX
-	environment.glow_enabled = true
+	# Godot's glow (capped at luminance 12, independent of the source and the eye) is off since the physical glare spread
+	# (GlareSpreadEffect, look fixes T13); `--glow=on` brings the old glow back (threshold 4, intensity 0.6) for A/B.
+	environment.glow_enabled = OS.get_cmdline_user_args().has("--glow=on")
 	environment.glow_hdr_threshold = 4.0
 	environment.glow_intensity = 0.6
 	var world_environment := WorldEnvironment.new()
@@ -1186,8 +1188,11 @@ func _setup_environment() -> void:
 	# Local adaptation (LocalAdaptationEffect, look fixes T10): its map from the opaque image after the meter, its factor
 	# after the rod step. Then the display tone step (DisplayToneEffect), the last before glow and AgX.
 	local_adaptation_map.cloud_effect = clouds.effect
+	# The glare spread (GlareSpreadEffect, look fixes T13): its SPREAD stage after the transparent pass, before the rods' step
+	# (the sources' true values), its ADD stage after the local adaptation's APPLY (the veil is not compressed with the image).
 	compositor.compositor_effects = [clouds.shadow_effect, clouds.effect, atmosphere.adaptation_meter,
-			local_adaptation_map, atmosphere.vision_effect, local_adaptation_apply, display_tone]
+			local_adaptation_map, atmosphere.glare_effect, atmosphere.vision_effect, local_adaptation_apply,
+			atmosphere.glare_add, display_tone]
 	world_environment.compositor = compositor
 	add_child(world_environment)
 

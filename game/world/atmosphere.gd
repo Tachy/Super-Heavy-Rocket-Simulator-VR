@@ -201,6 +201,8 @@ var last_veil_cd_m2 := 0.0
 var last_veil_scotopic_cd_m2 := 0.0
 var last_veil_angle_deg := -1.0
 var last_veil_visibility := 0.0
+## The glare spread's mean veil over the field at the last measurement (cd/m^2, photopic): part of the veil added to the field.
+var last_veil_image_cd_m2 := 0.0
 ## The meter's Sun mask at the last measurement: [masked weight, its weight that showed the disc].
 var last_sun_mask_weights := [0, 0]
 ## Fidelity flag (look fixes T5b fix round 1): the Sun's disability glare veil on the field (render_check --glare=off:
@@ -258,6 +260,10 @@ var vision_effect := VisionEffect.new()
 ## The field luminance meter (scene-referred adaptation, Task 14; attached before vision_effect in world.gd's
 ## Compositor; not in the GPU check's, which keeps the analytic rule).
 var adaptation_meter := AdaptationMeter.new()
+## The physical glare spread (look fixes T13; GlareSpread): after the transparent pass, before vision_effect (world.gd's
+## Compositor). Its image part feeds the meter one frame late; the Sun's veil is drawn per pixel from last_sun_normal_lux.
+var glare_effect := GlareSpreadEffect.new()
+var glare_add := GlareSpreadEffect.new(true, GlareSpreadEffect.Stage.ADD, glare_effect)
 ## The field beyond the frame (look fixes T4; AdaptationSurround, fidelity flag AdaptationSurround.enabled): the
 ## out-of-frame directions within 70 deg of the view axis, from the analytic model (_surround_luminance).
 var adaptation_surround := AdaptationSurround.new()
@@ -554,6 +560,16 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	# The field meter reads this frame back in true luminance (nothing measured with the adaptation off).
 	adaptation_meter.set_frame(scene_per_cd_m2 if eye_adaptation_enabled else 0.0, _field_epoch, view_loading,
 			adaptation_view, sun_seen_cd_m2(scene_per_cd_m2))
+	# The glare spread: the Sun's direction (render world), its veil's illuminance in scene units (the visibility the meter
+	# measured: hidden or enclosed Sun: none), its colour and the mask radius of the disc.
+	adaptation_meter.glare_effect = glare_effect
+	glare_effect.meter = adaptation_meter
+	glare_effect.vision = vision_effect
+	for effect in [glare_effect, glare_add]:
+		effect.set_frame(scene_per_cd_m2 > 0.0, Frames.to_render(sun_from_earth.normalized()),
+				last_sun_normal_lux * last_veil_visibility * scene_per_cd_m2 if glare_enabled else 0.0, _sun_light_unit_rgb,
+				cos(AdaptationMeter.SUN_MASK_RADIUS_FACTOR * asin(minf(SUN_RADIUS_M / (ASTRONOMICAL_UNIT_M * d_au), 1.0))),
+				eye_adaptation_enabled)
 	eclipse_segments = 0
 	if moon_apparent_gcrf_m != Vector3.ZERO:
 		var moon_from_earth := moon_apparent_gcrf_m - earth_center_gcrf_m
@@ -1561,6 +1577,14 @@ func _take_field_measurement() -> void:
 	var veil := glare_veil(result[3], result[4]) if glare_enabled else Vector2.ZERO
 	last_veil_cd_m2 = veil.x
 	last_veil_scotopic_cd_m2 = veil.y
+	# + the glare spread's veil of the sources the display cannot show (the Earth, the Moon; its image part, one frame old):
+	# the mean over the field, added as the Sun's is (not per sample: see AdaptationMeter.veil_mean).
+	last_veil_image_cd_m2 = 0.0
+	if glare_enabled and result.size() > 5:
+		var image_veil := Vector2(AdaptationMeter.veil_mean(result[5], 0),
+				AdaptationMeter.veil_mean(result[5], AdaptationMeter.HISTOGRAM_BINS))
+		last_veil_image_cd_m2 = image_veil.x
+		veil += image_veil
 	var photopic := AdaptationMeter.field_log_average(counts, 0)
 	if photopic < 0.0:
 		return
