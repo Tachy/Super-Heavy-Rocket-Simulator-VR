@@ -981,12 +981,24 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
 - **Above 62 km the volume levels are baked for S only** (shape and S, not the light): a re-bake in orbit (every
   ~19 km of flight at 400 km, ~2.4 s) runs the density / occupancy / S phases of the kept levels (3 levels from
   400 km at the desktop's pixel angle) - more bake dispatches than before (only the flat geometry), each <= ~2 ms GPU.
-- **The volume's cover below the column's (look fixes T8, 2026-11-07; open, needs a ruling)**: at nadir the volume
-  levels draw less cloud than the column's beam cover that the flat levels and the far field follow (the user's
-  reference, ruling 2026-10-29). Mean alpha over the view (`CLOUD_BAKED_VOLUME_ONLY` / `CLOUD_BAKED_FLAT_ONLY` /
-  `CLOUD_BAKED_FAR_REFERENCE`, render_check `--centre_dump`, analog weather 2025-11-07 15:00 UTC, six sites over the
-  Gulf at 50 km): volume 0.357, flat levels 0.435, column 0.438 (volume / column 0.50-1.05 per site, 0.82 overall; at
-  15 / 30 km three sites 0.38-0.87). So the 40-60 km takeover raises the cover by ~20 % region by region (the analog
-  nadir view at 26 N 97 W: 0.445 -> 0.516 share of bright pixels from 45 to 55 km) - gradual, no jump, but the two
-  renders do not match. Whether the volume's shapes (the low-altitude look) or the column's beam cover should move is
-  a model decision; numbers: `.superpowers/sdd/2026-11-07-look-fixes/t8-report.md`.
+- **The volume's cover and brightness against the flat levels' (look fixes T8 / T7b; open)**: the 40-60 km takeover
+  changes the view region by region (the volume's 3-D shapes and the flat pattern place the clouds differently: 4 x 4
+  region means move by up to ~12 codes over 45-65 km, steps <= 1.5 % per km near 55 km) and, depending on the site, the
+  cover or the brightness. Measured 2026-11-08 (fly-up straight down 45-65 km, fixed exposure, one process per height;
+  `screenshots/look_fixes/t7b/sheet_handover.png`, `fly_stats_all.txt`): Gulf analog (26 N 97.157 W, 2025-11-07
+  15 UTC) cloud share 0.476 -> 0.537, mean luma -0.6 %; the 15 N 45 W cumulus hour (ERA5 2025-03-20 14 UTC) cloud
+  share 0.331 -> 0.339, mean luma +4.3 % (the volume's gaps darker: 94 vs 101 codes). Causes found (T7b, centre dumps
+  at 50 km, `CLOUD_BAKED_VOLUME_ONLY` / `FLAT_ONLY`): (1) the column rule's nadir cover is the beam cover of the
+  largest fraction, 1 - (1 - f)^(1 + 0.66 (1 - f)) - independent of the cloud block's depth - while the volume's
+  shapes project more cover the deeper the block (a 1-2 km slab 1 - (1 - f)^1.31-1.34 at nadir: 0.25 / 0.49 / 0.80
+  against the rule's 0.29 / 0.51 / 0.76 at f 0.2 / 0.4 / 0.7; the Gulf's 0.5-1.5 km blocks less, the deep trade
+  cumulus more); the data's own total cover is the largest fraction there (single blocks, ERA5 maximum overlap), the
+  rule's vertical term adds 20-40 %; (2) the volume's soft margins are translucent (in-cloud alpha 0.84-0.92 against
+  the flat pattern's 0.93-0.98), mean alpha 0.77 / 0.88 / 1.01 x the flat levels' for those slabs; (3) the volume's
+  clouds are brighter than the flat slab's (Gulf: cloud luma 191 vs 181 codes at equal cover) - before T7b the lower
+  cover hid it. A per-fraction layer inflation f' = 1 - (1 - f)^(1 + 0.55 (1 - f)^2) matched the slabs within 3 % and
+  the Gulf cover (0.536 -> 0.537) but exposed (3) there (mean luma -6.3 % over 45-65 km) and over-covered the cumulus
+  hour (0.390 -> 0.338): not taken (the hand-over must not change visibly). Next: the block depth into the volume's
+  cover (or the column rule), then the flat slab's light against the volume's. Six T8 sites (50 km, mean alpha
+  volume / flat): 0.92 / 0.70 / 0.71 / 0.81 / 0.49 / 1.04 before, 1.01 / 0.82 / 0.87 / 0.93 / 0.60 / 1.20 with the
+  inflation (sites 24.5 N 96.3 W, 25.2 N 93.8 W, 26.0 N 95.5 W, 26.0 N 97.157 W, 26.8 N 93.8 W, 27.5 N 96.3 W).

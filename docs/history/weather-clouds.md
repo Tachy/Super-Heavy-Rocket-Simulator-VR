@@ -2645,3 +2645,17 @@ Superseded by the fine column and the sub-grid structure (look fixes T7 C / B). 
 
 The analog set then drew the Earth from space at 1 deg (blurred against an ERA5 hour), a partly cloudy cell as an even
 grey veil and every cell as a homogeneous slab (display white share 0.62-0.71 against EPIC's 0.13).
+
+## The volume's cover below the column's: the T8 open point (until 2026-11-08)
+
+Superseded by the T7b measurements (causes found, a per-fraction fix tried and not taken). Verbatim from the subsystem file:
+
+> - **The volume's cover below the column's (look fixes T8, 2026-11-07; open, needs a ruling)**: at nadir the volume
+>   levels draw less cloud than the column's beam cover that the flat levels and the far field follow (the user's
+>   reference, ruling 2026-10-29). Mean alpha over the view (`CLOUD_BAKED_VOLUME_ONLY` / `CLOUD_BAKED_FLAT_ONLY` /
+>   `CLOUD_BAKED_FAR_REFERENCE`, render_check `--centre_dump`, analog weather 2025-11-07 15:00 UTC, six sites over the
+>   Gulf at 50 km): volume 0.357, flat levels 0.435, column 0.438 (volume / column 0.50-1.05 per site, 0.82 overall; at
+>   15 / 30 km three sites 0.38-0.87). So the 40-60 km takeover raises the cover by ~20 % region by region (the analog
+>   nadir view at 26 N 97 W: 0.445 -> 0.516 share of bright pixels from 45 to 55 km) - gradual, no jump, but the two
+>   renders do not match. Whether the volume's shapes (the low-altitude look) or the column's beam cover should move is
+>   a model decision; numbers: `.superpowers/sdd/2026-11-07-look-fixes/t8-report.md`.
