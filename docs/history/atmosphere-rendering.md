@@ -538,3 +538,22 @@ mostly black field (lunar day looking up 60 deg: 2.4 %, fragile) was removed who
   any luminance, so the blue hour (Sun -5.5 deg, twilight sky light B/R 2.9, L_a 12) was adapted at D 0.83 and went
   nearly grey (sky B/R 3.1 -> 1.25), and a moonlit night at D 0.82. Since fix round 3 D = m D_photopic with CIE 191's
   mesopic m (eye-adaptation.md, "Mesopic degree of adaptation").
+
+## Special-case exposure rules, superseded 2026-11-08 (look fixes T13, unified appearance model)
+- Rule D "highlight protection" (2026-11-07 .. T13, now `--protect_adaptation`): L_a = max(L_f / key, L_anchor / 0.9),
+  the darker of the mean-grey and anchored exposures. It existed because the mean grey alone washed out the white cabin
+  and the anchor alone washed out sky / limb scenes. Since T13 bright regions are held by the local adaptation (their
+  local mean at the anchored white) and the display curve's shoulder; the global rule is the mean grey alone.
+- Field key 0.18 (photographers' grey card / Reinhard 2002's key) and DAY_EXPOSURE in or out of it (T6, 2026-11-08:
+  rule_key = key / DAY_EXPOSURE = 0.12, `--day_exposure=1.5` the earlier 0.18): the field rendered at scene 0.27 (old)
+  or 0.18 (T6) on AgX's curve (sRGB 140 / 118). Since T13 the key is CIECAM02's Y_b 0.2 and the field renders at
+  Y_b x DAY_EXPOSURE = 0.3, shown by the fixed display curve at 0.2 of display white. `--field_key=0.12` reproduces T6's
+  key.
+- Hand keys of cockpit_shots.gd (CABIN_FIELD_KEY 1.2, PILOT_FIELD_KEY 0.5): `--cabin_keys`.
+- The gain floor 1 is kept, restated as the white cap (no adopted white above the white plate under the TOA Sun).
+- Planned but not done: T11 (DAY_EXPOSURE 1.5 for the Moon only) and T12 (a special highlight shoulder for the Earth
+  from space) - covered by the one rule and the fixed display curve.
+- AgX's own grey curve in the display tone step (T5 .. T13, now `--display_curve=agx`): awp(Y), contrast 1.25, white
+  16.29: field 0.27 -> display 0.26, white plate 1.5 -> 0.69, compressing the ~10:1 cloud / sea contrast (Earth from
+  space white share 0.44 against DSCOVR EPIC's 0.13, T7 step 2).
+- Godot's glow (threshold 4, intensity 0.6; capped input, not tied to the source; T10 diagnosis), now `--glow=on`.

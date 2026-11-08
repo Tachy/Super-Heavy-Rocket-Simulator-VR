@@ -177,6 +177,24 @@ SCENES = {
 GAPS = ["cockpit_night_lamps: cockpit_shots.gd has no --utc / night case (T10 note) - not automated yet"]
 
 
+def run_watched(cmd, log, timeout_s=900):
+    """Runs a Godot render; stops it early when the project does not compile (a parse error makes render_check loop)."""
+    import time
+    with open(log, "w") as f:
+        proc = subprocess.Popen(cmd, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT)
+        start = time.time()
+        while proc.poll() is None:
+            time.sleep(5)
+            try:
+                with open(log, errors="ignore") as r:
+                    head = r.read(200000)
+            except OSError:
+                head = ""
+            if "Parse Error" in head or time.time() - start > timeout_s:
+                proc.kill()
+                break
+
+
 def render(name, args, label, extra):
     png = os.path.join(OUT, f"{label}_{name}.png")
     log = os.path.join(OUT, f"{label}_{name}.log")
@@ -184,16 +202,16 @@ def render(name, args, label, extra):
         out_dir = os.path.join(OUT, f"{label}_cockpit")
         cmd = [GODOT, "--path", "game", "--script", "res://tests/cockpit_shots.gd", "--",
                "--mission=falcon9_crew_dragon", "--t_plus=-60", "--out_dir=" + out_dir] + extra
-        with open(log, "w") as f:
-            subprocess.run(cmd, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT, timeout=1800)
+        run_watched(cmd, log, 1800)
         src = os.path.join(out_dir, "pilot_eye.png")
         if os.path.exists(src):
             Image.open(src).save(png)
         return png
     cmd = [GODOT, "--path", "game", "--script", "res://tests/render_check.gd", "--"] + args + extra + \
         ["--adaptation_log", "--out=" + png]
-    with open(log, "w") as f:
-        subprocess.run(cmd, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT, timeout=1800)
+    if os.path.exists(png):
+        os.remove(png)
+    run_watched(cmd, log)
     return png
 
 

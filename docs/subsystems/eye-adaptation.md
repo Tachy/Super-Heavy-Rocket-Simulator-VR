@@ -81,21 +81,29 @@ shaders:
   move the anchor, a larger bright area sets it (`adaptation_meter_test.gd`). Both statistics are measured under either
   rule (`last_field_cd_m2`, `last_anchor_cd_m2`; render_check and cockpit_shots log them). Comparison A field / B
   white plate / C anchored: `screenshots/eye_adaptation/anchored/` (values in the open points).
-- **Highlight-protection rule D - the game's field rule** [user 2026-11-07, `FieldRule.PROTECT`, default;
-  `--mean_grey_adaptation` / `--anchored_adaptation` select the others; `Atmosphere.field_adaptation_luminance`]: L_a = max(L_f / `field_key`, L_anchor /
-  `ANCHOR_WHITE`) - the stricter (darker) of the mean-grey and the anchor exposures, the scotopic pair likewise; everything
-  downstream unchanged. Intent: the anchored white where a bright area would clip, the mean grey elsewhere (dark scenes).
-  **DAY_EXPOSURE out of the field rule** [look fixes T6, 2026-11-08, `Atmosphere.rule_key()`, `field_day_exposure`,
-  user argument `--day_exposure=1.5` = the earlier rule]: a field at the key renders at key x `DAY_EXPOSURE` x gain, so
-  the field used to land at 0.27 instead of the documented 0.18. The grey term now divides by key / `DAY_EXPOSURE`
-  (0.12), the field renders at 0.18; the anchor (white-plate) term is unchanged. Effect (-0.58 EV where the grey term
-  decides): pad noon el 5 gain 1.65 -> 1.10, Apollo 11 down-Sun el 5 4.94 -> 3.29 (ground mean sRGB 128 -> 108),
-  lunar night under the Earth 8342 -> 7557 (the anchor decides), dusk 1996 -> 1706; cockpit (anchor) and the Earth from
-  space (gain at the floor 1: L_a above the white plate's) unchanged. Sheets `screenshots/look_fixes/t6/`.
-  Test: `adaptation_meter_test.gd`. Comparison A field / C anchored / D protected:
-  `screenshots/eye_adaptation/protected/`: D equals the mean-grey rule in every outdoor scene (Moon day, lunar night,
-  pad noon, dusk, 400 km, start view: the anchor / 0.9 is 2-4x the field, the field / 0.18 5.5x) and the anchored rule
-  in the cockpit (gain 157 against 480 at key 0.18: anchor 242 cd/m^2 = 15x the field), so no hand key is needed there.
+- **Unified appearance model - the game's rule** [look fixes T13, user 2026-11-08: one observer model in the spirit
+  of iCAM06 (Kuang, Johnson & Fairchild 2007) / Pattanaik et al. 2000's multiscale observer, replacing the special
+  cases; `FieldRule.MEAN_GREY`, default]. (1) Global temporal adaptation: the adopted white L_w = L_f / Y_b,
+  Y_b = `FIELD_MID_GREY` = 0.20 [S: CIE 159:2004 CIECAM02, the background of an average scene, 20 % of the white],
+  capped at the white plate under the TOA Sun (`EyeAdaptation.advance`; no diffuse surface is whiter: a field brighter
+  than Y_b of it is a white world shown at the white - the former "gain floor 1"); Ferwerda gains, pacing, mesopic k,
+  CIE 191 D, Hunt S and Stevens B unchanged. The adopted white renders at the scene units' white plate (DAY_EXPOSURE),
+  the field at Y_b x DAY_EXPOSURE = 0.3. (2) Local adaptation (below) holds every bright region (cabin walls and
+  windows, the Earth from the lunar night, the full Moon) at the anchored white - the job rule D's anchor term did
+  globally. (3) Chromatic adaptation and colour appearance (CAT02, mesopic D, Hunt, Stevens; below). (4) Physical glare
+  spread (CIE 146) in place of Godot's glow (below). (5) The fixed display mapping (`DisplayTone.display_curve`, display
+  tone step 1, below): linear (colourimetric) to the knee - the field at 0.2 of display white - and a log-quadratic
+  shoulder to display white at DAY_EXPOSURE x 1000 / 203 [S: ITU-R BT.2408: HDR reference white 203 cd/m^2 on a
+  1000 cd/m^2 peak]: white plate 0.67, scene 2.5 0.83. Removed (history `docs/history/atmosphere-rendering.md`): rule D
+  as default (`--protect_adaptation`), the T6 rule key / `--day_exposure` (`--field_key=0.12` gives its key), the
+  cockpit hand keys (`cockpit_shots --cabin_keys`), the planned T11 Moon exception and T12 highlight shoulder, AgX's
+  grey curve in the tone step (`--display_curve=agx`), Godot's glow (`--glow=on`). Reference scene suite (the
+  definition of done for every later appearance change): `tools/look_reference_suite.py` (scenes, targets and sources
+  below in "Reference scenes"). Test: `adaptation_meter_test.gd` (Y_b, default rule, field at Y_b x DAY_EXPOSURE and
+  at 0.2 of display white, white cap), `display_tone_test.gd` (T13 cases).
+- **Rule D (option `--protect_adaptation`)**: L_a = max(L_f / `field_key`, L_anchor / `ANCHOR_WHITE`), the stricter
+  (darker) of the mean-grey and the anchor exposures (the game's rule 2026-11-07 .. T13). Comparison A field /
+  C anchored / D protected: `screenshots/eye_adaptation/protected/`.
 - **Field beyond the frame** [look fixes T4, 2026-11-07; `adaptation_surround.gd` `AdaptationSurround`, fidelity flag
   `AdaptationSurround.enabled`, user argument `--frame_only_adaptation` switches it off]. The meter sees only the frame:
   looking up into the noon sky the field was the sky alone and the gain doubled (pad noon el 5 / el 60: field 4642 /
@@ -419,7 +427,7 @@ shaders:
 - **Local adaptation: small bright objects keep their detail** [look fixes T10, user 2026-11-08; `local_adaptation.gd`
   `LocalAdaptation` (model, CPU mirror), `local_adaptation_effect.gd` `LocalAdaptationEffect` (two compositor stages);
   fidelity flag `LocalAdaptation.enabled`, user argument `--local_adaptation=off` (game, render_check, cockpit_shots)].
-  The global rule D sets one gain for the view; a small object far brighter than the field - the Earth from the lunar
+  The global rule sets one gain for the view; a small object far brighter than the field - the Earth from the lunar
   night (~1e4 cd/m^2 at gain 7557: scene ~1000, display white with Godot's glow around it), the full Moon in the Earth's
   night sky, lamps in a dark cabin - clipped. The eye adapts locally [S: Vangorp, Myszkowski, Graf & Mantiuk 2015, "A
   model of local adaptation", ACM TOG 34(6) 166: the adapting luminance is pooled over a Gaussian of sigma 0.428 deg
@@ -436,39 +444,36 @@ shaders:
   part of the post step (VisionEffect, 38 % of the Earth's displayed Y at lunar night) is scaled by c^2 (the cones' by
   c): rod saturation [E: Aguilar & Stiles 1954] - a region the cones adapt to locally is photopic and has no rod signal;
   the shape c^2 is a [call] (only "the rods' share vanishes under strong compression, continuous at c = 1" is justified).
-  Image pipeline [call]: the MAP stage (before the transparent pass, after the field meter, which measures the unchanged
-  image; it asks for the MSAA resolve every frame) averages the opaque image with the cloud composite into blocks of
-  mean LINEAR luminance, stored as log2 (area-exact: a disc moving over the grid changes its blocks continuously; block edge a power of two with >= 1.5 blocks per pooling sigma: 1 px on a 900 px high desktop
-  frame at fov 100, 8 px for the headset; above 4 px a 4 x 4 sample grid per block), pools them bilaterally (spatial sigma 0.428 deg, range sigma 0.4 decades
-  [S: Durand & Dorsey 2002], radius 2 sigma; weights from log differences, the pooled sum itself LINEAR luminance as in
-  Vangorp - a [call]: round 1 replaced the geometric mean that underestimated L_loc in mixed regions) and evaluates log2 c per block; the APPLY stage (after VisionEffect, before
-  the display tone step, glow and AgX) multiplies each pixel by c, joint-bilaterally upsampled against the pixel's own
-  luminance (Kopf et al. 2007; 4 x 4 blocks, spatial sigma 1 block; range sigma 0.4 decades, 1.0 decade for a pixel DIMMER
-  than the block [call]: the antialiased edge pixels of a disc, up to ~2 decades under it, share its factor instead of
-  staying at c = 1 as white 1-px sparkles; the dark field 4+ decades under is still unlike it). The like-block share
-  blends log c in by a smoothstep from 1 % to 4 % (`LocalAdaptation.smooth_share`) instead of a hard cut. The edge-aware pooling is a
-  display requirement, not the eye's: Vangorp's plain Gaussian darkens a 0.4 deg ring of the dark field around a bright
-  disc and brightens its limb (the local tone mapper's halo); here the dark field beside the disc keeps c = 1 exactly
-  and the limb no more than the interior (test). A pixel unlike every block near it (range weight < 1 % of the
-  spatial: an emitter drawn in the transparent pass over a dark field, a sub-block glint) keeps c = 1; over a locally
-  adapted region (a label on the Earth's disc from the lunar night) a display-referred emitter takes that region's c.
-  Per view (both VR eyes, each its own map) but ONE block size per frame, from view 0's pixels per degree at the image
-  centre [call]: both eyes pool over the same footprint in degrees (no binocular gain mismatch from different footprints),
-  only the grid phase differs; measured on the GPU path, a 24 px disc at 0..8 px disparity displays a left / right peak
-  within x1.12 (gate x1.2). For a wide rectilinear frustum px/deg grows toward the edge (x1.5-3), so the pooling is wider in
-  degrees at the periphery [call, accepted]. Temporal behaviour [call]: no temporal low-pass on c. A screen-space filter
-  on log c cannot follow a moving object: with the global rule's 0.5 s light time constant (`LIGHT_TIME_CONSTANT_S`) a
-  disc swept at 30 deg/s would drag a ghost of ~15 deg; the fast neural light adaptation (~0.1 s, Pattanaik 2000) is
-  faster than a frame at the scales that matter, so c follows the image of the same frame (a lamp or the Earth entering the
-  view is compressed at once, the global gain pacing as before). What is bounded instead is the grid-phase dependence
-  (CPU test + GPU readback): a disc of 10 / 16 / 24 / 32 px (1.25 .. 4 blocks, 0.3 .. 1 deg at the headset's 31.5 px/deg)
-  moved over the grid in half-pixel steps varies its displayed flux ratio by x1.86 / 1.54 / 1.22 / 1.12 and its peak pixel by
-  x1.84 / 1.57 / 1.22 / 1.17 (before round 1, log block means and a hard share cut: x250 at 10 px, peak x60 at 16 px). A
-  structure below ~1.25 blocks (6 px = 0.19 deg) is the documented limit and still pops with the phase (flux ratio x34).
-  One source of truth: the shaders are templates whose numbers (Ferwerda branch constants, luminance floor and weights,
-  fp16 clamp) are generated from `EyeAdaptation` / `LocalAdaptation`, the push-constant layouts are shared functions
-  (`down_push`, `pool_push`, `apply_push`). Off with the eye adaptation off, at a display gain <= 1 and before the
-  tables have loaded.
+  Pooling (look fixes T13, grid-phase invariant; T10's block grid varied a 0.3-1 deg disc by x1.1-1.9 with its phase):
+  L_loc is a shift-invariant edge-aware pool, Vangorp's Gaussian made edge-aware as a piecewise-linear bilateral filter
+  [S: Durand & Dorsey 2002; Paris & Durand 2006]: 16 log-luminance bands (spacing <= 0.4 decades [S: sigma_r], from
+  PLATEAU/16 to the fp16 clamp [call]; the lowest band takes every darker pixel); per band the range weight of every
+  full-resolution pixel (sigma 0.4 decades for a neighbour at or below the band, 1.0 decade for a brighter one [call:
+  the antialiased edge pixels of a bright disc share its factor instead of staying white]); MAP: area-exact box
+  downsample of w L and w to a block grid (block = largest power of two with >= 1.5 texels per sigma, <= 32 [call];
+  8 px at the headset's 31.5 px/deg; every pixel read), separable Gaussian blur at low resolution (radius 3 sigma
+  [call]); APPLY: bilinear upsampling, each pixel reads its own two bands (linear in its log L): L_loc = interpolated
+  blur(wL) / blur(w). Box x Gaussian is shift invariant (aliasing exp(-2 pi^2 (sigma / texel)^2) < 1e-19 at 1.5 texels).
+  A pixel whose like-pixel share blur(w) is below 1 % keeps c = 1 (an emitter over a dark field, a sub-block glint), a
+  smoothstep blends log c in up to 4 % [call]. The edge-aware pooling is a display requirement, not the eye's: Vangorp's
+  plain Gaussian darkens a ring of the dark field around a bright disc and brightens its limb; here the dark field
+  keeps c = 1 and the limb no more than the interior (test). MAP runs before the transparent pass (after the field meter,
+  with the cloud composite; MSAA resolve every frame), APPLY after VisionEffect, before the display tone step. Per view
+  (both VR eyes) with ONE block size per frame from view 0's px/deg at the image centre [call] (wider in degrees at the
+  periphery of a wide frustum, accepted). No temporal filter: a screen-space low-pass cannot follow a moving object (a
+  30 deg/s head turn at the 0.5 s light constant would drag a ~15 deg ghost); fast neural light adaptation (~0.1 s,
+  Pattanaik 2000) is faster than a frame at these scales, so c follows the same frame. Measured (CPU mirror, 31.5
+  px/deg, a 1e4 cd/m^2 antialiased disc over 1e-3 moved 0..8 px in half-pixel steps): 9.5 / 16 / 24 / 32 px (0.3 .. 1
+  deg) displayed flux x1.02 / 1.02 / 1.01 / 1.01, peak x1.03 / 1.02 / 1.01 / 1.01 (gate 5 %; T10: x1.86 .. 1.12);
+  stereo through the GPU path (disparity 0-8 px) left / right peak within x1.005 (gate 3 %); GPU = CPU within 0.7 %
+  (fp16 maps). Below ~0.3 deg (6 px) the share blend keeps a phase-dependent factor (flux x2.7 over a block,
+  information): the thin Earth crescent and the far Moon on the desktop (1-4 px) stay c = 1. One source of truth: the
+  shaders are templates filled from `EyeAdaptation` / `LocalAdaptation` (`LocalAdaptation.band_count()`). Off with the
+  eye adaptation off, at a display gain <= 1 and before the tables have loaded. Cost at 5294 x 4250 per eye stereo
+  (RTX 4090, `--gpu_passes`, median of 300 frames, GPU shared with other agents): MAP 0.73 ms + APPLY 0.44 ms (T10's
+  block grid 0.27 + 0.33 ms), plus the MSAA resolve before the transparent pass. In-game (lunar night, A T10 grid / B
+  bands; `screenshots/look_fixes/t13/la/`): Earth at fov 100 (12 px) 50.8 % -> 8.5 % of the disc clipped; full Moon fov
+  12 17 % -> 0 % clipped, no glow rim; crescent identical (sub-block).
   - The halo (the user's "blur rim", 2026-11-08): Godot's glow (world.gd: threshold 4, intensity 0.6, its input capped
     at luminance 12 - independent of the source's luminance and of the eye), not the glare veil (that is the Sun's alone
     and enters only the adaptation) nor the Earth shader: with `render_check --glow=off` the rim is gone (A, lunar night
@@ -497,8 +502,8 @@ shaders:
   (1.25x), an emitter over the black sky c = 1; translation invariance (disc of 10 .. 32 px over the block grid, bound x2);
   a soft 1/r^2 gradient (factor rises outward, no ring); an image size that is no multiple of the block (disc at the edge);
   the shaders carry the generated constants (no placeholder left); the flag. `game/tests/local_adaptation_gpu_check.gd`
-  (needs a GPU, local RenderingDevice, no render): the three generated shaders against the CPU mirror on discs of 10 .. 32
-  px at three grid phases (worst |c_gpu / c_cpu - 1| 0.0010, tolerance 3 %, fp16 input) and the stereo disparity sweep.
+  (needs a GPU, local RenderingDevice, no render): the generated shaders against the CPU mirror on 12 discs of 9.5 .. 32
+  px (worst |c_gpu / c_cpu - 1| 0.0068, tolerance 3 %, fp16 input) and the stereo disparity sweep (x1.005, gate 1.03).
 
 - **Display tone step: chroma-preserving tone curve** [look fixes T5, 2026-11-07; `display_tone.gd` `DisplayTone` (model
   and CPU mirror), `display_tone_effect.gd` `DisplayToneEffect` (compute step); fidelity flag `DisplayTone.enabled`,
@@ -506,8 +511,10 @@ shaders:
   16-26 % of the sky's and the ocean's B/R at mid-high scene values and turns the noon sky's OkLab hue by ~8 deg; a plain
   luminance curve keeps B/R but its per-channel clip turns saturated blues violet. The step, per pixel x (scene-linear
   Rec.709 after the post step; on every view layer, after `VisionEffect`, before glow and AgX): (1) the luminance Y goes
-  through AgX's own grey curve, g = awp(Y) (Godot's contrast 1.25 and white 16.29 read from the environment) - the
-  former tonality on the grey axis; (2) the chromaticity is kept, d0 = x g / Y: OkLab [S: Ottosson 2020] is homogeneous
+  through the fixed display curve g = `DisplayTone.display_curve(Y)` (look fixes T13: linear Y / DAY_EXPOSURE to the knee
+  0.203, log-quadratic shoulder ln g = ln g_k + u - u^2 / 2U, u = ln(Y / Y_k), to white at DAY_EXPOSURE x 1000 / 203
+  [S: ITU-R BT.2408]; `--display_curve=agx`: AgX's own grey curve awp(Y) as T5 .. T13, Godot's contrast 1.25 and white
+  16.29); the emitters' inverse uses the same curve (global `vision_display_curve`); (2) the chromaticity is kept, d0 = x g / Y: OkLab [S: Ottosson 2020] is homogeneous
   of degree 1/3, so d0 has x's OkLab hue exactly; (3) the Hunt factor's daylight part: OkLab chroma x max(S, 1) at
   constant lightness and hue; (4) path to white [call]: chroma x (1 - smoothstep) over log2 Y from scene 2 (above the
   sunlit white plate, 1.5) to AgX's white - Sun disc, glints and the brightest highlights end in display white; (5)
@@ -596,9 +603,10 @@ shaders:
 
 - Eye model: Ferwerda 1996 cone/rod t.v.i. with Jensen 2000 rod saturation, CIECAM02 brightness / chroma terms,
   Schaefer 1990 star threshold (user decision 2026-10-25, "like the eye").
-- Field statistic: highlight protection D, the darker of the mean-grey and the anchor exposures (user 2026-11-07,
-  after comparing mean grey, white plate, anchored; the mean grey alone washed out the cabin, the white plate was too
-  dark outside and black in the cabin, the anchor alone washed out sky / limb scenes).
+- One appearance model (user 2026-11-08, look fixes T13): global mean-grey adaptation (Y_b 0.2, white cap), local
+  adaptation for bright regions, CAT02 / CIECAM02 appearance, CIE 146 glare, a fixed display curve (BT.2408 headroom);
+  no per-scene rules or keys. Every appearance change passes `tools/look_reference_suite.py`. (Rule D, the darker of the
+  mean-grey and anchor exposures, 2026-11-07 .. T13: history.)
 - Local adaptation for small bright objects (user 2026-11-08, look fixes T10): only ever lowers the gain, the local
   mean of a bright region at the anchored white (1.35), edge-aware pooling (no halo), switchable
   (`--local_adaptation=off`).
