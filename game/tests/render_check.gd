@@ -1055,6 +1055,9 @@ func _refuse(message: String) -> void:
 func _view_from(world: World, body: String) -> void:
 	world.update_world()
 	var direction := world.sun_apparent_from_earth_m if body == "sun" else world.moon_apparent_from_earth_m
+	if body.begins_with("gcrf:"):  # --view_from=gcrf:<x>,<y>,<z>: a direction from the Earth in GCRF (e.g. DSCOVR's)
+		var c := body.substr(5).split(",")
+		direction = Vector3(float(c[0]), float(c[1]), float(c[2]))
 	var u := Frames.to_render(direction).normalized()
 	world.camera.pitch = -asin(u.y)
 	world.camera.yaw = atan2(u.x, u.z)

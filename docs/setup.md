@@ -135,7 +135,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   fails. Scripts needing the generated models (`docking_mechanism_test`, `tower_view_test`, `vehicle_view_test`) are skipped
   unless `-Gpu`; `-Only a,b` selects scripts. Needs the built GDExtension. Scripts not named `*_test` are GPU checks or tools. `terrain_quadtree_test` is slow with the terrain data (502 s measured, data checks alone take 132 s Earth, 193 s Moon), so the runner gives it a 900 s limit (`$slowScripts`); it prints elapsed ms per check.
 - Visual check (needs GPU, no --headless): `godot --path game --script res://tests/render_check.gd --
-  --utc=2024-04-08T18:42:00 --focus=earth --view_from=moon --out=<png>`; ground views with
+  --utc=2024-04-08T18:42:00 --focus=earth --view_from=moon --out=<png>` (`--view_from=sun|moon|gcrf:<x>,<y>,<z>`, the last a
+  GCRF direction from the Earth, e.g. DSCOVR's `dscovr_j2000_position` from the EPIC API, with `--distance= --fov=`); ground views with
   `--lat= --lon= --look_at_moon --fov=`; clouds with `--weather=<abs path .wthr>` or `--weather=slab:<bottom>,<top>,<liquid>,<fraction>`
   and `--cloud_quality=desktop|vr`, `--cloud_divisor=<x>` (`docs/subsystems/weather-clouds.md` "Diagnostics"). The
   game's first view: `--start_view` (implies `--weather=analog`, the game's weather being on by default; `--weather=off`

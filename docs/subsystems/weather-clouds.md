@@ -754,6 +754,17 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   the known limits. Source: NOAA GOES-R series ABI Level 2 CMIPF, `s3://noaa-goes16/ABI-L2-CMIPF/2024/099/18/`
   (`OR_ABI-L2-CMIPF-M6C02_G16_s20240991800204_...`), public domain (NOAA Open Data Dissemination; GOES-16 was the
   GOES-East satellite on that date); not shipped, not in the repo (the reprojection script lived in `tmp/`).
+- **Cover and optical depth against climatology and DSCOVR EPIC (look fixes T7 step 1, 2026-11-08;
+  `.superpowers/sdd/2026-11-07-look-fixes/t7-report.md`)**: the data's total cloud cover (area-weighted) is 0.617 over
+  the 48 analog hours (0.591-0.654), 0.61-0.62 in full-resolution ERA5 hours; zonal 0.50-0.56 in the subtropics,
+  0.70-0.77 over the Southern Ocean, 0.79 in the Arctic - at or slightly below the satellite climatologies (GEWEX cloud
+  assessment, Stubenrauch et al. 2013: 0.68 +- 0.03; MODIS ~0.67, ISCCP ~0.66). The far field's nadir beam cover
+  matches it (0.60-0.63). The cover is not too high. The in-cloud optical depth is: with the added cumulus water
+  (grid-mean liquid path 109-126 g/m^2, of which 61-68 added; ERA5's own 48-57) the cover-weighted in-cloud tau
+  p50 is 20-26 (ERA5's own water: 9-11), the share of cloud area thicker than 23 (ISCCP's thick class) 0.45-0.52 (own
+  water 0.18-0.20), and the insolation-weighted cloud albedo increment (homogeneous Eddington slabs, background 0.10)
+  0.32-0.36 against 0.23-0.26 with the data's own water and ~0.14 from CERES EBAF (SW cloud effect ~ -47 W/m^2 of
+  340). Open: the model decision (T7 report).
 - `game/tests/cloud_layer_test.gd` (headless): the cross-fade never jumps, never changes a weighted slot. Also passes
   with a GPU (non-headless): there the slot uploads take real frames, so the world-volume case's first pair gets 12 s (it
   failed on "pair resident at its blend" at 6 s, 2026-10-30). Exit leak check: `render_check` prints no "RID leaked" warning (the effect's per-view `volume_buffer` was not freed, fixed 2026-10-30).
