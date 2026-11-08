@@ -113,7 +113,7 @@ def m_sky(a):
 
 def m_moon_day(a):
     ground = rows(a, 0.65, 0.95)
-    return {"ground_luma": float(luma(ground).mean()), "clipped": clipped(ground)}
+    return {"ground_luma": float(luma(ground).mean()), "clipped": clipped(ground), "ground_b_over_r": br(ground)}
 
 
 def halo_bump(a):
@@ -250,6 +250,17 @@ def m_sun_profile(fov_deg):
     return measure
 
 
+def sun_measure(fov_deg):
+    """m_sun + the halo profile (luma at 1 / 2 / 3 / 5 / 10 deg, the rings outside the frame are nan)."""
+    profile = m_sun_profile(fov_deg)
+
+    def measure(a):
+        out = m_sun(a)
+        out.update(profile(a))
+        return out
+    return measure
+
+
 def _cloud_br(a, x0, y0, x1, y1):
     """Linear B/R of the cloud pixels of a region (image fractions): per-pixel B/R < 1.2 (not the blue sky / sea),
     unclipped, luma above the cloud pixels' median (the lit cloud, not its shaded base)."""
@@ -318,6 +329,8 @@ SCENES = {
         "disc_b_over_r": (0.70, 99, "[user 2026-11-08: not cream - T10 (233,211,189) = linear B/R 0.63; "
                                     "call: the disc (maria + highlands + limb veil) at least 0.70, a warm off-white; the "
                                     "regolith is reddish, B/R ~0.8 under sunlight, Lane & Irvine 1973]")}),
+    # the first-quarter Moon in the afternoon sky over the pad (~45 deg up in the south-east; bug hunt 2026-11-08)
+    "day_moon_from_earth": (["--utc=2026-11-17T22:00:00"] + PAD + ["--look_at_moon", "--fov=12"], m_disc, {}),
     "earth_from_space_epic": (["--utc=2025-03-20T14:28:03", "--focus=earth",
                                "--view_from=gcrf:1548878.149868,49983.227147,173343.826562", "--distance=4e8",
                                "--fov=2.4", "--hide_ui", "--weather=" + EPIC_WTHR], "epic", {
@@ -392,6 +405,8 @@ def _variants():
                 if tag == "f10":  # 5 and 10 deg lie outside the 10 deg frame
                     g.pop("halo_5deg_rel", None)
                     g.pop("halo_10deg_rel", None)
+            if name == "sun_in_view":
+                measure = sun_measure(float(fov))
             out[f"{name}_{tag}"] = (base + ["--fov=" + fov], measure if name == "sun_in_view" else
                                     with_halo(measure, float(fov), ANGULAR_RADIUS_DEG[aim]), g)
     return out
