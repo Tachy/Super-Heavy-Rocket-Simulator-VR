@@ -2707,3 +2707,48 @@ The open point verbatim:
 >   CPU and the moonlight probe; new: the cf 0.15 cases, the CPU light vs the ground's mean, the tau-1 slab's slant depth
 >   at a 20 deg Sun 0.898 x, the vehicle shadow / gap probe). Next: refit the rule to the shapes (a core constant change,
 >   core + bindings rebuild) - the vertical term goes toward 0 with the nadir cover the data's.
+
+## The flat levels' vertical volume column (T7c, until 2026-11-08)
+
+Superseded by look fixes T7c fix 2 (render B marches the volume's own march along the view, `cloud_baked_set`). The
+T7c column (`cloud_baked_flat_volume_column`) sampled the baked shapes and light along the vertical at the flat levels'
+crossing, at fixed heights half the level's vertical cell apart (at most 48), each step's depth along the view (step /
+mu), shaded with the march's formula. Straight down it matched the volume (Gulf r4 2.05 codes); off nadir it showed
+iso-height terraces with dark rims on every cumulus top (the cloud top quantised into the fixed steps, no entry
+bisection) and 11-19 % more in-cloud high-pass contrast than the volume (Gulf nadir +11 %, oblique +16 %, cumulus
+oblique +11 %, low Sun +19 %); Gulf 45 deg at 50 km: L -3.6 %, cloud share 0.402 -> 0.363, r4 4.65 codes (T7c review
+C1, `screenshots/look_fixes/t7c_review/`). Its sky light took the near eclipse factor only (review M1). The verbatim
+paragraph:
+
+> (a) *The flat levels draw the volume's own column* (`cloud_baked_flat_volume_column`): inside the volume's levels
+>   (the same hand-over band at its extent as the volume's own, `cloud_baked_flat_weight_at`) the per-pixel pattern is
+>   replaced by a vertical march through the baked shapes and light (A, B; the level and blend the volume's march takes
+>   for that point and footprint; half the level's vertical cell; the march's own shading - Sun and sky sources, scaled
+>   transport, the pixel's phase - with each step's depth along the view, step / mu), composed as `cloud_baked_set`
+>   composes the volume (bright top for its alpha). Seen straight down this is the volume's own pixel; slanted, its column
+>   as a slab at the flat levels' crossing. Beyond the levels the 2-D pattern as before. The volume levels' light is
+>   baked above 62 km too (`CloudBaked`: the light for S's levels when none is marched) - the flat levels use it at every
+>   height. Before, the flat levels placed the clouds by their own 2-D pattern (turned, tile-broken taps at 2 km): 4 x 4
+>   regions moved by ~12 codes over 45-65 km.
+
+## The 40-60 km takeover (baked step 3 - look fixes T7c fix 2, until 2026-11-08)
+
+Dropped by T7c fix 2: once render B drew the volume's own march (the first fix-2 step: pixel-identical to render A at
+0-60 deg off nadir, `screenshots/look_fixes/t7c_fix2/pairs/pairs_c1_column.txt`), the two renders were the same and the
+takeover was removed - the volume is drawn at every height. The step-3 text from the subsystem file:
+
+> range (x / 1.25) and pixel angle (x 1.25) can fetch are not baked (re-bake outside those ranges). Takeover: from 40 to
+>   60 km camera height the flat levels replace the volume region by region (`cloud_baked_takeover_local`: a value
+>   noise of 20 km cells against the height's weight, each region switching over 0.08 of the noise, so a pixel shows one
+>   render - the volume with the hand-over behind it, or the flat levels alone; cirrus check 2026-10-30: scaling the
+>   volume's extinction by 1 - w kept its shapes opaque while the flat levels' half-alpha shapes filled the gaps - grey
+>   translucent shapes, lower-half mean alpha 0.40 at 50 km now 0.31), above 62 km the volume is not marched and its
+>   light is not baked; the levels the footprint keeps are baked for S only (shape, occupancy, S - the shadows' source at
+>   every height; a re-bake every ~2.6 s in orbit, ~20 bake frames at 400 km, cost not yet measured in the headset) (below
+>   40 km the volume levels are unchanged; `STARSIM_BAKED_DEFINES=CLOUD_BAKED_FLAT_NO_TAKEOVER` keeps the volume at every
+>   height - its coarse voxel levels close a deck's sub-voxel gaps, so their square stayed visible against the flat
+> cover).
+
+Shader parts removed: `cloud_baked_takeover_weight` (smoothstep 40-60 km of the camera height), `cloud_baked_takeover_local`
+(a value noise of 20 km cells, `CLOUD_BAKED_TAKEOVER_CELL_M`, each region switching over `CLOUD_BAKED_TAKEOVER_SOFT` 0.08
+of the noise), `cloud_baked_hash`; the B render's slab / pattern inside the volume's levels.

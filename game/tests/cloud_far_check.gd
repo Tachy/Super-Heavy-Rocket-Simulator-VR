@@ -27,13 +27,15 @@
 #      new flat geometry (a detour to 200 km first): 25 ground points' 21 x 21 block luminance the same within 1.5 % (the
 #      flat bake's turned / tile-breaking readings followed the camera's tile: the pattern jumped at the geometry's
 #      re-bakes on a climb, 27 % here);
-#   5b. the 40-60 km takeover (look fixes T7c, user 2026-11-08: the hand-over must not change the view): the broken
-#      layer straight down from just below the takeover (the volume alone) and just above it (the flat levels alone):
-#      25 ground points' block luminance (blocks of the same ground size) the same within TAKEOVER_TOLERANCE, the mean
-#      over the points within TAKEOVER_MEAN_TOLERANCE (before T7c the flat levels placed the clouds by their own 2-D
-#      pattern: regions moved by ~12 codes over 45-65 km);
+#   5b. the climb through 40-60 km (look fixes T7c / fix 2, user 2026-11-08: no visible change there from any view
+#      angle; since fix 2 the volume is drawn at every height, the flat levels only beyond it): the broken layer at 0 /
+#      30 / 45 / 60 deg off nadir, at a low Sun, the analog over the Gulf and over the Atlantic's cumulus; 25 ground
+#      points' block luminance about the aim point over the climb 39.5 -> 60.5 km: straight down each within
+#      TAKEOVER_TOLERANCE and their mean within TAKEOVER_MEAN_TOLERANCE (before T7c the flat levels placed the clouds
+#      by their own 2-D pattern: regions moved by ~12 codes over 45-65 km), off nadir their mean within
+#      TAKEOVER_GLOBAL_PER_KM per km;
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_far_check.gd [-- --save=<dir>] (PNGs of
-# the renders) [--no_3d_light] (CloudLayer.far_3d_light off) [--only_rebake] (sections 5 and 5b alone) [--only_probe] (section 1 alone). Exit code 1 on failure.
+# the renders) [--no_3d_light] (CloudLayer.far_3d_light off) [--only_rebake] (sections 5 and 5b alone) [--only_takeover] (5b alone) [--only_probe] (section 1 alone). Exit code 1 on failure.
 extends SceneTree
 
 const EPOCH_UTC := "2024-04-08T14:00:00"  ## no eclipse; the Sun over the Atlantic
@@ -91,8 +93,8 @@ const PROJECTION_TOLERANCE := Vector2(0.03, 0.1)  ## (water clouds, cirrus)
 const PROJECTION_ICE_FRACTION_MIN := 0.1
 const HANDOVER_TOLERANCE := 0.05
 const CLOUDY_RATIO_MIN := 1.3
-## Section 5 (look fixes T8): the first height (above the 40-60 km takeover and the volume's 62 km top: the flat levels
-## alone), how far up the next shape tile edge is searched and how far below / above it the two cameras are, the
+## Section 5 (look fixes T8): the first height (above the former 40-60 km takeover; since T7c fix 2 the volume is
+## drawn there too), how far up the next shape tile edge is searched and how far below / above it the two cameras are, the
 ## ground points' grid step (deg; 5 x 5 about SUB_CAMERA), the block radius (px), the detour height that forces a new
 ## flat geometry and the tolerance [E] (the mean relative block step; 2026-11-07: 1.42 % with the T8 fix, 27.4 % before;
 ## 2026-11-08 0.77 % with T7c's volume column - tightened from 3 %).
@@ -104,17 +106,30 @@ const REBAKE_GRID_DEG := 0.12
 const REBAKE_BLOCK_RADIUS := 10
 const REBAKE_TOLERANCE := 0.015
 const CLEAR_TOLERANCE := 0.02
-## Section 5b (T7c): the heights just below / above the takeover (cloud_baked_flat.gdshaderinc
-## CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M), the ground grid step (deg; 5 x 5 about SUB_CAMERA), the block's ground radius
-## (m: a region of ~6 km, the fly-up sheets' 4 x 4 regions are 7-12 km; the points within ~13 deg of nadir - farther out
-## the volume below the takeover shows its clouds' sides, the flat levels a slab: 2026-11-08 15 % at 25 deg) and the
-## tolerances [E]: per point (linear luminance; 7 % ~ 3 sRGB codes of ~130, the user's mark; 2026-11-08 worst 5.0 %,
-## mean 0.85 %) and the mean.
+## Section 5b (T7c): the climb's heights (the former takeover's band, cloud_baked_flat.gdshaderinc
+## CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M), the ground grid step (deg; 5 x 5 about the aim point), the block's ground size
+## across the view (m: a region of ~6 km, the fly-up sheets' 4 x 4 regions are 7-12 km) and the climb's tolerances
+## straight down [E]: per point (linear luminance; 7 % ~ 3 sRGB codes of ~130, the user's mark; 2026-11-08 worst 5.2 %,
+## mean 1.1 %) and the mean.
 const TAKEOVER_HEIGHTS_M := Vector2(39500.0, 60500.0)
 const TAKEOVER_GRID_DEG := 0.04
 const TAKEOVER_BLOCK_M := 3000.0
 const TAKEOVER_TOLERANCE := 0.07
 const TAKEOVER_MEAN_TOLERANCE := 0.02
+## (fix 2, review I1) the off-nadir angles of the broken layer's views (deg; looking north, the ray aimed at the
+## layer's TAKEOVER_LAYER_M over the aim point), its low-Sun epoch (Sun ~12 deg up at SUB_CAMERA), the analog
+## snapshot's sites (name, (lat, lon), off-nadir deg, UTC: a morning Sun over the Gulf, an evening one over the
+## Atlantic's cumulus).
+const TAKEOVER_ANGLES_DEG := [0.0, 30.0, 45.0, 60.0]
+const TAKEOVER_LAYER_M := 1500.0
+const TAKEOVER_LOW_SUN_UTC := "2024-04-08T20:15:00"
+const TAKEOVER_ANALOG_SITES := [["Gulf 26 N 97 W", Vector2(26.0, -97.157), 45.0, "2024-04-08T14:00:00"],
+		["cumulus 15 N 45 W, low Sun", Vector2(15.0, -45.0), 60.0, "2024-04-08T20:15:00"]]
+## (fix 2) off nadir the 25 points' mean luminance change per km of climb within TAKEOVER_GLOBAL_PER_KM (the fly-up's
+## global target, T7c: <= 1.5 % per km) [E]; their single points are reported (the view of the 3-D shapes changes with
+## the distance - the other points' rays turn, the footprint's level changes - as much below the band: 25.8 -> 39.5 km
+## worst points 14-50 %, 2026-11-08).
+const TAKEOVER_GLOBAL_PER_KM := 0.015
 ## Section 3b (T7b): the analog hour of the epoch's month (2024-04-08 14 UTC -> April, 12 UTC).
 const ANALOG_MONTH := 4
 const ANALOG_HOUR := 12
@@ -130,6 +145,7 @@ var _samples := 0
 var _save_dir := ""
 var _no_3d_light := false  ## --no_3d_light: CloudLayer.far_3d_light off (the plane-parallel slab alone)
 var _only_rebake := false  ## --only_rebake: section 5 alone
+var _only_takeover := false  ## --only_takeover: section 5b alone
 var _only_probe := false  ## --only_probe: section 1 (1, 1b, 1c) alone
 var _files: Array[String] = []
 
@@ -144,6 +160,8 @@ func _initialize() -> void:
 			_only_rebake = true
 		elif arg == "--only_probe":
 			_only_probe = true
+		elif arg == "--only_takeover":
+			_only_takeover = true
 	_run.call_deferred()
 
 
@@ -173,9 +191,10 @@ func _run() -> void:
 	_world.set_focus(World.FOCUS_EARTH)
 	_world.camera.fov = 60.0
 	var broken := _slab("broken", BROKEN_LIQUID_KG_M3, BROKEN_FRACTION)
-	if _only_rebake:
+	if _only_rebake or _only_takeover:
 		_show(broken)
-		await _rebake_tile_sample()
+		if not _only_takeover:
+			await _rebake_tile_sample()
 		await _takeover_sample()
 		_finish()
 		return
@@ -770,39 +789,142 @@ func _rebake_tile_sample() -> void:
 			mean <= REBAKE_TOLERANCE, "mean %.2f %%, worst point %.2f %%" % [mean * 100.0, worst * 100.0])
 
 
-## 5b. The 40-60 km takeover: the volume alone just below it, the flat levels alone just above (look fixes T7c).
+## 5b. The climb through the former 40-60 km takeover (look fixes T7c; fix 2,
+## review I1: the oblique views, two more sites, a low Sun). A case: label, snapshot, the aim point (lat, lon), its
+## off-nadir angle (deg), the UTC.
 func _takeover_sample() -> void:
+	var broken := _slab("broken", BROKEN_LIQUID_KG_M3, BROKEN_FRACTION)
+	var analog := _analog_snapshot()
+	var cases: Array = []
+	for angle: float in TAKEOVER_ANGLES_DEG:
+		cases.append(["broken cf 0.4", broken, SUB_CAMERA, angle, EPOCH_UTC])
+	cases.append(["broken cf 0.4, low Sun", broken, SUB_CAMERA, 45.0, TAKEOVER_LOW_SUN_UTC])
+	if analog.is_empty():
+		print("  SKIP  takeover on the analog snapshot: no analog file for month %d %02d UTC" % [ANALOG_MONTH,
+				ANALOG_HOUR])
+	else:
+		for site: Array in TAKEOVER_ANALOG_SITES:
+			cases.append(["analog " + site[0], analog, site[1], site[2], site[3]])
+	for c: Array in cases:
+		_show(c[1])
+		_world.clock.set_time(_world.core.utc_to_tdb_s(c[4]))
+		await _takeover_case(c[0], c[2], c[3])
+	_world.clock.set_time(_world.core.utc_to_tdb_s(EPOCH_UTC))
+	_world.set_focus(World.FOCUS_EARTH)
+	_world.camera.fov = 60.0
+	_show(broken)
+
+
+## One 5b case: the aim point p (lat, lon) seen off_nadir_deg off the nadir (looking north), the camera on the same ray
+## to p at TAKEOVER_HEIGHTS_M.x and .y; 25 ground points about p (TAKEOVER_GRID_DEG), block luminance (blocks of
+## TAKEOVER_BLOCK_M across the view), the in-cloud texture (the high-pass SD in a block of 3 x TAKEOVER_BLOCK_M about p,
+## reported). Straight down the points within TAKEOVER_TOLERANCE and their mean within TAKEOVER_MEAN_TOLERANCE; off nadir
+## their mean within TAKEOVER_GLOBAL_PER_KM per km.
+func _takeover_case(label: String, p: Vector2, off_nadir_deg: float) -> void:
 	var points: Array[Vector3] = []
 	for i in range(-2, 3):
 		for j in range(-2, 3):
-			points.append(_itrf(SUB_CAMERA.x + TAKEOVER_GRID_DEG * i, SUB_CAMERA.y + TAKEOVER_GRID_DEG * j))
+			points.append(_itrf(p.x + TAKEOVER_GRID_DEG * i, p.y + TAKEOVER_GRID_DEG * j))
 	var lums := {}
+	var texture := {}
+	var theta := deg_to_rad(off_nadir_deg)
 	for h: float in [TAKEOVER_HEIGHTS_M.x, TAKEOVER_HEIGHTS_M.y]:
-		await _place(SUB_CAMERA, WGS84_A_M + h)
+		# the camera south of p at h; its ray theta off its nadir meets the layer's height over p (central angle gamma)
+		var r_c := WGS84_A_M + h
+		var r_p := WGS84_A_M + TAKEOVER_LAYER_M
+		var gamma := asin(clampf(r_c * sin(theta) / r_p, -1.0, 1.0)) - theta
+		var distance := sqrt(r_c * r_c + r_p * r_p - 2.0 * r_c * r_p * cos(gamma))
+		_world.set_ground_site({"id": "custom", "name": "custom", "body": "earth",
+				"latitude_deg": p.x - rad_to_deg(gamma), "longitude_deg": p.y, "height_m": 0.0, "eye_height_m": h})
+		_world.camera.fov = 60.0
+		_world.camera.azimuth = 0.0
+		_world.camera.elevation = -(PI * 0.5 - theta - gamma)
+		await _settle()
 		var image := _frame()
-		_save(image, "t7c_takeover_%.0f" % h)
-		# the block's pixel radius for TAKEOVER_BLOCK_M on the ground (the cloud layer ~1.5 km up)
-		var pixels_per_m := image.get_height() / (2.0 * (h - 1500.0) * tan(deg_to_rad(_world.camera.fov) * 0.5))
+		_save(image, "t7c_takeover_%s_%.0f_%.0f" % [label.replace(" ", "_").replace(",", ""), off_nadir_deg, h])
+		var pixels_per_m := image.get_height() / (2.0 * distance * tan(deg_to_rad(_world.camera.fov) * 0.5))
 		var radius := maxi(int(round(TAKEOVER_BLOCK_M * pixels_per_m)), 2)
 		var values: Array[float] = []
-		for p in points:
-			values.append(_block_luminance(image, _pixel_of(p), radius))
+		for q in points:
+			values.append(_block_luminance(image, _pixel_of(q), radius))
 		lums[h] = values
-	var a_all: Array = lums[TAKEOVER_HEIGHTS_M.x]
-	var b_all: Array = lums[TAKEOVER_HEIGHTS_M.y]
+		texture[h] = _highpass_sd(image, _pixel_of(points[12]), 3 * radius)
+	var h0 := TAKEOVER_HEIGHTS_M.x
+	var h1 := TAKEOVER_HEIGHTS_M.y
+	var climb := _point_stats(lums[h0], lums[h1])
+	var per_km := climb.y / ((h1 - h0) * 1e-3)
+	var detail := "worst point %.2f %%, mean %.2f %% (%.3f %% per km), texture (high-pass SD) %.4f / %.4f" % [
+			climb.x * 100.0, climb.y * 100.0, per_km * 100.0, texture[h0], texture[h1]]
+	if off_nadir_deg == 0.0:
+		_check(("climb %.1f -> %.1f km, %s, straight down: the %d ground points' block luminance within %.0f %%, their "
+				+ "mean within %.0f %%") % [h0 * 1e-3, h1 * 1e-3, label, points.size(), TAKEOVER_TOLERANCE * 100.0,
+				TAKEOVER_MEAN_TOLERANCE * 100.0], climb.x <= TAKEOVER_TOLERANCE and climb.y <= TAKEOVER_MEAN_TOLERANCE,
+				detail)
+	else:
+		_check("climb %.1f -> %.1f km, %s, %.0f deg off nadir: the %d ground points' mean within %.1f %% per km" % [
+				h0 * 1e-3, h1 * 1e-3, label, off_nadir_deg, points.size(), TAKEOVER_GLOBAL_PER_KM * 100.0],
+				per_km <= TAKEOVER_GLOBAL_PER_KM, detail)
+
+
+## The worst relative difference of b against a and the relative difference of their sums.
+static func _point_stats(a: Array, b: Array) -> Vector2:
 	var sum_a := 0.0
 	var sum_b := 0.0
 	var worst := 0.0
-	for i in range(points.size()):
-		sum_a += a_all[i]
-		sum_b += b_all[i]
-		worst = maxf(worst, absf(float(b_all[i]) - float(a_all[i])) / maxf(float(a_all[i]), 1.0e-6))
-	var mean := absf(sum_b - sum_a) / maxf(sum_a, 1.0e-6)
-	_check(("takeover %.1f -> %.1f km, broken cf 0.4: the %d ground points' block luminance within %.0f %%, their mean "
-			+ "within %.0f %%") % [TAKEOVER_HEIGHTS_M.x * 1e-3, TAKEOVER_HEIGHTS_M.y * 1e-3, points.size(),
-			TAKEOVER_TOLERANCE * 100.0, TAKEOVER_MEAN_TOLERANCE * 100.0],
-			worst <= TAKEOVER_TOLERANCE and mean <= TAKEOVER_MEAN_TOLERANCE,
-			"worst point %.2f %%, mean %.2f %%" % [worst * 100.0, mean * 100.0])
+	for i in range(a.size()):
+		sum_a += a[i]
+		sum_b += b[i]
+		worst = maxf(worst, absf(float(b[i]) - float(a[i])) / maxf(float(a[i]), 1.0e-6))
+	return Vector2(worst, absf(sum_b - sum_a) / maxf(sum_a, 1.0e-6))
+
+
+## Waits until the terrain and the clouds have settled (as _place does).
+func _settle() -> void:
+	var idle := 0
+	for i in range(MAX_FRAMES):
+		await process_frame
+		var loading: int = _world.earth_terrain.stats["nodes_loading"]
+		var uploading: bool = _world.clouds.state()["uploading"]
+		var baked := _world.clouds.effect.baked
+		var baking: bool = ShaderGlobals.value(&"cloud_enabled") and (baked == null or not baked.settled())
+		idle = idle + 1 if loading == 0 and not uploading and not baking else 0
+		if idle >= SETTLE_FRAMES and i >= 2 * SETTLE_FRAMES:
+			break
+
+
+## The SD of the luminance minus its 9 x 9 box mean over the (2 r + 1)^2 block about centre (the in-cloud texture).
+static func _highpass_sd(image: Image, centre: Vector2, radius: int) -> float:
+	var w := image.get_width()
+	var h := image.get_height()
+	var x0 := clampi(int(round(centre.x)) - radius, 4, w - 5)
+	var x1 := clampi(int(round(centre.x)) + radius, 4, w - 5)
+	var y0 := clampi(int(round(centre.y)) - radius, 4, h - 5)
+	var y1 := clampi(int(round(centre.y)) + radius, 4, h - 5)
+	var bw := x1 - x0 + 9
+	var bh := y1 - y0 + 9
+	# summed-area table of the luminance (the box means in O(1) per pixel)
+	var sat := PackedFloat64Array()
+	sat.resize((bw + 1) * (bh + 1))
+	for y in range(bh):
+		var row := 0.0
+		for x in range(bw):
+			var c := image.get_pixel(x0 - 4 + x, y0 - 4 + y)
+			row += 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+			sat[(y + 1) * (bw + 1) + x + 1] = sat[y * (bw + 1) + x + 1] + row
+	var sum := 0.0
+	var sum2 := 0.0
+	var n := 0
+	for y in range(4, bh - 4):
+		for x in range(4, bw - 4):
+			var box := (sat[(y + 5) * (bw + 1) + x + 5] - sat[(y - 4) * (bw + 1) + x + 5]
+					- sat[(y + 5) * (bw + 1) + x - 4] + sat[(y - 4) * (bw + 1) + x - 4]) / 81.0
+			var c := image.get_pixel(x0 - 4 + x, y0 - 4 + y)
+			var d := 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b - box
+			sum += d
+			sum2 += d * d
+			n += 1
+	var m := sum / maxf(n, 1)
+	return sqrt(maxf(sum2 / maxf(n, 1) - m * m, 0.0))
 
 
 ## The cumulus shape tile (the unwrapped origin's integer part, CloudLayer._shape_origin) of a camera straight above

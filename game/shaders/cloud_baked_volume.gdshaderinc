@@ -72,7 +72,7 @@ struct CloudBakedPoint {
 CloudBakedPoint cloud_baked_point(int si, float gx, float gy, float h, float footprint_m, int k_min) {
 	CloudBakedPoint q;
 	float l = cloud_baked_lod(si, max(abs(gx), abs(gy)), footprint_m);
-	q.keep = 1.0 - cloud_baked_flat_weight_at(si, l);  // (the takeover: region by region, cloud_baked_set)
+	q.keep = 1.0 - cloud_baked_flat_weight_at(si, l);  // (the hand-over to the flat levels at the extent, cloud_baked_set)
 	q.k = cloud_baked_level_of(si, l, k_min, q.blend);
 	int levels = int(baked.sets[si].axis_y.w);
 	q.uvw = cloud_baked_uvw(si, min(q.k, levels - 1), gx, gy, h);

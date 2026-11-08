@@ -208,7 +208,7 @@ inline constexpr double cloud_overlap_slant_onset_cot = 1.8;
 // profile's tapered rims); a slanted beam crosses further cells (b, p: growing about with the square of its run through
 // the layer). [E] Least-squares fitted to the shapes' shadows (cloud_check.gd STARSIM_SLANT_TABLE=1: area means of the
 // direct Sun over eight sites, f 0.15 / 0.3 / 0.4 / 0.6 x e 5-75 deg, a 1 km layer of grid-mean depth 3, detail
-// levels off; screenshots/look_fixes/t7c_fix1/scripts/fit_beam.py, 2026-11-08): rms 0.006, worst 0.013 in the
+// levels off; tools/validation/cloud_fits/fit_beam.py and its table, 2026-11-08): rms 0.006, worst 0.013 in the
 // transmittance. Decks (f = 1) are untouched.
 inline constexpr double cloud_sun_beam_zenith_exponent = 0.62;
 inline constexpr double cloud_sun_beam_slant = 0.018;

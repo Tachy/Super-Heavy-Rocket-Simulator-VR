@@ -10,8 +10,8 @@ extends RefCounted
 ## Flat levels (2026-10-29, steps 3-4): 2.5D columns (pattern, cover, grid-mean depth, top / base; light per pixel) in
 ## up to FLAT_COLUMNS_MAX-wide levels, each doubling the cell, over the spherical cap the camera can see (FLAT_* below;
 ## the far side is never baked). Below FLAT_FINE_HEIGHT_M they start beyond the volume (level K, 6.4 km); above it at the
-## footprint's level at the nearest cloud, so from orbit the pixel footprint, not a level's extent, picks the cell, and
-## they take over from a volume level that its extent made coarser than the footprint (the shader's takeover). With the
+## footprint's level at the nearest cloud, so from orbit the pixel footprint, not a level's extent, picks the cell; they
+## draw beyond the volume's levels at every height (look fixes T7c fix 2: no takeover of the volume's area). With the
 ## altitude the volume's finer levels drop out (the footprint rule, LEVEL_DROP), up to the scaled-space Earth's far
 ## field (earth_clouds.gdshader), which follows the same cover / opacity rule.
 
@@ -29,8 +29,8 @@ static var dz_max_m := 400.0
 static var detail := OS.get_environment("STARSIM_BAKED_DETAIL") != "0"
 ## The clouds' shadows from the bake (shadow step 2026-10-30): S, the line toward the Sun from the band's floor per
 ## column (cloud_baked.gdshaderinc CLOUD_BAKED_SHADOW), feeds the cloud shadow maps (CloudShadowEffect), the march's air
-## shadow and the vehicles' direct Sun (CloudLayer.direct_sun_transmittance) - one method at every camera height: above VOLUME_TOP_M
-## the volume levels the footprint keeps are still baked for S (shape and S, not the light) but not marched.
+## shadow and the vehicles' direct Sun (CloudLayer.direct_sun_transmittance) - one method at every camera height; the
+## same levels are marched (look fixes T7c fix 2: the volume at every height).
 ## Checks: > 0 forces a re-bake (and its cross-fade) this many frames after the last one is shown (environment
 ## STARSIM_BAKED_REBAKE_FRAMES; the swap's cost and look in a measurement).
 static var rebake_frames := int(OS.get_environment("STARSIM_BAKED_REBAKE_FRAMES"))
@@ -83,12 +83,6 @@ const FLAT_COLUMNS_MAX := 1536
 const FLAT_MEMORY_CAP_BYTES := 300.0 * 1024.0 * 1024.0
 const FLAT_BYTES_PER_COLUMN := 28.0
 const FLAT_FINE_HEIGHT_M := 40000.0
-## [E] Above this camera height the volume is not marched (its light not baked; its shape and S are, for the shadows):
-## from the shader's takeover heights (40-60 km, cloud_baked.gdshaderinc CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M) the flat
-## levels draw every cloud (a re-bake brings the volume back below it while the takeover still draws the flat levels). STARSIM_BAKED_DEFINES=CLOUD_BAKED_FLAT_NO_TAKEOVER
-## keeps the volume at every height (diagnostics).
-const VOLUME_TOP_M := 62000.0
-static var takeover := not "CLOUD_BAKED_FLAT_NO_TAKEOVER" in extra_defines
 ## [E] The flat geometry's height range: re-baked once the camera leaves [h / FLAT_HEIGHT_RANGE, h x FLAT_HEIGHT_RANGE]
 ## of its bake height h (+- FLAT_CAP_HEIGHT_MARGIN_M): the columns a level needs follow from the footprint over that range
 ## (cloud_baked.gdshaderinc CLOUD_BAKED_FLAT_HEIGHT_RANGE).
@@ -495,9 +489,8 @@ static func flat_layout(height_m: float, cap_rad: float, pixel_angle: float) -> 
 
 ## The first volume level the footprint rule keeps at this height (pixel angle in rad): the finest whose cell is at least
 ## LEVEL_DROP x the footprint at the nearest possible cloud (CLOUD_TOP_M below the camera); levels: none.
+## (Until look fixes T7c fix 2 none above 62 km, VOLUME_TOP_M: the flat levels took over - a re-bake at 62 km.)
 static func first_level(height_m: float, pixel_angle: float) -> int:
-	if takeover and height_m > VOLUME_TOP_M:
-		return levels  # the flat levels draw every cloud (the shader's takeover)
 	return footprint_level(height_m, pixel_angle)
 
 
@@ -659,8 +652,8 @@ func _start_volumes(lowest: int, highest: int) -> void:
 		_phases.append({"kind": "flat", "level": j, "total": n, "next": 0,
 			"step": maxi(1, int(FLAT_CELLS_PER_FRAME * cost * bake_scale / n))})
 	for kind in ["density", "occupancy", "light"]:
-		# the light for the marched levels (above VOLUME_TOP_M, none marched: for S's levels - the flat levels draw the
-		# volume's own column with it, look fixes T7c); the shape (density, occupancy) for S's too
+		# the light for the marched levels (= S's since look fixes T7c fix 2; with none marched, S's); the shape
+		# (density, occupancy) for S's
 		var light_first := int(plan["first_level"]) if int(plan["first_level"]) < levels else int(plan["shadow_first"])
 		for k in range(light_first if kind == "light" else int(plan["shadow_first"]), levels):
 			var dz: float = plan["dz"][k]
@@ -704,7 +697,7 @@ func _bake_step(set0: Array[RDUniform], samplers: Dictionary, camera: Vector3) -
 		_phases.pop_front()
 		_start_volumes(layers[0], layers[1])
 		if _phases.is_empty():
-			# Nothing to bake: every volume level dropped (above VOLUME_TOP_M) and the flat geometry carried over. The
+			# Nothing to bake: every volume level dropped (the footprint rule, far up) and the flat geometry carried over. The
 			# set is done (its anchor and Sun new); before 2026-10-30 this indexed the empty list, the script error left
 			# _baking set and no re-bake ever started again (the frozen centre in VR above ~90 km).
 			_finish_bake()

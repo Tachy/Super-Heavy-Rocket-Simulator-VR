@@ -25,10 +25,14 @@
 #      vs the ground's mean;
 #   3. the vehicles' direct Sun from the drawn shapes (CloudLayer.direct_sun_transmittance, Atmosphere.sun_light_at;
 #      2026-10-30): under a broken layer (cf 0.4) at a 45 deg Sun, points 10 m up along a 4 km line (centred on the
-#      darkest near-map point of a 16 km scan): one in a cumulus' shadow and one in the gap beside it (by the probe) get direct Sun light differing by at least 0.5 of the clear
+#      darkest near-map point of a 16 km scan - so the line holds a shadow by construction: a probe / map agreement and
+#      a contrast test, not a test of how much shadow there is): one in a cumulus' shadow and one in the gap beside it
+#      (by the probe) get direct Sun light differing by at least 0.5 of the clear
 #      value while the CPU's grid mean gives both the same; the probe agrees with the near shadow map at the same
 #      points (both read S): mean |dT| <= 0.02, worst <= 0.15 (the map's texels at the shadows' edges).
-# Detail levels off for the numbers (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
+# Detail levels off for the numbers (cloud_detail_levels 0); the desktop quality preset. STARSIM_GAME_DETAIL=1
+# (diagnostics, look fixes T7c fix 2): the preset's detail levels kept (the game's near tier), sections 2 and 3 alone
+# (with STARSIM_SLANT_TABLE=1 the slant table) - their numbers in weather-clouds.md. Exit code 1 on failure.
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_check.gd
 extends SceneTree
 
@@ -73,11 +77,10 @@ const HANDOVER_TOLERANCE := 0.05
 const FAR_HANDOVER_TOLERANCE := 0.03  ## the far map and the slanted column on a deck (both smooth)
 ## [E] The S maps' slant optical depth through a closed slab against the core's (S is baked through the voxelised
 ## shapes: measured 0.927-0.937 x the core's on the 1 km slabs, 2026-10-30 - an open point of the bake, not of this
-## check; the grid-mean map it replaced agreed within 3 % in T). Since look fixes T7c 0.898-0.915: the slab's rim
-## heights (the profile's fraction below 1 between the layer centres) are drawn at their depth-aware fraction, patchy -
-## a line through them passes more light than their grid-mean depth (Jensen; with the flag volume_depth_cover off
-## 0.927-0.937 again, 2026-11-08).
-const S_DEPTH_TOLERANCE := 0.12
+## check; the grid-mean map it replaced agreed within 3 % in T). T7c drew a closed slab's rim heights at their
+## depth-aware fraction (0.898-0.915, the tolerance 12 %); since T7c fix 2 a block's heights are deflated against its
+## largest fraction (cloud_volume_fraction_block: a deck's rims as drawn before).
+const S_DEPTH_TOLERANCE := 0.10
 const VIEW_SIZE := 33  ## odd: the centre pixel's ray is the camera axis
 ## [E] Frames a render waits at most for the baked volume to settle (a bake, a cross-fade) - the probe's read-back too.
 const BAKE_MAX_FRAMES := 3000
@@ -139,6 +142,17 @@ func _run() -> void:
 		await process_frame
 		if i > 2 and _clouds.kernels_status() == "":
 			break
+	if OS.get_environment("STARSIM_GAME_DETAIL") != "":
+		# diagnostics (look fixes T7c fix 2, review I2): the preset's detail levels kept (the game's near tier), sections 2
+		# and 3 alone - the near / far map hand-over and the shapes vs the CPU as the player sees them
+		if OS.get_environment("STARSIM_SLANT_TABLE") != "":
+			await _slant_table()
+			quit(0)
+			return
+		await _handover_samples()
+		await _vehicle_samples()
+		_finish(false)
+		return
 	_detail_off()
 	if OS.get_environment("STARSIM_SLANT_TABLE") != "":
 		await _slant_table()
@@ -765,7 +779,8 @@ func _vehicle_samples() -> void:
 
 ## The point VEHICLE_HEIGHT_M up, along m east (west if negative) of the check site.
 func _vehicle_point(along: float) -> Vector3:
-	return _destination(LAT_DEG, LON_DEG, absf(along), deg_to_rad(90.0 if along >= 0.0 else 270.0)) 			+ _local_direction(90.0, 0.0) * VEHICLE_HEIGHT_M
+	return _destination(LAT_DEG, LON_DEG, absf(along), deg_to_rad(90.0 if along >= 0.0 else 270.0)) \
+			+ _local_direction(90.0, 0.0) * VEHICLE_HEIGHT_M
 
 
 ## The Sun probe at each point (Earth-fixed m; one key each), read back after a few frames; NAN where none came.

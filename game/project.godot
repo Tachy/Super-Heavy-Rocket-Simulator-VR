@@ -450,6 +450,14 @@ cloud_base_after={
 "type": "sampler2D",
 "value": ""
 }
+cloud_clear_before={
+"type": "sampler2D",
+"value": ""
+}
+cloud_clear_after={
+"type": "sampler2D",
+"value": ""
+}
 cloud_fine_before={
 "type": "sampler2D",
 "value": ""

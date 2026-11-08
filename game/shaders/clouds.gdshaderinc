@@ -62,6 +62,10 @@ global uniform sampler3D cloud_ice_after : filter_linear, repeat_enable;
 // its layer's extinction scale, 0 = no base). Read with texelFetch.
 global uniform sampler2D cloud_base_before : filter_nearest, repeat_enable;
 global uniform sampler2D cloud_base_after : filter_nearest, repeat_enable;
+// The columns' clear ratio E (R8 columns x rows, core cloud_render_clear_ratio_texels: (1 - C) / (1 - f_max) of the
+// layers' maximum-random cover; look fixes T7c fix 2). Bilinear.
+global uniform sampler2D cloud_clear_before : filter_linear, repeat_enable;
+global uniform sampler2D cloud_clear_after : filter_linear, repeat_enable;
 global uniform vec3 cloud_field_before_size;  // (columns, rows, layers)
 global uniform vec3 cloud_field_after_size;
 global uniform float cloud_blend;  // weight of cloud_field_after
@@ -499,7 +503,8 @@ float cloud_threshold(float fraction, float state) {
 // L = CLOUD_PROJECTION_TEXELS of the type's vertical shape texels (cumulus / stratiform 125 m: 1 km; cirrus 15.6 m:
 // 125 m). [E] A, p, B, q per type (x cumulus, y stratiform, z cirrus) least-squares fitted to the shapes' own union
 // (cloud_far_check 1e: f 0.02-0.8, D 0.25-3 km, the edge ramp at an in-cloud depth of 10 counted where the opacity
-// exceeds 0.05; rms 0.005 in cover); f_v by fixed-point iterations (monotone from f), at least one fraction code (the
+// exceeds 0.05; rms 0.005 in cover; tools/validation/cloud_fits/fit_projection.py); f_v by fixed-point iterations
+// (monotone from f), at least one fraction code (the
 // threshold table's resolution: deep cirrus of f < ~0.03 keeps more). Blocks separated by clear heights overlap at
 // random (independent shapes) - the column's maximum-random cover, the data's.
 const vec3 CLOUD_PROJECTION_A = vec3(0.6956, 0.6037, 0.5941);
@@ -523,6 +528,18 @@ float cloud_volume_fraction(float fraction, float depth_m, int type) {
 	return max(f, 1.0 / 255.0);
 }
 
+// A height's fraction in its block (look fixes T7c fix 2, review I4): the block's largest fraction f_max deflated by
+// cloud_volume_fraction, every height scaled by the same ratio f_v(f_max) / f_max - the block seen from above covers
+// f_max (maximum overlap: its other heights lie under its fullest ones; the fraction-weighted depth already counts
+// them as part of the block's depth). A uniform block as before; a closed deck (f_max 1) keeps its rim heights at their
+// fractions (they add nothing seen from above - deflated, a slanted Sun line through the deck passed ~3 % more light).
+float cloud_volume_fraction_block(float fraction, float largest, float depth_m, int type) {
+	if (!(largest > fraction) || fraction <= 0.0) {
+		return cloud_volume_fraction(fraction, depth_m, type);
+	}
+	return max(fraction * cloud_volume_fraction(largest, depth_m, type) / largest, 1.0 / 255.0);
+}
+
 // The fraction of the field's layer at its centre (0 without condensate).
 float cloud_layer_fraction(vec2 lat_lon, int layer) {
 	CloudCell c = cloud_field(lat_lon, cloud_layer_centre_m(float(layer)));
@@ -534,7 +551,7 @@ float cloud_layer_fraction(vec2 lat_lon, int layer) {
 // by their fraction over the block's largest, sum f_k dz_k / f_max (a uniform block its depth; a block whose fraction
 // peaks in a few layers about their depth: the union of the shapes is that of its fullest heights - the plain depth
 // over-deflated such a block: the Gulf analog's 2.5 km block of f 0.05-0.43 drew 0.26 of its 0.43 from 50 km).
-float cloud_block_depth_m(vec2 lat_lon, float height_m) {
+float cloud_block_depth_m(vec2 lat_lon, float height_m, out float largest_out) {
 	int k = int(clamp(floor(cloud_layer_coordinate(height_m)), 0.0, CLOUD_LAYERS - 1.0));
 	float f_k = cloud_layer_fraction(lat_lon, k);
 	float weighted = f_k * (cloud_layer_bottom_m(float(k + 1)) - cloud_layer_bottom_m(float(k)));
@@ -555,6 +572,7 @@ float cloud_block_depth_m(vec2 lat_lon, float height_m) {
 		weighted += f * (cloud_layer_bottom_m(float(j + 1)) - cloud_layer_bottom_m(float(j)));
 		largest = max(largest, f);
 	}
+	largest_out = largest;
 	return largest > 0.0 ? weighted / largest : cloud_layer_bottom_m(float(k + 1)) - cloud_layer_bottom_m(float(k));
 }
 
@@ -1022,23 +1040,13 @@ float cloud_beam_fraction_of(float c) {
 }
 
 // The data's total cover against the column's largest fraction (look fixes T7c, user 2026-11-08: seen from above the
-// cover is the data's total cover): the maximum-random overlap of the layers' fractions at their centres (core
-// cloud_column_cover_max_random - what the snapshot's cover is scaled to, ERA5's tcc; a layer counts with condensate)
-// as the clear ratio E = (1 - C) / (1 - f_max) of one snapshot's field (1: a single block of touching layers).
-float cloud_column_clear_ratio_of(sampler3D field, vec3 size, vec2 lat_lon) {
-	float clear = 1.0;
-	float above = 0.0;
-	float largest = 0.0;
-	for (int k = int(CLOUD_LAYERS) - 1; k >= 0; k--) {
-		vec4 t = texture(field, cloud_field_uvw(lat_lon, float(k), size));
-		float f = t.r >= CLOUD_MIN_FRACTION && cloud_decode_extinction(t) > 0.0 ? clamp(t.r, 0.0, 1.0) : 0.0;
-		if (above < 1.0) {
-			clear *= (1.0 - max(f, above)) / (1.0 - above);
-		}
-		above = f;
-		largest = max(largest, f);
-	}
-	return largest < 1.0 ? clamp(clear / (1.0 - largest), 0.0, 1.0) : 1.0;
+// cover is the data's total cover): the maximum-random overlap of the layers' fractions (core
+// cloud_column_cover_max_random - what the snapshot's cover is scaled to, ERA5's tcc; a layer counts with condensate
+// above the ground) as the clear ratio E = (1 - C) / (1 - f_max) per column, precomputed by the core
+// (cloud_render_clear_ratio_texels; fix 2, review I5: the per-pixel loop over the 32 layers of both snapshots cost
+// 0.23 ms of the VR frame on the Earth from scaled space; review M2: the core's ground test now holds too).
+float cloud_column_clear_ratio_of(sampler2D clear, vec3 size, vec2 lat_lon) {
+	return texture(clear, cloud_field_uvw(lat_lon, 0.0, size).xy).r;
 }
 
 // The column's total cover (the data's: maximum-random) from its largest fraction (a column texel's G, the fine
@@ -1049,10 +1057,10 @@ float cloud_column_total_cover(vec2 lat_lon, float largest) {
 	}
 	float e = 0.0;
 	if (cloud_blend < 1.0) {
-		e += (1.0 - cloud_blend) * cloud_column_clear_ratio_of(cloud_field_before, cloud_field_before_size, lat_lon);
+		e += (1.0 - cloud_blend) * cloud_column_clear_ratio_of(cloud_clear_before, cloud_field_before_size, lat_lon);
 	}
 	if (cloud_blend > 0.0) {
-		e += cloud_blend * cloud_column_clear_ratio_of(cloud_field_after, cloud_field_after_size, lat_lon);
+		e += cloud_blend * cloud_column_clear_ratio_of(cloud_clear_after, cloud_field_after_size, lat_lon);
 	}
 	return 1.0 - (1.0 - clamp(largest, 0.0, 1.0)) * e;
 }

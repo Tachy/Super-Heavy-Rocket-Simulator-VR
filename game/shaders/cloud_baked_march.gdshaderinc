@@ -2,10 +2,11 @@
 // cloud_baked.gdshaderinc).
 
 #ifdef CLOUD_BAKED_MARCH
-// The march of one set: dir (Earth-local unit) from eye over [d0, d1] of the band. Out: radiance (before the air in
-// front), the background's transmittance and the alpha-weighted distance.
-void cloud_baked_march(int si, CloudRay ray, vec3 dir,
-		vec3 eye, float d0, float d1, out vec3 radiance, out float transmittance_bg, out float weighted) {
+// The march of one set: dir (Earth-local unit) from eye over [d0, d1] of the band, from level k_min on (the marched
+// levels, cloud_baked_set). Out: radiance (before the air in front), the
+// background's transmittance and the alpha-weighted distance.
+void cloud_baked_march(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float d1, int k_min,
+		out vec3 radiance, out float transmittance_bg, out float weighted) {
 	radiance = vec3(0.0);
 	transmittance_bg = 1.0;
 	weighted = 0.0;
@@ -27,7 +28,6 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir,
 	float c0 = baked.sets[si].axis_x.w;
 	float n = baked.sets[si].up0.w;
 	float pixel_angle = cloud_view.params.w;
-	int k_min = int(baked.sets[si].misc.z);
 	float t = d0;
 	float t_clear = d0;     // the last clear sample (an entry is bisected from it)
 	bool inside = false;    // the last sample had extinction: the next steps are in-cloud steps
@@ -223,9 +223,35 @@ void cloud_baked_march(int si, CloudRay ray, vec3 dir,
 	}
 }
 
+// A march's result composed as the volume draws it: premultiplied colour with the air in front at the alpha-weighted
+// distance cloud_m, and the air above the bright top (cloud_far_bright_top_transmittance, look fixes T7 step 3) for a
+// camera above the air's bulk looking down - faded in over CLOUD_BAKED_BRIGHT_TOP_HEIGHT_M, the gate the flat levels
+// take too (cloud_baked_bright_top_weight); the cover the alpha,
+// the in-cloud vertical depth mu (-ln(1 - alpha)) (the slant depth along the view times the view's cosine - the flat
+// levels pass the vertical depth; T7 review M1; a deck's, broken cloud's albedo underestimated, saturating at
+// 13.8 mu) [E].
+vec3 cloud_baked_march_color(vec3 dir, vec3 eye, vec3 radiance, float alpha, float cloud_m) {
+	vec3 air_transmittance;
+	vec3 air_light = atm_to_point_offset(eye + dir * cloud_m, air_transmittance);
+	vec3 p_c = atmosphere_camera_hi + atmosphere_camera_lo + eye + dir * cloud_m;
+	float mu_c = -dot(dir, cloud_geodetic_up(p_c));
+	float w_top = cloud_baked_bright_top_weight(mu_c);
+	vec3 seen = air_transmittance;
+	if (w_top > 0.0) {
+		seen = mix(air_transmittance, cloud_far_bright_top_transmittance(air_transmittance, mu_c, alpha,
+				-mu_c * log(max(1.0 - alpha, 1.0e-6))), w_top);
+	}
+	return seen * radiance + alpha * air_light;
+}
+
 // One set's clouds along the ray: the volume's march over its band segment [d0, d1] (volume: the segment exists; faded
-// out toward the flat levels) and the flat levels behind it. Out: premultiplied colour with the air in front, the
-// background's transmittance and the alpha-weighted cloud distance.
+// out toward the flat levels at its extent, cloud_baked_flat_weight_at) and the flat levels behind it by that weight.
+// At every camera height (look fixes T7c fix 2, user 2026-11-08: the 40-60 km hand-over must not change the view from
+// any view or Sun angle, for both eyes): there is no separate flat-level render of the volume's area any more - the
+// marched levels (misc.z: the footprint's, CloudBaked.first_level, the same as S's at every height; S's misc.w if none),
+// the same march, levels, entry bisection, light integration and composition at every height. The flat levels draw
+// beyond the volume's levels.
+// Out: premultiplied colour with the air in front, the background's transmittance and the alpha-weighted cloud distance.
 void cloud_baked_set(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float d1, bool volume, float scene_m,
 		out vec3 color, out float transmittance, out float cloud_m, out float far_w) {
 	color = vec3(0.0);
@@ -233,36 +259,25 @@ void cloud_baked_set(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float d
 	cloud_m = 0.0;
 	far_w = 0.0;
 	float alpha = 0.0;
-	if (volume && int(baked.sets[si].misc.z) < int(baked.sets[si].axis_y.w) && cloud_baked_takeover_weight(si) < 1.0) {
+	int levels = int(baked.sets[si].axis_y.w);
+	int k_volume = int(baked.sets[si].misc.z) < levels ? int(baked.sets[si].misc.z) : int(baked.sets[si].misc.w);
+	bool march = volume && k_volume < levels;
+#ifdef CLOUD_BAKED_FLAT_ONLY
+	march = false;  // (diagnostics: the flat levels alone)
+#endif
+	if (march) {
 		vec3 radiance;
 		float weighted;
-		cloud_baked_march(si, ray, dir, eye, d0, d1, radiance, transmittance, weighted);
+		cloud_baked_march(si, ray, dir, eye, d0, d1, k_volume, radiance, transmittance, weighted);
 		alpha = 1.0 - transmittance;
 		cloud_m = alpha > 1.0e-6 ? weighted / alpha : 0.0;
 		if (alpha > 1.0e-6) {
-			vec3 air_transmittance;
-			vec3 air_light = atm_to_point_offset(eye + dir * cloud_m, air_transmittance);
-			// the air above the bright top (cloud_far_bright_top_transmittance, look fixes T7 step 3) for a camera above
-			// the air's bulk looking down - faded in over CLOUD_BAKED_BRIGHT_TOP_HEIGHT_M so that the volume meets the
-			// flat levels at their 40-60 km takeover (cloud_baked_bright_top_weight, the flat levels' gate); the cover the
-			// volume's alpha, the in-cloud vertical depth mu (-ln(1 - alpha)) (the slant depth along the view times the
-			// view's cosine - the flat levels pass the vertical depth; T7 review M1; a deck's, broken cloud's albedo
-			// underestimated, saturating at 13.8 mu) [E]
-			vec3 p_c = atmosphere_camera_hi + atmosphere_camera_lo + eye + dir * cloud_m;
-			float mu_c = -dot(dir, cloud_geodetic_up(p_c));
-			float w_top = cloud_baked_bright_top_weight(mu_c);
-			vec3 seen = air_transmittance;
-			if (w_top > 0.0) {
-				seen = mix(air_transmittance, cloud_far_bright_top_transmittance(air_transmittance, mu_c, alpha,
-						-mu_c * log(max(1.0 - alpha, 1.0e-6))), w_top);
-			}
-			color = seen * radiance + alpha * air_light;
+			color = cloud_baked_march_color(dir, eye, radiance, alpha, cloud_m);
 		}
 	}
 	// The flat levels from where their weight starts, inside the 20 km shell: behind the volume by the hand-over's
-	// weight (render A), alone (render B), A and B cross-faded by the takeover's weight.
-	float wt = cloud_baked_takeover_weight(si);
-	if (baked.sets[si].outer.x < 0.5 || (transmittance < CLOUD_BAKED_FLAT_MIN_TRANSMITTANCE && wt <= 0.0)) {
+	// weight.
+	if (baked.sets[si].outer.x < 0.5 || transmittance < CLOUD_BAKED_FLAT_MIN_TRANSMITTANCE) {
 		return;
 	}
 #ifdef CLOUD_BAKED_VOLUME_ONLY
@@ -282,12 +297,11 @@ void cloud_baked_set(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float d
 	if (far_w >= 1.0 || shell.x > shell.y || shell.y <= t_from || t_from >= scene_m
 			|| !cloud_baked_flat_shade(si, ray, dir, eye, max(t_from, shell.x), scene_m, pixel_angle, color_f, alpha_f,
 					dist_f)) {
-		color_f = vec3(0.0);
-		alpha_f = 0.0;
+		return;
 	}
 	color_f *= 1.0 - far_w;
 	alpha_f *= 1.0 - far_w;
-	if (alpha_f > 0.0 && transmittance >= CLOUD_BAKED_FLAT_MIN_TRANSMITTANCE) {
+	if (alpha_f > 0.0) {
 		float w = cloud_baked_flat_weight_at(si, cloud_baked_lod(si, max(abs(g.gx0 + dist_f * g.gdx),
 				abs(g.gy0 + dist_f * g.gdy)), pixel_angle * dist_f));
 		float alpha_w = alpha_f * w;
@@ -295,17 +309,6 @@ void cloud_baked_set(int si, CloudRay ray, vec3 dir, vec3 eye, float d0, float d
 		cloud_m = alpha_all > 1.0e-6 ? (alpha * cloud_m + transmittance * alpha_w * dist_f) / alpha_all : 0.0;
 		color += transmittance * w * color_f;
 		transmittance *= 1.0 - alpha_w;
-	}
-	if (wt > 0.0) {
-		// Region by region (cloud_baked_takeover_local): each ground patch shows one render, its edge soft.
-		vec2 x2 = cloud_sphere_crossing(ray, CLOUD_BAKED_FLAT_PATTERN_HEIGHT_M);
-		float t_p = x2.x <= x2.y && x2.x > 0.0 ? x2.x : (x2.y > 0.0 ? x2.y : CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M.y);
-		wt = cloud_baked_takeover_local(atmosphere_camera_hi + atmosphere_camera_lo + eye + dir * t_p, wt);
-		float alpha_a = 1.0 - transmittance;
-		float alpha_mix = mix(alpha_a, alpha_f, wt);
-		cloud_m = alpha_mix > 1.0e-6 ? mix(alpha_a * cloud_m, alpha_f * dist_f, wt) / alpha_mix : 0.0;
-		color = mix(color, color_f, wt);
-		transmittance = 1.0 - alpha_mix;
 	}
 }
 

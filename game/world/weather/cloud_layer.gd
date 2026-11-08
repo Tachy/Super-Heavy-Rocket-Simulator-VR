@@ -163,6 +163,7 @@ var _empty_ice: ImageTexture3D
 var _empty_column: ImageTexture3D  ## zero (cover 0, depth 0) LA8: an R8 texture would read as cover 1 through .ra
 var _empty_base: ImageTexture  ## zero (no cloud base: nothing cut) RGF, 2 x 2
 var _empty_fine: ImageTexture  ## zero fine column (no cloud) RG8, 2 x 2
+var _empty_clear: ImageTexture  ## clear ratio 1 (one block) R8, 2 x 2
 var _pushed_light := {"files": ["", ""], "w1": 0.0, "ok": true}  ## the core's pair as last accepted
 var _slab_transmittance: ImageTexture
 ## Earth-fixed anchors of the shadow maps (render axes, float64; NAN: none yet).
@@ -202,6 +203,8 @@ func setup(core: StarsimCore) -> void:
 	var zero_fine := PackedByteArray()
 	zero_fine.resize(2 * 2 * 2)
 	_empty_fine = ImageTexture.create_from_image(Image.create_from_data(2, 2, false, Image.FORMAT_RG8, zero_fine))
+	var one_clear := PackedByteArray([255, 255, 255, 255])
+	_empty_clear = ImageTexture.create_from_image(Image.create_from_data(2, 2, false, Image.FORMAT_R8, one_clear))
 	for i in range(2):
 		_slots[i] = _empty_slot()
 	_bind_slots()
@@ -373,7 +376,7 @@ func state() -> Dictionary:
 ## GPU's; the dictionary is shared with the service, which reloads from the core's cache if it needs them again).
 static func _strip_texels(snapshot: Dictionary) -> void:
 	for key: String in ["cloud_texels", "cloud_ice_texels", "cloud_column_texels", "cloud_base_texels",
-			"cloud_fine_column_texels"]:
+			"cloud_fine_column_texels", "cloud_clear_ratio_texels"]:
 		snapshot.erase(key)
 
 
@@ -542,6 +545,12 @@ func _new_slot(snapshot: Dictionary) -> Dictionary:
 	var fine_rows := int(snapshot.get("fine_rows", 0))
 	var fine: PackedByteArray = snapshot.get("cloud_fine_column_texels", PackedByteArray())
 	var fine_texture: ImageTexture = null
+	# The clear ratio per cell (core cloud_render_clear_ratio_texels; look fixes T7c fix 2): none given, E 1.
+	var clear: PackedByteArray = snapshot.get("cloud_clear_ratio_texels", PackedByteArray())
+	var clear_texture: ImageTexture = null
+	if clear.size() == columns * rows:
+		clear_texture = ImageTexture.create_from_image(Image.create_from_data(columns, rows, false, Image.FORMAT_R8,
+				clear))
 	if fine_columns >= 2 and fine_rows >= 2 and fine.size() == fine_columns * fine_rows * 2:
 		fine_texture = ImageTexture.create_from_image(Image.create_from_data(fine_columns, fine_rows, false,
 				Image.FORMAT_RG8, fine))
@@ -553,6 +562,7 @@ func _new_slot(snapshot: Dictionary) -> Dictionary:
 		"column": CloudFieldTexture.create(column, columns, rows, 2),
 		"base": ImageTexture.create_from_image(Image.create_from_data(columns, rows, false, Image.FORMAT_RGF, base)),
 		"fine": fine_texture, "fine_size": Vector2(fine_columns, fine_rows) if fine_texture != null else Vector2(2, 2),
+		"clear": clear_texture,
 		"top_m": float(snapshot.get("cloud_top_m", CloudEffect.CLOUD_TOP_M))}
 
 
@@ -620,9 +630,9 @@ static func _zero_texture(format: Image.Format, texel_bytes: int) -> ImageTextur
 
 func _bind_slots() -> void:
 	var names := [[&"cloud_field_before", &"cloud_ice_before", &"cloud_field_before_size", &"cloud_column_before",
-			&"cloud_base_before", &"cloud_fine_before", &"cloud_fine_before_size"],
+			&"cloud_base_before", &"cloud_fine_before", &"cloud_fine_before_size", &"cloud_clear_before"],
 		[&"cloud_field_after", &"cloud_ice_after", &"cloud_field_after_size", &"cloud_column_after",
-			&"cloud_base_after", &"cloud_fine_after", &"cloud_fine_after_size"]]
+			&"cloud_base_after", &"cloud_fine_after", &"cloud_fine_after_size", &"cloud_clear_after"]]
 	field_texture_bytes = 0
 	# The highest cloud top of both slots (environment::cloud_render_top_m): the air shadow's rays end there.
 	ShaderGlobals.set_value(&"cloud_air_shadow_top_m", maxf(float(_slots[0]["top_m"]), float(_slots[1]["top_m"])))
@@ -637,12 +647,14 @@ func _bind_slots() -> void:
 		var has_fine := has and slot.get("fine") != null
 		ShaderGlobals.set_value(names[s][5], slot["fine"] if has_fine else _empty_fine)
 		ShaderGlobals.set_value(names[s][6], slot["fine_size"] if has_fine else Vector2(2, 2))
+		ShaderGlobals.set_value(names[s][7], slot["clear"] if has and slot.get("clear") != null else _empty_clear)
 		if has and not (s == 1 and slot["field"] == _slots[0]["field"]):
 			var size: Vector3 = slot["size"]
 			field_texture_bytes += slot["field"].bytes + slot["ice"].bytes + slot["column"].bytes
 			field_texture_bytes += int(size.x * size.y) * BASE_TEXEL_BYTES
 			var fine_size: Vector2 = slot["fine_size"]
 			field_texture_bytes += int(fine_size.x * fine_size.y) * 2
+			field_texture_bytes += int(size.x * size.y) if slot.get("clear") != null else 0
 
 
 func _upload_noise() -> void:

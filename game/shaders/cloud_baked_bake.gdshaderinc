@@ -75,10 +75,10 @@ layout(rg16f, set = 1, binding = 1) uniform writeonly image3D baked_a_out;
 // 250 m) averages the ramp over its taps and the march interpolates the edge coordinate between the voxels - small
 // clouds shrink, the nadir cover of a uniform slab fell to ~0.65 x the fine level's (slabs 0.5-2 km, f 0.2-0.7, seen
 // from 50-200 km: mean alpha 0.12 / 0.26 / 0.55 against 0.20 / 0.40 / 0.73 from 15 km). Those levels take the fraction
-// 1 - (1 - f_v)^(1 + gain (1 - f_v)), fitted to those slabs (screenshots/look_fixes/t7c/slabs*.out); with the edge mean
+// 1 - (1 - f_v)^(1 + gain (1 - f_v)), fitted to those slabs (tools/validation/cloud_fits/level_cover_slabs_2026-11-08.txt); with the edge mean
 // of that fraction the water is kept.
 const float CLOUD_BAKED_LEVEL_COVER_GAIN = 0.8;
-vec4 cloud_baked_ramp_at(vec3 offset, float h, float footprint_m, float extra_state, float block_m,
+vec4 cloud_baked_ramp_at(vec3 offset, float h, float footprint_m, float extra_state, float block_m, float block_max,
 		out float ramp_spread) {
 	ramp_spread = 0.0;
 	vec2 lat_lon = cloud_lat_lon(atmosphere_camera_hi + atmosphere_camera_lo + offset);
@@ -95,7 +95,7 @@ vec4 cloud_baked_ramp_at(vec3 offset, float h, float footprint_m, float extra_st
 	float m = 0.0;
 	for (int type = 0; type < 3; type++) {
 		if (types[type] > 0.0) {
-			float f_v = cloud_volume_fraction(cell.fraction, block_m, type);
+			float f_v = cloud_volume_fraction_block(cell.fraction, block_max, block_m, type);
 			if (cloud_volume_depth_cover && baked.build.x > 0 && f_v < 1.0) {
 				f_v = 1.0 - pow(1.0 - f_v, 1.0 + CLOUD_BAKED_LEVEL_COVER_GAIN * (1.0 - f_v));  // (the coarse levels)
 			}
@@ -138,7 +138,8 @@ void main() {
 		return;
 	}
 	bool ice = max(max(lo_cell.ice, mid_cell.ice), hi_cell.ice) > 0.0;
-	float block_m = cloud_block_depth_m(lat_lon_c, g.z);
+	float block_max;
+	float block_m = cloud_block_depth_m(lat_lon_c, g.z, block_max);
 	int taps_h = clamp(int(ceil(c / 125.0)), 1, 3);
 	int taps_v = clamp(int(ceil(dz / (ice ? 20.0 : 60.0))), 1, ice ? 16 : 8);
 	float ramp = 0.0;
@@ -160,7 +161,7 @@ void main() {
 				vec3 p = g + f * vec3(c, c, dz);
 				float r_spread;
 				vec4 r = cloud_baked_ramp_at(cloud_baked_offset_of(si, p.x, p.y, p.z), p.z, 0.5 * c, extra_state,
-						block_m, r_spread);
+						block_m, block_max, r_spread);
 				ramp += r.x;
 				ramp_spread += r_spread;
 				x_max = max(x_max, r.y);

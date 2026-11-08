@@ -261,18 +261,24 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
     the beam's cover: `cloud_beam_cover(f, mu0)` = 1 - (1 - f)^n, n = 0.62 + 0.018 cot(e)^1.85 (`constants.hpp
     cloud_sun_beam_*`, `CLOUD_SUN_BEAM_*` / `cloud_sun_beam_cover_of` in the shader, [E]; look fixes T7c fix 1) - the
     drawn shapes' effective shadow, so that the core's light (vehicles, the far tier's slanted column, the air's shadow
-    beyond the levels) equals the near shadow map's mean. Below f at the zenith: the depth-aware shapes' shadows are
+    beyond the levels) equals the near shadow map's mean with the detail levels off (with them on, the game's near
+    tier, 4-10 % darker: below). Below f at the zenith: the depth-aware shapes' shadows are
     lighter than an opaque cover of f (cf 0.3, Sun 89 deg: 0.211 shadow; parts measured on the check's sites: the
     cumulus cloud-to-cloud spread 0.018 (0.229 without it, Jensen), level 0's 100 m voxels ~0.02 (50 m cells: +8-10 %),
     the remainder the thin margins and the slab profile's tapered rims; three regions of eight sites 0.211 / 0.218 /
     0.243). A slanted beam crosses further cells: the growth about with the square of its run through the layer.
     Least-squares fitted to the shapes' shadows (the near map, area means over eight independent sites, `cloud_check.gd`
     `STARSIM_SLANT_TABLE=1`, f 0.15 / 0.3 / 0.4 / 0.6 x e 5-75 deg, the layer 1 km deep, grid-mean depth 3 - in-cloud
-    7.5-20, no direct light through a cloud -, detail levels off; `screenshots/look_fixes/t7c_fix1/scripts/fit_beam.py`):
+    7.5-20, no direct light through a cloud -, detail levels off; `tools/validation/cloud_fits/fit_beam.py` with its table):
     the direct Sun's transmittance rms 0.006, worst 0.013. Measured, f 0.3: 0.794 at 75 deg, 0.794 at 45, 0.766 at 20,
-    0.632 at 8, 0.442 at 5. With the detail levels on (the game's presets) the shadows are darker at low f (cf 0.15 /
-    0.3 / 0.6, Sun 89 deg: 0.142 / 0.242 / 0.446 shadow, off at 75-89 deg 0.099 / 0.211 / 0.424) - the check and the fit take them off
-    (the CPU references have the shapes of state 0). The renderer's view keeps its own projected-cover rule for the
+    0.632 at 8, 0.442 at 5. The fit holds for the shapes of state 0 (the check's, the CPU references', S's coarse levels
+    and the far map); with the game's detail levels the near tier's shadows are darker (cf 0.15 / 0.3 / 0.6, Sun 89 deg:
+    0.142 / 0.242 / 0.446 shadow against 0.099 / 0.211 / 0.424; area means of the direct Sun cf 0.15 / 0.3 / 0.4 at a
+    45 deg Sun 0.855 / 0.756 / 0.693 against the rule's 0.902 / 0.795 / 0.722, at 8 deg 0.728 / 0.565 / 0.465 against
+    0.811 / 0.627 / 0.515: the core's light is 4-5 % / ~10 % lighter in direct T than the near shadows) - a limit,
+    not refitted: the near map meets the far map at 9-11 km with the detail levels too (steps <= 0.04, cloud_check
+    `STARSIM_GAME_DETAIL=1`, T7c fix 2, review I2), and the core's light meets the drawn shadows only beyond them (the
+    far map, state 0). The renderer's view keeps its own projected-cover rule for the
     slant growth (`constants.hpp cloud_overlap_*`, `CLOUD_OVERLAP_*`: n = 1 + 0.66 (1 - f) + 0.21 max(cot e - 1.8, 0),
     fitted 2026-10-30 to the undeflated shapes; the far field and the flat levels take the data's total cover at the
     nadir and only its slant growth). Limits: the layer depth (1 km) and the in-cloud depth are those of the fit; the sky
@@ -424,8 +430,8 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
     (`cloud_baked_bright_top_weight`: `CLOUD_BAKED_BRIGHT_TOP_HEIGHT_M` [E] times dot(view, up) < 0 at the cloud - the
     flat levels took it unconditionally until T7b, so a ground camera's flat-level horizon clouds and bases seen from
     below got a top-lit term, at grazing paths up to ~46x the Beer term in blue; volume cover = the march's alpha,
-    vertical depth -mu ln(1 - alpha): a broken field's albedo underestimated), so volume and flat levels meet at the
-    40-60 km takeover; no change from the ground (T7b: flat levels alone from the sea at a low Sun 22 % of the pixels
+    vertical depth -mu ln(1 - alpha): a broken field's albedo underestimated), so volume and flat levels meet (at the
+    volume's extent; the former 40-60 km takeover); no change from the ground (T7b: flat levels alone from the sea at a low Sun 22 % of the pixels
     changed by > 2 codes, the full render identical - the volume covers them there; a 30 km horizon band now at the
     volume's half weight; `screenshots/look_fixes/t7b/sheet_i1_ground.png`, `sheet_i1_b.png`). EPIC 2025-03-20: the brightest 5 % of the disc
     B/R 0.960 -> 1.008 (EPIC 1.008), `screenshots/look_fixes/t7/sheet_step3_pink_epic1430.png`; a tau-10 deck from
@@ -534,17 +540,10 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   side never baked or fetched). Below 40 km camera height they start beyond the volume (level 6, 6.4 km; ground 1 level
   of 320 columns); above, at the footprint's level at the nearest cloud, coarser while the layout exceeds 300 MB
   (`FLAT_MEMORY_CAP_BYTES`; 100 km: 4 levels from 400 m, ISS: 4 from 800 m). Columns no camera of the geometry's height
-  range (x / 1.25) and pixel angle (x 1.25) can fetch are not baked (re-bake outside those ranges). Takeover: from 40 to
-  60 km camera height the flat levels replace the volume region by region (`cloud_baked_takeover_local`: a value
-  noise of 20 km cells against the height's weight, each region switching over 0.08 of the noise, so a pixel shows one
-  render - the volume with the hand-over behind it, or the flat levels alone; cirrus check 2026-10-30: scaling the
-  volume's extinction by 1 - w kept its shapes opaque while the flat levels' half-alpha shapes filled the gaps - grey
-  translucent shapes, lower-half mean alpha 0.40 at 50 km now 0.31), above 62 km the volume is not marched and its
-  light is not baked; the levels the footprint keeps are baked for S only (shape, occupancy, S - the shadows' source at
-  every height; a re-bake every ~2.6 s in orbit, ~20 bake frames at 400 km, cost not yet measured in the headset) (below
-  40 km the volume levels are unchanged; `STARSIM_BAKED_DEFINES=CLOUD_BAKED_FLAT_NO_TAKEOVER` keeps the volume at every
-  height - its coarse voxel levels close a deck's sub-voxel gaps, so their square stayed visible against the flat
-  cover). Cover and light follow the scaled-space far field (user ruling 2026-10-29: the old whole-Earth far field's
+  range (x / 1.25) and pixel angle (x 1.25) can fetch are not baked (re-bake outside those ranges). The volume is drawn
+  at every camera height (no takeover since look fixes T7c fix 2, "The seamless takeover" below); from 40 km the flat
+  levels are shaded from the ray's start; the levels the footprint keeps are baked (shape, occupancy, S, light) and
+  marched at every height (a re-bake every ~2.6 s in orbit). Cover and light follow the scaled-space far field (user ruling 2026-10-29: the old whole-Earth far field's
   cover is the reference; `cloud_far.gdshaderinc` `cloud_far_layer`, gain 1): per column (`CLOUD_BAKED_FLAT`) the
   field's column at 1 (cells <= 14 km) or 2 x 2 points - the nadir beam cover C_col of the largest fraction, the
   grid-mean depth, the far field's heights (steps 4-5 below) - and a pattern P: the share of 3 x 3 (4 x 4) taps whose prefiltered
@@ -599,16 +598,18 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   ~67 km on a climb, the analog nadir view at 26 N 97 W 10 % mean block luminance between 56 and 57 km, now 0.7 %).
 - **The seamless takeover and the data's cover from above (look fixes T7c, user 2026-11-08: no visible change over
   40-60 km, the nadir cover the data's total cover, the layers only shape the structure)**:
-  (a) *The flat levels draw the volume's own column* (`cloud_baked_flat_volume_column`): inside the volume's levels
-  (the same hand-over band at its extent as the volume's own, `cloud_baked_flat_weight_at`) the per-pixel pattern is
-  replaced by a vertical march through the baked shapes and light (A, B; the level and blend the volume's march takes
-  for that point and footprint; half the level's vertical cell; the march's own shading - Sun and sky sources, scaled
-  transport, the pixel's phase - with each step's depth along the view, step / mu), composed as `cloud_baked_set`
-  composes the volume (bright top for its alpha). Seen straight down this is the volume's own pixel; slanted, its column
-  as a slab at the flat levels' crossing. Beyond the levels the 2-D pattern as before. The volume levels' light is
-  baked above 62 km too (`CloudBaked`: the light for S's levels when none is marched) - the flat levels use it at every
-  height. Before, the flat levels placed the clouds by their own 2-D pattern (turned, tile-broken taps at 2 km): 4 x 4
-  regions moved by ~12 codes over 45-65 km.
+  (a) *No takeover: the volume at every height* (`cloud_baked_set`, T7c fix 2): the volume's march draws its levels
+  at every camera height, the flat levels behind it by the hand-over weight at its extent
+  (`cloud_baked_flat_weight_at`) and beyond - so nothing changes over 40-60 km at any view or Sun angle, for both eyes.
+  The marched levels are the footprint's at every height (`CloudBaked.first_level` = `shadow_first`; until fix 2 none
+  above 62 km, `VOLUME_TOP_M` - its forced re-bake changed the view 2-3 x as much as 1 km of climb at 45-60 deg off
+  nadir, a new voxel phase); from 40 km the flat levels are
+  shaded from the ray's start (`cloud_baked_flat_takeover`). History: until step 3's takeover the flat levels replaced
+  the volume region by region over 40-60 km with their own 2-D pattern (4 x 4 regions moved by ~12 codes over 45-65 km);
+  T7c drew a vertical column of the volume's shapes and light in render B (straight down the volume's pixel, off nadir
+  terraced cloud tops and 11-19 % more in-cloud contrast, T7c review C1); a first fix-2 step marched the volume itself
+  in render B (pixel-identical to A, `screenshots/look_fixes/t7c_fix2/pairs/pairs_c1_column.txt`) - with A and B the
+  same, the takeover was dropped (`docs/history/weather-clouds.md`).
   (b) *Depth-aware cover* (`cloud_volume_fraction`, fidelity flag `CloudLayer.volume_depth_cover` / global
   `cloud_volume_depth_cover`, render_check `--no_depth_cover`): the shapes' 3-D noise is displaced from height to
   height, so a block of touching cloudy layers seen from above covered more than its fraction (cumulus f 0.4, 1 km:
@@ -616,13 +617,22 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   d the block's effective depth (`cloud_block_depth_m`: the touching cloudy layers' depths weighted by f_k / f_max - a
   block whose fraction peaks in a few layers projects like those; the plain depth drew the Gulf analog's 2.5 km block of
   f 0.05-0.43 as 0.26) in units of 8 of the type's vertical shape texels; A, p, B, q per type [E] least-squares fitted
-  to the shapes' union (cloud_far_check 1e). The coarse levels (k >= 1) lose small clouds in
+  to the shapes' union (cloud_far_check 1e; `tools/validation/cloud_fits/fit_projection.py` with its data). Each
+  height of a block is deflated against the block's largest fraction f_max (`cloud_volume_fraction_block`, T7c fix 2,
+  review I4): f_v = f x f_v(f_max) / f_max - a uniform block as before; a closed deck (f_max 1) keeps its rim heights
+  (the profile's fractions below 1 between the layer centres) undeflated, as they add nothing seen from above (T7c
+  deflated them per height: a slanted Sun line through a closed slab passed ~3 % more light, S 0.898 x the core).
+  The coarse levels (k >= 1) lose small clouds in
   their voxel average (slabs from 50-200 km: mean alpha 0.65 x the fine level's) and take 1 - (1 - f_v)^(1 + 0.8 (1 -
   f_v)) (`CLOUD_BAKED_LEVEL_COVER_GAIN` [E], fitted to slabs 0.5-2 km, f 0.2-0.7); the edge mean of the fraction used
   keeps the water. Blocks apart overlap at random: the column's maximum-random cover, the data's.
   (c) *The drawn nadir cover is the data's total cover* (`cloud_column_total_cover`): the flat levels' C_col and the
   scaled-space far field take 1 - (1 - f_max) E, E = (1 - C_mr) / (1 - f_max) of the layers' maximum-random cover (core
-  `cloud_column_cover_max_random`, which the snapshot's fractions are scaled to: ERA5 tcc) - before, the beam rule's
+  `cloud_column_cover_max_random`, which the snapshot's fractions are scaled to: ERA5 tcc; the layers with condensate
+  above the cell's ground). E per cell is precomputed by the core (`environment::cloud_render_clear_ratio_texels`, R8
+  columns x rows, bindings `cloud_clear_ratio_texels`, globals `cloud_clear_before` / `_after`, bilinear; T7c fix 2,
+  review I5 / M2: the per-pixel loop over 32 layers of both snapshots cost 0.23 ms of the VR frame on the Earth from
+  scaled space, desktop 0.02 ms, and left out the ground test) - before, the beam rule's
   nadir cover of the largest fraction (20-40 % above a single block). The slant growth stays the beam rule's
   (`cloud_beam_fraction_of`). The Sun's beam cover (shadows, ground light; `cloud_beam_cover`) has its own rule, the
   drawn shapes' effective shadow (T7c fix 1, "Light under the clouds" above).
@@ -678,8 +688,8 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   (`CloudBaked.shadow_fill`; the line's floor crossing -> level -> S; t_front / t_back = the line's crossings of the
   cloudy heights; beyond the levels the slanted column) - the maps' texel semantics, the terrain shaders and the
   distance rule (near -> far 9-11 km, far -> column 120-140 km) unchanged; at every camera height (2026-10-30: above
-  62 km the volume levels the footprint keeps are baked for S - shape and S, not the light - but not marched, plan
-  `shadow_first` / grid misc.w); before the first set the surfaces take the column; (b) the baked march's air shadow (`cloud_air_sun_transmittance` ->
+  62 km the volume levels the footprint keeps were baked for S only until look fixes T7c fix 2, plan `shadow_first` /
+  grid misc.w); before the first set the surfaces take the column; (b) the baked march's air shadow (`cloud_air_sun_transmittance` ->
   `cloud_baked_air_sun`): T_c from S within the levels (+-410 km: crepuscular rays of clouds tens of km away; the old
   maps' shapes reached 9-11 km), the slanted column beyond; a point inside the cloudy heights takes exp(-tau) scaled
   linearly in the height (the maps' rule). The air's lookup is prefiltered: S's level from the footprint at the floor
@@ -752,8 +762,17 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   frame's edge). Fly-up straight down 40-80 km, one process per height (`fly_stats_C.txt`, `sheet_ab_fly_*.png`):
   per-step region change <= 1.8 codes per 5 km (<= 0.36 / km), 54-65 km <= 0.25 per step; the global luma <= 0.32 % /
   km; the region drift 45 -> 65 km Gulf 3.2 / cumulus 4.4 codes (T7b: 12.7 / 11.3); the Sc deck <= 0.5 codes per step.
-  cloud_far_check 5b (broken cf 0.4, 39.5 vs 60.5 km, 25 points within ~13 deg of nadir): worst 5.0 %, mean 0.85 %
-  (tolerance 7 % / 2 %); section 5 (the re-bake) 1.56 -> 0.77 % (tolerance 3 -> 1.5 %).
+  Fix 2 (`screenshots/look_fixes/t7c_fix2/`): with render B marching the volume itself, A and B were pixel-identical at
+  50 km for the Gulf at 0 / 30 / 45 deg off nadir and its low Sun (r4 0.00 codes, `pairs/pairs_c1_column.txt`); at 60
+  deg only the horizon band beyond the volume's extent differed (the diagnostics' VOLUME_ONLY draws no flat levels) -
+  the takeover was then dropped. Oblique A/B before fix 2 (T7c review, 50 km): Gulf 45 deg r4 4.65 codes, L -3.6 %,
+  cloud share 0.402 -> 0.363, in-cloud high-pass SD 11.5 -> 13.4 codes (terraces); sheet `sheet_ab_oblique.png`.
+  cloud_far_check 5b (the climb 39.5 -> 60.5 km, the camera on the same ray to the aim point, 25 ground points' block
+  luminance; `far5b/`): broken cf 0.4 straight down worst 4.9 %, mean 1.2 % (tolerance 7 % / 2 %); off nadir the
+  points' mean per km (tolerance 1.5 % / km): broken 30 / 45 / 60 deg 0.35 / 0.51 / 0.07 % / km, low Sun 45 deg 0.42,
+  analog Gulf 45 deg 0.10, analog cumulus low Sun 60 deg 0.00; single points 10-24 % (reported: the volume's view of
+  its 3-D shapes changes with the distance as much below the band - 25.8 -> 39.5 km worst 14-50 %). Section 5 (the
+  re-bake across a shape tile at 69 km, now with the volume): mean 0.70 %, worst 2.8 % (tolerance 1.5 % mean).
   Nadir cover (centre dumps, alpha > 0.05): uniform slabs (bottom 1 km, in-cloud tau 10) 0.5-2 km, f 0.2 / 0.4 / 0.7:
   from 15 km 0.21 / 0.42 / 0.75 (1 km), from 50 km 0.21 / 0.43 / 0.73, from 100 km 0.18-0.23 / 0.39-0.44 / 0.69-0.75,
   from 400 km 0.34 / 0.60 / 0.87 with mean alpha 0.19 / 0.43 / 0.77 (the coarsest levels smear: a wider faint margin,
@@ -941,14 +960,14 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
 
 ## Open points and known limits
 
-- **The drawn nadir cover of a broken slab below the data's (look fixes T7c fix 1)**: the Sun beam rule follows the
-  drawn shapes' shadows, which at the zenith are ~0.66-0.81 of an opaque f on the check's 1 km slab (detail levels
-  off; 0.74-0.94 with them on) - partly physical (the cumulus spread's thin clouds, the thin margins), partly a loss of
-  the drawn cover against T7c's depth-aware fraction (fitted to the shapes' analytic union, cloud_far_check 1e): level
-  0's 100 m voxels (~8-10 %: 50 m cells raise the shadow 0.211 -> 0.229) and the profile's tapered rims at the block's
-  top and bottom (estimated, not measured). A level-0 cover gain (like `CLOUD_BAKED_LEVEL_COVER_GAIN` of the coarse
-  levels) would bring the near look to the data's cover - a look change, not made; the beam rule would then be refitted
-  (`STARSIM_SLANT_TABLE=1`, fit_beam.py).
+- **The shadows' mean opacity below the data's cover on broken slabs (look fixes T7c fix 1 / fix 2)**: the Sun beam
+  rule follows the drawn shapes' shadows, which at the zenith are ~0.66-0.81 of an opaque f on the check's 1 km slab
+  (detail levels off; 0.74-0.94 with them on). This is a deficit of the mean opacity, not of the view's cover: slabs
+  from 15 km give a mask cover (alpha > 0.05) of 0.21 / 0.42 / 0.75 for f 0.2 / 0.4 / 0.7 - the data's cover, as decided
+  (user 2026-11-08) - while the shadow's mean is lower through the thin margins (mean opacity 0.92-0.95 of the union,
+  cloud_far_check 1e), the cumulus spread's thin clouds (physical, Jensen) and level 0's 100 m voxels (50 m cells raise
+  the shadow 0.211 -> 0.229). A level-0 cover gain (like `CLOUD_BAKED_LEVEL_COVER_GAIN` of the coarse levels) would push
+  the view's cover above the data's - not made (T7c review I3a).
 - **The volume's cover depends on its level (look fixes T7c)**: the fine level matches the data, the coarse levels
   carry a gain fitted to slabs (`CLOUD_BAKED_LEVEL_COVER_GAIN`), the coarsest (from ~400 km) smear a faint margin over a
   wider area (alpha > 0.05 cover 0.34 at f 0.2, mean alpha kept). Real sites from 50 km within -14 / +11 % of the
@@ -1035,19 +1054,19 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   The ground under it is lit through the bilinear column (`cloud_ground_light`), the cloud drawn from the B-spline: at
   cloud edges the two differ within a cell (seen as no artefact in the start view). A column with several layers is one slab (placed by its seen light's mean
   depth): from the ground, a high layer far out and a low one share one crossing.
-- **S against the core on a closed slab (2026-10-30, cloud_check section 1)**: the maps' S gives 0.898-0.915 x the
-  core's slant optical depth through the 1 km slabs (tau 1 and 3, Sun 45 / 20 deg; T 0.274 vs 0.242 at tau 1 / 45 deg;
-  0.927-0.937 before look fixes T7c and with `volume_depth_cover` off: the slab's rim heights, whose profile fraction
-  lies below 1 between the layer centres, are drawn at their depth-aware fraction and pass more light than their
-  grid-mean depth) - a property of the bake through the voxelised shapes (the rest not pinned: the levels' vertical
-  cells at the slab's faces, the edge ramp's mean), also in the air shadow and the vehicles' direct Sun. The check holds
-  it at 12 % in depth (10 % before T7c); open: whether to correct the bake.
+- **S against the core on a closed slab (2026-10-30, cloud_check section 1)**: the maps' S gives 0.927-0.937 x the
+  core's slant optical depth through the 1 km slabs (tau 1 and 3, Sun 45 / 20 deg; T 0.266 vs 0.242 at tau 1 / 45 deg)
+  - a property of the bake through the voxelised shapes (the rest not pinned: the levels' vertical cells at the slab's
+  faces, the edge ramp's mean), also in the air shadow and the vehicles' direct Sun. The check holds it at 10 % in
+  depth (T7c's per-height deflation of a deck's rims gave 0.898-0.915 and 12 %; since fix 2 a block is deflated
+  against its largest fraction); open: whether to correct the bake.
 - **S's coarse levels on broken cloud (2026-10-30, cloud_check section 2)**: at 110 km from the camera the far map's S
   comes from volume level 4 (1.6 km cells, S at 800 m), whose smoothed shapes shadow more than the shapes do - cf 0.3
   at a 45 / 8 deg Sun 0.556 / 0.226 against the slanted column's 0.591 / 0.395, so the 120-140 km hand-over to the
   column steps by 0.03-0.09 on the ground (a faint ring, most at a low Sun; visible from altitude). Reported, not
   asserted; the same S was the game's below 62 km since the shadow step, now at every height.
-- **Above 62 km the volume levels are baked, not marched** (shape, S and - since look fixes T7c - the light: the
-  flat levels draw the volume's own column with it): a re-bake in orbit (every ~19 km of flight at 400 km, ~2.4 s)
-  runs the density / occupancy / light / S phases of the kept levels (3 levels from 400 km at the desktop's pixel
-  angle), each dispatch <= ~2 ms GPU.
+- **The volume in orbit** (since look fixes T7c fix 2 marched at every height; shape, occupancy, light and S baked):
+  a re-bake in orbit (every ~19 km of flight at 400 km, ~2.4 s) runs the density / occupancy / light / S phases of
+  the kept levels (3 levels from 400 km at the desktop's pixel angle), each dispatch <= ~2 ms GPU; measured (T7c review
+  I5c, 1600 x 900, 400 km): 74 bake frames, 1.2 s wall, dispatches <= 0.54 ms - within the ~2.4 s re-bake interval
+  (the light phase ~1.9 x the density phase's frames by the voxel budgets, 0.4 M against 0.75 M per frame).

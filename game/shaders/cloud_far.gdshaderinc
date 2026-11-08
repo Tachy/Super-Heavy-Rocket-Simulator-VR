@@ -419,7 +419,7 @@ vec3 cloud_far_cloudy_radiance(vec3 p, vec3 up, vec3 view_prop, float tau, float
 	sun_irradiance = vec3(0.0);
 #endif
 	if (dot(sun_irradiance, sun_irradiance) > 0.0) {
-// (in the baked march only its kernels above 40 km camera height - the takeover, orbit - where
+// (in the baked march only its kernels above 40 km camera height - the flat levels from the ray's start, orbit - where
 // CLOUD_BAKED_FAR_FALLBACK is defined: in the one kernel the code raised the march's register peak, ground and deck
 // +0.15 ms even with w 0; elsewhere the code as before step 7)
 #if !defined(CLOUD_DIAG_NO_FACETS) && (!defined(CLOUD_BAKED_MARCH) || defined(CLOUD_BAKED_FAR_FALLBACK))
