@@ -540,11 +540,15 @@ shaders:
   the veil is light on the retina tied to its source, and the eye adapted to the full Moon / the Earth / a lamp sees the
   halo relative to that source - source and halo are one framework [E: Gilchrist et al. 1999 anchoring, the local
   adaptation's basis]. So every source pixel's veil is shown at that pixel's local factor c = clamp(PLATEAU / Y, 1 / g,
-  1) [call: the local adaptation's Weber-range form, floored at the cone gain's floor 1 / g; the Sun's analytic veil
-  takes 1 / g] - the SOURCE stage spreads excess x c in the pyramid's alpha, the ADD stage scales the veil by alpha /
+  1) [call: the local adaptation's Weber-range form, floored at the cone gain's floor 1 / g] - the SOURCE stage spreads excess x c in the pyramid's alpha, the ADD stage scales the veil by alpha /
   Y(veil). The halo thus keeps its physical ratio to its disc (CIE 146 x Omega: full Moon 9.7e-4 / 1.6e-4 / 1.9e-5 at
-  1 / 2 / 5 deg, full Earth from the Moon 2.2e-3 / 2.6e-4 at 2 / 5 deg), monotonic, no limb logic. The meter still
-  takes the full veil (disability glare raises the adaptation). Measured alternatives (`screenshots/look_fixes/t13_fix1/`):
+  1 / 2 / 5 deg, full Earth from the Moon 2.2e-3 / 2.6e-4 at 2 / 5 deg), monotonic, no limb logic. The **Sun's analytic veil**
+  is shown the same way [user 2026-11-08 "Sonne wie Mond und Erde"; `Atmosphere.sun_disc_scene`]: at its disc's factor
+  PLATEAU / Y_disc (Y_disc = beam illuminance / 6.8e-5 sr x scene per cd/m^2, ~7e6 x g; no floor - the disc is clamped to
+  white, its halo is not), so the halo is CIE 146 x Omega_Sun of the disc: 1.0e-3 / 1.7e-4 at 1 / 2 deg = sRGB luma 3.1 / 0.5
+  (measured, Sun in space 400 km, 60 and 10 deg; before: white out to 3 deg, 211 at 5 deg, a "Godot blur"). From the ground
+  the sky shader's aureole (unchanged) is the halo (luma ~225 at 1-3 deg); the disc is 51 px at 60 deg, not the clipped
+  halo's 5600. The spread's Sun mask direction is the Sun seen from the CAMERA (`sun_apparent - camera`, not from the Earth's centre: from lunar orbit the 0.15 deg parallax left the disc's rim outside the mask, and the rim spread as a source - a 1.4 deg white ball). The meter still takes the full veil (disability glare raises the adaptation). Measured alternatives (`screenshots/look_fixes/t13_fix1/`):
   T13's veil at the global gain showed the full Moon's halo at 0.10-0.47 of the disc at 1 deg (a glowing ball; dark
   limb dots and axis-aligned steps from the per-texel limb compression); the veil added before the local adaptation's
   MAP (pooled with the image) was flattened to the plateau - a dark ring at the limb, a bright ring at 1-2 deg (halo_rise
@@ -553,8 +557,8 @@ shaders:
   the log average under a black sky). Measured (`screenshots/look_fixes/t13/glare/`): the lunar-night Earth's pyramid
   veil against the direct CIE sum -25 % at 1.5 deg, -6 .. 0 % at 2 .. 10 deg, radial profile strictly falling; a moving
   0.5 deg disc varies the veil at 2 / 5 deg by <= 0.9 % (gate 3 %); GPU = CPU within 0.0013 of the peak. The Sun in
-  space (black sky, no aureole): luma at 3 / 5 / 10 deg 251 / 211 / 127 from 400 km (CIE scene values 4.5 / 1.40 /
-  0.32). Cost (stereo mock at the headset's resolution, shared GPU): SPREAD 1.10 + ADD 0.72 ms (frame +1.9 ms). Tests
+  space (black sky, no aureole): luma at 1 / 2 / 3 / 5 deg 3.1 / 0.5 / 0.1 / 0 from 400 km (the veil at the disc's
+  factor; before the Sun fix 255 / 255 / 251 / 211). Cost (stereo mock at the headset's resolution, shared GPU): SPREAD 1.10 + ADD 0.72 ms (frame +1.9 ms). Tests
   `glare_spread_test.gd` (headless, slow), `glare_spread_gpu_check.gd` (GPU). The scalar Sun veil of the adaptation
   (Stiles-Holladay 10 / theta^2) is unchanged (CIE 146 is 0.68-0.86 x it at 3-25 deg; open point).
 - **Reference scenes (definition of done for every appearance change)** [look fixes T13; `tools/look_reference_suite.py`,

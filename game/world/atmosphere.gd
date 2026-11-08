@@ -578,10 +578,10 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	glare_effect.meter = adaptation_meter
 	glare_effect.vision = vision_effect
 	for effect in [glare_effect, glare_add]:
-		effect.set_frame(scene_per_cd_m2 > 0.0, Frames.to_render(sun_from_earth.normalized()),
+		effect.set_frame(scene_per_cd_m2 > 0.0, Frames.to_render((sun_apparent_gcrf_m - camera_gcrf_m).normalized()),
 				last_sun_normal_lux * last_veil_visibility * scene_per_cd_m2 if glare_enabled else 0.0, _sun_light_unit_rgb,
 				cos(AdaptationMeter.SUN_MASK_RADIUS_FACTOR * asin(minf(SUN_RADIUS_M / (ASTRONOMICAL_UNIT_M * d_au), 1.0))),
-				eye_adaptation_enabled, display_gain)
+				eye_adaptation_enabled, display_gain, sun_disc_scene(scene_per_cd_m2))
 	eclipse_segments = 0
 	if moon_apparent_gcrf_m != Vector3.ZERO:
 		var moon_from_earth := moon_apparent_gcrf_m - earth_center_gcrf_m
@@ -684,6 +684,19 @@ func sun_seen_cd_m2(scene_per_cd: float) -> float:
 	peak = maxf(peak, _sun_light_unit_rgb.z)
 	var clamped := SUN_DISC_SCENE_CLAMP / maxf(peak, 1.0e-6) / scene_per_cd  # the clamp on the largest channel, in luminance
 	return SUN_SEEN_SHARE * minf(lux / solid_angle, clamped)
+
+
+## The Sun disc's mean luminance in scene units (the direct beam over the disc's solid angle x scene per cd/m^2, unclamped:
+## what the local adaptation would compress); 0 without a direct Sun. The Sun's veil is shown at PLATEAU / this
+## (GlareSpread.source_factor; user 2026-11-08 "Sonne wie Mond und Erde"): the halo keeps its physical ratio to its disc.
+func sun_disc_scene(scene_per_cd: float) -> float:
+	var visible := maxf(last_adaptation_visible_fraction, 1.0e-6)
+	var lux := last_sun_normal_lux / visible
+	if lux <= 0.0 or scene_per_cd <= 0.0:
+		return 0.0
+	var d_m := ASTRONOMICAL_UNIT_M * _sun_distance_au
+	var solid_angle := TAU * (1.0 - sqrt(1.0 - pow(SUN_RADIUS_M / d_m, 2.0)))
+	return lux / solid_angle * scene_per_cd
 
 
 ## The Sun's disability glare veil over the field (look fixes T5b fix round 1, user 2026-11-08): [photopic, scotopic

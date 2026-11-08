@@ -331,6 +331,8 @@ var _spread_sun := {}
 var _local_active := false
 ## The global display gain g (the local factor's floor 1 / g; GlareSpread.source_factor).
 var _display_gain := 1.0
+## The Sun disc's mean luminance in scene units (Atmosphere.sun_disc_scene; 0: no direct Sun): its veil's local factor.
+var _sun_disc_scene := 0.0
 
 
 func _init(attach := true, effect_stage := Stage.SPREAD, spread_source: GlareSpreadEffect = null) -> void:
@@ -345,16 +347,17 @@ func _init(attach := true, effect_stage := Stage.SPREAD, spread_source: GlareSpr
 ## Main thread, every frame: whether the spread runs, the Sun's direction in the render world, its veil's illuminance in
 ## scene units (0: none) and colour, and the Sun mask's cosine (Atmosphere.update).
 func set_frame(active: bool, sun_world: Vector3, sun_scene_lux: float, sun_rgb: Vector3, mask_cos: float,
-		local_adaptation_on := false, display_gain := 1.0) -> void:
+		local_adaptation_on := false, display_gain := 1.0, sun_disc_scene := 0.0) -> void:
 	var on := active and GlareSpread.enabled
 	access_resolved_color = on
 	if source == null:  # the ADD instance reads the SPREAD instance's state
 		RenderingServer.call_on_render_thread(_set_on_render_thread.bind(on, sun_world, sun_scene_lux, sun_rgb, mask_cos,
-				local_adaptation_on, display_gain))
+				local_adaptation_on, display_gain, sun_disc_scene))
 
 
 func _set_on_render_thread(active: bool, sun_world: Vector3, sun_scene_lux: float, sun_rgb: Vector3, mask_cos: float,
-		local_adaptation_on: bool, display_gain := 1.0) -> void:
+		local_adaptation_on: bool, display_gain := 1.0, sun_disc_scene := 0.0) -> void:
+	_sun_disc_scene = sun_disc_scene
 	_local_active = local_adaptation_on
 	_display_gain = maxf(display_gain, 1.0)
 	_active = active
@@ -608,8 +611,9 @@ func _add(render_data: RenderData) -> void:
 			continue
 		var frame: Array = source._spread_sun[index]
 		var sun_eye: Vector3 = frame[1]
-		# The Sun's own local factor is the floor 1 / g (its disc stays display white: GlareSpread.source_factor).
-		var sun_factor := GlareSpread.source_factor(INF, 1.0 / source._display_gain) if source._local_factor_on() else 1.0
+		# The Sun's veil at its disc's local factor PLATEAU / Y_disc (no floor: the disc is clamped to white, its halo is
+		# not): like the Moon's and the Earth's (user 2026-11-08). The meter keeps the full veil.
+		var sun_factor := GlareSpread.source_factor(source._sun_disc_scene, 0.0) if source._local_factor_on() else 1.0
 		source.apply_veil(source._views[index], buffers.get_color_layer(index), size, frame[0], sun_eye,
 				sun_factor * source._sun_scene_lux if source._sun_world != Vector3.ZERO else 0.0, source._sun_rgb, true, map,
 				source._local_factor_on())

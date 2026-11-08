@@ -394,7 +394,9 @@ def _variants():
         for tag, fov in FOV_VARIANTS.items():
             g = dict(gates)
             if name == "sun_in_view":
-                g = {"white_px": gates["white_px"]}
+                g = {"white_px": gates["white_px"],
+                     "luma_1deg": (0.0, 245.0, "[user 2026-11-08 'Sonne wie Mond und Erde': the eye's veil is shown at the "
+                                               "disc's local factor, the halo is the sky's aureole, not a clipped white ball]")}
             else:
                 g["halo_bump"] = (0.0, 3.0, "[orchestrator / user 2026-11-08: a smooth CIE 146 veil, no ring, no bands: "
                                             "radial profile beyond the limb falls monotonically within 3 luma]")
@@ -426,7 +428,14 @@ SCENES["terminator_half_earth_f10"] = (LUNAR_NIGHT + ["--lon=45", "--utc=2026-12
 # sun_in_view* (ground, the atmosphere's aureole + the same veil).
 for _fov in ("60", "10"):
     _sun_gates = {"white_px": (1, 10 ** 9, "[call] the Sun's disc is display white"),
-                  "halo_bump": (0.0, 3.0, "[CIE 146: the veil falls monotonically with the angle]")}
+                  "halo_bump": (0.0, 3.0, "[CIE 146: the veil falls monotonically with the angle]"),
+                  # [S: CIE 146:2002 veil x the Sun's solid angle 6.8e-5 sr = 1.0e-3 / 1.7e-4 of the disc at 1 / 2 deg, linear;
+                  # the sRGB display 12.92 x v x 255 = 3.3 / 0.6 luma; the veil is shown at the disc's local factor (user
+                  # 2026-11-08 'Sonne wie Mond und Erde'); x0.5 .. 2 for the kernel fit and the disc's mean]
+                  "luma_1deg": (1.6, 6.6, "[S: CIE 146 x Omega_Sun, sRGB 3.3 luma]"),
+                  "luma_2deg": (0.2, 1.3, "[S: CIE 146 x Omega_Sun, sRGB 0.6 luma]"),
+                  "luma_5deg": (0.0, 0.5, "[S: CIE 146 x Omega_Sun, <= 0.1 luma]"),
+                  "luma_10deg": (0.0, 0.5, "[S: CIE 146 x Omega_Sun, <= 0.03 luma]")}
     SCENES[f"sun_space_400km_f{_fov}"] = (["--lat=25.9853", "--lon=-97.1873", "--height=400000",
                                            "--utc=2026-11-07T18:15:00", "--hide_ui", WEATHER, "--look_at_sun",
                                            f"--fov={_fov}"], m_sun_profile(float(_fov)), _sun_gates)

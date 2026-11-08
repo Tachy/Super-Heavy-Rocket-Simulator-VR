@@ -196,6 +196,17 @@ func _sun() -> void:
 				"%.1f / %.1f cd/m^2, visibility %.2f" % [mine, scalar, atmosphere.last_veil_visibility])
 		var cie := GlareSpread.sun_veil_cd_m2(1.27e5, theta, atmosphere.last_veil_visibility)
 		print("glare_spread_test: info - %.0f deg: CIE 146 veil %.1f cd/m^2 = %.2f x the scalar's Stiles-Holladay" % [theta, cie, cie / scalar])
+	# The Sun's veil is shown at its disc's local factor PLATEAU / Y_disc (no floor): its halo keeps CIE 146 x Omega_Sun of the
+	# disc's plateau value (1e-3 at 1 deg), like the Moon's and the Earth's.
+	var disc := atmosphere.sun_disc_scene(0.0035)
+	atmosphere.adaptation_surround.last_visibility = 1.0
+	var factor := GlareSpread.source_factor(disc, 0.0)
+	_check("Sun disc scene luminance ~ 1.9e9 cd/m^2 x scene per cd", absf(disc / (1.9e9 * 0.0035) - 1.0) < 0.1, "%.3g" % disc)
+	_check("Sun factor = PLATEAU / Y_disc, far below the cone floor", absf(factor * disc / GlareSpread.PLATEAU_SCENE - 1.0) < 1.0e-9
+			and factor < 1.0e-5, "%.3g" % factor)
+	var halo_1deg := GlareSpread.sun_veil_cd_m2(1.27e5, 1.0, 1.0) * 0.0035 * factor / GlareSpread.PLATEAU_SCENE
+	_check("Sun halo at 1 deg / disc = CIE 146 x Omega_Sun (1.0e-3, x0.5 .. 2)", halo_1deg > 0.5e-3 and halo_1deg < 2.0e-3,
+			"%.3g" % halo_1deg)
 	_check("Sun veil behind the eye = 0", GlareSpread.sun_veil_cd_m2(1.27e5, 95.0, 1.0) == 0.0, "")
 	_check("Sun veil held inside the disc's radius", is_equal_approx(GlareSpread.sun_veil_cd_m2(1.27e5, 0.0, 1.0),
 			GlareSpread.sun_veil_cd_m2(1.27e5, Atmosphere.GLARE_MIN_ANGLE_DEG, 1.0)
