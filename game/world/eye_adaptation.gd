@@ -90,6 +90,13 @@ static var adopted_white_follows_scene := true
 ## or a slide in a dark room, not the world). The display observer is taken as fully adapted to the display's white
 ## [call: the display is the only stimulus of a darkened room or an HMD].
 const SURROUND_F := 1.0
+## [S: CIE 191:2010] the mesopic adaptation coefficient m = MESOPIC_M_A + MESOPIC_M_B log10 L_mes (m 0 at 0.005, 1 at
+## 5.06 cd/m^2) and V'(lambda_0) = 683 / 1699, the scotopic efficiency at 555 nm on the photopic scale
+## (mesopic_photopic_weight). Iteration cap [call]: the fixed-point iteration converges to 1e-12 within ~30 steps.
+const MESOPIC_M_A := 0.7670
+const MESOPIC_M_B := 0.3334
+const MESOPIC_V_PRIME_LAMBDA0 := 683.0 / 1699.0
+const MESOPIC_WEIGHT_ITERATIONS := 100
 ## [S: Fairchild & Reniff 1995, "Time course of chromatic adaptation for color-appearance judgments", JOSA A 12(5),
 ## 824-838: a fast phase of a few seconds and adaptation about 90 % complete after ~60 s; Rinner & Gegenfurtner 2000,
 ## Vision Res. 40, 1813: the slow component's half-life ~20 s] The adopted white's time constant (s): one exponential in
@@ -269,19 +276,60 @@ static func white_from_gains(gains: Vector3) -> Basis:
 	return to_cones.inverse() * Basis.from_scale(gains) * to_cones
 
 
+## The degree of adaptation D of the cones' white (look fixes T5b fix round 3, user 2026-11-08 "the blue hour must stay
+## blue"): CIECAM02's photopic D (photopic_degree_of_adaptation) times the photopic share m of the mesopic visual
+## response (mesopic_photopic_weight, CIE 191:2010) at the adapting field L_A = the white's x Y_b / 100 and its scotopic
+## counterpart. [call] The von Kries gains are a cone mechanism, CIECAM02's D was fitted to photopic data (L_A >~ 1-10
+## cd/m^2) and its floor 0.82 F at L_A -> 0 is an extrapolation; in the mesopic range the visual response is
+## m V + (1 - m) V' (CIE 191) and only its cone part m discounts the illuminant's colour - the rod part has no
+## cone-specific gain control (its achromatic signal and blue tint are the rods' post step, Ferwerda / Jensen, unchanged:
+## no double handling). So D = m D_photopic: unchanged where m = 1 (L_mes >= 5.06 cd/m^2: day, cabin, the lit Moon,
+## space), falling continuously through the mesopic range to 0 at L_mes <= 0.005 cd/m^2 (scotopic: the cones keep the
+## colourimetric light, at night below the rods anyway). Continuous in L_A (no switch at the CIE 191 limits: m is
+## clipped inside the iteration, see mesopic_photopic_weight).
+## scotopic_white_cd_m2 < 0: the scotopic white is taken equal to the photopic one (S/P 1).
+static func degree_of_adaptation(white_cd_m2: float, scotopic_white_cd_m2 := -1.0) -> float:
+	var white := maxf(white_cd_m2, 0.0)
+	var scotopic := white if scotopic_white_cd_m2 < 0.0 else scotopic_white_cd_m2
+	var share := APPEARANCE_BACKGROUND_PERCENT / 100.0
+	return photopic_degree_of_adaptation(white) * mesopic_photopic_weight(white * share, scotopic * share)
+
+
 ## CIECAM02's degree of adaptation [S: CIE 159:2004; Moroney et al. 2002]: D = F (1 - (1 / 3.6) exp((-L_A - 42) / 92)),
 ## L_A the adapting field's luminance (cd/m^2) = the white's x Y_b / 100 (as luminance_level_factor), F = SURROUND_F.
-## 0.82 F at L_A -> 0 (a moonlit night), 0.90 F at L_A 50 (the lamp-lit cabin), F above ~500 (daylight).
-static func degree_of_adaptation(white_cd_m2: float) -> float:
+## 0.82 F at L_A -> 0, 0.90 F at L_A 50 (the lamp-lit cabin), F above ~500 (daylight).
+static func photopic_degree_of_adaptation(white_cd_m2: float) -> float:
 	var l_a := maxf(white_cd_m2, 0.0) * APPEARANCE_BACKGROUND_PERCENT / 100.0
 	return clampf(SURROUND_F * (1.0 - exp((-l_a - 42.0) / 92.0) / 3.6), 0.0, 1.0)
+
+
+## [S: CIE 191:2010, "Recommended system for mesopic photometry based on visual performance", sec. 3 / Annex] The
+## adaptation coefficient m of the mesopic luminous efficiency m V(lambda) + (1 - m) V'(lambda) of a field of photopic
+## luminance l_p and scotopic luminance l_s (cd/m^2): iterate from m 0.5, L_mes = (m l_p + (1 - m) l_s V'(lambda_0)) /
+## (m + (1 - m) V'(lambda_0)), m = a + b log10 L_mes clipped to [0, 1] (a 0.7670, b 0.3334, V'(lambda_0) = 683 / 1699).
+## m = 0 at L_mes 0.005 cd/m^2, 1 at 5.06. [call] The CIE's explicit switches (photopic for l_p >= 5, scotopic for
+## l_s <= 0.005) are left out: with the clip they are the iteration's own fixed points for an S/P >= 1 light, and for
+## a warm light (S/P < 1) the switch at l_p 5 would jump.
+static func mesopic_photopic_weight(l_p: float, l_s: float) -> float:
+	var p := maxf(l_p, 0.0)
+	var s := maxf(l_s, 0.0)
+	var m := 0.5
+	for _i in range(MESOPIC_WEIGHT_ITERATIONS):
+		var l_mes := (m * p + (1.0 - m) * s * MESOPIC_V_PRIME_LAMBDA0) / (m + (1.0 - m) * MESOPIC_V_PRIME_LAMBDA0)
+		if l_mes <= 0.0:
+			return 0.0
+		var next := clampf(MESOPIC_M_A + MESOPIC_M_B * log(l_mes) / log(10.0), 0.0, 1.0)
+		if absf(next - m) < 1.0e-12:
+			return next
+		m = next
+	return m
 
 
 ## The adopted white's next step toward the field's illuminant (linear sRGB, any scale; ZERO: no light known - the
 ## gains stay) at the paced adaptation luminance: the target gains white_gains_of(illuminant, D(adaptation_cd_m2)),
 ## paced in log over CHROMATIC_TIME_CONSTANT_S (a pending snap jumps). Call after advance.
 func advance_white(illuminant_rgb: Vector3, dt_s: float) -> void:
-	white_degree = degree_of_adaptation(adaptation_cd_m2) if adopted_white_follows_scene else 1.0
+	white_degree = degree_of_adaptation(adaptation_cd_m2, scotopic_cd_m2) if adopted_white_follows_scene else 1.0
 	if LUMINANCE_WEIGHTS.dot(illuminant_rgb) > 0.0:
 		var target := white_gains_of(illuminant_rgb, white_degree)
 		if _white_snap_pending:

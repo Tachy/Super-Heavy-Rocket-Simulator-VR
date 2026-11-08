@@ -104,22 +104,59 @@ func _check_reddened(sun: Vector3) -> void:
 			"B/R %.3f before, %.3f balanced" % [reddened.z / reddened.x, ratio])
 
 
-## CIECAM02's D (F 1, average surround): 1 - e^(-42/92) / 3.6 = 0.8241 at L_A -> 0, 0.9022 at the white 270 cd/m^2
-## (the cabin, L_A 54), 1 within 1e-6 by day (4.3e4); increasing.
+## CIECAM02's photopic D (F 1, average surround): 1 - e^(-42/92) / 3.6 = 0.8241 at L_A -> 0, 0.9022 at the white
+## 270 cd/m^2 (the cabin, L_A 54), 1 within 1e-6 by day (4.3e4). The mesopic D (T5b fix round 3) = m D_photopic with
+## CIE 191:2010's m: for S/P 1 L_mes = L_A, so m = 0.7670 + 0.3334 log10 L_A exactly (1e-9): 0.7670 at 1 cd/m^2,
+## 0.4336 at 0.1, 0 at <= 0.005, 1 at >= 5.06; for S/P 3 the iteration's fixed point holds (1e-9). Photopic unchanged
+## (D = D_photopic within 1e-12) for every white >= 25.3 cd/m^2 (L_A >= 5.06) at S/P 0.5-3.5 - noon, cabin, the lit
+## Moon, space. Continuous (largest step 0.005 per 0.01 dex over 1e-4 .. 1e5 cd/m^2, m's slope 0.0033 per 0.01 dex
+## x D_photopic) and increasing in L_a.
 func _check_degree() -> void:
-	var dark := EyeAdaptation.degree_of_adaptation(0.0)
-	var cabin := EyeAdaptation.degree_of_adaptation(270.0)
-	var day := EyeAdaptation.degree_of_adaptation(4.3e4)
-	_check("D at L_A 0 (night)", absf(dark - 0.8241) < 1.0e-4, "%.5f (0.8241)" % dark)
-	_check("D at 270 cd/m^2 (cabin)", absf(cabin - 0.9022) < 1.0e-4, "%.5f (0.9022)" % cabin)
-	_check("D by day", absf(day - 1.0) < 1.0e-6, "%.8f" % day)
-	var last := 0.0
+	var dark := EyeAdaptation.photopic_degree_of_adaptation(0.0)
+	var cabin := EyeAdaptation.photopic_degree_of_adaptation(270.0)
+	var day := EyeAdaptation.photopic_degree_of_adaptation(4.3e4)
+	_check("photopic D at L_A 0", absf(dark - 0.8241) < 1.0e-4, "%.5f (0.8241)" % dark)
+	_check("photopic D at 270 cd/m^2 (cabin)", absf(cabin - 0.9022) < 1.0e-4, "%.5f (0.9022)" % cabin)
+	_check("photopic D by day", absf(day - 1.0) < 1.0e-6, "%.8f" % day)
+	for l in [1.0, 0.1, 0.02, 2.0]:
+		var m := EyeAdaptation.mesopic_photopic_weight(l, l)
+		var expected := clampf(0.7670 + 0.3334 * log(l) / log(10.0), 0.0, 1.0)
+		_check("CIE 191 m at L_mes %s (S/P 1)" % l, absf(m - expected) < 1.0e-9, "%.6f (%.6f)" % [m, expected])
+	_check("CIE 191 m scotopic", EyeAdaptation.mesopic_photopic_weight(0.004, 0.004) == 0.0, "0 at 0.004 cd/m^2")
+	_check("CIE 191 m photopic", EyeAdaptation.mesopic_photopic_weight(5.1, 5.1) == 1.0, "1 at 5.1 cd/m^2")
+	var v0 := EyeAdaptation.MESOPIC_V_PRIME_LAMBDA0
+	var l_p := 0.3
+	var l_s := 0.9
+	var m3 := EyeAdaptation.mesopic_photopic_weight(l_p, l_s)
+	var l_mes := (m3 * l_p + (1.0 - m3) * l_s * v0) / (m3 + (1.0 - m3) * v0)
+	_check("CIE 191 fixed point at S/P 3", absf(m3 - (0.7670 + 0.3334 * log(l_mes) / log(10.0))) < 1.0e-9,
+			"m %.6f, L_mes %.5f" % [m3, l_mes])
+	var unchanged := 0.0
+	for sp in [0.5, 1.0, 2.4, 3.5]:
+		for white in [25.3, 270.0, 4.3e4, 1.2e5]:
+			unchanged = maxf(unchanged, absf(EyeAdaptation.degree_of_adaptation(white, white * sp)
+					- EyeAdaptation.photopic_degree_of_adaptation(white)))
+	_check("photopic D unchanged (white >= 25.3 cd/m^2)", unchanged < 1.0e-12, "largest %s" % unchanged)
+	var worst_step := 0.0
 	var monotonic := true
-	for k in range(-6, 6):
-		var d := EyeAdaptation.degree_of_adaptation(pow(10.0, k))
-		monotonic = monotonic and d >= last
-		last = d
-	_check("D increasing in L_a", monotonic, "1e-6 .. 1e5")
+	for sp in [0.5, 1.0, 2.4, 3.0]:
+		var last := -1.0
+		for k in range(-400, 501):
+			var white := pow(10.0, k * 0.01)
+			var d := EyeAdaptation.degree_of_adaptation(white, white * sp)
+			if last >= 0.0:
+				worst_step = maxf(worst_step, absf(d - last))
+				monotonic = monotonic and d >= last - 1.0e-12
+			last = d
+	_check("D continuous in L_a", worst_step < 0.005, "largest step %.5f per 0.01 dex" % worst_step)
+	_check("D increasing in L_a", monotonic, "1e-4 .. 1e5 cd/m^2, S/P 0.5-3")
+	var dusk := EyeAdaptation.degree_of_adaptation(12.2, 12.2 * 3.0)
+	var night := EyeAdaptation.degree_of_adaptation(0.044, 0.044 * 2.0)
+	print("  D: dusk (L_a 12.2, S/P 3) %.4f (photopic %.4f), full-Moon night (L_a 0.044, S/P 2) %.4f, moonless %.4f"
+			% [dusk, EyeAdaptation.photopic_degree_of_adaptation(12.2), night,
+			EyeAdaptation.degree_of_adaptation(1.0e-4, 3.0e-4)])
+	_check("mesopic dusk D below the photopic", dusk < EyeAdaptation.photopic_degree_of_adaptation(12.2) - 0.05,
+			"%.4f" % dusk)
 
 
 ## Partial adaptation: D = 0 is the identity, the cone gains are linear in D (CIE 159's D Y_w / R_w + 1 - D), D = 1 the
@@ -139,9 +176,12 @@ func _check_partial(sun: Vector3) -> void:
 
 ## The full Moon seen from the ground at night (look fixes T5b review Q3): its light is the Sun's x the regolith's colour
 ## (moon_light_colour) x the air at elevation 83 deg (Rayleigh 0.0973 at 550 nm, lambda^-4.05; aerosol 0.1 at 550 nm,
-## Angstrom 1.3 - the config's values, review Q3), and so is the night's illuminant (moonlight). Adapted with the night's
-## D (0.82, L_a 0.05 cd/m^2) the disc's light is pale cream: B/R 0.80-0.92 [E: observers' "pale cream / silvery";
-## review Q3 0.83-0.89]; at D = 1 neutral (0.97-1.03); with the former fixed TOA-Sun white B/R about 0.52.
+## Angstrom 1.3 - the config's values, review Q3), and so is the night's illuminant (moonlight). The disc itself is
+## photopic (~2500 cd/m^2): seen in range (a narrow frame, L_a ~2e4) the eye adapts with D 1 - neutral, 0.97-1.03; with
+## the photopic floor D 0.82 pale cream, B/R 0.80-0.92 [E: observers' "pale cream / silvery"; review Q3 0.83-0.89] - kept
+## as the check of the CAT itself. The night's mesopic D (T5b fix round 3, L_a 0.05, S/P 2: m ~0.13) leaves the
+## moonlight close to its colourimetric warmth (between colourimetric and the photopic-floor cream); the rods' post step
+## carries the night's look. Former fixed TOA-Sun white: B/R about 0.52.
 func _check_moonlight(sun: Vector3, moon_colour: Vector3) -> void:
 	var lambdas := Vector3(0.680, 0.550, 0.440)
 	var air_mass := 1.0 / sin(deg_to_rad(83.0))
@@ -150,12 +190,16 @@ func _check_moonlight(sun: Vector3, moon_colour: Vector3) -> void:
 		var tau := 0.0973 * pow(lambdas[k] / 0.55, -4.05) + 0.1 * pow(lambdas[k] / 0.55, -1.3)
 		t[k] = exp(-air_mass * tau)
 	var moonlight := sun * moon_colour * t
-	var night := EyeAdaptation.white_balance(moonlight, EyeAdaptation.degree_of_adaptation(0.05)) * moonlight
+	var floor_d := EyeAdaptation.white_balance(moonlight, EyeAdaptation.photopic_degree_of_adaptation(0.05)) * moonlight
+	var night := EyeAdaptation.white_balance(moonlight, EyeAdaptation.degree_of_adaptation(0.05, 0.1)) * moonlight
 	var full := EyeAdaptation.white_balance(moonlight, 1.0) * moonlight
 	var toa := EyeAdaptation.white_balance(sun, 1.0) * moonlight
-	_check("full Moon at night: pale cream", night.z / night.x > 0.80 and night.z / night.x < 0.92,
-			"B/R %.3f (D 1: %.3f, TOA white: %.3f, colourimetric %.3f)" % [night.z / night.x, full.z / full.x,
+	_check("full Moon at the photopic floor D: pale cream", floor_d.z / floor_d.x > 0.80 and floor_d.z / floor_d.x < 0.92,
+			"B/R %.3f (D 1: %.3f, TOA white: %.3f, colourimetric %.3f)" % [floor_d.z / floor_d.x, full.z / full.x,
 			toa.z / toa.x, moonlight.z / moonlight.x])
+	_check("moonlight at the night's mesopic D: between colourimetric and the floor cream",
+			night.z / night.x > moonlight.z / moonlight.x and night.z / night.x < floor_d.z / floor_d.x,
+			"B/R %.3f (D %.4f)" % [night.z / night.x, EyeAdaptation.degree_of_adaptation(0.05, 0.1)])
 	_check("moonlight at D 1: neutral", absf(full.z / full.x - 1.0) < 0.03, "B/R %.4f" % [full.z / full.x])
 	_check("moonlight colour keeps the Sun's luminance", absf(EyeAdaptation.LUMINANCE_WEIGHTS.dot(sun * moon_colour)
 			/ EyeAdaptation.LUMINANCE_WEIGHTS.dot(sun) - 1.0) < TOLERANCE, "%s" % moon_colour)

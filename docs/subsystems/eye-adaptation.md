@@ -322,7 +322,27 @@ shaders:
     paced L_a x Y_b / 100 (Y_b 20), F = `SURROUND_F` 1.0: the scene observer's surround is the scene itself, CIECAM02's
     "average" (S_R >= 0.2; dim 0.9 and dark 0.8 are films / slides in a dim / dark room) [S: CIE 159:2004 Table 1;
     Fairchild 2013, Color Appearance Models 3rd ed., 16.4]; the display observer fully adapted to the display white
-    [call]. D 0.824 at a moonlit night, 0.90 in the lamp-lit cabin (L_a ~270), 1.000 by day and in space.
+    [call]. This photopic D (`photopic_degree_of_adaptation`) is 0.90 in the lamp-lit cabin (L_a ~270), 1.000 by day
+    and in space; its floor 0.82 F at L_A -> 0 is an extrapolation of photopic data.
+  - Mesopic degree of adaptation [T5b fix round 3, user 2026-11-08 "the blue hour must stay blue";
+    `degree_of_adaptation(L_a, L_as)`, `mesopic_photopic_weight`]: D = m D_photopic, m the photopic share of CIE 191's
+    mesopic response m V + (1 - m) V' [S: CIE 191:2010: iterate L_mes = (m L_p + (1 - m) L_s V'(lambda_0)) / (m +
+    (1 - m) V'(lambda_0)), m = 0.7670 + 0.3334 log10 L_mes in [0, 1], V'(lambda_0) = 683 / 1699], evaluated at the
+    adapting field L_p = L_A = 0.2 L_a and L_s = 0.2 L_as (the paced scotopic adaptation: the field's S/P). [call] The
+    von Kries gains are a cone mechanism; in the mesopic range only the cone part m of the response discounts the
+    illuminant's colour, the rods have no cone-specific gain control - their achromatic signal and blue tint stay the
+    rods' post step (Ferwerda k / Jensen, unchanged; m and k are separate quantities: k weighs the rods' luminance, m
+    the cones' white point - no double handling). The CIE's explicit photopic / scotopic switches are left out (with
+    the clip they are the iteration's fixed points for S/P >= 1; for S/P < 1 the switch at L_p 5 would jump), so D is
+    continuous in L_a. Values: m = 1 for L_A >= 5.06 cd/m^2 (L_a >= 25.3: day, cabin, the lit Moon, space - D
+    unchanged, 1e-12), m = 0 for L_mes <= 0.005 (moonless night: the cones keep the colourimetric light, below the rods
+    anyway). D at S/P 3 (twilight sky): L_a 10 0.730, 3.16 0.605, 1 0.484, 0.1 0.246.
+    Renders (A = photopic D / B = mesopic D, Starbase, fov 100, el 5, display-linear B/R; `screenshots/look_fixes/
+    t5b_fix3/`): dusk Sun -5.5 deg (L_a 12.2) D 0.829 -> 0.751, sky 1.25 -> 1.36, ground 0.95 -> 1.05; blue hour Sun
+    -7.7 deg (L_a 1.51) D 0.825 -> 0.523, sky 1.42 -> 1.91, ground 1.11 -> 1.38; full-Moon night (L_a 0.067) D 0.824
+    -> 0.186, ground 2.31 -> 2.24, sky 2.79 -> 2.67 (the rods' tint dominates); noon pad, Moon day, cockpit identical
+    (D 1 / m 1). At Sun -5.5 deg the blue stays weak: its L_a is the anchored adaptation (the white-plate rule ~9
+    cd/m^2), photopic by CIE 191 (L_A 2.4: m 0.91), while the frame's own mean is ~2 cd/m^2.
   - Transform: von Kries in CAT02's cone space with CIE 159's partial form, gains D grey / white + 1 - D (grey: the
     display's grey at the illuminant's luminance), W = M^-1 diag(gains) M - D = 0 the identity (the display white
     D65), D = 1 the illuminant drawn grey.
@@ -344,9 +364,13 @@ shaders:
   eye +0.11 / +0.19 ms (T2). Test `game/tests/white_balance_test.gd` (headless): the D65 grey kept (identity), the TOA
   Sun B/R 0.856 drawn grey at its luminance (1e-6), the Sun through Rayleigh air mass 4 at 700 hPa still warm at D = 1
   toward the TOA Sun (B/R 0.485 -> 0.564), post step o display-referred inverse = identity (1e-6, also at D 0.82 toward
-  the moonlight); D = 0.8240 at L_A 0, 0.9022 at a 270 cd/m^2 white, 1 by day, increasing; D 0 the identity, gains
-  linear in D; the full Moon's light (Sun x regolith colour x air at el 83) adapted with the night's D: B/R 0.874 (pale
-  cream, band 0.80-0.92; D 1: 1.000; the former TOA white 0.505; colourimetric 0.436); the moonlight colour keeps the
+  the moonlight); photopic D = 0.8240 at L_A 0, 0.9022 at a 270 cd/m^2 white, 1 by day; CIE 191 m = 0.7670 + 0.3334
+  log10 L at S/P 1 (1e-9; 0 at 0.004, 1 at 5.1), its fixed point at S/P 3 (1e-9); the mesopic D = the photopic for
+  whites >= 25.3 cd/m^2 at S/P 0.5-3.5 (1e-12), continuous (largest step < 0.005 per 0.01 dex over 1e-4 .. 1e5) and
+  increasing, below the photopic at dusk by > 0.05; D 0 the identity, gains
+  linear in D; the full Moon's light (Sun x regolith colour x air at el 83) adapted with the photopic floor D 0.824:
+  B/R 0.874 (pale cream, band 0.80-0.92; D 1: 1.000; the former TOA white 0.505; colourimetric 0.436), with the
+  night's mesopic D between colourimetric and that cream; the moonlight colour keeps the
   Sun's luminance (1e-6); a D65 cabin lamp neutral (1e-6); pacing one time constant e^-1 (1e-9), 90 % in 60 s (0.0995),
   a snap jumps; the field illuminant at the pad at noon (Sun 48 deg) = the horizontal Sun + sky (1e-6) with its CCT in
   5200-6500 K (5510 K; [S] Hernandez-Andres et al. 2001 clear-sky global daylight, lower edge [call] -300 K for the
@@ -494,7 +518,8 @@ shaders:
   keep the frame alone). Rule D, the highlight cut and the anchor percentile unchanged.
 - City lights scene-referred with scale [E] (user ruling 2026-10-25).
 - Adopted white = the field's illuminant, estimated physically (Sun + sky, moonlight, the enclosure's lamps, the Sun
-  above the air in space; not a grey world of the frame), with CIECAM02's D (average surround, F 1), paced 26 s (user
+  above the air in space; not a grey world of the frame), with CIECAM02's D (average surround, F 1) x CIE 191's mesopic
+  cone share m (fix round 3, user 2026-11-08: the blue hour stays blue), paced 26 s (user
   2026-11-08, after review T5b Q3; it replaces the fixed TOA-Sun white of proposal F7, 2026-11-07).
 - The Sun's disc is masked out of the field meter by its direction and size, its disability glare added as a veil
   (Stiles-Holladay, CIE 146:2002) - in the frame and just outside it, both eyes; no solid-angle floor (user 2026-11-08).
@@ -515,9 +540,9 @@ shaders:
 
 - Adopted white: the pad's global horizontal daylight (Sun 48 deg) is B/R 0.758 / 5510 K against the TOA Sun's 0.856
   / 5920 K, so by day the ground reads more neutral and the sky bluer than with the former fixed white (pad noon el 5:
-  ground B/R 0.55 (TOA white) -> 0.68, sky 7.5 -> 10.3; el 60 sky 9.5); at dusk (Sun -5.5 deg) the twilight sky light
-  (B/R 2.9) at D 0.83 turns the blue hour nearly grey (sky B/R 3.1 -> 1.25, the horizon glow orange) - D at mesopic
-  levels is a pending user decision. The full
+  ground B/R 0.55 (TOA white) -> 0.68, sky 7.5 -> 10.3; el 60 sky 9.5); at dusk the twilight sky light (B/R 2.9) is
+  the adopted white, with the mesopic D (fix round 3) only partly: see "Mesopic degree of adaptation" and the fix
+  round 3 numbers. The full
   Moon at a VR fov stays display white (B/R 1.00 in A and B): adapted to the moonlit night (L_a 0.04 cd/m^2, gain 1.2e4)
   the disc is far above white - the Moon's own disability glare (10 x 0.3 lux / 0.27^2 ~ 40 cd/m^2 looking at it) and
   local adaptation are not modelled; pale cream shows where the disc is in range (fov 2: B/R 0.33 -> 0.77). The surround

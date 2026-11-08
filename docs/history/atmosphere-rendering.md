@@ -534,3 +534,7 @@ mostly black field (lunar day looking up 60 deg: 2.4 %, fragile) was removed who
   luminance term, the direct Sun at NORMAL incidence + the horizontal sky. It weighted the 4940 K direct beam 1 / mu0
   too much against the sky (pad, Sun 48 deg: B/R 0.724 / 5370 K; Sun 5 deg: 0.181 against the horizontal 0.753). Since
   fix round 2 the colour is the horizontal global illuminance (0.758 / 5510 K); the luminance rule is unchanged.
+- Degree of adaptation = CIECAM02's photopic D alone (T5b fix rounds 1-2, 2026-11-08): its floor 0.82 held down to
+  any luminance, so the blue hour (Sun -5.5 deg, twilight sky light B/R 2.9, L_a 12) was adapted at D 0.83 and went
+  nearly grey (sky B/R 3.1 -> 1.25), and a moonlit night at D 0.82. Since fix round 3 D = m D_photopic with CIE 191's
+  mesopic m (eye-adaptation.md, "Mesopic degree of adaptation").
