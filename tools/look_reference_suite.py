@@ -150,6 +150,48 @@ def m_disc(a):
             "limb_ratio": halo_bump(a)[1]}
 
 
+def halo_profile(a, fov_deg, radius_deg):
+    """The halo around the brightest compact object (look fixes T13 fix 1): mean linear display luminance (sRGB decoded,
+    BT.709 luma) of rings at 1 / 2 / 5 / 10 deg from the disc's centre (+-10 %, render_check's vertical fov, rectilinear
+    centre scale) over the disc's own mean (inside 60 % of its angular radius radius_deg). The centre: the centroid of the
+    pixels above half the brightest near the frame centre (the scenes aim at the object)."""
+    y = luma(lin(a))
+    h, w = y.shape
+    px_per_deg = (h / 2) / np.tan(np.radians(fov_deg / 2)) * np.pi / 180
+    y8 = luma(a)
+    yy, xx = np.mgrid[0:h, 0:w]
+    # the object is aimed at the frame centre (--look_at_*): the centroid of the bright pixels within 1.5 radii of it
+    near = np.hypot(yy - h / 2, xx - w / 2) < max(1.5 * radius_deg * px_per_deg, 4.0)
+    bright = near & (y8 > 0.5 * y8[near].max())
+    cy, cx = yy[bright].mean(), xx[bright].mean()
+    r = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+    r_max = int(min(cy, cx, h - cy, w - cx))
+    r_disc = radius_deg * px_per_deg
+    disc = float(y[r < 0.6 * r_disc].mean()) if (r < 0.6 * r_disc).any() else float("nan")
+    out = {"disc_lin": disc}
+    for d in (1, 2, 5, 10):
+        ring = (r > 0.9 * d * px_per_deg) & (r < 1.1 * d * px_per_deg)
+        out[f"halo_{d}deg_rel"] = float(y[ring].mean() / max(disc, 1e-9)) if ring.any() and d * px_per_deg * 1.1 < r_max \
+            else float("nan")
+    # rings: the 8-bit radial luma profile (1 px annuli) from 1.15 disc radii outward must fall; the largest rise above
+    # its running minimum (a dark ring at the limb followed by a brighter ring shows up here)
+    y8r = np.bincount(r.astype(int).ravel(), y8.ravel())[:r_max] / np.maximum(np.bincount(r.astype(int).ravel())[:r_max], 1)
+    rise, low = 0.0, float("inf")
+    for v in y8r[int(1.15 * r_disc) + 1:]:
+        low = min(low, v)
+        rise = max(rise, v - low)
+    out["halo_rise"] = float(rise)
+    return out
+
+
+def with_halo(measure, fov_deg, radius_deg):
+    def m(a):
+        out = measure(a)
+        out.update(halo_profile(a, fov_deg, radius_deg))
+        return out
+    return m
+
+
 def m_epic(a, path):
     if not os.path.exists(EPIC_REF):
         return {"skipped": 1.0}
@@ -264,6 +306,28 @@ SCENES = {
 # the local adaptation and glare kernels are in degrees, so the gates must hold at all three. render_check's 1600 x 900
 # frame, vertical fov: 22.2 deg = 40 px/deg at the centre [E: Pimax Dream Air 5294 px per eye over ~100-130 deg],
 # 60 deg = 13.6 px/deg, 10 deg (central vision: the object as attended, user 2026-11-08) = 90 px/deg; the base scenes' 100 deg = 6.6 px/deg (the Earth from the Moon, 1.9 deg, ~12 px).
+# The halo profile (look fixes T13 fix 1, user 2026-11-08: "a real clear full-Moon night shows at most a slight glow, no
+# big ball"): linear display luminance of rings at 1 / 2 / 5 / 10 deg over the disc's own (halo_profile), all fovs. Each
+# source's eye veil is shown at its source's local factor, so the halo keeps its physical ratio to the disc: CIE 146:2002
+# (young eye) veil / disc = f(theta) x Omega_disc - the full Moon 9.7e-4 / 1.6e-4 / 1.9e-5 / 4.3e-6, the full Earth from
+# the Moon (0.95 deg) 1.3e-2 (in its limb's antialiasing, not gated) / 2.2e-3 / 2.6e-4 / 5.8e-5. From the Earth the night
+# sky and the atmosphere's lunar aureole add a floor (sky shader, KS91-type, measured 0.004-0.02 of the disc).
+# T13 values (A): Moon 1 deg 0.10-0.47, 2 deg 0.02-0.11; Earth 2 deg 0.17-0.50.
+HALO_GATES = {
+    "full_moon_from_earth": {
+        "halo_1deg_rel": (0.0, 0.03, "[user 2026-11-08: a slight glow; CIE 146 veil 9.7e-4 of the disc + sky / aureole floor]"),
+        "halo_2deg_rel": (0.0, 0.03, "[user 2026-11-08; CIE 146 veil 1.6e-4 of the disc + sky / aureole floor]"),
+        "halo_rise": (0.0, 3.0, "[orchestrator 2026-11-08: no dark ring at the limb, no bright ring beyond: the 8-bit "
+                                "radial profile from 1.15 disc radii falls within 3 luma]")},
+    "lunar_night_full_earth": {
+        "halo_2deg_rel": (0.001, 0.006, "[S: CIE 146:2002 veil / disc 2.2e-3 (x0.5 .. 2.7: the disc's mean vs its "
+                                        "brightest parts, the kernel fit); no sky on the Moon]"),
+        "halo_5deg_rel": (0.0, 0.001, "[S: CIE 146 veil / disc 2.6e-4, x4]"),
+        "halo_10deg_rel": (0.0, 0.0003, "[S: CIE 146 veil / disc 5.8e-5, x5]"),
+        "halo_rise": (0.0, 3.0, "[orchestrator 2026-11-08: no rings at the limb]")},
+}
+# [S: mean distances] the Moon from the Earth 1737.4 km / 384400 km, the Earth from the Moon 6371 km / 384400 km.
+ANGULAR_RADIUS_DEG = {"--look_at_moon": 0.259, "--look_at_earth": 0.950, "--look_at_sun": 0.267}
 FOV_VARIANTS = {"vr": "22.2", "d60": "60", "f10": "10"}
 
 
@@ -289,7 +353,16 @@ def _variants():
                                             "radial profile beyond the limb falls monotonically within 3 luma]")
                 if not name.startswith("lunar_night_crescent"):
                     g["limb_ratio"] = (0.0, 1.2, "[T10 test: limb no brighter than the interior x1.25; no bright ring]")
-            out[f"{name}_{tag}"] = (base + ["--fov=" + fov], measure, g)
+                g.update(HALO_GATES.get(name, {}))
+                if tag == "f10" and "halo_2deg_rel" in g:
+                    # at 10 deg the eye adapts to the Earth's disc (gain ~1.2, T13): nothing above display white, no veil
+                    lo, hi, src = g["halo_2deg_rel"]
+                    g["halo_2deg_rel"] = (0.0, hi, src + " [f10: adapted to the disc, no source]")
+                if tag == "f10":  # 5 and 10 deg lie outside the 10 deg frame
+                    g.pop("halo_5deg_rel", None)
+                    g.pop("halo_10deg_rel", None)
+            out[f"{name}_{tag}"] = (base + ["--fov=" + fov], measure if name == "sun_in_view" else
+                                    with_halo(measure, float(fov), ANGULAR_RADIUS_DEG[aim]), g)
     return out
 
 
@@ -374,7 +447,11 @@ def main():
     ap.add_argument("--extra", default="")
     ap.add_argument("--measure_only", action="store_true")
     ap.add_argument("--compare", default="")
+    ap.add_argument("--out", default="", help="output folder (default screenshots/look_fixes/t13/suite)")
     o = ap.parse_args()
+    global OUT
+    if o.out:
+        OUT = os.path.abspath(o.out)
     os.makedirs(OUT, exist_ok=True)
     names = [n for n in SCENES if not o.only or n in o.only.split(",")]
     results, failed = {}, []

@@ -569,7 +569,7 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 		effect.set_frame(scene_per_cd_m2 > 0.0, Frames.to_render(sun_from_earth.normalized()),
 				last_sun_normal_lux * last_veil_visibility * scene_per_cd_m2 if glare_enabled else 0.0, _sun_light_unit_rgb,
 				cos(AdaptationMeter.SUN_MASK_RADIUS_FACTOR * asin(minf(SUN_RADIUS_M / (ASTRONOMICAL_UNIT_M * d_au), 1.0))),
-				eye_adaptation_enabled)
+				eye_adaptation_enabled, display_gain)
 	eclipse_segments = 0
 	if moon_apparent_gcrf_m != Vector3.ZERO:
 		var moon_from_earth := moon_apparent_gcrf_m - earth_center_gcrf_m

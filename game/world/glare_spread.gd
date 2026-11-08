@@ -13,6 +13,7 @@ extends RefCounted
 ##   max(0, Y - SOURCE_WHITE) of the pixel's colour, in scene units at the frame's global gain (SOURCE_WHITE =
 ##   Atmosphere.DAY_EXPOSURE, the white plate). The Sun's disc (clamped in fp16) is masked out and gets its ANALYTIC veil
 ##   instead (sun_veil_cd_m2: the form of Atmosphere.glare_veil per pixel, in and out of frame).
+## - Shown: each source's veil at its source's local adaptation factor (source_factor; T13 fix 1).
 ## - Spread: f is a sum of Gaussians (GlareSpreadKernel.WEIGHTS, sigma_k = 0.1 deg x 2^k, non-negative weights fitted offline,
 ##   max error 46 % at 0.1 deg, <= 3 % over 0.5 .. 30 deg) evaluated on a pyramid: level k has a texel of sigma_k /
 ##   TEXELS_PER_SIGMA (every level blurs with the same sigma in texels), the levels are built with a linear-tent filter
@@ -347,27 +348,22 @@ static func veil_at(result: Dictionary, x: int, y: int) -> float:
 	return bilinear(result["a0"], result["size"], (x + 0.5) / factor - 0.5, (y + 0.5) / factor - 0.5)
 
 
-## The factor the local adaptation (LocalAdaptation) puts on a pixel that is itself a source of mean excess `excess` (scene
-## units, the glare source image's texel): the region's mean is shown at PLATEAU_SCENE, so the veil lying on the source goes
-## with it (the Earth's disc keeps its detail); pixels outside every source keep the full veil (the dark surround is not
-## compressed). 1 without a source.
-static func self_compression(excess: float) -> float:
-	return minf(1.0, PLATEAU_SCENE / (SOURCE_WHITE + excess)) if excess > 0.0 else 1.0
-
-
-## The veil factor of a pixel near a source (T13 lead, VR-scale review: the low-res texel's compression on every pixel
-## of it drew a dark ring of up to a texel at the limb, the antialiased edge pixels and the first sky pixels compressed
-## like the disc while the halo beyond kept its veil): the texel's compression weighted by how much of the pixel is the
-## source, estimated from its displayed (locally adapted) luminance against the plateau the disc is shown at:
-## mix(1, self_compression(excess), clamp(y_shown / (COVERAGE_SHARE x PLATEAU))). [call] The sky beside the disc keeps
-## its veil, the disc (also its darker parts: the ocean at ~0.3-0.5 of the plateau) its compressed veil, the limb
-## between - the radial profile has no dip and the disc's contrast is kept.
-static func veil_factor(excess: float, y_shown: float) -> float:
-	return lerpf(1.0, self_compression(excess), clampf(y_shown / (COVERAGE_SHARE * PLATEAU_SCENE), 0.0, 1.0))
-
-
-## [call] The share of the plateau from which a pixel counts as wholly the source (veil_factor).
-const COVERAGE_SHARE := 0.25
+## The local adaptation factor a source pixel of scene luminance y_scene (at the global gain) is shown at, and with it
+## its veil (look fixes T13 fix 1, user / orchestrator 2026-11-08). The veil is light on the retina, tied to its source:
+## the eye adapted to the full Moon / the Earth / a lamp sees the scatter around it relative to that source - the source
+## and its halo are one framework [E: Gilchrist et al. 1999 anchoring, the local adaptation's own basis
+## (LocalAdaptation.PLATEAU_SCENE)], so the halo is compressed with the disc and keeps its physical ratio to it (CIE 146:
+## 1e-3 of the full Moon's disc at 1 deg, 1.6e-4 at 2 deg). [call] The factor is the local adaptation's Weber-range form
+## c = PLATEAU / y (a region adapted to y shows its mean at the plateau; LocalAdaptation), floored at 1 / g (the cone gain's
+## floor 1: the Sun's disc, a lamp filament stay display white) and at most 1 (the step only lowers the gain). Measured
+## alternatives (`.superpowers/sdd/2026-11-07-look-fixes/t13-fix1-report.md`): the veil added at the global gain (T13)
+## showed the halo at 0.1-0.5 of the disc at 1 deg (a glowing ball); the veil fed into the local adaptation's pooling
+## flattened the smooth halo to the plateau (a dark ring at the limb, a bright ring at 1-2 deg). The field meter still
+## takes the full veil (the disability glare raises the adaptation). inverse_gain: 1 / g; 1 without the local adaptation.
+static func source_factor(y_scene: float, inverse_gain: float) -> float:
+	if y_scene <= 0.0:
+		return 1.0
+	return clampf(PLATEAU_SCENE / y_scene, minf(inverse_gain, 1.0), 1.0)
 
 
 ## The source term of a pixel of scene luminance y_scene (colour kept: the caller scales rgb by this over y_scene).

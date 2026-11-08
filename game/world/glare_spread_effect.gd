@@ -5,16 +5,19 @@ extends CompositorEffect
 ## before VisionEffect, reads the HDR frame as the shaders drew it (the composited clouds, lamp lenses, the plume; before the
 ## rods and before the local adaptation's compression: the sources' true scene values) and builds the veil pyramid; the ADD
 ## stage after the local adaptation's APPLY (before the display tone step) adds the veil through the rods' and cones' step of
-## VisionEffect (the veil lies over dark-adapted retina: the local adaptation, which compresses what is bright in the image,
-## must not dim it - added before it, the veil next to the Earth's disc was dimmed to a dark ring). Per view (both VR eyes):
+## VisionEffect, each source's veil at its source's local adaptation factor (GlareSpread.source_factor, T13 fix 1: the
+## halo is compressed with its disc and keeps its physical ratio to it; fed into the local adaptation's pooling instead, the
+## smooth halo was flattened to the plateau - a dark ring at the limb, a bright ring at 1-2 deg). Per view (both VR eyes):
 ##   SOURCE  the full-resolution frame -> level 0: per pixel the excess max(0, Y - SOURCE_WHITE) with the colour kept,
-##           the Sun's disc masked out, x dOmega_px / dOmega_axis, tent-filtered into texels of f0 pixels;
+##           the Sun's disc masked out, x dOmega_px / dOmega_axis, tent-filtered into texels of f0 pixels; alpha: the
+##           excess luminance x the pixel's local factor (the pyramid carries it like the colour);
 ##   DOWN    level k -> k + 1 with the tent [1, 3, 3, 1] / 8 (energy and centroid kept);
 ##   BLUR    every level, separable Gaussian of the same sigma in texels (a horizontal pass into a shared scratch image,
 ##           a vertical pass that also adds the weight w_k and the up-sampled coarser result: A_k = w_k blur(M_k) + up(A_k+1),
 ##           in place of M_k);
-##   ADD     colour += M (bilinear(A_0) + the Sun's analytic veil of the pixel (GlareSpread.sun_veil_cd_m2 in scene units)),
-##           M = VisionEffect's per-pixel map (cone map + rod_scale x tint x scotopic weights).
+##   ADD     colour += M (bilinear(A_0).rgb x A_0.a / Y(A_0) (the veil-weighted local factor of its sources) + the Sun's
+##           analytic veil of the pixel x 1 / g (GlareSpread.sun_veil_cd_m2 in scene units)), M = VisionEffect's per-pixel map
+##           (cone map + rod_scale x tint x scotopic weights). The meter reads the uncompressed A_0.rgb (the full veil).
 ## The A_0 image stays until the next frame's SOURCE pass: the field meter (before the transparent pass) reads it one frame
 ## late (AdaptationMeter.glare_effect) so the Earth's / Moon's veil raises the adaptation. The Sun's part is not in it (the
 ## meter adds the scalar Sun veil itself). Without a RenderingDevice (headless, Compatibility), with GlareSpread.enabled
@@ -27,7 +30,7 @@ layout(rgba16f, set = 0, binding = 0) uniform restrict readonly image2D color_im
 layout(rgba16f, set = 0, binding = 1) uniform restrict writeonly image2D level_image;
 layout(push_constant, std430) uniform Params {
 	vec4 size;  // width, height, f0, white (scene units)
-	vec4 low;   // level-0 columns, rows, -, -
+	vec4 low;   // level-0 columns, rows, plateau (scene units; 0: no local factor), 1 / the global gain
 	vec4 ray;   // view ray of NDC (x, y): (x a + b, y c + d, -1) - a, b, c, d
 	vec4 sun;   // the Sun's direction in the eye's view axes, cos of the mask radius (> 1: no mask)
 } params;
@@ -40,7 +43,7 @@ void main() {
 	}
 	float f = params.size.z;
 	vec2 centre = (vec2(t) + 0.5) * f;
-	vec3 sum = vec3(0.0);
+	vec4 sum = vec4(0.0);
 	for (int y = int(ceil(centre.y - f - 0.5)); y <= int(floor(centre.y + f - 0.5)); y++) {
 		float wy = 1.0 - abs(float(y) + 0.5 - centre.y) / f;
 		if (y < 0 || y >= int(params.size.y) || wy <= 0.0) {
@@ -66,10 +69,14 @@ void main() {
 			if (dot(ray, params.sun.xyz) > params.sun.w * sqrt(r2)) {
 				continue;  // the Sun's disc (clamped in fp16): its veil is analytic
 			}
-			sum += wx * wy * c * ((luminance - params.size.w) / luminance) * pow(r2, -1.5);
+			float w = wx * wy * ((luminance - params.size.w) / luminance) * pow(r2, -1.5);
+			// GlareSpread.source_factor: the local adaptation's factor of the source pixel (its framework's), carried in
+			// alpha as excess luminance x factor; low.z = plateau (0: no local adaptation), low.w = 1 / global gain
+			float factor = params.low.z > 0.0 ? clamp(params.low.z / luminance, params.low.w, 1.0) : 1.0;
+			sum += w * vec4(c, luminance * factor);
 		}
 	}
-	imageStore(level_image, t, vec4(sum / (f * f), 0.0));
+	imageStore(level_image, t, sum / (f * f));
 }
 """
 
@@ -105,14 +112,14 @@ void main() {
 	if (t.x >= out_count.x || t.y >= out_count.y) {
 		return;
 	}
-	vec3 sum = vec3(0.0);
+	vec4 sum = vec4(0.0);
 	for (int y = max(0, 2 * t.y - 1); y < min(in_count.y, 2 * t.y + 3); y++) {
 		float wy = tent(t.y, y, in_count.y, out_count.y);
 		for (int x = max(0, 2 * t.x - 1); x < min(in_count.x, 2 * t.x + 3); x++) {
-			sum += wy * tent(t.x, x, in_count.x, out_count.x) * imageLoad(in_image, ivec2(x, y)).rgb;
+			sum += wy * tent(t.x, x, in_count.x, out_count.x) * imageLoad(in_image, ivec2(x, y));
 		}
 	}
-	imageStore(out_image, t, vec4(sum, 0.0));
+	imageStore(out_image, t, sum);
 }
 """
 
@@ -132,17 +139,17 @@ void main() {
 		return;
 	}
 	int radius = int(params.size.z);
-	vec3 sum = vec3(0.0);
+	vec4 sum = vec4(0.0);
 	float total = 0.0;
 	for (int d = -radius; d <= radius; d++) {
 		float w = exp(-float(d * d) * params.size.w);
 		total += w;
 		int x = t.x + d;
 		if (x >= 0 && x < int(params.size.x)) {
-			sum += w * imageLoad(in_image, ivec2(x, t.y)).rgb;
+			sum += w * imageLoad(in_image, ivec2(x, t.y));
 		}
 	}
-	imageStore(out_image, t, vec4(sum / total, 0.0));
+	imageStore(out_image, t, sum / total);
 }
 """
 
@@ -158,9 +165,9 @@ layout(push_constant, std430) uniform Params {
 	vec4 coarse;  // coarse width, coarse height, weight w_k, coarser level present (1 / 0)
 } params;
 
-vec3 coarse_at(ivec2 p) {
+vec4 coarse_at(ivec2 p) {
 	p = clamp(p, ivec2(0), ivec2(int(params.coarse.x) - 1, int(params.coarse.y) - 1));
-	return imageLoad(coarse_image, p).rgb;
+	return imageLoad(coarse_image, p);
 }
 
 void main() {
@@ -169,17 +176,17 @@ void main() {
 		return;
 	}
 	int radius = int(params.size.z);
-	vec3 sum = vec3(0.0);
+	vec4 sum = vec4(0.0);
 	float total = 0.0;
 	for (int d = -radius; d <= radius; d++) {
 		float w = exp(-float(d * d) * params.size.w);
 		total += w;
 		int y = t.y + d;
 		if (y >= 0 && y < int(params.size.y)) {
-			sum += w * imageLoad(scratch_image, ivec2(t.x, y)).rgb;
+			sum += w * imageLoad(scratch_image, ivec2(t.x, y));
 		}
 	}
-	vec3 result = params.coarse.z * sum / total;
+	vec4 result = params.coarse.z * sum / total;
 	if (params.coarse.w > 0.5) {
 		vec2 u = (vec2(t) - 0.5) * 0.5;  // the coarser level's texel index of this texel's centre
 		ivec2 i0 = ivec2(floor(u));
@@ -187,7 +194,7 @@ void main() {
 		result += (1.0 - f.y) * ((1.0 - f.x) * coarse_at(i0) + f.x * coarse_at(i0 + ivec2(1, 0)))
 				+ f.y * ((1.0 - f.x) * coarse_at(i0 + ivec2(0, 1)) + f.x * coarse_at(i0 + ivec2(1, 1)));
 	}
-	imageStore(level_image, t, vec4(result, 0.0));
+	imageStore(level_image, t, result);
 }
 """
 
@@ -196,10 +203,9 @@ const APPLY_TEMPLATE := """
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(rgba16f, set = 0, binding = 0) uniform image2D color_image;
 layout(rgba16f, set = 0, binding = 1) uniform restrict readonly image2D veil_image;
-layout(rgba16f, set = 0, binding = 2) uniform restrict readonly image2D source_image;
 layout(push_constant, std430) uniform Params {
-	vec4 size;     // width, height, f0, flags (1: the image part, 2: the local adaptation's compression of the veil on a source)
-	vec4 low;      // level-0 columns, rows, plateau (scene units), source white (scene units)
+	vec4 size;     // width, height, f0, flags (1: the image part, 2: each source's veil at its local adaptation factor)
+	vec4 low;      // level-0 columns, rows, -, -
 	vec4 ray;      // a, b, c, d (see SOURCE)
 	vec4 sun;      // the Sun's direction in the eye's view axes, E_gl in scene units (lux x visibility x scene per cd/m^2)
 	vec4 sun_rgb;  // the direct Sun's colour (luminance 1)
@@ -229,24 +235,16 @@ void main() {
 		vec2 u = (vec2(pixel) + 0.5) / params.size.z - 0.5;
 		ivec2 i0 = ivec2(floor(u));
 		vec2 f = u - vec2(i0);
-		veil = (1.0 - f.y) * ((1.0 - f.x) * imageLoad(veil_image, clamp_low(i0)).rgb
-						+ f.x * imageLoad(veil_image, clamp_low(i0 + ivec2(1, 0))).rgb)
-				+ f.y * ((1.0 - f.x) * imageLoad(veil_image, clamp_low(i0 + ivec2(0, 1))).rgb
-						+ f.x * imageLoad(veil_image, clamp_low(i0 + ivec2(1, 1))).rgb);
+		vec4 a = (1.0 - f.y) * ((1.0 - f.x) * imageLoad(veil_image, clamp_low(i0))
+						+ f.x * imageLoad(veil_image, clamp_low(i0 + ivec2(1, 0))))
+				+ f.y * ((1.0 - f.x) * imageLoad(veil_image, clamp_low(i0 + ivec2(0, 1)))
+						+ f.x * imageLoad(veil_image, clamp_low(i0 + ivec2(1, 1))));
+		veil = a.rgb;
 		if ((flags & 2) != 0) {
-			// A pixel that is itself a source the local adaptation compresses (GlareSpread.self_compression): its veil
-			// goes with it; the dark surround keeps the full veil.
-			// the largest of the four texels around
-			float excess = max(max(dot(LUMINANCE, imageLoad(source_image, clamp_low(i0)).rgb),
-							dot(LUMINANCE, imageLoad(source_image, clamp_low(i0 + ivec2(1, 0))).rgb)),
-					max(dot(LUMINANCE, imageLoad(source_image, clamp_low(i0 + ivec2(0, 1))).rgb),
-							dot(LUMINANCE, imageLoad(source_image, clamp_low(i0 + ivec2(1, 1))).rgb)));
-			// GlareSpread.veil_factor: weighted by how much of the pixel is the source (its shown luminance / the plateau)
-			float coverage = clamp(dot(LUMINANCE, imageLoad(color_image, pixel).rgb) / (@COVERAGE@ * params.low.z), 0.0, 1.0);
-			veil *= mix(1.0, excess > 0.0 ? min(1.0, params.low.z / (params.low.w + excess)) : 1.0, coverage);
-			// The halo next to a source lies over a retina adapted to it: the local adaptation shows such a region at
-			// most at its plateau; the veil saturates softly there (monotonic in the veil, no ring at the limb).
-			veil *= params.low.z / (params.low.z + dot(LUMINANCE, veil));
+			// GlareSpread.source_factor: every source's veil is shown at its source's local adaptation factor (alpha: the
+			// spread of excess luminance x factor; over the veil's luminance the veil-weighted mean factor).
+			float y = dot(LUMINANCE, veil);
+			veil *= y > 0.0 ? clamp(a.a / y, 0.0, 1.0) : 1.0;
 		}
 	}
 	if (params.sun.w > 0.0) {
@@ -282,7 +280,7 @@ static func _fill(template: String) -> String:
 		"P_TERM": 0.1 * GlareSpreadKernel.PIGMENTATION,
 		"AGE_FACTOR": GlareSpread.age_factor(),
 		"CONSTANT_TERM": 0.0025 * GlareSpreadKernel.PIGMENTATION,
-		"MIN_ANGLE": Atmosphere.GLARE_MIN_ANGLE_DEG, "COVERAGE": GlareSpread.COVERAGE_SHARE,
+		"MIN_ANGLE": Atmosphere.GLARE_MIN_ANGLE_DEG,
 	}
 	for key: String in values:
 		template = template.replace("@" + key + "@", glsl_float(values[key]))
@@ -329,8 +327,10 @@ var _views := []
 ## SPREAD -> ADD, render thread: per view index of this frame's spread [ray parameters, the Sun's direction in the eye's
 ## axes]; cleared at the start of every SPREAD pass.
 var _spread_sun := {}
-## Whether the local adaptation runs (Atmosphere: eye adaptation on); the veil on a source is compressed with it.
+## Whether the local adaptation runs (Atmosphere: eye adaptation on); each source's veil is shown at its local factor.
 var _local_active := false
+## The global display gain g (the local factor's floor 1 / g; GlareSpread.source_factor).
+var _display_gain := 1.0
 
 
 func _init(attach := true, effect_stage := Stage.SPREAD, spread_source: GlareSpreadEffect = null) -> void:
@@ -345,17 +345,18 @@ func _init(attach := true, effect_stage := Stage.SPREAD, spread_source: GlareSpr
 ## Main thread, every frame: whether the spread runs, the Sun's direction in the render world, its veil's illuminance in
 ## scene units (0: none) and colour, and the Sun mask's cosine (Atmosphere.update).
 func set_frame(active: bool, sun_world: Vector3, sun_scene_lux: float, sun_rgb: Vector3, mask_cos: float,
-		local_adaptation_on := false) -> void:
+		local_adaptation_on := false, display_gain := 1.0) -> void:
 	var on := active and GlareSpread.enabled
 	access_resolved_color = on
 	if source == null:  # the ADD instance reads the SPREAD instance's state
 		RenderingServer.call_on_render_thread(_set_on_render_thread.bind(on, sun_world, sun_scene_lux, sun_rgb, mask_cos,
-				local_adaptation_on))
+				local_adaptation_on, display_gain))
 
 
 func _set_on_render_thread(active: bool, sun_world: Vector3, sun_scene_lux: float, sun_rgb: Vector3, mask_cos: float,
-		local_adaptation_on: bool) -> void:
+		local_adaptation_on: bool, display_gain := 1.0) -> void:
 	_local_active = local_adaptation_on
+	_display_gain = maxf(display_gain, 1.0)
 	_active = active
 	_sun_world = sun_world
 	_sun_scene_lux = sun_scene_lux
@@ -501,7 +502,8 @@ func build_veil(index: int, color: RID, size: Vector2i, ppd: float, ray: PackedF
 	var sizes: Array = view["sizes"]
 	var levels: Array = view["levels"]
 	_dispatch(Kernel.SOURCE, [_image_uniform(0, color), _image_uniform(1, levels[0])],
-			PackedFloat32Array([size.x, size.y, factor, _white, sizes[0].x, sizes[0].y, 0.0, 0.0,
+			PackedFloat32Array([size.x, size.y, factor, _white, sizes[0].x, sizes[0].y,
+			GlareSpread.PLATEAU_SCENE if _local_factor_on() else 0.0, 1.0 / _display_gain,
 			ray[0], ray[1], ray[2], ray[3], sun[0], sun[1], sun[2], sun[3]]), _groups(sizes[0]))
 	for k in range(1, sizes.size()):
 		_dispatch(Kernel.DOWN, [_image_uniform(0, levels[k - 1]), _image_uniform(1, levels[k])],
@@ -522,15 +524,15 @@ func build_veil(index: int, color: RID, size: Vector2i, ppd: float, ray: PackedF
 	return view
 
 
-## colour += M (bilinear(A_0) + the Sun's veil), one view. local: the veil on a source is compressed as the local
-## adaptation compresses it (GlareSpread.self_compression).
+## colour += M (bilinear(A_0) + the Sun's veil), one view. local: each source's veil at its source's local adaptation
+## factor (A_0's alpha; GlareSpread.source_factor).
 func apply_veil(view: Dictionary, color: RID, size: Vector2i, ray: PackedFloat32Array, sun_eye: Vector3, sun_scene_lux: float,
 		sun_rgb: Vector3, image_part := true, map := Basis.IDENTITY, local := false) -> void:
 	var sizes: Array = view["sizes"]
 	var flags := (1 if image_part else 0) | (2 if local else 0)
-	_dispatch(Kernel.APPLY, [_image_uniform(0, color), _image_uniform(1, view["a0"]), _image_uniform(2, view["levels"][0])],
-			PackedFloat32Array([size.x, size.y, view["factor"], flags, sizes[0].x, sizes[0].y, GlareSpread.PLATEAU_SCENE,
-			GlareSpread.SOURCE_WHITE, ray[0], ray[1], ray[2], ray[3], sun_eye.x, sun_eye.y, sun_eye.z, sun_scene_lux,
+	_dispatch(Kernel.APPLY, [_image_uniform(0, color), _image_uniform(1, view["a0"])],
+			PackedFloat32Array([size.x, size.y, view["factor"], flags, sizes[0].x, sizes[0].y, 0.0,
+			0.0, ray[0], ray[1], ray[2], ray[3], sun_eye.x, sun_eye.y, sun_eye.z, sun_scene_lux,
 			sun_rgb.x, sun_rgb.y, sun_rgb.z, 0.0, map.x.x, map.x.y, map.x.z, 0.0, map.y.x, map.y.y, map.y.z, 0.0,
 			map.z.x, map.z.y, map.z.z, 0.0]), _groups(size))
 
@@ -606,8 +608,15 @@ func _add(render_data: RenderData) -> void:
 			continue
 		var frame: Array = source._spread_sun[index]
 		var sun_eye: Vector3 = frame[1]
+		# The Sun's own local factor is the floor 1 / g (its disc stays display white: GlareSpread.source_factor).
+		var sun_factor := GlareSpread.source_factor(INF, 1.0 / source._display_gain) if source._local_factor_on() else 1.0
 		source.apply_veil(source._views[index], buffers.get_color_layer(index), size, frame[0], sun_eye,
-				source._sun_scene_lux if source._sun_world != Vector3.ZERO else 0.0, source._sun_rgb, true, map,
-				LocalAdaptation.enabled and source._local_active)
+				sun_factor * source._sun_scene_lux if source._sun_world != Vector3.ZERO else 0.0, source._sun_rgb, true, map,
+				source._local_factor_on())
 	if CloudEffect.capture_timestamps:
 		source._rd.capture_timestamp("after_glare_add")
+
+
+## Whether each source's veil is shown at its local adaptation factor (the local adaptation runs).
+func _local_factor_on() -> bool:
+	return LocalAdaptation.enabled and _local_active

@@ -529,10 +529,19 @@ shaders:
   pixel (CIE f x normal illuminance x cos x visibility, in and out of frame). SPREAD stage post-transparent before
   VisionEffect (tent-filtered pyramid, a Gaussian per level, coarse-to-fine; frames under 15 px/deg merge the sub-texel
   levels into level 0); ADD stage after the local adaptation's APPLY, through VisionEffect's map (rods and cones see the
-  veil): on a source the veil is compressed as the source is - weighted by how much of the pixel is the source, its
-  shown luminance over a quarter of the plateau (`GlareSpread.veil_factor`; the low-res texel's compression on every
-  pixel drew a dark ring at the limb at VR scale) - beside it the image part saturates softly at the plateau
-  (veil x P / (P + veil)) [call], so the radial profile falls monotonically (no ring at the limb). The adaptation meter
+  veil). **Shown at its source's local factor** [T13 fix 1, user / orchestrator 2026-11-08; `GlareSpread.source_factor`]:
+  the veil is light on the retina tied to its source, and the eye adapted to the full Moon / the Earth / a lamp sees the
+  halo relative to that source - source and halo are one framework [E: Gilchrist et al. 1999 anchoring, the local
+  adaptation's basis]. So every source pixel's veil is shown at that pixel's local factor c = clamp(PLATEAU / Y, 1 / g,
+  1) [call: the local adaptation's Weber-range form, floored at the cone gain's floor 1 / g; the Sun's analytic veil
+  takes 1 / g] - the SOURCE stage spreads excess x c in the pyramid's alpha, the ADD stage scales the veil by alpha /
+  Y(veil). The halo thus keeps its physical ratio to its disc (CIE 146 x Omega: full Moon 9.7e-4 / 1.6e-4 / 1.9e-5 at
+  1 / 2 / 5 deg, full Earth from the Moon 2.2e-3 / 2.6e-4 at 2 / 5 deg), monotonic, no limb logic. The meter still
+  takes the full veil (disability glare raises the adaptation). Measured alternatives (`screenshots/look_fixes/t13_fix1/`):
+  T13's veil at the global gain showed the full Moon's halo at 0.10-0.47 of the disc at 1 deg (a glowing ball; dark
+  limb dots and axis-aligned steps from the per-texel limb compression); the veil added before the local adaptation's
+  MAP (pooled with the image) was flattened to the plateau - a dark ring at the limb, a bright ring at 1-2 deg (halo_rise
+  19-76 luma). The adaptation meter
   adds the last frame's mean image veil to the field and the anchor like the Sun's scalar veil (per sample it lowered
   the log average under a black sky). Measured (`screenshots/look_fixes/t13/glare/`): the lunar-night Earth's pyramid
   veil against the direct CIE sum -25 % at 1.5 deg, -6 .. 0 % at 2 .. 10 deg, radial profile strictly falling; a moving
@@ -548,8 +557,12 @@ shaders:
   orbit), the cabin (pilot_eye, day); the small bright objects also at 22.2 deg (40 px/deg, the headset's scale), 60 and
   10 deg (central vision) with crops; the terminator (half Earth 10 deg, 400 km) measured only until T9b. Every scene
   with the Earth or its sky in view runs with `--weather=analog` (the game's weather). Gates and sources in the script;
-  results `screenshots/look_fixes/t13/suite/<label>_results.json`. Gap: no night cabin with lamps (cockpit_shots has no
-  night case).
+  results `screenshots/look_fixes/t13/suite/<label>_results.json` (`--out` for another folder). Halo profile (T13 fix 1,
+  full Moon from the Earth and full Earth from the lunar night, every fov): linear display luminance of rings at 1 / 2 /
+  5 / 10 deg over the disc's (`halo_<d>deg_rel`) against CIE 146 x the disc's solid angle (Earth 2 deg 0.001-0.006, 5
+  deg <= 1e-3, 10 deg <= 3e-4; Moon 1 and 2 deg <= 0.03 incl. the sky / aureole floor) and `halo_rise` (8-bit radial
+  profile from 1.15 radii falls within 3 luma: no limb / plateau rings). Gap: no night cabin with lamps (cockpit_shots
+  has no night case).
 - **Display tone step: chroma-preserving tone curve** [look fixes T5, 2026-11-07; `display_tone.gd` `DisplayTone` (model
   and CPU mirror), `display_tone_effect.gd` `DisplayToneEffect` (compute step); fidelity flag `DisplayTone.enabled`,
   render_check / cockpit_shots `--tone=agx`]. Godot's AgX (inset matrix, the allenwp curve per channel, outset) took
@@ -722,11 +735,12 @@ shaders:
 - Local adaptation (T10): a small bright object stays inside the field rule's 2 % highlight cut (the global gain is
   unchanged) and is brought into range by the local step instead. Its limits: (1) a structure narrower than ~2 blocks
   (a thin Earth crescent at desktop resolution, 1-2 px; a 3-4 px full Moon at fov 100) finds no like block and keeps c
-  = 1 or pops with the grid phase (the desktop and the headset therefore look different for the same object by design) (stays white; the headset has ~4.8x the desktop's pixels per degree); (2) no disability glare of the Earth or the
-  Moon is drawn: Godot's glow no longer fires on a locally adapted disc, while CIE 146 predicts for the full Earth from
-  the lunar night (6.9 lux at the eye, L_a 0.49 cd/m^2) a veil of 18 / 6.4 / 1.3 / 0.46 cd/m^2 at 2 / 3 / 6 / 10 deg (13x
-  L_a at 3 deg; for the full Moon from the Earth, 0.25 lux, ~40x less) - a physical glare spread function on the image
-  (Sun, Earth, Moon; replacing Godot's luminance-capped glow) is the follow-up (user decision); (3) display-referred
+  = 1 or pops with the grid phase (the desktop and the headset therefore look different for the same object by design) (stays white; the headset has ~4.8x the desktop's pixels per degree); (2) the Earth's / Moon's disability
+  glare (CIE 146: full Earth from the lunar night 6.9 lux at the eye, 18 / 6.4 / 1.3 / 0.46 cd/m^2 at 2 / 3 / 6 / 10 deg;
+  full Moon 0.25 lux, ~0.64 / 0.074 / 0.017 cd/m^2 at 2 / 5 / 10 deg against a moonlit sky of ~0.02 cd/m^2, Krisciunas &
+  Schaefer 1991) raises the adaptation at full strength but is shown at its source's local factor ("Glare spread"); the
+  eye's far veil (where it is below the field, > ~10 deg) is therefore not visible - whether it should blend to the
+  global gain there is open; (3) display-referred
   emitters over a locally adapted region take its factor; (4) Godot's glow on other sources (Sun disc, plume, lamp
   lenses) is unchanged and still not tied to CIE 146; (5) the Earth's locally adapted disc is light blue with the
   ocean at the gamut edge (blue channel 254 in ~55 % of its pixels at fov 100), as when the Earth fills the view.

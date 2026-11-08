@@ -557,3 +557,8 @@ mostly black field (lunar day looking up 60 deg: 2.4 %, fragile) was removed who
   16.29: field 0.27 -> display 0.26, white plate 1.5 -> 0.69, compressing the ~10:1 cloud / sea contrast (Earth from
   space white share 0.44 against DSCOVR EPIC's 0.13, T7 step 2).
 - Godot's glow (threshold 4, intensity 0.6; capped input, not tied to the source; T10 diagnosis), now `--glow=on`.
+- Glare veil shown at the global gain beside a source (T13, 2026-11-08 .. T13 fix 1): on a source the veil was compressed
+  per low-res texel and weighted by the pixel's shown luminance (`veil_factor`, coverage 0.25 of the plateau), beside it
+  saturated softly at the plateau (veil x P / (P + veil)). The full Moon's halo was 0.10-0.47 of the disc at 1 deg and
+  0.02-0.11 at 2 deg (physical 1e-3 / 1.6e-4) - a glowing ball, dark limb dots, axis-aligned steps. Replaced by each
+  source's veil at its source's local factor (`GlareSpread.source_factor`).

@@ -6,7 +6,7 @@
 #   (the 10 deg point of this 16 deg wide test frame lies 6 deg from its edge);
 # - shift invariance: a 0.5 deg disc moved in sub-pixel steps: the pyramid/direct ratio at 2 and 5 deg varies < 3 %;
 # - energy: a point source's level-0 energy is the source's;
-# - the shaders' placeholders; the veil on a source goes with the local adaptation's compression (self_compression);
+# - the shaders' placeholders; each source's veil at its local adaptation factor (source_factor);
 # - the Sun's analytic veil: the form of Atmosphere.glare_veil (Stiles-Holladay) at the view axis equals the scalar; the
 #   CIE 146 form's ratio to it is reported; behind the eye nothing; held below the Sun's own radius.
 # godot --headless --path game --script res://tests/glare_spread_test.gd
@@ -159,20 +159,27 @@ func _shaders() -> void:
 	for source: String in GlareSpreadEffect.shader_sources():
 		left += source.count("@")
 	_check("no placeholder left in the shaders", left == 0, "%d" % left)
-	_check("self compression: no source = 1", GlareSpread.self_compression(0.0) == 1.0, "")
-	# T13: the veil factor across a limb - sky (shown 0) keeps the veil, the disc (shown at the plateau) is compressed,
-	# a half-covered limb pixel lies between (no dip below either side)
-	var sky_f := GlareSpread.veil_factor(1000.0, 0.0)
-	var limb_f := GlareSpread.veil_factor(1000.0, 0.5 * GlareSpread.COVERAGE_SHARE * GlareSpread.PLATEAU_SCENE)
-	var disc_f := GlareSpread.veil_factor(1000.0, GlareSpread.PLATEAU_SCENE)
-	_check("veil factor: sky 1, disc compressed, limb between", sky_f == 1.0 and absf(disc_f
-			- GlareSpread.self_compression(1000.0)) < 1e-12 and limb_f < sky_f and limb_f > disc_f,
-			"%.4f / %.4f / %.4f" % [sky_f, limb_f, disc_f])
-	_check("self compression: a source of 1000 goes to the plateau",
-			absf(GlareSpread.self_compression(1000.0) * (GlareSpread.SOURCE_WHITE + 1000.0) - GlareSpread.PLATEAU_SCENE) < 1.0e-9,
-			"%.5f" % GlareSpread.self_compression(1000.0))
-	_check("self compression: a weak source (excess 0.01) is not compressed above 1",
-			GlareSpread.self_compression(0.01) <= 1.0, "%.4f" % GlareSpread.self_compression(0.01))
+	# T13 fix 1: each source's veil is shown at its source's local factor (GlareSpread.source_factor)
+	var plateau := GlareSpread.PLATEAU_SCENE
+	_check("source factor: a source of 1000 goes to the plateau",
+			absf(GlareSpread.source_factor(1000.0, 1.0e-6) * 1000.0 - plateau) < 1.0e-9,
+			"%.6f" % GlareSpread.source_factor(1000.0, 1.0e-6))
+	_check("source factor: floored at 1 / g (the Sun stays display white)",
+			GlareSpread.source_factor(1.0e9, 0.01) == 0.01, "%.4f" % GlareSpread.source_factor(1.0e9, 0.01))
+	_check("source factor: never above 1 (a source below the plateau, no source)",
+			GlareSpread.source_factor(0.5 * plateau, 1.0e-3) == 1.0 and GlareSpread.source_factor(0.0, 1.0e-3) == 1.0, "")
+	_check("source factor: 1 without the local adaptation (inverse gain 1)",
+			GlareSpread.source_factor(1.0e4, 1.0) == 1.0, "")
+	# The full Moon (0.259 deg radius): its halo keeps the physical ratio to its disc, veil / disc = f(theta) x Omega
+	# (CIE 146, young eye): ~1e-3 at 1 deg, ~1.6e-4 at 2 deg, ~2e-5 at 5 deg - a slight glow, no ball.
+	var omega := PI * pow(deg_to_rad(0.259), 2.0)
+	var ratios := []
+	for theta: float in [1.0, 2.0, 5.0]:
+		ratios.append(GlareSpread.cie146(theta) * omega)
+	_check("full Moon: shown halo / disc at 1 / 2 / 5 deg",
+			absf(ratios[0] / 9.7e-4 - 1.0) < 0.05 and absf(ratios[1] / 1.65e-4 - 1.0) < 0.05
+			and absf(ratios[2] / 1.9e-5 - 1.0) < 0.05 and ratios[0] > ratios[1] and ratios[1] > ratios[2],
+			"%.7f / %.7f / %.7f" % ratios)
 
 
 func _sun() -> void:
