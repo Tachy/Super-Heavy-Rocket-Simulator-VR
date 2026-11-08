@@ -83,11 +83,11 @@ func _view(theta_deg: float, fov_deg: float) -> Dictionary:
 	return {"head": Basis.IDENTITY, "eyes": [[Basis.IDENTITY, projection]], "sun": Vector3(sin(t), 0.0, -cos(t))}
 
 
-## The game's rule (PROTECT, key 0.18) on the field with the veil.
+## The game's rule (MEAN_GREY, Y_b 0.2 since look fixes T13) on the field with the veil.
 func _adaptation(counts: PackedInt32Array, veil: Vector2) -> float:
 	var field := maxf(AdaptationMeter.field_log_average(counts, 0), 0.0) + veil.x  # as Atmosphere._take_field_measurement
 	var anchor := maxf(AdaptationMeter.field_anchor(counts, 0), 0.0) + veil.x
-	return Atmosphere.field_adaptation_luminance(Atmosphere.FieldRule.PROTECT, maxf(field, 0.0), maxf(anchor, 0.0),
+	return Atmosphere.field_adaptation_luminance(Atmosphere.FieldRule.MEAN_GREY, maxf(field, 0.0), maxf(anchor, 0.0),
 			EyeAdaptation.FIELD_MID_GREY)
 
 

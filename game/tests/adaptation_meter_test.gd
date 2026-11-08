@@ -14,6 +14,12 @@ func _near(name_: String, actual: float, expected: float, relative: float) -> vo
 		_failures += 1
 
 
+func _check_rule(name_: String, ok: bool) -> void:
+	if not ok:
+		print("adaptation_meter_test: FAIL %s" % name_)
+		_failures += 1
+
+
 func _histogram(entries: Dictionary) -> PackedInt32Array:  # bin -> weight
 	var counts := PackedInt32Array()
 	counts.resize(BINS * 2)
@@ -113,16 +119,16 @@ func _initialize() -> void:
 	_near("anchor above the average", float(AdaptationMeter.field_anchor(spread) >= AdaptationMeter.field_log_average(spread)),
 			1.0, 0.0)
 
-	# The field rule's adaptation luminance L_f / FIELD_MID_GREY (Atmosphere.update): a grey-world field (18 % of the
+	# The field rule's adaptation luminance L_f / FIELD_MID_GREY (Atmosphere.update): a grey-world field (Y_b 20 % of the
 	# white plate) gives the plate's gain; the Apollo 11 field measured in Task 14 (660 cd/m^2 under a 41 064 cd/m^2
-	# plate) 11.2 in place of the plate rule's 1 (Weber range: L_ref x 0.18 / L_f).
+	# plate) 12.4 in place of the plate rule's 1 (Weber range: L_ref x 0.2 / L_f).
 	var reference := 41064.0
 	var grey := EyeAdaptation.FIELD_MID_GREY
 	_near("grey world", EyeAdaptation.cone_gain(grey * 20000.0 / grey, reference), EyeAdaptation.cone_gain(20000.0, reference),
 			1e-12)
 	_near("Apollo 11 field", EyeAdaptation.cone_gain(660.0 / grey, reference), reference * grey / 660.0, 1e-9)
 
-	# Highlight protection (Atmosphere.FieldRule.PROTECT, the game default): the larger (darker exposure) of the mean-grey
+	# Highlight protection (Atmosphere.FieldRule.PROTECT, rule D before T13, --protect_adaptation): the larger (darker exposure) of the mean-grey
 	# and the anchor adaptation luminances, photopic or scotopic alike.
 	var key := EyeAdaptation.FIELD_MID_GREY
 	var white := EyeAdaptation.ANCHOR_WHITE
@@ -136,12 +142,22 @@ func _initialize() -> void:
 			100.0 / key, 1e-9)
 	_near("rule protect, scotopic pair", Atmosphere.field_adaptation_luminance(Atmosphere.FieldRule.PROTECT, 0.01, 0.2, key),
 			0.2 / white, 1e-9)
-	# Look fixes T6: DAY_EXPOSURE out of the field rule - the field renders at the key (scene value = L x DAY_EXPOSURE x gain,
-	# gain = L_ref / L_a), --day_exposure=1.5 restores the earlier rendering at key x 1.5.
-	var atmosphere := Atmosphere.new()
-	_near("T6 rule key default", atmosphere.rule_key(), key / Atmosphere.DAY_EXPOSURE, 1e-12)
-	atmosphere.field_day_exposure = Atmosphere.DAY_EXPOSURE
-	_near("T6 rule key old", atmosphere.rule_key(), key, 1e-12)
+	# Unified appearance model (look fixes T13): the game's rule is the mean grey with Y_b = 0.2 (CIE 159), no anchor term;
+	# the field then renders at Y_b x DAY_EXPOSURE (gain L_ref / L_a, scene value L x DAY_EXPOSURE x gain / L_ref), which the
+	# fixed display curve shows at Y_b of display white. The old rules stay selectable.
+	_near("T13 Y_b", key, 0.2, 1e-12)
+	_check_rule("T13 default rule", Atmosphere._field_rule_from_arguments(PackedStringArray()) == Atmosphere.FieldRule.MEAN_GREY)
+	_check_rule("T13 --protect_adaptation", Atmosphere._field_rule_from_arguments(
+			PackedStringArray(["--protect_adaptation"])) == Atmosphere.FieldRule.PROTECT)
+	_check_rule("T13 --anchored_adaptation", Atmosphere._field_rule_from_arguments(
+			PackedStringArray(["--anchored_adaptation"])) == Atmosphere.FieldRule.ANCHOR)
+	var field_scene := 660.0 * Atmosphere.DAY_EXPOSURE * EyeAdaptation.cone_gain(660.0 / key, reference) / reference
+	_near("T13 field renders at Y_b x DAY_EXPOSURE", field_scene, key * Atmosphere.DAY_EXPOSURE, 1e-9)
+	_near("T13 field at Y_b of display white", DisplayTone.display_curve(field_scene, PackedFloat64Array()), key, 1e-9)
+	# The white cap (the former gain floor 1): a field brighter than Y_b of the TOA white plate is a white world.
+	var capped := EyeAdaptation.new()
+	capped.advance(0.5 * reference / key, 0.0, reference, 0.0)
+	_near("T13 white cap", capped.gain, 1.0, 1e-12)
 	_near("rule protect, dark field", Atmosphere.field_adaptation_luminance(Atmosphere.FieldRule.PROTECT, 0.0, 0.0, key), 0.0, 0.0)
 
 	# The start view (World.start_view_angles): the camera sits 60 deg from the Sun as seen from the Earth's centre

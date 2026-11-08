@@ -71,6 +71,45 @@ const CHROMA_MIN := 1e-7
 ## Fidelity flag: the chroma-preserving step (true) or Godot's AgX alone (false; render_check --tone=agx).
 static var enabled := true
 
+## The fixed display mapping of step 1 (look fixes T13, unified appearance model): the grey curve g(Y) the step shows a
+## scene luminance at. Colourimetric (relative) reproduction [S: R. W. G. Hunt, "The Reproduction of Colour", 6th ed.
+## 2004, ch. 11.7: equal relative luminances for an observer adapted to the display's white as to the scene's]: the eye's
+## adopted white renders at the scene units' white plate Atmosphere.DAY_EXPOSURE (EyeAdaptation, field rule), so
+## g = Y / DAY_EXPOSURE - the adopted white at display white, the field (Y_b = 20 % of it) at 0.2 - up to the knee;
+## above it an exponential shoulder, C1 at the knee, toward display white (highlights the display cannot show: glints,
+## the Sun's disc, clouds in backscatter, locally adapted regions' brightest parts). It replaces AgX's own grey curve
+## (allenwp: +1.0 EV on the field, the white plate at 0.69 and a ~10:1 cloud / sea contrast compressed to ~4:1, the
+## Earth from space too white against DSCOVR EPIC; look fixes T7 step 2). AgX stays the engine's encoder (step 6).
+## [S: ITU-R BT.2035 (2013): the reference display white 100 cd/m^2 is the display's white; DISPLAY_WHITE_CD_M2]
+## The slope: display per scene luminance below the knee (1 / DAY_EXPOSURE: the white plate at display white).
+const DISPLAY_SLOPE := 1.0 / Atmosphere.DAY_EXPOSURE
+## [call: SDR camera practice puts the knee point at ~80-90 % of the signal; here in display-linear luminance] The
+## display value where the shoulder starts.
+const DISPLAY_KNEE := 0.8
+## Fidelity flag: the fixed display curve (true) or AgX's grey curve as before T13 (false; --display_curve=agx).
+static var display_linear := not OS.get_cmdline_user_args().has("--display_curve=agx")
+
+
+## Step 1's grey curve: the fixed display mapping (linear to the knee, exponential shoulder) or AgX's (display_linear off).
+static func display_curve(y: float, p: PackedFloat64Array) -> float:
+	if not display_linear:
+		return curve(y, p)
+	y = maxf(y, 0.0)
+	var linear := DISPLAY_SLOPE * y
+	if linear <= DISPLAY_KNEE:
+		return linear
+	return 1.0 - (1.0 - DISPLAY_KNEE) * exp(-(linear - DISPLAY_KNEE) / (1.0 - DISPLAY_KNEE))
+
+
+## The display curve's inverse on [0, 1).
+static func display_curve_inverse(d: float, p: PackedFloat64Array) -> float:
+	if not display_linear:
+		return curve_inverse(d, p)
+	d = clampf(d, 0.0, CURVE_INVERSE_MAX)
+	if d <= DISPLAY_KNEE:
+		return d / DISPLAY_SLOPE
+	return (DISPLAY_KNEE - (1.0 - DISPLAY_KNEE) * log((1.0 - d) / (1.0 - DISPLAY_KNEE))) / DISPLAY_SLOPE
+
 
 ## The allenwp curve's parameters for an AgX contrast and white (Godot's environment_storage.cpp, SDR output max 1):
 ## [contrast, toe_a, slope, w, white].
@@ -187,7 +226,7 @@ static func target(x: Vector3, hunt: float, p: PackedFloat64Array, glow := INF) 
 	var white := p[4]
 	if y >= white:
 		return Vector3.ONE
-	var g := curve(y, p)
+	var g := display_curve(y, p)
 	var lab := to_oklab(x * (g / y))
 	var lightness := minf(lab.x, 1.0)
 	var c := Vector2(lab.y, lab.z).length()
@@ -245,7 +284,7 @@ static func tone_inverse(c: Vector3, p: PackedFloat64Array) -> Vector3:
 	var y_d := LUMINANCE_WEIGHTS.dot(d)
 	if y_d <= 0.0:
 		return Vector3.ZERO
-	return d * (curve_inverse(y_d, p) / y_d)
+	return d * (display_curve_inverse(y_d, p) / y_d)
 
 
 ## OkLab hue angle (rad) of a colour.

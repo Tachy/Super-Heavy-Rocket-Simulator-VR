@@ -290,6 +290,10 @@ vision_tone_white={
 "type": "float",
 "value": 0.0
 }
+vision_display_curve={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
 atmosphere_eclipse_segments={
 "type": "int",
 "value": 0

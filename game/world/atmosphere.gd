@@ -158,10 +158,22 @@ var sun_direction_local := Vector3.ZERO
 var camera_local_m := Vector3.ZERO
 ## Fidelity flag: eye adaptation (EyeAdaptation) - on in the game; off: the fixed day exposure (atmosphere_check.gd).
 var eye_adaptation_enabled := true
-## The grey the measured field is taken as (EyeAdaptation.FIELD_MID_GREY by default). A high-key scene - the white Crew Dragon
-## cabin seen from inside - sets a higher key [E: Reinhard et al. 2002 raise the key for high-key scenes] so its white walls
-## are not metered down to 18 % grey; whoever puts the camera in the cabin sets it (cockpit_shots.gd --field_key).
-var field_key := EyeAdaptation.FIELD_MID_GREY
+## The background share the measured field is taken as (EyeAdaptation.FIELD_MID_GREY, Y_b 0.2, by default; one value for
+## every scene since T13 - the white cabin's walls are held by the local adaptation; cockpit_shots.gd --field_key and
+## --cabin_keys set it for comparisons).
+var field_key := _field_key_from_arguments(OS.get_cmdline_user_args())
+
+
+## User argument --field_key=<v> (comparisons; T13: --protect_adaptation --field_key=0.12 --display_curve=agx is the
+## rule before T13), else Y_b.
+static func _field_key_from_arguments(arguments: PackedStringArray) -> float:
+	for argument in arguments:
+		if argument.begins_with("--field_key="):
+			var value := float(argument.get_slice("=", 1))
+			if value > 0.0:
+				return value
+			push_warning("Atmosphere: ignoring %s (not a positive number)" % argument)
+	return EyeAdaptation.FIELD_MID_GREY
 ## The cone gain of the eye adaptation this frame (1 without it). Times `brightness` it is in luminance_scale and
 ## scene_per_cd_m2, and the shaders read that product as atmosphere_exposure_gain for what is not lit through the tables
 ## (Moon, Sun disc).
@@ -258,43 +270,26 @@ var surround_albedo_profile := PackedVector3Array()
 ## --analytic_adaptation switches it off at start (before / after comparisons).
 var scene_referred_adaptation := not OS.get_cmdline_user_args().has("--analytic_adaptation")
 ## Which statistic of the measured field sets the white (with scene_referred_adaptation; eye-adaptation.md):
-## MEAN_GREY - the centre-weighted log average taken as the scene's grey, L_a = L_f / field_key (the game's rule until
-## 2026-11-07; user argument --mean_grey_adaptation);
+## MEAN_GREY - the game's rule (unified appearance model, look fixes T13): the centre-weighted log average taken as the
+## scene's background, L_a = L_f / field_key (Y_b, EyeAdaptation.FIELD_MID_GREY); bright regions are protected by the
+## local adaptation (LocalAdaptation) and the display curve's shoulder, not by the global rule;
 ## ANCHOR - the field's AdaptationMeter.ANCHOR_PERCENTILE-th percentile taken as a white, L_a = L_anchor /
 ## EyeAdaptation.ANCHOR_WHITE (field_key not used; user argument --anchored_adaptation);
-## PROTECT - the game's rule (user 2026-11-07): highlight protection, the stricter (darker) of the two exposures,
-## L_a = max(L_f / field_key, L_anchor / EyeAdaptation.ANCHOR_WHITE) (scotopic: the same max on the pair).
+## PROTECT - rule D, the game's rule 2026-11-07 .. T13: the darker of the two, L_a = max(L_f / field_key, L_anchor /
+## EyeAdaptation.ANCHOR_WHITE) (user argument --protect_adaptation).
 ## Everything downstream (gains, pacing, clamps, fallbacks) is the same.
 enum FieldRule { MEAN_GREY, ANCHOR, PROTECT }
 var field_rule := _field_rule_from_arguments(OS.get_cmdline_user_args())
-## The day exposure the field rule's grey is metered with (look fixes T6, 2026-11-08): the scene value of a field at the
-## key is key x DAY_EXPOSURE x gain, so with a key of 0.18 the field rendered at 0.27 (DAY_EXPOSURE 1.5). The rule takes
-## DAY_EXPOSURE out: L_a = L_f x (DAY_EXPOSURE / field_day_exposure) / key, the field lands at the key. Default 1.0;
-## user argument --day_exposure=1.5 restores the earlier rule (the field at key x 1.5).
-var field_day_exposure := _field_day_exposure_from_arguments(OS.get_cmdline_user_args())
 
 
 func field_rule_name() -> String:
 	return ["field", "anchor", "protect"][field_rule]
 
 
-## The key the field rule divides the metered field by: field_key x field_day_exposure / DAY_EXPOSURE (0.18 / 1.5 = 0.12 by
-## default, so the field renders at 0.18; with --day_exposure=1.5 the plain field_key).
-func rule_key() -> float:
-	return field_key * field_day_exposure / DAY_EXPOSURE
-
-
-static func _field_day_exposure_from_arguments(arguments: PackedStringArray) -> float:
-	for argument in arguments:
-		if argument.begins_with("--day_exposure="):
-			return maxf(float(argument.get_slice("=", 1)), 1.0e-3)
-	return 1.0
-
-
 static func _field_rule_from_arguments(arguments: PackedStringArray) -> FieldRule:
-	if arguments.has("--mean_grey_adaptation"):
-		return FieldRule.MEAN_GREY
-	return FieldRule.ANCHOR if arguments.has("--anchored_adaptation") else FieldRule.PROTECT
+	if arguments.has("--protect_adaptation"):
+		return FieldRule.PROTECT
+	return FieldRule.ANCHOR if arguments.has("--anchored_adaptation") else FieldRule.MEAN_GREY
 
 
 ## The adaptation luminance a field rule takes from the measured field (L_f) and anchor (L_anchor), cd/m^2 (photopic or
@@ -516,9 +511,9 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 			if _field_snap:
 				_eye.snap()
 			var rule_cd_m2 := field_adaptation_luminance(field_rule, last_field_cd_m2, last_anchor_cd_m2,
-					rule_key())
+					field_key)
 			var rule_scotopic_cd_m2 := field_adaptation_luminance(field_rule, last_field_scotopic_cd_m2,
-					last_anchor_scotopic_cd_m2, rule_key())
+					last_anchor_scotopic_cd_m2, field_key)
 			_eye.advance(rule_cd_m2, rule_scotopic_cd_m2, reference_luminance(d_au), adaptation_dt_s)
 			# A new view stays snapped while it is still streaming in, and at least FIELD_SNAP_MIN_S after the jump
 			# (the streaming may not have started on its first frames).

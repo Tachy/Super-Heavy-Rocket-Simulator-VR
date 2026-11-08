@@ -39,14 +39,18 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	# The pre-T13 properties on AgX's grey curve (--display_curve=agx), then the fixed display curve (look fixes T13).
+	DisplayTone.display_linear = false
 	_check_grey()
+	_check_glow_bound()
+	DisplayTone.display_linear = true
+	_check_display_curve()
 	_check_round_trip()
 	_check_monotonic()
 	_check_hue()
 	_check_chroma()
 	_check_hunt_factor()
 	_check_emitter_inverse()
-	_check_glow_bound()
 	print("display_tone_test: %s (%d failures)" % ["PASS" if _failures == 0 else "FAIL", _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -55,6 +59,41 @@ func _check(label: String, ok: bool, detail: String) -> void:
 	if not ok:
 		_failures += 1
 	print("display_tone_test: %-46s %s %s" % [label, detail, "ok" if ok else "FAIL"])
+
+
+## The fixed display curve (T13): grey shown on it exactly (AgX o step), linear to the knee (the white plate at display
+## white x knee / ..., the field Y_b DAY_EXPOSURE at Y_b), C1 and monotonic at the knee, the inverse exact, white reached.
+func _check_display_curve() -> void:
+	var worst := 0.0
+	var worst_inverse := 0.0
+	var y := 1.0e-4
+	while y < 16.0:
+		worst = maxf(worst, (DisplayTone.agx(DisplayTone.apply(Vector3.ONE * y, 1.0, _p), _p)
+				- Vector3.ONE * DisplayTone.display_curve(y, _p)).length())
+		var d := DisplayTone.display_curve(y, _p)
+		if d < 0.999:
+			worst_inverse = maxf(worst_inverse, absf(DisplayTone.display_curve_inverse(d, _p) / y - 1.0))
+		y *= 1.25
+	_check("T13 grey shown on the display curve", worst < EXACT, "largest error %s" % worst)
+	_check("T13 display curve inverse", worst_inverse < 1e-6, "largest relative error %s" % worst_inverse)
+	var field := EyeAdaptation.FIELD_MID_GREY * Atmosphere.DAY_EXPOSURE
+	_check("T13 field at Y_b of display white", absf(DisplayTone.display_curve(field, _p) - 0.2) < 1e-9,
+			"%s" % DisplayTone.display_curve(field, _p))
+	var knee := DisplayTone.DISPLAY_KNEE / DisplayTone.DISPLAY_SLOPE
+	var h := 1e-6
+	var left := (DisplayTone.display_curve(knee, _p) - DisplayTone.display_curve(knee - h, _p)) / h
+	var right := (DisplayTone.display_curve(knee + h, _p) - DisplayTone.display_curve(knee, _p)) / h
+	_check("T13 display curve C1 at the knee", absf(left - right) < 1e-4 * left, "slopes %s / %s" % [left, right])
+	var monotonic := true
+	var previous := -1.0
+	y = 1.0e-4
+	while y < 20.0:
+		var d := DisplayTone.display_curve(y, _p)
+		monotonic = monotonic and (d > previous or d >= 1.0)
+		previous = d
+		y *= 1.05
+	_check("T13 display curve monotonic, white at AgX's white", monotonic and DisplayTone.display_curve(_p[4], _p) > 0.9999,
+			"at white %s" % DisplayTone.display_curve(_p[4], _p))
 
 
 func _check_grey() -> void:

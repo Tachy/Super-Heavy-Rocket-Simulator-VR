@@ -21,6 +21,9 @@ global uniform mat3 vision_cone_inverse;
 global uniform float vision_hunt;
 global uniform vec4 vision_tone;
 global uniform float vision_tone_white;
+// The fixed display curve of the tone step's step 1 (DisplayTone.display_curve, look fixes T13): slope, knee, 1 = on
+// (0: AgX's grey curve, vision_curve_inverse).
+global uniform vec3 vision_display_curve;
 
 float vision_curve(float x) {
 	x = max(x, 0.0);
@@ -64,7 +67,13 @@ vec3 vision_tone_inverse(vec3 c) {
 	if (y <= 0.0) {
 		return vec3(0.0);
 	}
-	return d * (vision_curve_inverse(y) / y);
+	float scene_y = vision_curve_inverse(y);
+	if (vision_display_curve.z != 0.0) {
+		float knee = vision_display_curve.y;
+		float yc = min(y, 0.999999);
+		scene_y = (yc <= knee ? yc : knee - (1.0 - knee) * log((1.0 - yc) / (1.0 - knee))) / vision_display_curve.x;
+	}
+	return d * (scene_y / y);
 }
 
 // [S: B. Ottosson 2020, "A perceptual color space for image processing"] linear sRGB <-> OkLab (DisplayTone).

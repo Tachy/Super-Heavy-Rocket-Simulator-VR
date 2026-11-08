@@ -19,6 +19,7 @@ layout(push_constant, std430) uniform Params {
 	vec4 curve;  // the allenwp curve: contrast, toe_a, slope, w
 	vec4 shape;  // Hunt factor, log2 path-to-white start, log2 white, white
 	vec4 size;   // width, height, gamut knee, glow bound (DisplayTone.glow_bound; GLOW_BOUND_OFF while glow is off)
+	vec4 display;  // the fixed display curve (DisplayTone.display_curve): slope, knee, 1 = on (0: AgX's grey curve), 0
 } params;
 
 // DisplayTone (game/world/display_tone.gd) is the CPU mirror of everything below; keep them identical.
@@ -57,6 +58,16 @@ float curve_inverse(float y) {
 	float a = params.curve.z / params.curve.w;
 	float b = params.curve.z * (1.0 - d / (1.0 - X0));
 	return 2.0 * d / (b + sqrt(max(b * b + 4.0 * a * d, 0.0))) + X0;
+}
+
+// Step 1's grey curve (DisplayTone.display_curve): linear to the knee, exponential shoulder; AgX's curve while off.
+float display_curve(float y) {
+	if (params.display.z == 0.0) {
+		return curve(y);
+	}
+	float linear = params.display.x * max(y, 0.0);
+	float knee = params.display.y;
+	return linear <= knee ? linear : 1.0 - (1.0 - knee) * exp(-(linear - knee) / (1.0 - knee));
 }
 
 vec3 predistort(vec3 d, mat3 outset_inverse, mat3 inset_inverse) {
@@ -132,7 +143,7 @@ void main() {
 		mat3 inset_inverse = inverse(INSET);
 		mat3 m1_inverse = inverse(M1);
 		mat3 m2_inverse = inverse(M2);
-		float g = curve(y);
+		float g = display_curve(y);
 		vec3 lab = to_oklab(x * (g / y));
 		float lightness = min(lab.x, 1.0);
 		float chroma = length(lab.yz);
@@ -187,15 +198,19 @@ func update(environment: Environment, chroma_factor: float) -> void:
 	var push := PackedFloat32Array()
 	var tone := Vector4.ZERO
 	var white := 0.0
+	var display := Vector3.ZERO
 	if active:
 		var p := DisplayTone.curve_parameters(environment.tonemap_agx_contrast, environment.tonemap_agx_white)
 		tone = Vector4(p[0], p[1], p[2], p[3])
 		white = p[4]
 		push = PackedFloat32Array([p[0], p[1], p[2], p[3], hunt, log(DisplayTone.PATH_TO_WHITE_START) / log(2.0),
 				log(p[4]) / log(2.0), p[4], 0.0, 0.0, DisplayTone.GAMUT_KNEE,
-				minf(DisplayTone.glow_bound(environment), GLOW_BOUND_OFF)])
+				minf(DisplayTone.glow_bound(environment), GLOW_BOUND_OFF),
+				DisplayTone.DISPLAY_SLOPE, DisplayTone.DISPLAY_KNEE, 1.0 if DisplayTone.display_linear else 0.0, 0.0])
+		display = Vector3(DisplayTone.DISPLAY_SLOPE, DisplayTone.DISPLAY_KNEE, 1.0) if DisplayTone.display_linear 				else Vector3.ZERO
 	ShaderGlobals.set_value(&"vision_tone", tone)  # the emitters' inverse of the step (vision.gdshaderinc)
 	ShaderGlobals.set_value(&"vision_tone_white", white)
+	ShaderGlobals.set_value(&"vision_display_curve", display)  # slope, knee, on (the emitters' inverse of step 1)
 	RenderingServer.call_on_render_thread(_set_on_render_thread.bind(active, push))
 
 

@@ -188,16 +188,16 @@ const DARK_TIME_CONSTANT_S := 110.0
 ## (22 mag/arcsec^2 ~ 1.7e-4 cd/m^2), so the star threshold there is the sky's (Schaefer: +0.06 mag at the floor); the
 ## t.v.i. functions are flat far above it.
 const LUMINANCE_FLOOR_CD_M2 := 1.0e-6
-## [E: a convention with two readings, both ~0.12-0.18: the photographers' 18 % grey card (a reflected-light meter
-## calibrated to ISO 2720:1974's K = 12.5 cd s/m^2 renders the metered luminance as a ~12-18 % grey, depending on the
-## maker's assumptions) and Reinhard et al. 2002, "Photographic tone reproduction for digital images", SIGGRAPH 2002: the
-## log-average luminance mapped to the display key 0.18 (review M-3: not a measured constant)] The scene-referred
-## rule (Task 14, Atmosphere.scene_referred_adaptation): the eye adapts to the field it sees, L_f (AdaptationMeter, the
-## centre-weighted log average), and the field is taken as the mid grey of its scene: the adaptation luminance (a
-## white, as the white-plate rule's) is L_f / FIELD_MID_GREY. The white-plate rule assumed that field (18 % of the plate
-## under the scene's light, a grey world); the field rule measures it - in a grey world the two are identical, a darker
-## field (regolith, the Earth's ocean from orbit) is seen brighter, a brighter one (snow, cloud tops) darker.
-const FIELD_MID_GREY := 0.18
+## [S: CIE 159:2004 (CIECAM02), the background of an average scene Y_b = 20 % of the adopted white (APPEARANCE_BACKGROUND_PERCENT)]
+## The scene-referred rule (Task 14, Atmosphere.scene_referred_adaptation; unified appearance model, look fixes T13):
+## the eye adapts to the field it sees, L_f (AdaptationMeter, the centre-weighted log average), and the field is the
+## background of its scene: the adopted white (the white plate the gains are computed for) is L_w = L_f / Y_b, capped
+## at the reference white plate under the TOA Sun (advance: no diffuse surface is whiter - a field brighter than Y_b of
+## it is a white world, shown at the white). The adopted white renders at the scene units' white plate
+## (Atmosphere.DAY_EXPOSURE), which the fixed display curve shows at display white (DisplayTone.display_curve), so the
+## field shows at 20 % of display white. (Before T13: 0.18 as the photographers' grey card / Reinhard 2002's key, with
+## DAY_EXPOSURE in or out of the rule (T6), and rule D's anchor term; docs/history/atmosphere-rendering.md.)
+const FIELD_MID_GREY := APPEARANCE_BACKGROUND_PERCENT / 100.0
 ## [E] The anchored rule (Atmosphere.FieldRule.ANCHOR, and the anchor half of the default PROTECT rule; Gilchrist et al. 1999 anchoring theory: the
 ## highest luminance of a sufficiently large area is seen as white): the reflectance the anchor (AdaptationMeter.field_anchor)
 ## is seen as - a white of ~0.9 (white paper, the cabin's white panels). L_a = L_anchor / ANCHOR_WHITE (a white plate, as

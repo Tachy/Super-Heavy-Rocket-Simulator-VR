@@ -7,8 +7,8 @@
 #                          hidden; + hatch_vs_crew1_1
 # godot --path game --script res://tests/cockpit_shots.gd -- --mission=falcon9_crew_dragon --t_plus=-60 --out_dir=<abs>/screenshots/m7-cockpit/look
 #   --fov=100 (pilot_eye, horizontal deg)  --crew=<n> (default the mission's)  --refs=<abs dir of the reference photos>
-#   --field_key=<0.18..1> (the eye adaptation's field grey for every shot, default the shot's key or CABIN_FIELD_KEY; 0.18 = the game default;
-#   not used with the game's --anchored_adaptation)
+#   --field_key=<0.2..1> (the eye adaptation's field background for every shot; default the game's Y_b 0.2, look fixes T13;
+#   not used with --anchored_adaptation); --cabin_keys: the hand keys before T13 (the shot's key or CABIN_FIELD_KEY)
 #   --fixed_exposure (eye adaptation off; default: on as in the game, snapped to each shot)
 #   --tone=agx (Godot's AgX alone, no display tone step), --hunt=day (the Hunt factor against L_day, as before look fixes T5)
 extends SceneTree
@@ -92,7 +92,7 @@ func _setup() -> bool:
 	_rig.print_bodies(sim)
 	_rig.hide_ui(_main)
 	_world.atmosphere.eye_adaptation_enabled = not _args.has("fixed_exposure")
-	_world.atmosphere.field_key = float(_args.get("field_key", CABIN_FIELD_KEY))
+	_world.atmosphere.field_key = float(_args.get("field_key", CABIN_FIELD_KEY if _args.has("cabin_keys") else EyeAdaptation.FIELD_MID_GREY))
 	DisplayTone.enabled = _args.get("tone", "chroma") != "agx"  # --tone=agx: Godot's AgX alone (look fixes T5)
 	EyeAdaptation.hunt_display_reference = _args.get("hunt", "display") != "day"  # --hunt=day: S <= 1 as before T5
 	EyeAdaptation.adopted_white_follows_scene = _args.get("white_balance", "on") != "toa"  # --white_balance=toa: the fixed TOA-Sun white
@@ -163,7 +163,7 @@ func _shoot() -> bool:
 	_wait += 1
 	if _wait == 3:
 		# An explicit --field_key holds for every shot (comparisons); else the shot's own key, else the cabin key.
-		var key := float(shot.get("field_key", CABIN_FIELD_KEY))
+		var key := float(shot.get("field_key", CABIN_FIELD_KEY)) if _args.has("cabin_keys") else EyeAdaptation.FIELD_MID_GREY
 		_world.atmosphere.field_key = float(_args["field_key"]) if _args.has("field_key") else key
 		_world.atmosphere.snap_adaptation()
 	if _wait < SHOT_SETTLE_FRAMES:
