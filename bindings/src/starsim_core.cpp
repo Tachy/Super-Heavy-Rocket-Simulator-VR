@@ -1312,6 +1312,12 @@ godot::Dictionary StarsimCore::weather_load_snapshot(const godot::String& file) 
         base_bytes.resize(static_cast<int64_t>(base.size() * sizeof(float)));
         if (!base.empty()) std::memcpy(base_bytes.ptrw(), base.data(), base.size() * sizeof(float));
         result["cloud_base_texels"] = base_bytes;
+        // The clear ratio (R8 per cell, environment::cloud_render_clear_ratio_texels; look fixes T7c fix 2)
+        const std::vector<std::uint8_t> clear = environment::cloud_render_clear_ratio_texels(*snapshot);
+        godot::PackedByteArray clear_bytes;
+        clear_bytes.resize(static_cast<int64_t>(clear.size()));
+        if (!clear.empty()) std::memcpy(clear_bytes.ptrw(), clear.data(), clear.size());
+        result["cloud_clear_ratio_texels"] = clear_bytes;
         // The fine column (RG8; a downsampled set's full-resolution column, else the snapshot's own grid; look fixes T7 C)
         const std::vector<std::uint8_t> fine = environment::cloud_render_fine_column_texels(*snapshot);
         const environment::FineColumnSize fine_size = environment::fine_column_size(*snapshot);

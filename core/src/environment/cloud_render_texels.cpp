@@ -209,6 +209,34 @@ std::vector<std::uint8_t> cloud_render_fine_column_texels(const WeatherSnapshot&
     return out;
 }
 
+std::vector<std::uint8_t> cloud_render_clear_ratio_texels(const WeatherSnapshot& snapshot) {
+    const std::vector<std::uint8_t>& source = snapshot.texels();
+    const std::size_t cells = static_cast<std::size_t>(snapshot.rows()) * snapshot.columns();
+    const std::vector<float>& ground = snapshot.ground_heights_m();
+    std::vector<std::uint8_t> out(cells, 255);
+    for (std::size_t cell = 0; cell < cells; ++cell) {
+        std::array<double, weather_layer_count> fraction{}, liquid{}, ice{};
+        const double ground_m = cell < ground.size() ? static_cast<double>(ground[cell]) : 0.0;
+        double largest = 0.0;
+        for (int layer = 0; layer < weather_layer_count; ++layer) {
+            const std::size_t i = (static_cast<std::size_t>(layer) * cells + cell) * channels;
+            const auto k = static_cast<std::size_t>(layer);
+            fraction[k] = decode_weather_cloud_fraction(source[i]);
+            liquid[k] = decode_weather_water(source[i + 1]);
+            ice[k] = decode_weather_water(source[i + 2]);
+            // (the layers cloud_column_cover_max_random counts: condensate stored, above the ground)
+            if (weather_layer_bottom_m(layer + 1) > ground_m && (source[i + 1] > 0 || source[i + 2] > 0)) {
+                largest = std::max(largest, std::clamp(fraction[k], 0.0, 1.0));
+            }
+        }
+        if (!(largest > 0.0) || largest >= 1.0) continue;
+        const double cover = cloud_column_cover_max_random(fraction, liquid, ice, ground_m);
+        const double ratio = std::clamp((1.0 - cover) / (1.0 - largest), 0.0, 1.0);
+        out[cell] = static_cast<std::uint8_t>(std::lround(ratio * 255.0));
+    }
+    return out;
+}
+
 FineColumnSize fine_column_size(const WeatherSnapshot& snapshot) {
     if (!snapshot.fine_column_texels().empty()) return {snapshot.fine_rows(), snapshot.fine_columns()};
     return {snapshot.rows(), snapshot.columns()};

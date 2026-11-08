@@ -211,6 +211,36 @@ TEST_CASE("Cloud column texels carry the grid-mean depth and the cover above eac
     }
 }
 
+TEST_CASE("Clear-ratio texels: the layers' maximum-random cover against the largest fraction", "[weather]") {
+    // Two blocks apart (f 0.5 over layers 4-7, f 0.3 over 18-19): C = 1 - 0.5 x 0.7 = 0.65, f_max 0.5, E = 0.35 / 0.5
+    // = 0.7; a cell whose ground lies above the lower block counts the upper one alone (E 1, as
+    // cloud_column_cover_max_random); a clear cell E 1. Within the 8-bit code's half step.
+    const int rows = 3, columns = 4;
+    std::vector<std::uint8_t> texels(static_cast<std::size_t>(weather_layer_count) * rows * columns * 4, 0);
+    auto put = [&](int layer, int r, int col, double fraction, double liquid) {
+        const std::size_t i = texel_offset(layer, r, col, rows, columns);
+        texels[i] = encode_weather_cloud_fraction(fraction);
+        texels[i + 1] = encode_weather_water(liquid);
+    };
+    for (int r = 0; r < rows; ++r) {
+        for (int col = 0; col < columns - 1; ++col) {
+            for (int layer = 4; layer <= 7; ++layer) put(layer, r, col, 0.5, 1e-4);
+            for (int layer = 18; layer <= 19; ++layer) put(layer, r, col, 0.3, 2e-5);
+        }
+    }
+    std::vector<float> ground(rows * columns, 0.0f);
+    ground[1 * columns + 2] = static_cast<float>(weather_layer_bottom_m(8) + 10.0);
+    const WeatherSnapshot snapshot = WeatherSnapshot::from_parts({}, rows, columns, ground, texels);
+    const std::vector<std::uint8_t> ratio = cloud_render_clear_ratio_texels(snapshot);
+    REQUIRE(ratio.size() == static_cast<std::size_t>(rows * columns));
+    const double f_low = decode_weather_cloud_fraction(encode_weather_cloud_fraction(0.5));
+    const double f_high = decode_weather_cloud_fraction(encode_weather_cloud_fraction(0.3));
+    const double expected = (1.0 - f_low) * (1.0 - f_high) / (1.0 - f_low);
+    CHECK(ratio[0 * columns + 1] / 255.0 == Approx(expected).margin(0.5 / 255.0 + 1e-9));
+    CHECK(ratio[1 * columns + 2] == 255);  // the lower block under the ground
+    CHECK(ratio[1 * columns + 3] == 255);  // clear
+}
+
 TEST_CASE("Base texels carry the flat cloud base and its layer's extinction scale", "[weather]") {
     // Ground heights 0, 1500 m (ellipsoid) with LCLs of 800 m, 600 m; saturated (0), unknown (-1), a level above the
     // boundary layer (3500 m), 250 m over -40 m ground, and the weather top (20 km, a capped level): only cells 0, 1

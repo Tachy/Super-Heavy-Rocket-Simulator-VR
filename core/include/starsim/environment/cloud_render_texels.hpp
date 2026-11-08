@@ -71,6 +71,13 @@ std::vector<std::uint8_t> cloud_render_column_texels(const WeatherSnapshot& snap
 // snapshot's stored fine column when it has one (WeatherSnapshot::fine_column_texels, a downsampled set), else
 // computed from its own grid (rows x columns). Size: fine_column_size.
 std::vector<std::uint8_t> cloud_render_fine_column_texels(const WeatherSnapshot& snapshot);
+// The clear-ratio texture (look fixes T7c fix 2, review I5): R8 per cell of the snapshot's grid (rows x columns), the
+// column's clear ratio E = (1 - C) / (1 - f_max) x 255, C the layers' maximum-random cover
+// (cloud_column_cover_max_random: the layers with condensate above the cell's ground - the data's total cover, ERA5's
+// tcc), f_max the largest of those layers' fractions; 255 (E = 1) without cloud, for a closed layer and a single block.
+// The shader's total cover 1 - (1 - f) E (clouds.gdshaderinc cloud_column_total_cover, f the fine column's largest
+// fraction) reads it instead of the 32 layers per pixel.
+std::vector<std::uint8_t> cloud_render_clear_ratio_texels(const WeatherSnapshot& snapshot);
 struct FineColumnSize {
     int rows = 0, columns = 0;
 };
