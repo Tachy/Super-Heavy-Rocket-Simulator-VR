@@ -177,6 +177,53 @@ TEST_CASE("Direct sunlight matches ASTM G173 at air mass 1.5", "[atmosphere]") {
     CHECK(rel_error(band, g173_direct_w_m2) < 0.10);
 }
 
+TEST_CASE("The three-channel direct beam matches the full spectrum", "[atmosphere]") {
+    // The runtime direct beam is solar_illuminance_rgb x sun_radiance_to_luminance x T at the three channel wavelengths
+    // (spectra::lambda_*_nm). Reference: the same optics at 1 nm, 360-830 nm, folded with the CIE 1931 functions into
+    // linear sRGB (683 lm/W x M_XYZ->sRGB x integral of cmf x ETR x T). Both T from the brute-force optical depth of the
+    // Task 1 optics at sea level (spherical air mass). Tolerances [D: look-fixes T9, the equivalent wavelengths
+    // 628 / 546 / 444 nm reproduce the 1 nm beam within 1.2 mired down to Sun 15 deg]: B/R and G/R 1 %, luminance 1 %
+    // at Sun 90 / 48 / 15 deg; at 5 deg luminance 4 % and B/R, G/R 20 % (measured +2.5 %, B/R +18 % = -13 mired at 2850 K). Bruneton's 680 / 550 / 440 nm
+    // fail it (B/R -7 % at 48 deg, luminance +23 % at 5 deg).
+    const ref::Model model{optics()};
+    const auto p = environment::atmosphere_parameters(optics());
+    const double r = constants::wgs84_semi_major_axis_m;
+    const std::vector<double> channel{environment::spectra::lambda_r_nm * ref::nm,
+                                      environment::spectra::lambda_g_nm * ref::nm,
+                                      environment::spectra::lambda_b_nm * ref::nm};
+    std::vector<double> lambdas;
+    for (int l = 360; l < 830; ++l) lambdas.push_back(l * ref::nm);
+    const double* m = environment::spectra::xyz_to_linear_srgb;
+    struct Case {
+        double elevation_deg, ratio_tol, luminance_tol;
+    };
+    for (const Case c : {Case{90.0, 0.01, 0.01}, Case{48.0, 0.01, 0.01}, Case{15.0, 0.01, 0.01}, Case{5.0, 0.20, 0.04}}) {
+        const double mu = std::sin(c.elevation_deg * constants::deg_to_rad);
+        const auto t3 = ref::transmittance_to_top(model, channel, r, mu, 4000);
+        Vec3 model_rgb{p.solar_illuminance_rgb[0] * p.sun_radiance_to_luminance[0] * t3[0],
+                       p.solar_illuminance_rgb[1] * p.sun_radiance_to_luminance[1] * t3[1],
+                       p.solar_illuminance_rgb[2] * p.sun_radiance_to_luminance[2] * t3[2]};
+        const auto tl = ref::transmittance_to_top(model, lambdas, r, mu, 4000);
+        Vec3 xyz{};
+        for (std::size_t i = 0; i < lambdas.size(); ++i) {
+            xyz = xyz + environment::cie_1931_cmf(lambdas[i]) * (environment::solar_irradiance_w_m2_per_m(lambdas[i]) * tl[i]);
+        }
+        xyz = xyz * (constants::max_luminous_efficacy_lm_per_w * ref::nm);
+        const Vec3 ref_rgb{m[0] * xyz.x + m[1] * xyz.y + m[2] * xyz.z, m[3] * xyz.x + m[4] * xyz.y + m[5] * xyz.z,
+                           m[6] * xyz.x + m[7] * xyz.y + m[8] * xyz.z};
+        const double br = (model_rgb.z / model_rgb.x) / (ref_rgb.z / ref_rgb.x) - 1.0;
+        const double gr = (model_rgb.y / model_rgb.x) / (ref_rgb.y / ref_rgb.x) - 1.0;
+        const double y = luminance_y(model_rgb) / luminance_y(ref_rgb) - 1.0;
+        std::printf("direct beam Sun %4.1f deg: B/R model %.4f full %.4f (%+.2f %%), G/R %+.2f %%, Y %.0f vs %.0f lx (%+.2f %%)\n",
+                    c.elevation_deg, model_rgb.z / model_rgb.x, ref_rgb.z / ref_rgb.x, 100.0 * br, 100.0 * gr,
+                    luminance_y(model_rgb), luminance_y(ref_rgb), 100.0 * y);
+        INFO("Sun elevation " << c.elevation_deg << " deg");
+        CHECK(std::abs(br) < c.ratio_tol);
+        CHECK(std::abs(gr) < c.ratio_tol);
+        CHECK(std::abs(y) < c.luminance_tol);
+    }
+}
+
 // The checks on the full-resolution tables share one precomputation (one test process): each SECTION runs
 // in the same process with the function-local static tables.
 TEST_CASE("The sky model at full resolution", "[atmosphere][nightly]") {
@@ -229,7 +276,7 @@ TEST_CASE("The sky model at full resolution", "[atmosphere][nightly]") {
 
     SECTION("The runtime direct beam matches the raymarch at air mass 1.5") {
         // The table path of the direct Sun (sun_transmittance, sun_and_sky_illuminance().sun_lux) at sea level, Sun at
-        // 48.19 deg zenith, vs the raymarch: transmittance at 680 / 550 / 440 nm within the table's 0.5 %, and the
+        // 48.19 deg zenith, vs the raymarch: transmittance at the channel wavelengths (628 / 546 / 444 nm) within the table's 0.5 %, and the
         // direct horizontal illuminance (Y of the RGB solar factors) vs 683 lm/W x the integral of ybar x ETR x T
         // (5 nm, 360-830 nm) x cos within 3 % (the three-wavelength RGB representation of the spectrum).
         const auto& atm = atmosphere();

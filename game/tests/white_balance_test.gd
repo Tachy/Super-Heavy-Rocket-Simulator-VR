@@ -92,8 +92,8 @@ func _check_sun(sun: Vector3) -> void:
 
 func _check_reddened(sun: Vector3) -> void:
 	# The Sun's colour through Rayleigh air mass 4 at 700 hPa (optical depth 0.0088 lambda_um^-4.05 at sea level
-	# [S: Bodhaine et al. 1999 fit]) at the tables' channel wavelengths (680, 550, 440 nm).
-	var lambdas := Vector3(0.680, 0.550, 0.440)
+	# [S: Bodhaine et al. 1999 fit]) at the tables' channel wavelengths (628, 546, 444 nm).
+	var lambdas := Vector3(0.628, 0.546, 0.444)
 	var t := Vector3.ZERO
 	for k in range(3):
 		t[k] = exp(-4.0 * 0.7 * 0.0088 * pow(lambdas[k], -4.05))
@@ -183,7 +183,7 @@ func _check_partial(sun: Vector3) -> void:
 ## moonlight close to its colourimetric warmth (between colourimetric and the photopic-floor cream); the rods' post step
 ## carries the night's look. Former fixed TOA-Sun white: B/R about 0.52.
 func _check_moonlight(sun: Vector3, moon_colour: Vector3) -> void:
-	var lambdas := Vector3(0.680, 0.550, 0.440)
+	var lambdas := Vector3(0.628, 0.546, 0.444)
 	var air_mass := 1.0 / sin(deg_to_rad(83.0))
 	var t := Vector3.ZERO
 	for k in range(3):

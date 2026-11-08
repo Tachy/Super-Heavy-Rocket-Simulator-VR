@@ -53,7 +53,7 @@ struct AtmosphereParameters {
     double mu_s_min = 0.0;                // cosine of the largest precomputed Sun zenith angle (120 deg)
     double mie_phase_g = 0.0;             // Cornette-Shanks asymmetry
     double sun_angular_radius_rad = 0.0;  // at 1 AU
-    // Bruneton's solar_irradiance: TOA spectral irradiance at 1 AU at kLambdaR / G / B (680 / 550 / 440 nm), in
+    // Bruneton's solar_irradiance: TOA spectral irradiance at 1 AU at the channel wavelengths (spectra::lambda_*_nm, 628 / 546 / 444 nm), in
     // W m^-2 m^-1 (Bruneton: per nm). The name follows the interface; it is not an illuminance.
     std::array<double, 3> solar_illuminance_rgb{};
     // Bruneton's SKY_SPECTRAL_RADIANCE_TO_LUMINANCE (precomputed-luminance mode: 683 lm/W, the tables hold radiance

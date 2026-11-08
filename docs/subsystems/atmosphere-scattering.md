@@ -145,10 +145,11 @@ vehicles still fly through `Us76Atmosphere`).
   view, e.g. the booster far below the ship or the tower seen from orbit, get the followed point's light); the totality
   approximation; night vision's limits (above); the 256 x 128 Earth mesh in scaled space sits up to ~0.6 km below the
   ellipsoid (-2 % in its aerial perspective).
-- Direct beam colour (look-fixes T9, `tools/validation/atmosphere_spectrum_check.py`): the transmittance at 680 / 550 /
-  440 nm makes the direct Sun too warm against a 1 nm spectrum (4934 vs 5134 K at Sun 48 deg, 3795 vs 4187 K at 15 deg;
-  global noon 5510 vs ~5700 K) and too bright at low Sun (+23 % at 5 deg); the sky (15 wavelengths) is fine. Proposed,
-  awaiting the user's decision: channel wavelengths 628 / 546 / 444 nm (`.superpowers/sdd/2026-11-07-look-fixes/t9-report.md`).
+- Direct beam colour: the transmittance table's channels sit at 628 / 546 / 444 nm (look-fixes T9b), the equivalent
+  wavelengths of the linear sRGB channels under sunlight (`tools/validation/atmosphere_channel_fix_check.py`); the direct
+  beam matches a 1 nm spectrum through the same optics within 0.1 % (B/R, luminance) at Sun 90 / 48 deg, 0.8 % at 15 deg;
+  at 5 deg luminance +2.5 %, B/R +18 % (-13 mired) - the residual at the horizon Sun (core test "The three-channel direct
+  beam matches the full spectrum"). Bruneton's 680 / 550 / 440 nm: `docs/history/atmosphere-rendering.md`.
 
 ## Radiance cubemap (ambient and reflections of every lit object)
 

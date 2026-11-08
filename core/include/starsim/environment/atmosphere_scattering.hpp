@@ -49,7 +49,7 @@ public:
 
     const AtmosphereTables& tables() const { return *tables_; }
 
-    // Transmittance from the point to the Sun (680 / 550 / 440 nm), with the Sun disc's fraction above the model
+    // Transmittance from the point to the Sun (628 / 546 / 444 nm, spectra::lambda_*_nm), with the Sun disc's fraction above the model
     // horizon (GetTransmittanceToSun).
     math::Vec3 sun_transmittance(const math::Vec3& position_itrf_m, const math::Vec3& sun_direction_itrf) const;
 

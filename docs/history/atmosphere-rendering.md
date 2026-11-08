@@ -562,3 +562,12 @@ mostly black field (lunar day looking up 60 deg: 2.4 %, fragile) was removed who
   saturated softly at the plateau (veil x P / (P + veil)). The full Moon's halo was 0.10-0.47 of the disc at 1 deg and
   0.02-0.11 at 2 deg (physical 1e-3 / 1.6e-4) - a glowing ball, dark limb dots, axis-aligned steps. Replaced by each
   source's veil at its source's local factor (`GlareSpread.source_factor`).
+
+## Direct-beam channel wavelengths 680 / 550 / 440 nm, superseded 2026-11-08 (look fixes T9b)
+
+Bruneton's kLambdaR / G / B were the transmittance table's channels until T9b. Against a 1 nm spectrum through the same
+optics they made the direct Sun too warm and, at low Sun, too bright: 4934 vs 5134 K at Sun 48 deg, 3795 vs 4187 K at
+15 deg, 2369 vs 2847 K at 5 deg (+23 % illuminance), +65 % at 2 deg; global noon 5510 K (B/R 0.758). Cause: the sRGB red
+channel's sunlight-weighted response sits at an equivalent 628 nm, so T(680) overstated red transmittance (T9 report,
+`tools/validation/atmosphere_spectrum_check.py`). Rejected alternative: per-channel broadband transmittance (exact for
+the direct beam, but the table ratio T(p) / T(q) of path segments breaks: near-horizontal blue 0.50 vs 0.18 exact).

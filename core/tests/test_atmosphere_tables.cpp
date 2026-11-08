@@ -243,6 +243,6 @@ TEST_CASE("Input hash covers the spectral data", "[atmosphere]") {
     const std::uint64_t hash = environment::atmosphere_input_hash(optics(), {});
     std::printf("atmosphere spectral data checksum: 0x%016llx, input hash 0x%016llx\n",
                 static_cast<unsigned long long>(checksum), static_cast<unsigned long long>(hash));
-    CHECK(checksum == 0xe510c3f8544c5064ull);
-    CHECK(hash == 0xf3e29f19ccaa8d86ull);  // code version 4 (single_rayleigh)
+    CHECK(checksum == 0x34af73121d46b1aaull);
+    CHECK(hash == 0x7d492c1ac62f8da8ull);  // code version 4 (single_rayleigh), channels 628 / 546 / 444 nm
 }

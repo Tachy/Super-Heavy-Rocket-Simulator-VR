@@ -161,11 +161,14 @@ inline constexpr double xyz_to_linear_srgb[9] = {
 };
 
 // Wavelengths of the R, G, B channels of the transmittance table and of the solar irradiance in the parameters
-// [S: Bruneton 2017 model.h kLambdaR / kLambdaG / kLambdaB], and the range of the precomputed spectrum
-// [S: Bruneton 2017 model.cc kLambdaMin / kLambdaMax].
-inline constexpr double lambda_r_nm = 680.0;
-inline constexpr double lambda_g_nm = 550.0;
-inline constexpr double lambda_b_nm = 440.0;
+// [D: the equivalent wavelengths of the linear sRGB channels under the G-173 TOA Sun - the wavelength whose optical
+// depth gives each channel's sunlight-weighted transmittance; stable within 1 nm from Sun 90 to 15 deg
+// (tools/validation/atmosphere_channel_fix_check.py, look-fixes T9). Bruneton's kLambdaR / G / B 680 / 550 / 440 nm
+// made the direct beam too red (-200 K at Sun 48 deg) and too bright at low Sun (+23 % at 5 deg)], and the range of the
+// precomputed spectrum [S: Bruneton 2017 model.cc kLambdaMin / kLambdaMax].
+inline constexpr double lambda_r_nm = 628.0;
+inline constexpr double lambda_g_nm = 546.0;
+inline constexpr double lambda_b_nm = 444.0;
 inline constexpr double lambda_min_nm = 360.0;
 inline constexpr double lambda_max_nm = 830.0;
 
