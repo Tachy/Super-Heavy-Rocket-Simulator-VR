@@ -484,7 +484,10 @@ static func _groups(size: Vector2i) -> Vector2i:
 
 ## The view ray parameters (a, b, c, d) of a projection (as AdaptationMeter.sun_mask_parameters).
 static func ray_parameters(p: Projection) -> PackedFloat32Array:
-	return PackedFloat32Array([1.0 / p.x.x, p.z.x / p.x.x, 1.0 / p.y.y, p.z.y / p.y.y])
+	# The render data's projection can come with Vulkan's y flip (p.y.y < 0, p.z.y negated with it): the ratio p.z.y / p.y.y
+	# is the same either way, the scale must be positive (image row 0 is the top, NDC y up). A sign here mirrored the Sun
+	# vertically (a second disc and halo below the view axis).
+	return PackedFloat32Array([1.0 / p.x.x, p.z.x / p.x.x, 1.0 / absf(p.y.y), p.z.y / p.y.y])
 
 
 ## The spread of one view's colour image: SOURCE, DOWN x (K - 1), BLUR x K (all but the APPLY step; the GPU check reads

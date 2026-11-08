@@ -137,6 +137,35 @@ func _case() -> void:
 		worst_sun = maxf(worst_sun, absf(got / expected - 1.0))
 		print("glare_spread_gpu_check: Sun veil at (%d, %d), %.2f deg: gpu %s, cpu %s" % [p.x, p.y, theta, got, expected])
 	_check("Sun analytic veil, %.0f px/deg" % PPD, worst_sun < 0.01, "worst %.4f" % worst_sun)
+	# Off-axis Sun (above and to the side) with the projection as the render data may give it (y flipped): the analytic
+	# veil peaks at the Sun's projected pixel, not at its vertical mirror.
+	for flipped in [false, true]:
+		var p := Projection(Vector4(projection_x, 0, 0, 0), Vector4(0, projection_y * (-1.0 if flipped else 1.0), 0, 0),
+				Vector4(0.0, 0.0, -1.0, -1.0), Vector4(0, 0, -0.1, 0))
+		var r := GlareSpreadEffect.ray_parameters(p)
+		var sun_dir := Vector3(0.4 / projection_x, 0.5 / projection_y, -1.0).normalized()  # NDC (0.4, 0.5): right of and above the axis
+		var applied2 := _effect.view_textures(0, Vector2i(W, H), GlareSpread.base_factor(_ppd), GlareSpread.plan(_ppd)["weights"].size())
+		var fresh := _color_texture(black)
+		_effect.apply_veil(applied2, fresh, Vector2i(W, H), r, sun_dir, scene_lux, Vector3.ONE, false)
+		_rd.submit()
+		_rd.sync()
+		_effect.free_local_sets()
+		var o := _rd.texture_get_data(fresh, 0)
+		_rd.free_rid(fresh)
+		var best := 0.0
+		for i in range(W * H):
+			best = maxf(best, o.decode_half(i * 8 + 2))
+		var sum := Vector2.ZERO  # the centroid of the plateau (the veil is held inside the disc's radius)
+		var n := 0.0
+		for y in range(H):
+			for x in range(W):
+				if o.decode_half((y * W + x) * 8 + 2) >= 0.995 * best:
+					sum += Vector2(x, y)
+					n += 1.0
+		var at := Vector2i(sum / n)
+		var want := Vector2i(int(W * 0.7), int(H * 0.25))
+		_check("off-axis Sun peak at its pixel, y %s, %.0f px/deg" % ["flipped" if flipped else "plain", PPD],
+				absi(at.x - want.x) <= 2 and absi(at.y - want.y) <= 2, "peak %s, expected %s" % [at, want])
 	_rd.free_rid(blank)
 	_rd.free_rid(color)
 
