@@ -7,6 +7,8 @@ Usage (needs a GPU, non-headless Godot; ~1-3 min per scene):
   python -I tools/look_reference_suite.py [--label B] [--only a,b] [--extra "--local_adaptation=off"] [--measure_only]
       [--compare A]   (writes an A|B sheet per scene)
 Output: screenshots/look_fixes/t13/suite/<label>_<scene>.png / .log, <label>_results.json; exit code 1 on a failed gate.
+Every scene with the Earth or its sky in view runs with --weather=analog (the game's weather is on by default;
+render_check's default is off); the EPIC scene uses the ERA5 snapshot of its hour.
 Reference data (git-ignored, local): the DSCOVR EPIC image screenshots/look_investigation/refs/epic_1b_20250320143251.png
 and the ERA5 weather of that hour screenshots/look_fixes/t7/capC/era5_1097630.wthr; scenes whose data is missing are
 skipped (reported).
@@ -25,10 +27,13 @@ GODOT = os.path.join(ROOT, "external", "godot", "bin", "godot.windows.editor.dou
 OUT = os.path.join(ROOT, "screenshots", "look_fixes", "t13", "suite")
 EPIC_REF = os.path.join(ROOT, "screenshots", "look_investigation", "refs", "epic_1b_20250320143251.png")
 EPIC_WTHR = os.path.join(ROOT, "screenshots", "look_fixes", "t7", "capC", "era5_1097630.wthr")
-PAD = ["--lat=25.9853", "--lon=-97.1873", "--hide_ui", "--weather=off"]
+# Weather as in the game (on by default): every scene with the Earth or its sky in view gets the shipped analog weather
+# of its --utc (render_check defaults to --weather=off; user 2026-11-08: the lunar-night Earth had no clouds).
+WEATHER = "--weather=analog"
+PAD = ["--lat=25.9853", "--lon=-97.1873", "--hide_ui", WEATHER]
 NOON = ["--utc=2026-11-07T18:15:00"] + PAD
-MOON = ["--body=moon", "--lat=0.674", "--lon=23.473", "--utc=2026-11-17T08:00:00", "--hide_ui"]
-LUNAR_NIGHT = ["--body=moon", "--lat=0", "--hide_ui"]
+MOON = ["--body=moon", "--lat=0.674", "--lon=23.473", "--utc=2026-11-17T08:00:00", "--hide_ui", WEATHER]
+LUNAR_NIGHT = ["--body=moon", "--lat=0", "--hide_ui", WEATHER]
 
 
 def lin(c):
