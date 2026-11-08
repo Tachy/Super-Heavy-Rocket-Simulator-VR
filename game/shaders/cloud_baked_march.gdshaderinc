@@ -315,7 +315,8 @@ void cloud_baked_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out 
 		// ground point instead of the baked clouds - the flat levels' cover reference at any height)
 		vec2 ground = cloud_sphere_crossing(ray, 0.0);
 		if (ground.x <= ground.y && ground.x > 0.0) {
-			vec4 layer = cloud_far_layer(atmosphere_camera_hi + atmosphere_camera_lo + eye + dir * ground.x, vec3(1.0));
+			vec4 layer = cloud_far_layer(atmosphere_camera_hi + atmosphere_camera_lo + eye + dir * ground.x, vec3(1.0),
+					cloud_view.params.w * ground.x);
 			cloud_m = layer.a > 1.0e-6 ? ground.x : 0.0;
 			color_t = cloud_stored_color(layer.rgb, 1.0 - layer.a);
 		}
@@ -428,7 +429,7 @@ void cloud_baked_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out 
 	if (far_w > 0.0) {
 		// beyond the flat geometry's cap (cloud_baked_flat_far_weight): the far field's share, behind the rest
 		float dist_far;
-		vec4 far = cloud_baked_flat_far_layer(ray, dir, eye, scene_m, dist_far);
+		vec4 far = cloud_baked_flat_far_layer(ray, dir, eye, scene_m, cloud_view.params.w, dist_far);
 		float a_far = transmittance * far_w * far.a;
 		float a_rest = 1.0 - transmittance;
 		cloud_m = a_rest + a_far > 1.0e-6 ? (a_rest * cloud_m + a_far * dist_far) / (a_rest + a_far) : 0.0;

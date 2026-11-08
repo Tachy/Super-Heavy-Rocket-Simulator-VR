@@ -164,6 +164,9 @@ void main() {
 	return;
 #endif
 	int fp = c <= CLOUD_BAKED_FLAT_TAP_CELLS_M.y ? 1 : 2;  // field points per axis
+	// The fine column (look fixes T7 C) where the cell draws the column's even cover (the pattern's fade below): the
+	// shapes keep placing the coarse column's cover where they draw it (the volume's hand-over unchanged).
+	float w_fine = smoothstep(CLOUD_BAKED_FLAT_PATTERN_CELLS_M.x, CLOUD_BAKED_FLAT_PATTERN_CELLS_M.y, c);
 	// The column over the field points: the grid-mean depth, the largest fraction; the far field's heights (each
 	// weighted by its point's depth: continuous where a point has no cloud); the pattern's types (the layers' depth-
 	// weighted mix: no switch where another layer's fraction becomes the largest).
@@ -176,6 +179,9 @@ void main() {
 			vec3 radial_f = cloud_baked_flat_radial(si, g + ((vec2(fx, fy) + 0.5) / float(fp) - 0.5) * c) / ATM_STRETCH;
 			vec2 lat_lon = cloud_lat_lon(CLOUD_A_M * radial_f);
 			vec2 column_p = cloud_column_mean_depth_smooth(lat_lon, 0.0);  // (B-spline: no field-cell squares, step 4)
+			if (w_fine > 0.0) {
+				column_p = mix(column_p, cloud_column_total_fine(lat_lon), w_fine);
+			}
 			column += column_p;
 			if (!(column_p.x > 0.0)) {
 				continue;

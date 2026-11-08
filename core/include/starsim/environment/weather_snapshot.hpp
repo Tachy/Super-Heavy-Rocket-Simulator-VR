@@ -288,7 +288,20 @@ public:
     const std::vector<float>& dropped_condensate_paths_kg_m2() const { return dropped_condensate_path_kg_m2_; }
 
     // Box mean over factor x factor cells (analog set, factor 4: 1 deg); needs (rows - 1) and columns divisible by it.
+    // The result keeps this grid's column at full resolution (fine column below; look fixes T7 C).
     WeatherSnapshot downsampled(int factor) const;
+
+    // Fine column (look fixes T7 C, user 2026-11-08: the Earth from space sharp from the 1-deg analog set): a
+    // downsampled snapshot carries the full-resolution grid's column, RG8 per cell (fine_rows x fine_columns, row 0 at
+    // +90 deg as the grid): R the grid-mean optical depth from 20 km down to the ellipsoid (0 m), coded as the column
+    // texels' R (cloud_render_texels.hpp encode_cloud_optical_depth), G the column's largest cloud fraction code - what
+    // the scaled-space far field and the flat levels' even cells read. Empty (0 x 0) for a snapshot at its own
+    // resolution: its column texels are that column.
+    int fine_rows() const { return fine_rows_; }
+    int fine_columns() const { return fine_columns_; }
+    const std::vector<std::uint8_t>& fine_column_texels() const { return fine_column_; }
+    // Throws std::invalid_argument unless texels.size() == 2 rows columns (or all three 0).
+    void set_fine_column(int rows, int columns, std::vector<std::uint8_t> texels);
 
 private:
     WeatherSnapshot(const WeatherSnapshotId& id, int rows, int columns);
@@ -303,6 +316,8 @@ private:
     std::vector<float> added_liquid_path_kg_m2_;  // rows x columns, diagnostic
     std::vector<float> dropped_condensate_path_kg_m2_;  // rows x columns, diagnostic
     std::vector<std::uint8_t> texels_;   // layers x rows x columns x 4
+    int fine_rows_ = 0, fine_columns_ = 0;
+    std::vector<std::uint8_t> fine_column_;  // fine_rows x fine_columns x 2, or empty
 };
 
 }  // namespace starsim::environment

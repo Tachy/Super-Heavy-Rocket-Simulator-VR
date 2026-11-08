@@ -181,6 +181,39 @@ std::vector<std::uint8_t> cloud_render_column_texels(const WeatherSnapshot& snap
     return out;
 }
 
+std::vector<std::uint8_t> cloud_render_fine_column_texels(const WeatherSnapshot& snapshot) {
+    if (!snapshot.fine_column_texels().empty()) return snapshot.fine_column_texels();
+    const std::vector<std::uint8_t>& source = snapshot.texels();
+    const std::size_t cells = static_cast<std::size_t>(snapshot.rows()) * snapshot.columns();
+    std::vector<std::uint8_t> out(2 * cells, 0);
+    std::array<double, 256> water{};
+    for (int code = 0; code < 256; ++code) water[code] = decode_weather_water(static_cast<std::uint8_t>(code));
+    for (std::size_t cell = 0; cell < cells; ++cell) {
+        // cloud_render_column_texels' top-down sum to the layer-0 centre, then layer 0 held down to 0 m.
+        double depth = 0.0, beta_above = 0.0;
+        std::uint8_t cover = 0;
+        for (int layer = weather_layer_count - 1; layer >= 0; --layer) {
+            const std::size_t i = (static_cast<std::size_t>(layer) * cells + cell) * channels;
+            const bool top = layer == weather_layer_count - 1;
+            const double gap_m =
+                top ? weather_top_m - layer_centre_m(layer) : layer_centre_m(layer + 1) - layer_centre_m(layer);
+            const double beta = cloud_extinction_per_m(water[source[i + 1]], water[source[i + 2]]);
+            depth += top ? beta * gap_m : 0.5 * (beta + beta_above) * gap_m;
+            beta_above = beta;
+            cover = std::max(cover, source[i]);
+        }
+        depth += beta_above * layer_centre_m(0);
+        out[2 * cell] = encode_cloud_optical_depth(depth);
+        out[2 * cell + 1] = cover;
+    }
+    return out;
+}
+
+FineColumnSize fine_column_size(const WeatherSnapshot& snapshot) {
+    if (!snapshot.fine_column_texels().empty()) return {snapshot.fine_rows(), snapshot.fine_columns()};
+    return {snapshot.rows(), snapshot.columns()};
+}
+
 double cloud_lcl_cut_factor(double height_m, double base_m) {
     if (!std::isfinite(base_m) || height_m >= weather_layer_bottom_m(layer_containing(base_m) + 1)) return 1.0;
     return std::clamp((height_m - base_m) / constants::cloud_lcl_ramp_m, 0.0, 1.0);

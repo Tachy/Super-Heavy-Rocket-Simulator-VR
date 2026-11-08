@@ -2632,3 +2632,16 @@ Superseded by the climatology cap (look fixes T7). Verbatim from the subsystem f
 >     at most 36 g/m^2 in one). Cover deficit vs tcc 0.196-0.203 (data) -> 0.004-0.009. The mean liquid water path is
 >     still above the ocean climatology the reviewer quoted from memory (MAC-LWP, O'Dell et al. 2008 / Elsaesser et al.
 >     2017: order 60-90 g/m^2, not verified here), see `known-issues.md`.
+
+## Far field: the column from the coarse column texels (until 2026-11-08)
+
+Superseded by the fine column and the sub-grid structure (look fixes T7 C / B). Verbatim from the subsystem file:
+
+> - the column above the ground point G from the column texels' cubic B-spline (`cloud_column_mean_depth_smooth`, as the
+>   cloud pass's far tier and the baked flat levels; look fixes T2 2026-11-07: the bilinear's creases along the cell
+>   edges, sharpened by the cover's non-linear alpha, drew the 1 deg analog as rectangular blocks of ~5 pixels in the
+>   start view; +0.05 ms GPU there, 1600 x 900; the placement's bisection stays on the bilinear layer centres)
+>   (grid-mean depth tau, largest fraction f); ...
+
+The analog set then drew the Earth from space at 1 deg (blurred against an ERA5 hour), a partly cloudy cell as an even
+grey veil and every cell as a homogeneous slab (display white share 0.62-0.71 against EPIC's 0.13).

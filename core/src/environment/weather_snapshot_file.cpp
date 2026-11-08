@@ -47,6 +47,11 @@ void write_weather_snapshot(const std::filesystem::path& file, const WeatherSnap
     }
     const auto* t = reinterpret_cast<const char*>(texels.data());
     bytes.insert(bytes.end(), t, t + texels.size());
+    const auto& fine = snapshot.fine_column_texels();
+    detail::append_bytes(bytes, static_cast<std::int32_t>(snapshot.fine_rows()));
+    detail::append_bytes(bytes, static_cast<std::int32_t>(snapshot.fine_columns()));
+    const auto* f = reinterpret_cast<const char*>(fine.data());
+    bytes.insert(bytes.end(), f, f + fine.size());
     detail::append_bytes(bytes, detail::fnv1a64(bytes.data(), bytes.size()));
     // Temp files of killed writers of any snapshot in this directory (137 MB each at 0.25 deg).
     detail::remove_stale_temp_files(file.has_parent_path() ? file.parent_path() : std::filesystem::path("."),
@@ -89,6 +94,13 @@ std::optional<WeatherSnapshot> read_weather_snapshot(const std::filesystem::path
         !r.read_array(added, cells) || !r.read_array(dropped, cells) || !r.read_array(texels, cells * layers * channels)) {
         return std::nullopt;
     }
+    std::int32_t fine_rows = 0, fine_columns = 0;
+    std::vector<std::uint8_t> fine;
+    if (!r.read(fine_rows) || !r.read(fine_columns) || fine_rows < 0 || fine_columns < 0 ||
+        fine_rows > max_grid_size || fine_columns > max_grid_size || ((fine_rows == 0) != (fine_columns == 0)) ||
+        !r.read_array(fine, static_cast<std::uint64_t>(fine_rows) * static_cast<std::uint64_t>(fine_columns) * 2)) {
+        return std::nullopt;
+    }
     if (r.at != payload) return std::nullopt;
 
     WeatherSnapshotId id;
@@ -97,8 +109,11 @@ std::optional<WeatherSnapshot> read_weather_snapshot(const std::filesystem::path
     id.valid_hour = valid_hour;
     id.cycle_hour = cycle_hour;
     id.analog_hour = analog_hour;
-    return WeatherSnapshot::from_parts(id, rows, columns, std::move(ground), std::move(texels), std::move(lcl),
-                                      std::move(tcc), std::move(added), std::move(dropped));
+    WeatherSnapshot snapshot = WeatherSnapshot::from_parts(id, rows, columns, std::move(ground), std::move(texels),
+                                                           std::move(lcl), std::move(tcc), std::move(added),
+                                                           std::move(dropped));
+    snapshot.set_fine_column(fine_rows, fine_columns, std::move(fine));
+    return snapshot;
 }
 
 }  // namespace starsim::environment

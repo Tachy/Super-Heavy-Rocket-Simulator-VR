@@ -44,6 +44,9 @@ const float CLOUD_FAR_MU_MIN = 0.02;
 // slab alone 17-31 % dark there: the volume's 3D gain grows toward a low Sun, 1.2x at 73 deg to 1.46x at 24 deg).
 const float CLOUD_FAR_ENTRY_TURN = 0.15;
 const float CLOUD_FAR_FLANK_GAIN = 0.4;
+// [E] The height of a fine column's cloud where the coarse layers hold none (the fine grid's cloud next to a clear
+// 1-deg cell: rare, the B-spline spreads the coarse column wider; the flat bake's CLOUD_BAKED_FLAT_DEFAULT_HEIGHT_M).
+const float CLOUD_FAR_DEFAULT_HEIGHT_M = 2000.0;
 // Fidelity flag (CloudLayer.far_3d_light): false lights the slab as plane-parallel (no entry turn, no gain).
 global uniform bool cloud_far_3d_light;
 // 8-point Gauss-Legendre nodes and weights on [0, 1].
@@ -52,6 +55,95 @@ const float CLOUD_FAR_GL_X[8] = float[](0.0198550717512319, 0.1016667612931866, 
 		0.4082826787521751, 0.5917173212478249, 0.7627662049581645, 0.8983332387068134, 0.9801449282487681);
 const float CLOUD_FAR_GL_W[8] = float[](0.0506142681451881, 0.1111905172266872, 0.1568533229389436,
 		0.1813418916891810, 0.1813418916891810, 0.1568533229389436, 0.1111905172266872, 0.0506142681451881);
+
+// Sub-grid structure of the column model (look fixes T7 B, user 2026-11-08): the far field and the flat levels' even
+// cells (where the shapes no longer place the cover) drew a cell as a uniform mix - a 0.5 cell a grey veil of half a
+// white cloud - and as a homogeneous plane-parallel slab (brighter than the same water spread unevenly: the
+// plane-parallel albedo bias, Cahalan et al. 1994, J. Atmos. Sci. 51, 2434).
+// - In-cloud optical-depth spread: the in-cloud depth of a cell is gamma distributed with the fractional standard
+//   deviation 0.75 (shape nu = 1 / FSD^2 = 1.778; the gamma form Barker 1996, J. Atmos. Sci. 53, 2289; the global FSD
+//   0.75 +- 0.18 from observations, Shonk et al. 2010, QJRMS 136, 1191). The slab is drawn at the effective thickness
+//   tau_eff = exp(<ln tau>) = chi tau, chi = exp(psi(nu)) / nu (Cahalan et al. 1994's effective-thickness
+//   approximation, here the gamma distribution's geometric mean): psi(1.778) = 0.2687 -> chi 0.736.
+// - Cover pattern: the cell's cover C as a cloud texture (white cells, dark gaps) - f(x) = Phi(a + k z(x)), z the
+//   shapes' noise read CLOUD_FAR_MESO_SCALE times enlarged (a fractal field from ~8 km texels up; prefiltered at the
+//   footprint, cloud_shape_prefiltered) and normalised by its own quantiles at that level (the prefilter tables:
+//   median and the 15.87 / 84.13 % points as -+1 sigma; read at most at their last level), a = Phi^-1(C) sqrt(1 + k^2)
+//   so that the mean over a Gaussian z is C; 0 and 1 kept; k fades to 0 over footprints of 8 - 16 texels (f -> C).
+//   [E: scale 32 and contrast 1.5 - looked at against DSCOVR EPIC 2025-03-20 (trade cumulus 5-20 km cells); a value
+//   noise on a 25-50 km lattice drew square blocks. The pattern is not the data's, only its statistics are; mesoscale
+//   cellular convection is 10-50 km across, Wood & Hartmann 2006, J. Climate 19, 1748.]
+const float CLOUD_FAR_TAU_SPREAD_CHI = 0.736;
+// Fidelity flag (CloudLayer.far_subgrid): false draws the homogeneous slab over the even cover.
+global uniform bool cloud_far_subgrid;
+const float CLOUD_FAR_MESO_SCALE = 32.0;
+const float CLOUD_FAR_MESO_CONTRAST = 1.5;
+// [E] The prefilter levels (log2 of the footprint in the pattern's texels) over which the contrast fades to 0.
+const vec2 CLOUD_FAR_MESO_FADE_LEVELS = vec2(3.0, 4.0);
+// The pattern's reading turned against the shapes' axes: a rotation by 37 deg about (1, 2, 3) / |(1, 2, 3)|.
+const mat3 CLOUD_FAR_MESO_TURN = mat3(vec3(0.8130, 0.5113, -0.2785), vec3(-0.4538, 0.8562, 0.2471),
+		vec3(0.3648, -0.0745, 0.9281));
+
+// The standard normal distribution function (Abramowitz & Stegun 7.1.26 for erf, |error| < 1.5e-7).
+float cloud_far_normal_cdf(float x) {
+	float y = abs(x) * 0.70710678;
+	float t = 1.0 / (1.0 + 0.3275911 * y);
+	float e = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t
+			* exp(-y * y);
+	return x >= 0.0 ? 0.5 * (1.0 + e) : 0.5 * (1.0 - e);
+}
+
+// The tail part of Acklam's quantile approximation (q = sqrt(-2 ln p) of the smaller tail probability).
+float cloud_far_normal_tail(float q) {
+	return (((((-7.784894002430293e-03 * q - 3.223964580411365e-01) * q - 2.400758277161838e+00) * q
+			- 2.549732539343734e+00) * q + 4.374664141464968e+00) * q + 2.938163982698783e+00)
+			/ ((((7.784695709041462e-03 * q + 3.224671290700398e-01) * q + 2.445134137142996e+00) * q
+			+ 3.754408661907416e+00) * q + 1.0);
+}
+
+// The inverse of the standard normal distribution function (Acklam's rational approximation, relative error
+// < 1.2e-9; p in (0, 1)).
+float cloud_far_normal_quantile(float p) {
+	if (p < 0.02425) {
+		return cloud_far_normal_tail(sqrt(-2.0 * log(p)));
+	}
+	if (p > 0.97575) {
+		return -cloud_far_normal_tail(sqrt(-2.0 * log(1.0 - p)));
+	}
+	float q = p - 0.5;
+	float r = q * q;
+	return (((((-3.969683028665376e+01 * r + 2.209460984245205e+02) * r - 2.759285104469687e+02) * r
+			+ 1.383577518672690e+02) * r - 3.066479806614716e+01) * r + 2.506628277459239e+00) * q
+			/ (((((-5.447609879822406e+01 * r + 1.615858368580409e+02) * r - 1.556989798598866e+02) * r
+			+ 6.680131188771972e+01) * r - 1.328068155288572e+01) * r + 1.0);
+}
+
+// The cover pattern's local cover at the Earth-local point p (the pattern lies on the sphere: no shift with the
+// cloud's placement height) for the cell's cover, seen with the footprint (m).
+float cloud_far_meso_cover(vec3 p, float cover, float footprint_m) {
+	if (!cloud_far_subgrid || !(cover > 1.0e-4) || cover >= 1.0 - 1.0e-4) {
+		return cover;
+	}
+	float texel = CLOUD_SHAPE_TILE_H_M * CLOUD_FAR_MESO_SCALE / CLOUD_SHAPE_TEXELS;
+	float level = log2(max(footprint_m, 1.0) / texel);
+	// the contrast fades only far beyond the tables' last level (a footprint of 8 - 16 texels: no sparkle from the
+	// Moon's distance), not with the renderer's resolution (the flat levels' march and the far field meet at the
+	// scaled-space switch with different pixel footprints)
+	float k = CLOUD_FAR_MESO_CONTRAST * (1.0 - smoothstep(CLOUD_FAR_MESO_FADE_LEVELS.x, CLOUD_FAR_MESO_FADE_LEVELS.y,
+			level));
+	if (!(k > 0.0)) {
+		return cover;
+	}
+	level = clamp(level, 0.0, CLOUD_SHAPE_PREFILTER_LEVELS);
+	vec3 q = CLOUD_FAR_MESO_TURN * normalize(p) * (CLOUD_A_M / (CLOUD_SHAPE_TILE_H_M * CLOUD_FAR_MESO_SCALE));
+	float v = cloud_shape_prefiltered(q, level).r;
+	float median = texture(cloud_prefilter_threshold, cloud_prefilter_uv(0.5, level)).r;
+	float plus = texture(cloud_prefilter_threshold, cloud_prefilter_uv(0.1587, level)).r;  // exceeded by 15.87 %
+	float minus = texture(cloud_prefilter_threshold, cloud_prefilter_uv(0.8413, level)).r;
+	float z = (v - median) / max(0.5 * (plus - minus), 1.0e-6);
+	float a = cloud_far_normal_quantile(cover) * sqrt(1.0 + k * k);
+	return cloud_far_normal_cdf(a + k * z);
+}
 
 // The scattering angle (x), its folded azimuth about the light's propagation from the vertical axis (y) and
 // 1 - cos(theta) (z) of a view (core cloud_sun_frame_angles; cloud_scattering_source_mc's geometry with the axis up).
@@ -300,22 +392,27 @@ vec3 cloud_far_cloudy_radiance(vec3 p, vec3 up, vec3 view_prop, float tau, float
 
 // The cloud layer over the ground point g (Earth-local) of the scaled-space Earth: premultiplied colour (rgb) and
 // alpha (a), to blend over the ground's colour as rgb + (1 - a) x ground. sky_eclipse: the eclipse sky's factor there.
-vec4 cloud_far_layer(vec3 g, vec3 sky_eclipse) {
+vec4 cloud_far_layer(vec3 g, vec3 sky_eclipse, float footprint_m) {
 	vec3 camera = atmosphere_camera_hi + atmosphere_camera_lo;
 	vec3 view = normalize(g - camera);
 	// The column texels' B-spline (cloud_column_mean_depth_smooth), as the cloud pass's far tier and the baked flat levels:
 	// the bilinear's creases along the cell edges, sharpened by the cover's non-linear alpha, drew the field's grid as
 	// rectangular blocks (the 1 deg analog from the start view, ~5 pixels a cell; look fixes T2). The placement's
 	// bisection below stays on the bilinear layer centres (as the flat levels' bake).
-	vec2 column_g = cloud_column_mean_depth_smooth(cloud_lat_lon(g), 0.0);
+	// Depth and cover from the fine column (look fixes T7 C: the 1-deg analog set's 0.25 deg column; the snapshot's own
+	// grid otherwise); the height from the layers (the coarse column's B-spline: the seen depth as the same share).
+	vec2 column_g = cloud_column_total_fine(cloud_lat_lon(g));
 	if (!(column_g.x > 0.0)) {
 		return vec4(0.0);
 	}
 	// The height to place the cloud at (cloud_far_seen_depth).
 	float mu_g = max(-dot(view, cloud_geodetic_up(g)), CLOUD_FAR_MU_MIN);
-	float h = cloud_far_depth_height(cloud_lat_lon(g), cloud_far_seen_depth(column_g, mu_g));
+	float coarse_g = cloud_column_mean_depth_smooth(cloud_lat_lon(g), 0.0).x;
+	float h = coarse_g > 0.0
+			? cloud_far_depth_height(cloud_lat_lon(g), cloud_far_seen_depth(column_g, mu_g) * coarse_g / column_g.x)
+			: CLOUD_FAR_DEFAULT_HEIGHT_M;
 	vec3 p = cloud_far_crossing(g, view, h);
-	vec2 column = cloud_column_mean_depth_smooth(cloud_lat_lon(p), 0.0);
+	vec2 column = cloud_column_total_fine(cloud_lat_lon(p));
 	if (!(column.x > 0.0)) {
 		return vec4(0.0);
 	}
@@ -323,7 +420,10 @@ vec4 cloud_far_layer(vec3 g, vec3 sky_eclipse) {
 	vec3 view_prop = -view;
 	float mu = max(dot(view_prop, up), CLOUD_FAR_MU_MIN);
 	float cover = max(cloud_column_beam_cover(column, mu), CLOUD_MIN_FRACTION);
-	float tau = column.x / cover;  // the cloudy part's vertical depth
+	// the cloudy part's vertical depth at the effective thickness of the in-cloud spread (CLOUD_FAR_TAU_SPREAD_CHI)
+	float tau = (cloud_far_subgrid ? CLOUD_FAR_TAU_SPREAD_CHI : 1.0) * column.x / cover;
+	// the cover as mesoscale cells (cloud_far_meso_cover; the in-cloud depth kept: the water's mean kept)
+	cover = cloud_far_meso_cover(p, cover, footprint_m);
 	float alpha = cover * (1.0 - exp(-tau / mu));
 	vec3 radiance = cloud_far_cloudy_radiance(p, up, view_prop, tau, column.y, sky_eclipse);
 	vec3 air_transmittance;

@@ -65,6 +65,16 @@ double cloud_texel_extinction_per_m(std::uint8_t high, std::uint8_t low);
 // takes a point's column from the centre above plus the trapezoid of the grid-mean extinction down to it, its cover the
 // larger of the centre's and the point's fraction: the sky factor and the Sun's diffuse light (cloud_optics.hpp).
 std::vector<std::uint8_t> cloud_render_column_texels(const WeatherSnapshot& snapshot);
+// The fine column texture (look fixes T7 C): RG8, R the grid-mean optical depth from 20 km down to the ellipsoid
+// (0 m: the column texels' layer-0 centre plus layer 0's extinction over the 125 m below it - the shader's column at
+// height 0, cloud_snapshot_column), coded as the column texels' R; G the column's largest cloud fraction code. The
+// snapshot's stored fine column when it has one (WeatherSnapshot::fine_column_texels, a downsampled set), else
+// computed from its own grid (rows x columns). Size: fine_column_size.
+std::vector<std::uint8_t> cloud_render_fine_column_texels(const WeatherSnapshot& snapshot);
+struct FineColumnSize {
+    int rows = 0, columns = 0;
+};
+FineColumnSize fine_column_size(const WeatherSnapshot& snapshot);
 
 // Base texture (static clouds Task 7: cumulus bases at the lifting condensation level): RG32F, rows x columns, one
 // texel (two floats) per cell, no layers. R: the cell's flat cloud base, ground + lifting condensation level as a

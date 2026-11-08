@@ -12,12 +12,14 @@
 //   float32[rows x columns]            the cumulus liquid water path added by the build (kg/m^2, diagnostic)
 //   float32[rows x columns]            the condensate path the build dropped above the in-cloud bound (kg/m^2, diagnostic)
 //   uint8[layers x rows x columns x 4] render texels (weather_snapshot.hpp encoding)
+//   int32    fine_rows, fine_columns (0, 0: none)
+//   uint8[fine_rows x fine_columns x 2] the fine column (WeatherSnapshot::fine_column_texels; a downsampled set)
 //   uint64   FNV-1a 64 checksum of every byte before it
 // Version 1 (no LCL block), 2 (unknown LCL stored as 0, texels without the LCL redistribution) and 3 (only the lowest
 // liquid run redistributed, a trace counted as cloud; downsampled levels averaged instead of the box's lowest base), 4
 // (a deck far above merged into the lifted cloud), 5 (no total cloud cover, the cover not scaled to it, no cumulus
 // water from the adiabatic parcel) and 6 (constant adiabatic fraction, no in-cloud bound, trace layers scaled, no
-// dropped-condensate block) and 7 (the cumulus water uncapped) are refused like any other version: the caller rebuilds / re-downloads it.
+// dropped-condensate block) 7 (the cumulus water uncapped) and 8 (no fine column) are refused like any other version: the caller rebuilds / re-downloads it.
 // A file that is short, long, damaged (checksum) or of another version is never read.
 
 #include <cstdint>
@@ -28,7 +30,7 @@
 
 namespace starsim::environment {
 
-inline constexpr std::uint32_t weather_snapshot_file_version = 8;
+inline constexpr std::uint32_t weather_snapshot_file_version = 9;
 inline constexpr const char* weather_snapshot_file_extension = ".wthr";
 
 // Writes to a unique temp file next to `file` and renames it into place; first removes the stale temp files of killed

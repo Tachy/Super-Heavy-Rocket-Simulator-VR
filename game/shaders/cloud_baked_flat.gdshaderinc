@@ -464,8 +464,6 @@ bool cloud_baked_flat_shade(int si, CloudRay ray, vec3 dir, vec3 eye, float t_fr
 	float slant = CLOUD_OVERLAP_SLANT * max(sqrt(max(1.0 - mu * mu, 0.0)) / mu - CLOUD_OVERLAP_ONSET_COT, 0.0);
 	float cov = 1.0 - pow(max(1.0 - clamp(f.x, 0.0, 1.0), 0.0), 1.0 + slant / n_v);
 	float tau_v = f.y / max(cover_v, CLOUD_MIN_FRACTION);
-	alpha = cov * (1.0 - exp(-tau_v / mu));
-	float tau_light = tau_v;
 	// the pattern faded out with the footprint and toward the scaled-space far field (no pattern there: no pop at the
 	// switch, CLOUD_BAKED_FLAT_SWITCH_FADE_M)
 	float w_pattern = (1.0 - smoothstep(CLOUD_BAKED_FLAT_PATTERN_FADE_M.x, CLOUD_BAKED_FLAT_PATTERN_FADE_M.y, footprint))
@@ -473,6 +471,14 @@ bool cloud_baked_flat_shade(int si, CloudRay ray, vec3 dir, vec3 eye, float t_fr
 #ifdef CLOUD_BAKED_DIAG_NO_PIXEL_PATTERN
 	w_pattern = 0.0;
 #endif
+	// where the shapes' pattern has faded, the far field's sub-grid structure (look fixes T7 B, cloud_far.gdshaderinc):
+	// the even cover as mesoscale cells, the slab at the effective thickness of the in-cloud spread
+	if (cloud_far_subgrid && w_pattern < 1.0) {
+		cov = mix(cloud_far_meso_cover(p, cov, footprint), cov, w_pattern);
+		tau_v *= mix(CLOUD_FAR_TAU_SPREAD_CHI, 1.0, w_pattern);
+	}
+	alpha = cov * (1.0 - exp(-tau_v / mu));
+	float tau_light = tau_v;
 	if (w_pattern > 0.0) {
 		// the pattern read on a sphere of fixed height (CLOUD_BAKED_FLAT_PATTERN_HEIGHT_M), not at p: where the
 		// column's height rises steeply against the view the shapes were dragged along it (smeared)
@@ -546,7 +552,7 @@ float cloud_baked_flat_far_weight(int si, CloudRay ray, vec3 dir, vec3 eye) {
 // the march kernels with CLOUD_BAKED_FAR_FALLBACK (CloudBaked: above FLAT_FINE_HEIGHT_M - a camera below moves at most
 // ~40 km/s, the 2 deg drift allowance lasts > 5 s against a re-bake's ~0.3 s): its code raised the march's register
 // peak - ground +0.14 ms even when not taken (inside the set's function ground / deck +0.15 / +0.5 ms).
-vec4 cloud_baked_flat_far_layer(CloudRay ray, vec3 dir, vec3 eye, float scene_m, out float dist) {
+vec4 cloud_baked_flat_far_layer(CloudRay ray, vec3 dir, vec3 eye, float scene_m, float pixel_angle, out float dist) {
 	dist = 0.0;
 	vec2 ground = cloud_sphere_crossing(ray, 0.0);
 	if (!(ground.x <= ground.y && ground.x > 0.0)) {
@@ -559,7 +565,7 @@ vec4 cloud_baked_flat_far_layer(CloudRay ray, vec3 dir, vec3 eye, float scene_m,
 	if ((dist - scene_m) * mu > CLOUD_BAKED_FLAT_SCENE_DEPTH_M) {
 		return vec4(0.0);
 	}
-	return cloud_far_layer(g, vec3(1.0));
+	return cloud_far_layer(g, vec3(1.0), pixel_angle * ground.x / sqrt(max(mu, 0.04)));
 }
 
 #endif

@@ -58,11 +58,11 @@ only with HTTP 206 (a 200 full-file answer is rejected), an unranged one only wi
 - **Total cloud cover** (static clouds Task 9c): ERA5 single-level `total_cloud_cover` (one more ~1.5 MB file per hour,
   ARCO store; no existing request carries it), GFS `TCDC:entire atmosphere:<lead>` (the instantaneous record, not the
   "0-6 hour ave"; ~0.8 MB). The build scales the layers' cover to it and adds the cumulus water
-  (`weather-clouds.md`). Stored in the `.wthr` file: format version 8 (7: the cumulus water uncapped) = ground block, the float32 LCL block, the float32
+  (`weather-clouds.md`). Stored in the `.wthr` file: format version 9 (8: no fine column; 7: the cumulus water uncapped) = ground block, the float32 LCL block, the float32
   tcc block (-1 unknown), the float32 added-cumulus-water block and the float32 dropped-condensate block (kg/m^2,
-  diagnostics; +16 MB at 0.25 deg for the four), then the texels. Older versions are refused (earlier versions:
+  diagnostics; +16 MB at 0.25 deg for the four), then the texels, then the fine column (look fixes T7 C: int32 rows, columns, RG8 per cell; a downsampled set carries its full-resolution column there - the analog files 0.25 deg, +2.1 MB each, 48 files 442 -> 562 MB; 0 x 0 at full resolution). Older versions are refused (earlier versions:
   `docs/history/weather-clouds.md`).
-- **Old files heal**: `read_weather_snapshot` refuses version-1 .. -7 files (and anything else of another version). A
+- **Old files heal**: `read_weather_snapshot` refuses version-1 .. -8 files (and anything else of another version). A
   runtime-cache file is then treated as unloadable: deleted and rebuilt from a fresh download (the existing retry path,
   "a snapshot file that cannot be loaded is deleted and rebuilt"), the analog baseline is the shipped
   `data/weather/analog` (regenerated with `python tools/data_pipeline/fetch.py --force weather_analog`; the installer

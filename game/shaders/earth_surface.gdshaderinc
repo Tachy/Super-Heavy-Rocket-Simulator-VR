@@ -131,7 +131,14 @@ void fragment() {
 		vec3 in_scatter = atm_to_point_offset(offset, transmittance);
 		ALBEDO = day * transmittance + in_scatter;
 #ifdef EARTH_CLOUDS
-		vec4 layer = cloud_far_layer(local_position, eclipse_factor);  // premultiplied, as the cloud pass
+		// (the footprint for the cover pattern's prefilter level: the flat levels' rule, the pixel angle x the distance /
+		// sqrt(mu) - the same pattern on both sides of the scaled-space switch)
+		vec3 to_point = local_position - (atmosphere_camera_hi + atmosphere_camera_lo);
+		vec3 view_dir = normalize(to_point);
+		float pixel_angle = max(length(dFdx(view_dir)), length(dFdy(view_dir)));
+		float footprint = pixel_angle * length(to_point)
+				/ sqrt(max(abs(dot(view_dir, cloud_geodetic_up(local_position))), 0.04));
+		vec4 layer = cloud_far_layer(local_position, eclipse_factor, footprint);  // premultiplied, as the cloud pass
 		ALBEDO = layer.rgb + (1.0 - layer.a) * ALBEDO;
 #endif
 	} else {

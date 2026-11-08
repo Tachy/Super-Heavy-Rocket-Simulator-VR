@@ -2,7 +2,8 @@
 
 For the reference year (2025) the 15th of each month at 00 / 06 / 12 / 18 UTC (48 hours) is downloaded from the
 ARCO-ERA5 Zarr store (six timed variables + the static orography, ~150 MB raw per hour, blosc chunks), turned into a
-downsampled weather cache file by build/core/weather_snapshot.exe (--downsample 4: 1 deg, ~8.6 MB) and the raw files are
+downsampled weather cache file by build/core/weather_snapshot.exe (--downsample 4: 1 deg plus the 0.25 deg fine column,
+~11.7 MB) and the raw files are
 deleted again (the static orography file is kept once).
 
 URL and file-name rules mirror core/src/environment/weather_source.cpp (era5_requests / era5_file_name) exactly; the

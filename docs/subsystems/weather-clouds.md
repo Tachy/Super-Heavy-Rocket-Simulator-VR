@@ -352,11 +352,18 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   before - one shader with a run-time flag changed the code generation, ~1400 pixels by up to 4 half-float ulps). A pixel
   there covers >= 7 km; the column replaces the march, with the same field and light transport in its plane-parallel
   limit:
-  - the column above the ground point G from the column texels' cubic B-spline (`cloud_column_mean_depth_smooth`, as the
-    cloud pass's far tier and the baked flat levels; look fixes T2 2026-11-07: the bilinear's creases along the cell
-    edges, sharpened by the cover's non-linear alpha, drew the 1 deg analog as rectangular blocks of ~5 pixels in the
-    start view; +0.05 ms GPU there, 1600 x 900; the placement's bisection stays on the bilinear layer centres)
-    (grid-mean depth tau, largest fraction f); the view's
+  - the column above the ground point G from the **fine column** (look fixes T7 C, user 2026-11-08: the 1-deg analog
+    drew the Earth from space blurred, ERA5 sharp): `environment::cloud_render_fine_column_texels`, RG8 per cell of the
+    snapshot's full-resolution grid - the analog files carry their 0.25 deg column (file format 9, +2.1 MB each), a
+    snapshot at its own resolution gives its own - R the grid-mean depth from 20 km down to 0 m (the column texels'
+    depth code), G the column's largest fraction; globals `cloud_fine_before` / `_after` (+ `_size`), read with the cubic
+    B-spline (`cloud_column_total_fine`; look fixes T2 2026-11-07: the bilinear's creases along the cell edges,
+    sharpened by the cover's non-linear alpha, drew the 1 deg analog as rectangular blocks of ~5 pixels in the start
+    view) (grid-mean depth tau, largest fraction f); the placement height from the layers (the coarse column's
+    B-spline, the seen depth as the same share of it; `CLOUD_FAR_DEFAULT_HEIGHT_M` 2 km [E] where the coarse column is
+    empty, the bisection on the bilinear layer centres). The flat levels' bake takes the fine column where its cells
+    draw the column's even cover (`w_fine` = the pattern's fade over cells of 6.4-12.8 km; the shapes keep the coarse
+    column where they place the cover, so the volume's 40-60 km hand-over is unchanged); the view's
     cover C_v = the beam cover of f at the view's cosine mu (`cloud_beam_cover_of`: the rule fitted to the shapes'
     shadows, for any line through the layer); independent columns: clear on 1 - C_v, the in-cloud depth tau / C_v;
   - the cloud's place: the view ray's crossing of the height where the column's depth from its top reaches the
@@ -371,6 +378,16 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
     the slab and underestimated it) x the sky irradiance there; seen from below (view cosine < 0, the cloud pass's
     flat-level column model under a layer above the eye) the same sources integrated from the slab's base, attenuated by exp(-w (tau - t) /
     |mu|): the diffusely transmitted light of the base;
+  - **sub-grid structure** (look fixes T7 B, user 2026-11-08; fidelity flag `CloudLayer.far_subgrid` / global
+    `cloud_far_subgrid`, default on; render_check `--no_far_subgrid`): the in-cloud depth is drawn at the effective
+    thickness of a gamma-distributed spread, tau_eff = chi tau, chi = exp(psi(nu)) / nu = 0.736 for the fractional
+    standard deviation 0.75 [S: Shonk et al. 2010 global FSD; gamma form Barker 1996; effective-thickness approximation
+    Cahalan et al. 1994] (`CLOUD_FAR_TAU_SPREAD_CHI`), and the cover C_v as a cloud texture: f = Phi(a + k z), z the
+    shapes' noise read 32 x enlarged (8 km texels; prefiltered at the footprint) normalised by its prefilter tables'
+    median and +-1 sigma points, a = Phi^-1(C_v) sqrt(1 + k^2) (the mean over z is C_v; 0 and 1 kept), k 1.5 fading to
+    0 beyond the tables' last level [E] (`cloud_far_meso_cover`). The flat levels take both where the shapes' pixel
+    pattern has faded (weight 1 - w_pattern), so the 40-60 km hand-over (w_pattern 1 there) is unchanged and the
+    scaled-space switch (w_pattern 0 there) meets the far field. Numbers: Validation "Sub-grid structure";
   - composite as the cloud pass: alpha = C_v (1 - exp(-tau / (C_v mu))), colour = T_air C_v L + alpha S_air over
     (1 - alpha) x the ground; the ground lit through the column (`cloud_ground_light`'s column tier, the terrain's
     beyond 140 km: direct, the Sun's diffuse part, the sky's; the Moon likewise).
@@ -656,6 +673,19 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
 
 ## Validation
 
+- **Sub-grid structure and the fine column** (look fixes T7 B / C, 2026-11-08; Earth from DSCOVR's direction at
+  2025-03-20 14:28 UTC against EPIC; `screenshots/look_fixes/t7/sheet_stepCB_epic1430.png`, `crop_stepCB.png`; disc
+  statistics of the display PNG, linear Y over the disc's p99 - dark < 0.15 / grey / white >= 0.5 - and the Y
+  correlation with EPIC; scripts `screenshots/look_fixes/t7/scripts/`): EPIC 0.37 / 0.50 / 0.13. ERA5 0.25 deg: before
+  T7 0.03 / 0.35 / 0.62 (corr 0.41), cumulus cap 0.03 / 0.43 / 0.54 (0.50), + sub-grid 0.06 / 0.50 / 0.44 (0.47).
+  Analog (Mar 15 12 UTC): before 0.01 / 0.29 / 0.71 (corr 0.16), cap + fine column 0.02 / 0.45 / 0.53 (0.20), +
+  sub-grid 0.06 / 0.51 / 0.43 (0.18) - the analog's 0.25 deg column draws the same structure detail as an ERA5 hour.
+  Insolation-weighted cloud albedo effect of the column model (independent columns, `scripts/cre.py`): 0.32 before,
+  0.27 capped, 0.24 at the effective thickness (CERES ~0.14; the rest: conservative slabs, r_e 10 um, no absorption).
+  The pattern's mean cover (numpy model of the transform on 400 000 sphere points): within 0.007 of C. cloud_far_check
+  PASS: section 3 broken cf 0.4 across the scaled-space switch worst 1.24 % (a contrast that faded with the renderer's
+  pixel size gave 10 %: the flat levels' march and the far field differ in footprint), decks 0.15 / 0.42 %; section 5
+  (the 40-60 km flat re-bake) 1.42 % mean as before.
 - In-cloud optical depths (static clouds Task 10, the 48 shipped analog files, format 7; the body-core vertical tau of
   each column's contiguous cloudy run, sum of beta / m(cf) dz - the renderer's plateau -, weighted by cos(lat) x the
   run's max cf; script and table: sdd `tau_inv/t10_cloud_tau.py`, `t10_analog_v7.log`). p10 / p50 / p90:

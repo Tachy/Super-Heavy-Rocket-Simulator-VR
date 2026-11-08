@@ -2,6 +2,8 @@
 
 #include "starsim/environment/weather_snapshot.hpp"
 
+#include "starsim/environment/cloud_render_texels.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -996,6 +998,16 @@ WeatherCell WeatherSnapshot::at(double latitude_rad, double longitude_rad, doubl
     return out;
 }
 
+void WeatherSnapshot::set_fine_column(int rows, int columns, std::vector<std::uint8_t> texels) {
+    if (rows < 0 || columns < 0 || texels.size() != static_cast<std::size_t>(rows) * columns * 2 ||
+        ((rows == 0) != (columns == 0))) {
+        throw std::invalid_argument("weather snapshot: fine column size does not match its grid");
+    }
+    fine_rows_ = rows;
+    fine_columns_ = columns;
+    fine_column_ = std::move(texels);
+}
+
 WeatherSnapshot WeatherSnapshot::downsampled(int factor) const {
     if (factor < 1 || (rows_ - 1) % factor != 0 || columns_ % factor != 0) {
         throw std::invalid_argument("weather snapshot: grid not divisible by the downsampling factor");
@@ -1062,6 +1074,7 @@ WeatherSnapshot WeatherSnapshot::downsampled(int factor) const {
         }
     });
     out.make_poles_uniform();
+    if (factor > 1) out.set_fine_column(rows_, columns_, cloud_render_fine_column_texels(*this));
     return out;
 }
 

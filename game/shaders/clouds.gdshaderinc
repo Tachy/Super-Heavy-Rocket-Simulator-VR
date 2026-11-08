@@ -853,6 +853,50 @@ vec2 cloud_column_mean_depth_smooth(vec2 lat_lon, float height_m) {
 	return depth;
 }
 
+// The fine column (look fixes T7 C; core cloud_render_fine_column_texels): RG8 per cell of the snapshot's
+// full-resolution grid - the 1-deg analog set carries its 0.25 deg column, a snapshot at its own resolution its own -
+// R the grid-mean depth from 20 km down to 0 m (the column texels' depth code), G the column's largest fraction.
+global uniform sampler2D cloud_fine_before : filter_nearest, repeat_enable;
+global uniform sampler2D cloud_fine_after : filter_nearest, repeat_enable;
+global uniform vec2 cloud_fine_before_size;  // (columns, rows)
+global uniform vec2 cloud_fine_after_size;
+
+// One snapshot's fine column at (lat, lon): the cubic B-spline over the 4 x 4 cells around (cloud_column_texel_smooth's
+// rule, decoded first): x the grid-mean depth, y the largest fraction.
+vec2 cloud_fine_column_smooth(sampler2D fine, vec2 size, vec2 lat_lon) {
+	float x = lat_lon.y / (2.0 * CLOUD_PI) * size.x;
+	float y = clamp((0.5 * CLOUD_PI - lat_lon.x) / (CLOUD_PI / (size.y - 1.0)), 0.0, size.y - 1.0);
+	float x0 = floor(x);
+	float y0 = floor(y);
+	vec4 wx = cloud_bspline_weights(x - x0);
+	vec4 wy = cloud_bspline_weights(y - y0);
+	int rows = int(size.y);
+	vec2 sum = vec2(0.0);
+	for (int j = 0; j < 4; j++) {
+		int r = clamp(int(y0) - 1 + j, 0, rows - 1);
+		vec2 row = vec2(0.0);
+		for (int i = 0; i < 4; i++) {
+			int c = int(mod(x0 - 1.0 + float(i), size.x));
+			vec2 t = texelFetch(fine, ivec2(c, r), 0).rg;
+			row += wx[i] * vec2(cloud_decode_depth(t.x), t.y);
+		}
+		sum += wy[j] * row;
+	}
+	return sum;
+}
+
+// The blended fine column from 20 km down to 0 m (cloud_column_mean_depth_smooth at height 0 on the fine grid).
+vec2 cloud_column_total_fine(vec2 lat_lon) {
+	vec2 depth = vec2(0.0);
+	if (cloud_blend < 1.0) {
+		depth += (1.0 - cloud_blend) * cloud_fine_column_smooth(cloud_fine_before, cloud_fine_before_size, lat_lon);
+	}
+	if (cloud_blend > 0.0) {
+		depth += cloud_blend * cloud_fine_column_smooth(cloud_fine_after, cloud_fine_after_size, lat_lon);
+	}
+	return depth;
+}
+
 // The cover to use (core CloudColumnDepths::cover): 0 without cloud, at least half a fraction code step with it.
 float cloud_column_cover(vec2 column) {
 	return column.x > 0.0 ? clamp(column.y, CLOUD_MIN_FRACTION, 1.0) : 0.0;

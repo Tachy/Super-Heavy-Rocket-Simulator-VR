@@ -469,6 +469,56 @@ TEST_CASE("Uniform slab and downsampling", "[weather]") {
     CHECK(coarse.at(-0.4, 2.0, 1500.0).liquid_water_kg_m3 == Catch::Approx(inside.liquid_water_kg_m3).epsilon(1e-9));
 }
 
+TEST_CASE("A downsampled snapshot keeps the full-resolution column and writes it to its file", "[weather]") {
+    // Look fixes T7 C: the fine column (RG8: depth from 20 km to 0 m, largest fraction) of the full grid.
+    const int rows = 9, columns = 16;
+    const auto& cols = era5_columns().columns;
+    auto fields = era5_fields(rows, columns, [&](int r, int c) -> const Era5Column& { return cols[(r + 2 * c) % 6]; });
+    const auto full = WeatherSnapshot::from_era5({}, fields, coarse_geoid());
+    // At its own resolution: no stored fine column; the texture is the full grid's, R the column texels' layer-0 depth
+    // plus layer 0's extinction over the 125 m below its centre, G the largest fraction of the column.
+    CHECK(full.fine_column_texels().empty());
+    const auto own = cloud_render_fine_column_texels(full);
+    REQUIRE(own.size() == static_cast<std::size_t>(rows) * columns * 2);
+    CHECK(fine_column_size(full).rows == rows);
+    CHECK(fine_column_size(full).columns == columns);
+    const auto column = cloud_render_column_texels(full);
+    int checked = 0;
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < columns; ++c) {
+            const std::size_t cell = static_cast<std::size_t>(r) * columns + c;
+            CHECK(own[2 * cell + 1] == column[2 * cell + 1]);  // layer 0's largest fraction above = the column's
+            const auto layer0 = full.at(node_latitude(r, rows), c * 2.0 * constants::pi / columns, 125.0);
+            const double extra = 125.0 * cloud_extinction_per_m(layer0.liquid_water_kg_m3, layer0.ice_water_kg_m3);
+            const double expected = decode_cloud_optical_depth(column[2 * cell]) + extra;
+            if (expected > 0.05) {
+                // one 8-bit log code step each way (~5.6 %) for the two codings
+                CHECK(decode_cloud_optical_depth(own[2 * cell]) == Catch::Approx(expected).epsilon(0.06));
+                ++checked;
+            }
+        }
+    }
+    CHECK(checked > 0);
+    // Downsampled: the coarse snapshot carries exactly that texture and its grid; the file keeps it.
+    const auto coarse = full.downsampled(4);
+    CHECK(coarse.fine_rows() == rows);
+    CHECK(coarse.fine_columns() == columns);
+    CHECK(coarse.fine_column_texels() == own);
+    CHECK(cloud_render_fine_column_texels(coarse) == own);
+    const auto file = unique_temp("weather_fine_column");
+    write_weather_snapshot(file, coarse);
+    const auto back = read_weather_snapshot(file);
+    REQUIRE(back.has_value());
+    CHECK(back->fine_rows() == rows);
+    CHECK(back->fine_columns() == columns);
+    CHECK(back->fine_column_texels() == own);
+    CHECK(back->render_texels() == coarse.render_texels());
+    std::filesystem::remove(file);
+    // A size that does not match is refused.
+    WeatherSnapshot copy = coarse;
+    CHECK_THROWS_AS(copy.set_fine_column(2, 2, std::vector<std::uint8_t>(7, 0)), std::invalid_argument);
+}
+
 TEST_CASE("Snapshot files round-trip; damaged ones are refused", "[weather]") {
     const int rows = 9, columns = 16;
     const auto& cols = era5_columns().columns;
@@ -628,7 +678,7 @@ TEST_CASE("A format version 1 snapshot file is refused", "[weather]") {
     // The same bytes with the right version number (and the missing block) are not a valid version 2 file either.
     const std::uint32_t two = 2;
     // Version 2 stored unknown levels as 0 and had no base redistribution; version 3 moved only the lowest liquid run; version 4 merged a deck far above the lifted cloud.
-    CHECK(weather_snapshot_file_version == 8);  // 7: cumulus water uncapped; 6: no dropped-condensate block; 5: no total cloud cover / cumulus water
+    CHECK(weather_snapshot_file_version == 9);  // 8: no fine column; 7: cumulus water uncapped; 6: no dropped-condensate block; 5: no total cloud cover / cumulus water
     std::memcpy(bytes.data() + 8, &two, sizeof(two));
     bytes.resize(bytes.size() - sizeof(std::uint64_t));
     hash = 14695981039346656037ull;

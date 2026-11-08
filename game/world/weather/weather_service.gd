@@ -670,7 +670,7 @@ func _switch_if_ready() -> void:
 	snapshots_changed.emit(_loaded[files[0]], _loaded[files[1]])
 	if not light_driven_by_layer:  # nobody uploads them: do not keep ~230 MB of texels per snapshot
 		for file: String in files:
-			for key: String in ["cloud_texels", "cloud_ice_texels", "cloud_column_texels"]:
+			for key: String in ["cloud_texels", "cloud_ice_texels", "cloud_column_texels", "cloud_fine_column_texels"]:
 				_loaded[file].erase(key)
 
 
