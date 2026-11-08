@@ -1245,6 +1245,82 @@ TEST_CASE("3D Sun light on an isolated cumulus", "[weather]") {
     }
 }
 
+TEST_CASE("3D sky light on an isolated cumulus", "[weather]") {
+    const math::Vec3 up = {0.0, 0.0, 1.0};
+    // A horizontally uniform slab: every ring path is t / mu_d long - the column source exactly.
+    for (double column : {10.0, 60.0}) {
+        for (double t : {0.0, 0.5, 2.0, 8.0, 40.0}) {
+            const double tv = std::min(t, column);
+            const double ring[cloud_sky_ring_azimuths] = {tv / cloud_sky_ring_sin, tv / cloud_sky_ring_sin,
+                                                           tv / cloud_sky_ring_sin, tv / cloud_sky_ring_sin};
+            for (const math::Vec3& view : {math::normalized(math::Vec3{-0.3, 0.2, 0.8}), math::Vec3{1.0, 0.0, 0.0},
+                                           math::normalized(math::Vec3{0.1, -0.4, -0.9})}) {
+                CHECK(cloud_sky_scattering_source_3d(view, up, ring, tv, column) ==
+                      Approx(cloud_sky_scattering_source(math::dot(view, up), tv, column)).epsilon(1e-9));
+            }
+        }
+    }
+    // A small thin puff (tau 0.2 every way): the single-scattered mean intensity of the upper hemisphere, L / 2 - the
+    // column source at the top of a vanishing slab (sigma = 2 - T -> 1), not each face's normal incidence (2.1 x).
+    {
+        const double ring[cloud_sky_ring_azimuths] = {0.2, 0.2, 0.2, 0.2};
+        const math::Vec3 view = {1.0, 0.0, 0.0};
+        const double puff = cloud_sky_scattering_source_3d(view, up, ring, 0.2, 0.4);
+        const double top = cloud_sky_scattering_source(0.0, 0.0, 0.4);
+        report("3D sky: thin puff %.5f, column top %.5f, k / (2 pi) %.5f\n", puff, top,
+               cloud_transport_scale() / c::two_pi);
+        CHECK(puff <= top * (1.0 + 1e-12));
+        CHECK(puff == Approx(cloud_transport_scale() / c::two_pi).epsilon(0.15));
+    }
+    // The ring directions: unit, at the ring's elevation, symmetric about up.
+    math::Vec3 sum = {0.0, 0.0, 0.0};
+    for (int i = 0; i < cloud_sky_ring_azimuths; ++i) {
+        const math::Vec3 d = cloud_sky_ring_direction(up, i);
+        CHECK(math::norm(d) == Approx(1.0).epsilon(1e-12));
+        CHECK(math::dot(d, up) == Approx(cloud_sky_ring_sin).epsilon(1e-12));
+        sum = sum + d;
+    }
+    CHECK(math::norm(sum - up * (cloud_sky_ring_azimuths * cloud_sky_ring_sin)) < 1e-9);
+
+    // A thick cumulus tower (vertical cylinder of radius 600 m from -600 to +600 m, soft edges over 100 m, in-cloud
+    // extinction 0.03 /m: tau ~33 top to base). Points 30 m inside its edges' ramp at the flank (middle height: deep
+    // in the column) and below its top; the camera level with the flank point.
+    const double radius = 600.0, thick = 0.03, edge = 100.0;
+    auto thick_at = [&](const math::Vec3& p) {
+        const double inside = std::min(radius - std::hypot(p.x, p.y), radius - std::abs(p.z));
+        return thick * cloud_edge_ramp(inside / edge);
+    };
+    auto integrate = [&](const math::Vec3& from, const math::Vec3& dir) {
+        double tau = 0.0;
+        const double ds = 0.05;
+        for (double s = 0.5 * ds; s < 2.0 * radius; s += ds) tau += thick_at(from + dir * s) * ds;
+        return tau;
+    };
+    const double column = integrate(math::Vec3{0.0, 0.0, -radius}, up);
+    auto sources = [&](const math::Vec3& p, const math::Vec3& view, double& column_model) {
+        double ring[cloud_sky_ring_azimuths];
+        for (int i = 0; i < cloud_sky_ring_azimuths; ++i) ring[i] = integrate(p, cloud_sky_ring_direction(up, i));
+        const double t_v = integrate(p, up);
+        column_model = cloud_sky_scattering_source(math::dot(view, up), t_v, column);
+        return cloud_sky_scattering_source_3d(view, up, ring, t_v, column);
+    };
+    const math::Vec3 flank = math::normalized(math::Vec3{1.0, 1.0, 0.0}) * (radius - edge - 30.0);  // faces a ring dir.
+    const math::Vec3 top = math::Vec3{0.0, 0.0, 1.0} * (radius - edge - 30.0);
+    double flank_column = 0.0, top_column = 0.0;
+    const double flank_3d = sources(flank, math::normalized(math::Vec3{1.0, 1.0, 0.0}), flank_column);
+    const double top_3d = sources(top, up, top_column);
+    report("3D sky: flank %.5f (column model %.5f), top %.5f (column model %.5f), column tau %.1f\n", flank_3d,
+           flank_column, top_3d, top_column, column);
+    // The flank gets its own sky beside the deep column's field, at most a top's (same view: no plane receives more
+    // than the horizontal irradiance).
+    const double top_same_view = cloud_sky_scattering_source(math::dot(math::normalized(math::Vec3{1.0, 1.0, 0.0}), up),
+                                                             0.0, column);
+    CHECK(flank_3d > 1.2 * flank_column);  // measured 1.26 (0.72 of a top seen the same way; column model 0.57)
+    CHECK(flank_3d <= top_same_view * (1.0 + 1e-12));
+    // The top keeps the column source: its ring paths run through the deck-like top as through a slab.
+    CHECK(top_3d == Approx(top_column).epsilon(0.1));
+}
+
 TEST_CASE("Sun transmittance through a uniform slab", "[weather]") {
     // One 1-km layer (1-2 km: four whole 250 m layers) of liquid water, everywhere. The snapshot's profile is linear
     // between layer centres, so its vertical integral is the slab's (equal layer thickness around it).

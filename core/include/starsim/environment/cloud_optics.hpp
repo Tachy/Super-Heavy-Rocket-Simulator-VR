@@ -170,6 +170,35 @@ double cloud_scattering_source_3d(const math::Vec3& sun_direction, const math::V
 // The entry-surface cosine mu_e of the header (exposed for the shader port's check).
 double cloud_entry_cosine(double sun_cos_zenith, double sun_optical_depth, double vertical_depth_from_top);
 
+// 3D sky light (look fixes, 2026-11-08; game/shaders/cloud_baked_light_bake.gdshaderinc cloud_baked_sky_source_3d is
+// its port - change them together). The column sky source above lit a cumulus flank deep below the top with the
+// diffuse field of a point that deep in a slab, while the Sun's light entered through the flank (3D Sun light). The
+// sky's horizontal irradiance is split into an isotropic sky's cos-weighted shares: the zenith band (elevations
+// 50-90 deg, cloud_sky_zenith_share) on the vertical column as before, the rest from cloud_sky_ring_azimuths
+// directions at the elevation of sine cloud_sky_ring_sin, each solved like the 3D Sun as diffuse incidence on the
+// tilted column it entered: mu_e = cloud_entry_cosine(mu_d, tau_d, t_v), source x mu_e / mu_d (the share's
+// irradiance on the entry surface), depth mu_e tau_d, the I1 axis the entry normal - divided by the total weight
+// G = share_z + sum share_i mu_e / mu_d where G > 1: under an isotropic sky no plane receives more than the horizontal
+// irradiance, and the tilted columns are independent (light entered through several faces of a convex shape - a
+// small puff, a corner - would otherwise count each face's normal incidence: a thin puff 2.1x its single-scattered
+// mean intensity L / 2, exact with the division). A horizontally uniform slab (tau_d = t_v / mu_d: G = 1) gives the
+// column source exactly.
+// [S: isotropic radiance L: a band of elevations e1..e2 gives the horizontal irradiance pi L (sin^2 e2 - sin^2 e1):
+// 50-90 deg 1 - sin^2 50 deg = 0.4132]
+inline constexpr double cloud_sky_zenith_share = 0.4132;
+inline constexpr int cloud_sky_ring_azimuths = 4;
+// [E] The ring at 20 deg elevation: its share (1 - 0.4132) / 4 x 1 / sin 20 deg = 0.43 of the horizontal irradiance on
+// a vertical flank facing one ring direction - the isotropic sky's 0-50 deg band gives a vertical face 0.434
+// (2 L integral cos^2 e de over 0-50 deg / (pi L)).
+inline constexpr double cloud_sky_ring_sin = 0.3420;
+// The ring direction i (toward the sky) about up (unit): azimuths (i + 1/2) 360 deg / n from an east axis.
+math::Vec3 cloud_sky_ring_direction(const math::Vec3& up, int i);
+// The 3D sky source per unit horizontal sky irradiance and unit unscaled optical depth (as
+// cloud_sky_scattering_source): ring_optical_depths[i] the optical depth marched toward cloud_sky_ring_direction(up, i).
+double cloud_sky_scattering_source_3d(const math::Vec3& view_propagation, const math::Vec3& up,
+                                      const double (&ring_optical_depths)[cloud_sky_ring_azimuths],
+                                      double vertical_depth_from_top, double column_optical_depth);
+
 // The light march (header): geometric intervals, then equal ones.
 struct CloudLightMarch {
     double first_m = 20.0;       // first near interval

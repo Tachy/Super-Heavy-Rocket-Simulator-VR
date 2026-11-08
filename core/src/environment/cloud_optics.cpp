@@ -238,6 +238,35 @@ double cloud_scattering_source_3d(const math::Vec3& sun_direction, const math::V
                                    mu_e, tau_s, depth, std::max(column_optical_depth, depth));
 }
 
+math::Vec3 cloud_sky_ring_direction(const math::Vec3& up, int i) {
+    math::Vec3 east = math::cross(math::Vec3{0.0, 0.0, 1.0}, up);
+    east = math::norm(east) > 1e-6 ? math::normalized(east) : math::Vec3{1.0, 0.0, 0.0};
+    const math::Vec3 north = math::cross(up, east);
+    const double azimuth = (i + 0.5) * c::two_pi / cloud_sky_ring_azimuths;
+    const double across = std::sqrt(1.0 - cloud_sky_ring_sin * cloud_sky_ring_sin);
+    return up * cloud_sky_ring_sin + (east * std::cos(azimuth) + north * std::sin(azimuth)) * across;
+}
+
+double cloud_sky_scattering_source_3d(const math::Vec3& view_propagation, const math::Vec3& up,
+                                      const double (&ring_optical_depths)[cloud_sky_ring_azimuths],
+                                      double vertical_depth_from_top, double column_optical_depth) {
+    double j = cloud_sky_zenith_share * cloud_sky_scattering_source(math::dot(view_propagation, up),
+                                                                    vertical_depth_from_top, column_optical_depth);
+    double gain = cloud_sky_zenith_share;
+    const double mu_d = cloud_sky_ring_sin;
+    const double share = (1.0 - cloud_sky_zenith_share) / cloud_sky_ring_azimuths;
+    for (int i = 0; i < cloud_sky_ring_azimuths; ++i) {
+        const double tau_d = std::max(0.0, ring_optical_depths[i]);
+        const double mu_e = cloud_entry_cosine(mu_d, tau_d, vertical_depth_from_top);
+        const math::Vec3 normal = entry_normal(cloud_sky_ring_direction(up, i), up, mu_d, mu_e);
+        const double t = mu_e * tau_d;
+        const double w = share * (mu_e / mu_d);
+        j += w * cloud_sky_scattering_source(math::dot(view_propagation, normal), t, std::max(column_optical_depth, t));
+        gain += w;
+    }
+    return j / std::max(gain, 1.0);  // no plane receives more than the horizontal irradiance (header)
+}
+
 CloudSunFrameAngles cloud_sun_frame_angles(const math::Vec3& sun_propagation, const math::Vec3& view_propagation,
                                            const math::Vec3& axis) {
     CloudSunFrameAngles out;

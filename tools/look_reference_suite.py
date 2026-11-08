@@ -282,6 +282,30 @@ def m_horizon_clouds(a):
     return {"horizon_cloud_b_over_r": far, "near_cloud_b_over_r": near, "horizon_over_near": far / near}
 
 
+# Earth's mean radius for the horizon dip of the altitude sweep [S: IUGG mean radius R1 6371.0088 km].
+EARTH_MEAN_RADIUS_M = 6371008.8
+# The sweep's view: elevation 2 deg, vertical fov 60 deg (Godot keeps the height).
+SWEEP_ELEVATION_DEG, SWEEP_FOV_DEG = 2.0, 60.0
+
+
+def m_horizon_band(height_m):
+    """User 2026-11-08 (pink horizon clouds, worse below 2 km?): the far cloud band at the visible horizon from an eye at
+    height_m - the rows from 1 deg below to 6 deg above the horizon dip (acos(R / (R + h))): 1.5 km tops 15-90 km
+    away from the ground; whole width, the cloud pixels' linear B/R (_cloud_br) - and the near cloud above it (8-30 deg
+    above the horizon)."""
+    dip = np.degrees(np.arccos(EARTH_MEAN_RADIUS_M / (EARTH_MEAN_RADIUS_M + height_m)))
+    t = np.tan(np.radians(SWEEP_FOV_DEG / 2.0))
+
+    def row(elev_deg):  # image fraction of an elevation (0 top)
+        return 0.5 - np.tan(np.radians(elev_deg - SWEEP_ELEVATION_DEG)) / t * 0.5
+
+    def measure(a):
+        far = _cloud_br(a, 0.0, row(-dip + 6.0), 1.0, row(-dip - 1.0))
+        near = _cloud_br(a, 0.0, row(-dip + 30.0), 1.0, row(-dip + 8.0))
+        return {"horizon_cloud_b_over_r": far, "near_cloud_b_over_r": near, "horizon_over_near": far / near}
+    return measure
+
+
 def m_cockpit(a):
     return {"frame_luma": float(luma(a.reshape(-1, 3)).mean()), "clipped": clipped(a.reshape(-1, 3))}
 
@@ -442,6 +466,25 @@ for _fov in ("60", "10"):
     SCENES[f"sun_lunar_orbit_f{_fov}"] = (["--body=moon", "--lat=0.674", "--lon=23.473", "--height=100000",
                                            "--utc=2026-11-17T08:00:00", "--hide_ui", WEATHER, "--look_at_sun",
                                            f"--fov={_fov}"], m_sun_profile(float(_fov)), _sun_gates)
+# The altitude sweep of the horizon clouds (user 2026-11-08: the pink band at the horizon from below 2 km too): measured
+# only (no gate yet - the 2 km scene's gates stand for it), analog weather at noon and the user's GFS snapshot if cached.
+GFS_USER_WTHR = os.path.join(ROOT, "data", "weather", "cache", "gfs_1111980_f007.wthr")
+# The primary gate of the horizon clouds (user 2026-11-08: the low-altitude renders match the game, the pink band clearly
+# visible): 300 m, the sweep's worst pink (far band B/R 0.594 before the cloud sky-light fix; 100-600 m all ~0.595).
+SCENES["horizon_clouds_noon_300m"] = (NOON + ["--height=300", "--azimuth=90", f"--elevation={SWEEP_ELEVATION_DEG:g}",
+                                              f"--fov={SWEEP_FOV_DEG:g}"], m_horizon_band(300.0), {
+    "horizon_cloud_b_over_r": (0.75, 99, "[D: as horizon_clouds_noon_2km - a white cloud 30 km away shown at S 1.5 "
+                                         "-> 0.775; call: distant noon cumulus white to slightly yellowish, not salmon; "
+                                         "2026-11-08 0.594]"),
+    "horizon_over_near": (0.85, 99, "[D: as horizon_clouds_noon_2km: the haze warms the far band by at most ~10-15 %; "
+                                    "2026-11-08 0.762; after the cloud sky-light fix 0.616 / 0.769]")})
+for _h in (0, 100, 300, 600, 1000, 2000):
+    _view = [f"--height={_h}", "--azimuth=90", f"--elevation={SWEEP_ELEVATION_DEG:g}", f"--fov={SWEEP_FOV_DEG:g}"]
+    SCENES[f"horizon_sweep_noon_{_h}m"] = (NOON + _view, m_horizon_band(float(_h)), {})
+    if os.path.exists(GFS_USER_WTHR):
+        SCENES[f"horizon_sweep_gfs_{_h}m"] = (["--utc=2026-11-08T19:30:00", "--lat=25.9853", "--lon=-97.1873",
+                                               "--hide_ui", "--weather=" + GFS_USER_WTHR] + _view,
+                                              m_horizon_band(float(_h)), {})
 SCENES["sun_in_view_profile_f10"] = ([a if a != WEATHER else "--weather=off" for a in NOON] + ["--look_at_sun", "--fov=10"],
                                      m_sun_profile(10.0), {})
 SCENES["terminator_400km"] = (["--lat=0", "--lon=0", "--height=400000", "--utc=2026-11-07T18:15:00", "--hide_ui", WEATHER,

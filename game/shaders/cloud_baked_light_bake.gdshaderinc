@@ -17,10 +17,11 @@ const int CLOUD_BAKED_SUN_FAR_SAMPLES = 8;
 const float CLOUD_BAKED_SUN_SHAPE_PATH_M = 6000.0;
 const float CLOUD_BAKED_SUN_PATH_MAX_M = 300000.0;
 
-// The optical depth toward the Sun from camera + offset (height h): the baked volume's extinction where a level holds
-// the point over the near part, the field's grid mean beyond; up to the band's top (0 when the path meets the ground:
-// Earth's shadow is atm_sunlit's / the Sun's transmittance's).
-float cloud_baked_sun_depth(int si, vec3 offset, vec3 sun) {
+// The optical depth toward a light from camera + offset (height h) along the unit direction sun: the baked volume's
+// extinction where a level holds the point over the near part (near_samples, quadratic spacing over shape_path_m), the
+// field's grid mean beyond (far_samples); up to the band's top (0 when the path meets the ground: Earth's shadow is
+// atm_sunlit's / the Sun's transmittance's).
+float cloud_baked_path_depth(int si, vec3 offset, vec3 sun, int near_samples, float shape_path_m, int far_samples) {
 	vec3 axis_x = baked.sets[si].axis_x.xyz * ATM_STRETCH;
 	vec3 axis_y = baked.sets[si].axis_y.xyz * ATM_STRETCH;
 	CloudRay ray = cloud_ray(sun);
@@ -44,13 +45,13 @@ float cloud_baked_sun_depth(int si, vec3 offset, vec3 sun) {
 	float gdx = dot(sun, axis_x);
 	float gdy = dot(sun, axis_y);
 	float tau = 0.0;
-	float near_m = min(length_m, CLOUD_BAKED_SUN_SHAPE_PATH_M);
+	float near_m = min(length_m, shape_path_m);
 	// the levels with light: the marched ones; with none marched (above 62 km) the shadows' (CloudBaked bakes their light
 	// for the flat levels' volume column, look fixes T7c)
 	int k_light = int(baked.sets[si].misc.z) < int(baked.sets[si].axis_y.w) ? int(baked.sets[si].misc.z)
 			: int(baked.sets[si].misc.w);
-	float n = float(CLOUD_BAKED_SUN_NEAR_SAMPLES);
-	for (int i = 0; i < CLOUD_BAKED_SUN_NEAR_SAMPLES; i++) {
+	float n = float(near_samples);
+	for (int i = 0; i < near_samples; i++) {
 		float a = near_m * float(i * i) / (n * n);
 		float b = near_m * float((i + 1) * (i + 1)) / (n * n);
 		float t = 0.5 * (a + b);
@@ -67,13 +68,72 @@ float cloud_baked_sun_depth(int si, vec3 offset, vec3 sun) {
 		tau += beta * (b - a);
 	}
 	if (length_m > near_m) {
-		float step_m = (length_m - near_m) / float(CLOUD_BAKED_SUN_FAR_SAMPLES);
-		for (int i = 0; i < CLOUD_BAKED_SUN_FAR_SAMPLES; i++) {
+		float step_m = (length_m - near_m) / float(far_samples);
+		for (int i = 0; i < far_samples; i++) {
 			float t = near_m + (float(i) + 0.5) * step_m;
 			tau += cloud_mean_extinction_at(offset + sun * t, cloud_height_along(ray, t)) * step_m;
 		}
 	}
 	return tau;
+}
+
+// The optical depth toward the Sun (the Sun's samples above).
+float cloud_baked_sun_depth(int si, vec3 offset, vec3 sun) {
+	return cloud_baked_path_depth(si, offset, sun, CLOUD_BAKED_SUN_NEAR_SAMPLES, CLOUD_BAKED_SUN_SHAPE_PATH_M,
+			CLOUD_BAKED_SUN_FAR_SAMPLES);
+}
+
+// ---- 3D sky light (look fixes cloud sky light, 2026-11-08; core cloud_sky_scattering_source_3d, cloud_optics.hpp
+// "3D sky light" - change them together). The sky's source took the vertical column only: a cumulus flank deep below
+// its top got the diffuse field of a point that deep in a slab (the two-stream source falls toward T at the base), while
+// the Sun's light entered through the flank (3D Sun light) - measured at 2 km, noon, near cumulus: the sky-lit part 0.56
+// of a white top's E_sky / pi, the Sun's 1.03 of its mu0 E / pi. The sky's horizontal irradiance is split into an
+// isotropic sky's shares: the zenith band (50-90 deg) on the vertical column, the rest from a ring of
+// CLOUD_BAKED_SKY_AZIMUTHS directions, each like the 3D Sun as diffuse light on the tilted column it entered (its
+// optical depth marched toward it through the shapes): source x mu_e / mu_d, depth mu_e tau_d, the I1 axis the entry
+// normal; divided by the total weight G = share_z + sum share_i mu_e / mu_d where G > 1 (an isotropic sky gives no plane
+// more than the horizontal irradiance; several faces of a convex shape would each count their normal incidence).
+// A horizontally uniform slab (G = 1) keeps the column source exactly: decks, the flat levels, the far field unchanged.
+// Ground-reflected light stays out (known issue). Constants: core cloud_sky_zenith_share, _ring_azimuths, _ring_sin.
+const float CLOUD_BAKED_SKY_ZENITH_SHARE = 0.4132;
+const int CLOUD_BAKED_SKY_AZIMUTHS = 4;
+// [E] The ring's elevation, 20 deg: its share 0.587 / 4 x 1 / sin(20 deg) = 0.43 of the horizontal irradiance on a
+// vertical flank facing one ring direction - the isotropic sky's 0-50 deg band gives a vertical face 0.434 (2 L
+// integral cos^2 e de over 0-50 deg / pi L).
+const float CLOUD_BAKED_SKY_RING_SIN = 0.3420;
+// [E] The ring paths' samples: through the shapes over CLOUD_BAKED_SKY_SHAPE_PATH_M (first interval 14 m: a flank's
+// depth resolved), the grid mean beyond (the depth then large: the column model).
+const int CLOUD_BAKED_SKY_NEAR_SAMPLES = 12;
+const float CLOUD_BAKED_SKY_SHAPE_PATH_M = 2000.0;
+const int CLOUD_BAKED_SKY_FAR_SAMPLES = 4;
+
+float cloud_baked_sky_source_3d(int si, vec3 offset, vec3 up, vec3 view_prop, vec2 column) {
+	float j = CLOUD_BAKED_SKY_ZENITH_SHARE * cloud_sky_scattering_source(dot(view_prop, up), column.x, column.y);
+#ifndef CLOUD_DIAG_SKY_COLUMN
+	float gain = CLOUD_BAKED_SKY_ZENITH_SHARE;
+	vec3 east = cross(vec3(0.0, 0.0, 1.0), up);
+	east = length(east) > 1.0e-6 ? normalize(east) : vec3(1.0, 0.0, 0.0);
+	vec3 north = cross(up, east);
+	float mu_d = CLOUD_BAKED_SKY_RING_SIN;
+	float across = sqrt(1.0 - mu_d * mu_d);
+	float share = (1.0 - CLOUD_BAKED_SKY_ZENITH_SHARE) / float(CLOUD_BAKED_SKY_AZIMUTHS);
+	for (int i = 0; i < CLOUD_BAKED_SKY_AZIMUTHS; i++) {
+		float azimuth = (float(i) + 0.5) * 2.0 * CLOUD_PI / float(CLOUD_BAKED_SKY_AZIMUTHS);
+		vec3 d = up * mu_d + across * (cos(azimuth) * east + sin(azimuth) * north);
+		float tau_d = cloud_baked_path_depth(si, offset, d, CLOUD_BAKED_SKY_NEAR_SAMPLES, CLOUD_BAKED_SKY_SHAPE_PATH_M,
+				CLOUD_BAKED_SKY_FAR_SAMPLES);
+		float mu_e = cloud_entry_cosine(mu_d, tau_d, column.x);
+		vec3 normal = cloud_entry_normal(d, up, mu_d, mu_e);
+		float t = mu_e * tau_d;
+		float w = share * (mu_e / mu_d);
+		j += w * cloud_sky_scattering_source(dot(view_prop, normal), t, max(column.y, t));
+		gain += w;
+	}
+	j /= max(gain, 1.0);  // no plane receives more than the horizontal irradiance (core header)
+#else
+	j /= CLOUD_BAKED_SKY_ZENITH_SHARE;  // (diagnostic: the vertical column alone, as before)
+#endif
+	return j;
 }
 
 void main() {
@@ -126,7 +186,7 @@ void main() {
 		j_sun = cloud_scattering_source_3d(sun, view_prop, normal, tau_s, column.x, column.y);
 	}
 	float j_ms = max(j_sun - phase * transmittance, 0.0);
-	float j_sky = cloud_sky_scattering_source(dot(view_prop, normal), column.x, column.y);
+	float j_sky = cloud_baked_sky_source_3d(si, offset, normal, view_prop, column);
 	// The edge width noise (the shapes' A channel, types mixed) for the march's per-sample detail.
 	vec3 types = cloud_type_weights(c);
 	float width_noise = 0.0;

@@ -507,7 +507,8 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   through the bake over the first 6 km, then 8 through the field's grid mean to the band's top - the old march's and
   the core's light model, `cloud_light_optical_depth`; step 7, 2026-10-30: through the shapes all the way a grazing
   Sun path found the gaps of broken cirrus, 1.14 x the old march's brightness per alpha toward a 5 deg Sun), the Sun's
-  multiple-scattering source and the sky's source for the view from the anchor, the edge-width noise), R8 occupancy per
+  multiple-scattering source and the sky's source for the view from the anchor - 3D sky light below -, the edge-width
+  noise), R8 occupancy per
   4^3 cells. Per frame: one march per ray through the levels - empty blocks skipped to their exit, in occupied blocks
   clear steps from the edge coordinate's distance estimate (20 m per edge width beyond the detail's lift, >= 16 m and
   the pixel footprint, <= a cell), the entry bisected 3 x, in-cloud trapezoid steps limited by the old march's step
@@ -663,6 +664,28 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   transmittance and its disc's visible fraction over the Earth's horizon seen from the cloud (`atm_sun_at`; higher
   tops lit longer), the twilight sky's light going on; daytime (mu0 > 0) unchanged bit for bit. The volume levels'
   light (`cloud_entry_cosine`) was continuous already. Numbers, images: `baked-outer5-report.md`.
+- **3D sky light (look fixes, cloud sky light, 2026-11-08)**: the light bake's sky source was the column's
+  (`cloud_sky_scattering_source` on the vertical depth from the column top) while the Sun's entered through the flanks
+  (3D Sun light): at 2 km, noon, the near cumulus' sky-lit part was 0.56 of a white top's E_sky / pi (Sun part 1.03 of
+  mu0 E / pi), sky / Sun 0.107 (G) against the plane-parallel 0.194 - clouds lit in the direct beam's colour. Now
+  `cloud_baked_sky_source_3d` (core `cloud_sky_scattering_source_3d`, cloud_optics.hpp "3D sky light"; change them
+  together): the isotropic sky's zenith band (50-90 deg, 0.4132 of the horizontal irradiance [S]) on the vertical column,
+  the rest from 4 ring directions at 20 deg elevation [E: one ring direction lights a vertical flank with 0.43 E_h, the
+  isotropic 0-50 deg band's 0.434], each on the tilted column it entered (optical depth marched toward it: 12 samples
+  through the shapes over 2 km, 4 through the grid mean; cloud_entry_cosine / entry normal as the Sun), source x
+  mu_e / mu_d, the sum divided by its total weight where > 1 (no plane gets more than the horizontal irradiance; a thin
+  puff then has its single-scattered L / 2). A uniform slab gives the column source exactly: decks, flat levels and the
+  far field unchanged. Effect (same tree, A = `STARSIM_BAKED_DEFINES=CLOUD_DIAG_SKY_COLUMN`, the old column term):
+  2 km linear camera, far band's sky / Sun 0.059 -> 0.099 (median), its sky part 841 -> 1548 cd/m^2; near cumulus
+  2316 -> 2377 (its flanks and tops near a surface already had the column's near-top source; the 0.14 expected from
+  the plate's E_sky / (E_sky + mu0 E_sun) [S: core 13.0 / 80.2 klx; clear-sky diffuse fraction ~0.165, Erbs, Klein &
+  Duffie 1982, Sol. Energy 28, 293] holds for a horizontal top - a flank gets half the isotropic sky (view factor
+  (1 + cos beta) / 2, Liu & Jordan 1963) against the 3D Sun's normal incidence); displayed far band B/R at 300 m
+  0.594 -> 0.616, at 2 km 0.639 -> 0.662 (suite `horizon_clouds_noon_300m` / `_2km`). Light bake p99 1.23 -> 1.32 ms.
+  Core test
+  "3D sky light on an isolated cumulus" (slab identity 1e-9, thin puff within 15 % of k / 2 pi and below a top, a
+  tower's flank 1.26 x the column model and below a top). Report `.superpowers/sdd/2026-11-07-look-fixes/
+  cloud-skylight-report.md`.
 - **Baked volume step 7: low Sun, the limb (2026-10-30)**: (a) the light bake's Sun path through the shapes over
   6 km only, then the grid mean (bullet above; cirrus toward a 5 deg Sun 1.14 -> 1.02 x the old march per alpha).
   (b) The far field's column light gets the shapes' sunlit faces below a 29 deg Sun (`cloud_far_facet_weight`, far
@@ -1088,7 +1111,9 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   columns (no light leaking around a cumulus' shadowed side beyond the entry-surface tilt); the HG peak is treated as
   forward (its ~0.3 deg width is not resolved in the multiply scattered light). Ice uses the droplet table.
 - Ice uses the droplet phase function and thin sheets without a fibre direction; no ground-reflected light into the
-  cloud bases; the sky light kept in the forward peak is left out.
+  cloud bases and flanks (a vertical flank's ground light ~ albedo x E_global / 2: 0.1 x 80 klx / 2 at noon, ~60 % of
+  its sky light); the sky light kept in the forward peak is left out; the 3D sky light is baked in the volume only (the
+  far field's slab keeps the column sky source - broken cumulus beyond the volume).
 - A resize shows the clouds of the old size for one frame (scaled), then the new ones.
 - The Sun's direct beam: the drawn disk follows the shapes (above exp(-tau / mu), the plane-parallel bias); the
   vehicles' and the eye's direct Sun follow them too through S (decided 2026-10-30, next bullet but one); the CPU's
