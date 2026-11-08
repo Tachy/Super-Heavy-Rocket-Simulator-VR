@@ -7,12 +7,25 @@
 #   the salmon clouds before (start view: cloud radiance B/R 0.79-0.84 measured, look fixes T2 report);
 # - light reddened by the air stays warm: the Sun through Rayleigh air mass 4 at 700 hPa (B/R 0.51 colourimetric) is
 #   still clearly warm after the balance (B/R < 0.75) - the terminator and the sunset keep their colour;
+# - the field's illuminant at the pad at noon (Sun 48 deg, clear) is the global horizontal daylight, Sun + sky with the
+#   sky's true weight: its CCT within NOON_CCT_MIN_K .. NOON_CCT_MAX_K (look fixes T5b fix round 2, review I1);
 # - the post step's map and the display-referred inverse (vision.gdshaderinc, Sherman-Morrison) cancel with rods,
 #   chroma < 1 and the white balance together (within 1e-6).
 # Headless: godot --headless --path game --script res://tests/white_balance_test.gd
 extends SceneTree
 
 const TOLERANCE := 1.0e-6
+## [S: Hernandez-Andres, Romero, Nieves & Lee 2001, JOSA A 18(6) 1325 - clear-sky global daylight at Sun elevations
+## above ~40 deg about 5500-6500 K; CIE 015:2018 D55 .. D65; Judd et al. 1964 daylight] The noon band of the global
+## horizontal illuminant's CCT. [call] Lower edge 300 K below: the model's three-wavelength (680 / 550 / 440 nm)
+## spectrum and its aerosol (tau 0.1 at 550 nm, Angstrom 1.3) give 5510 K (direct beam 4940 K, sky 10 500 K, sky 17.5 %
+## of the horizontal illuminance).
+const NOON_CCT_MIN_K := 5200.0
+const NOON_CCT_MAX_K := 6500.0
+## Starbase pad (as sunset_adaptation_test), the Sun at 48 deg elevation (noon in early November).
+const PAD_LAT_DEG := 25.9967
+const PAD_LON_DEG := -97.1543
+const NOON_SUN_ELEVATION_DEG := 48.0
 
 var _failures := 0
 
@@ -44,6 +57,7 @@ func _run() -> void:
 	_check_moonlight(sun, atmosphere.moon_light_colour())
 	_check_pacing(sun)
 	_check_inverse(EyeAdaptation.white_balance(sun * atmosphere.moon_light_colour(), EyeAdaptation.degree_of_adaptation(0.05)))
+	_check_noon_illuminant(core, atmosphere, sun)
 	atmosphere.shutdown()
 	print("white_balance_test: %s (%d failures)" % ["PASS" if _failures == 0 else "FAIL", _failures])
 	quit(1 if _failures > 0 else 0)
@@ -186,3 +200,45 @@ func _check_inverse(white: Basis) -> void:
 		var shown := EyeAdaptation.post_step(written, scale, chroma_factor, white)
 		worst = maxf(worst, (shown - c).length() / c.length())
 	_check("post step o display-referred inverse = id", worst < TOLERANCE, "largest relative error %s" % worst)
+
+
+## Correlated colour temperature of a linear Rec.709 colour (K) [S: McCamy 1992, Color Res. Appl. 17(2) 142; within
+## ~2 K of the Planckian locus over 2856-6504 K].
+static func _cct_k(rgb: Vector3) -> float:
+	var x_ := 0.4124 * rgb.x + 0.3576 * rgb.y + 0.1805 * rgb.z
+	var y_ := 0.2126 * rgb.x + 0.7152 * rgb.y + 0.0722 * rgb.z
+	var z_ := 0.0193 * rgb.x + 0.1192 * rgb.y + 0.9505 * rgb.z
+	var x := x_ / (x_ + y_ + z_)
+	var y := y_ / (x_ + y_ + z_)
+	var n := (x - 0.3320) / (0.1858 - y)
+	return 449.0 * n * n * n + 3525.0 * n * n + 6823.3 * n + 5520.33
+
+
+## The field's illuminant at the pad at noon (Atmosphere.field_illuminant after adaptation_luminance): the horizontal
+## plate's global daylight - CCT in the noon band, bluer than the direct beam alone and warmer than the sky alone (the
+## sky enters with its weight on the horizontal); the luminance plate (the Sun at normal incidence) unchanged.
+func _check_noon_illuminant(core: StarsimCore, atmosphere: Atmosphere, toa: Vector3) -> void:
+	var lat := deg_to_rad(PAD_LAT_DEG)
+	var lon := deg_to_rad(PAD_LON_DEG)
+	var up := Vector3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))
+	var north := Vector3(-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat))
+	var e := deg_to_rad(NOON_SUN_ELEVATION_DEG)
+	var sun_dir := (up * sin(e) + north * cos(e)).normalized()
+	var eye := HeightSource.geodetic_to_fixed(PAD_LAT_DEG, PAD_LON_DEG, 2.0)
+	var follows := EyeAdaptation.adopted_white_follows_scene
+	EyeAdaptation.adopted_white_follows_scene = true
+	atmosphere.adaptation_luminance(eye, sun_dir, 1.0, 1.0)
+	var white := atmosphere.field_illuminant()
+	EyeAdaptation.adopted_white_follows_scene = follows
+	var lux: Dictionary = core.atmosphere_illuminance(eye, up, sun_dir)
+	var direct: Vector3 = toa * core.atmosphere_sun_transmittance(eye, sun_dir)
+	var sky: Vector3 = lux["sky_lux"]
+	var cct := _cct_k(white)
+	_check("noon illuminant: global daylight CCT", cct >= NOON_CCT_MIN_K and cct <= NOON_CCT_MAX_K,
+			"%.0f K, B/R %.3f (band %.0f-%.0f K; direct beam %.0f K, sky %.0f K)" % [cct, white.z / white.x,
+			NOON_CCT_MIN_K, NOON_CCT_MAX_K, _cct_k(direct), _cct_k(sky)])
+	var global: Vector3 = lux["sun_lux"] + sky
+	var expected := global / EyeAdaptation.LUMINANCE_WEIGHTS.dot(global)
+	_check("noon illuminant = horizontal Sun + sky", (white - expected).length() < 1.0e-6,
+			"%s vs %s (sky %.1f %% of the horizontal)" % [white, expected,
+			100.0 * EyeAdaptation.LUMINANCE_WEIGHTS.dot(sky) / EyeAdaptation.LUMINANCE_WEIGHTS.dot(global)])

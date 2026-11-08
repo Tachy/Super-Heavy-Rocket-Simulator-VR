@@ -294,15 +294,30 @@ shaders:
   `EyeAdaptation.adopted_white_follows_scene` (`--white_balance=toa`, render_check and cockpit_shots: the former fixed
   white of the Sun above the air at D = 1)].
   - Field illuminant (`Atmosphere.field_illuminant`, linear Rec.709 at luminance 1): the light reaching the scene,
-    estimated physically from the analytic terms, not a grey world of the frame - of the plate at the eye (the direct
-    Sun at normal incidence through air and clouds + the sky's horizontal light, at night + the Moon's plate and the
-    moonlit sky, + the tower lamps' lit surfaces in their lumen-weighted CCT colour, `TowerLights.deck_light_colour`)
+    estimated physically from the analytic terms, not a grey world of the frame - of the plate at the eye (inside the
+    air the HORIZONTAL plate, the global illuminance E_sun,n mu0 (T_s + T_sd) + E_sky T_d through air and clouds, at
+    night + the Moon's horizontal plate and the moonlit sky; above the air the Sun at normal incidence; + the tower
+    lamps' lit surfaces in their lumen-weighted CCT colour, `TowerLights.deck_light_colour`)
     and, above the air, the Earth's side (near the Moon the earthshine in the Sun's colour, as the shaders draw it;
     elsewhere the Earth in view), the brighter. So: the Sun above the air in space and on the Moon, Sun + sky on the
     ground, moonlight at night, the twilight sky at dusk. An enclosure the eye is in (`interior_light_colour`; World:
     the cabin of a `CockpitView` that `contains` the camera, its lamps' `LAMP_COLOUR`, D65) takes over as the surround's
     visibility V closes: V x outside + (1 - V) x interior. A plate below `FIELD_ILLUMINANT_MIN_CD_M2` 1e-3 cd/m^2 [call]
     (a moonless night) has nothing to adapt to: the white is held.
+    Why horizontal (fix round 2, review I1): CIECAM02's adopted white is the illuminant of the scene; the scene is
+    mostly horizontal (ground, deck, sea) and daylight is measured as global horizontal light [S: CIE 015:2018 daylight;
+    Judd et al. 1964; Hernandez-Andres et al. 2001, JOSA A 18, 1325]. The luminance plate (Sun at normal incidence +
+    horizontal sky, below) is unchanged; as a colour it weighted the Sun 1 / mu0 too much (1.35 at Sun 48 deg). Units
+    checked (headless print at the pad): `sky_lux` and E_sun are both lux (sky 15 834 lx, Sun 74 646 lx horizontal /
+    100 446 lx normal at Sun 48 deg; sky 17.5 % of the horizontal), so the sky had its weight; the white was warm
+    because the direct beam is (AOD 0.1 at 550 nm, air mass 1.35: T 0.84 / 0.74 / 0.60, B/R 0.612, 4940 K = D50).
+    Illuminant B/R and CCT [linear Rec.709, McCamy]: pad Sun 90 deg 0.784 / 5620 K, 60 deg 0.772 / 5570 K, 48 deg
+    0.758 / 5510 K (was 0.724 / 5370 K), 30 deg 0.718, 15 deg 0.654, 5 deg 0.753 (sky-dominated; was 0.181), 0 deg
+    1.52, dusk -5.5 deg 2.93 (unchanged, sky only); 400 km and the Moon 0.856 / 5920 K (the TOA Sun, unchanged).
+    Reference: D55 = B/R 0.745, D60 0.874, D65 1.0 in linear Rec.709; measured clear-sky global daylight at high Sun
+    ~5500-6500 K - the model sits at the band's warm edge [call: three-wavelength spectrum, AOD 0.1]. Known limit: an
+    eye high in the air with the Sun below its local horizontal but still visible (the horizon dip) takes the sky's
+    colour only (the scene below it is in twilight).
   - Degree of adaptation [S: CIE 159:2004; Moroney et al. 2002]: D = F (1 - (1 / 3.6) exp((-L_A - 42) / 92)), L_A = the
     paced L_a x Y_b / 100 (Y_b 20), F = `SURROUND_F` 1.0: the scene observer's surround is the scene itself, CIECAM02's
     "average" (S_R >= 0.2; dim 0.9 and dark 0.8 are films / slides in a dim / dark room) [S: CIE 159:2004 Table 1;
@@ -333,7 +348,9 @@ shaders:
   linear in D; the full Moon's light (Sun x regolith colour x air at el 83) adapted with the night's D: B/R 0.874 (pale
   cream, band 0.80-0.92; D 1: 1.000; the former TOA white 0.505; colourimetric 0.436); the moonlight colour keeps the
   Sun's luminance (1e-6); a D65 cabin lamp neutral (1e-6); pacing one time constant e^-1 (1e-9), 90 % in 60 s (0.0995),
-  a snap jumps. T2's A/B numbers: `.superpowers/sdd/2026-11-07-look-fixes/t1-t2-report.md`.
+  a snap jumps; the field illuminant at the pad at noon (Sun 48 deg) = the horizontal Sun + sky (1e-6) with its CCT in
+  5200-6500 K (5510 K; [S] Hernandez-Andres et al. 2001 clear-sky global daylight, lower edge [call] -300 K for the
+  model's spectrum). T2's A/B numbers: `.superpowers/sdd/2026-11-07-look-fixes/t1-t2-report.md`.
 
 - **Sun glare: the disc masked, its disability glare a veil** [look fixes T5b fix round 1, user 2026-11-08;
   `AdaptationMeter` (shader mask, `sun_mask_parameters`), `Atmosphere.glare_veil`; fidelity flags
@@ -496,11 +513,11 @@ shaders:
   (more colourful twilight) - user's verdict open. Glow: with the bound, emitters at S > 1 (the plume by day) glow
   somewhat less than with AgX alone (their S = 1 value is their former c through the Hunt inverse, less saturated).
 
-- Adopted white (T5b fix round 1): the pad's daylight plate (direct Sun at normal incidence + sky, Sun 48 deg) is B/R
-  0.72 against the TOA Sun's 0.856, so by day the ground reads more neutral and the sky bluer than with the fixed white
-  (pad noon el 5: ground B/R 0.55 -> 0.74, sky 7.5 -> 11.3); at dusk (Sun -5.5 deg) the twilight sky light (B/R 2.9) at
-  D 0.83 turns the blue hour nearly grey (sky B/R 3.1 -> 1.25, the horizon glow orange). Both follow the model; whether
-  the plate (normal incidence) or the horizontal illuminance is the scene's light is a [call] for the user's eye. The full
+- Adopted white: the pad's global horizontal daylight (Sun 48 deg) is B/R 0.758 / 5510 K against the TOA Sun's 0.856
+  / 5920 K, so by day the ground reads more neutral and the sky bluer than with the former fixed white (pad noon el 5:
+  ground B/R 0.55 (TOA white) -> 0.68, sky 7.5 -> 10.3; el 60 sky 9.5); at dusk (Sun -5.5 deg) the twilight sky light
+  (B/R 2.9) at D 0.83 turns the blue hour nearly grey (sky B/R 3.1 -> 1.25, the horizon glow orange) - D at mesopic
+  levels is a pending user decision. The full
   Moon at a VR fov stays display white (B/R 1.00 in A and B): adapted to the moonlit night (L_a 0.04 cd/m^2, gain 1.2e4)
   the disc is far above white - the Moon's own disability glare (10 x 0.3 lux / 0.27^2 ~ 40 cd/m^2 looking at it) and
   local adaptation are not modelled; pale cream shows where the disc is in range (fov 2: B/R 0.33 -> 0.77). The surround

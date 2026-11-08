@@ -530,3 +530,7 @@ mostly black field (lunar day looking up 60 deg: 2.4 %, fragile) was removed who
 - Moonlight drawn in the Sun's colour ([call] "reddening B-V 0.92 left out"); now with the regolith's colour.
 - AdaptationSurround took the frame's weight from the ~150 query directions inside it: a frame narrower than their
   10 deg spacing had weight 0 and the surround dropped out (fov 2: "model in frame -1", the Moon disc the whole field).
+- Field illuminant from the luminance plate (T5b fix round 1 only, 2026-11-08): the colour of the white-plate
+  luminance term, the direct Sun at NORMAL incidence + the horizontal sky. It weighted the 4940 K direct beam 1 / mu0
+  too much against the sky (pad, Sun 48 deg: B/R 0.724 / 5370 K; Sun 5 deg: 0.181 against the horizontal 0.753). Since
+  fix round 2 the colour is the horizontal global illuminance (0.758 / 5510 K); the luminance rule is unchanged.

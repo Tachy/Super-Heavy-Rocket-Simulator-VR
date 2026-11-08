@@ -196,7 +196,7 @@ var last_sun_mask_weights := [0, 0]
 static var glare_enabled := true
 var _sun_light_unit_rgb := Vector3.ONE  ## the direct Sun's colour at the eye (luminance 1): the scotopic veil
 var _sun_distance_au := 1.0  ## update: the Sun's distance (the veil's disc size)
-var _illuminant_down_rgb := Vector3.ZERO  ## adaptation_luminance: the light on a plate at the eye (RGB cd/m^2)
+var _illuminant_down_rgb := Vector3.ZERO  ## adaptation_luminance: the light on the horizontal plate at the eye (RGB cd/m^2)
 var _illuminant_far_rgb := Vector3.ZERO  ## away from the air: the earthshine / Earth-in-view plate (RGB cd/m^2)
 ## A true luminance (cd/m^2, at the Sun's actual distance) -> scene value, incl. the exposure gain.
 var scene_per_cd_m2 := 0.0
@@ -581,7 +581,8 @@ func moon_sun_color() -> Vector3:
 
 ## The field's illuminant (linear Rec.709 at luminance 1; look fixes T5b fix round 1, user 2026-11-08): the light that
 ## reaches the scene the eye adapts to, estimated physically, not as a grey world of the frame. Of the plate at the eye
-## (Sun + sky through the clouds, the Moon + the moonlit sky at night, the tower lamps' lit surfaces in their colour) and,
+## (in the air the horizontal plate, the global illuminance - fix round 2: Sun + sky through the clouds, the Moon + the
+## moonlit sky at night, the tower lamps' lit surfaces in their colour; above the air the Sun at normal incidence) and,
 ## away from the Earth's air, the earthshine at the Moon (the Earth in view elsewhere), the brighter: the Sun above the
 ## air in space, Sun + sky on the ground, moonlight at night. An enclosure the eye is in (interior_light_colour, the
 ## cabin) takes over as the surround's visibility V closes: colour = V x outside + (1 - V) x interior. Below
@@ -767,8 +768,16 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 	# (StarsimCore.weather_cloud_light: 1, 0, 1 with weather off - the same numbers as before).
 	var clouds := cloud_light_at(eye_itrf_m, sun_direction_itrf, "eye")
 	var sun_plate: Vector3 = solar * sun_factor * transmittance
-	var down_rgb := (sun_plate * (clouds.x + clouds.y * maxf(sun_direction_itrf.dot(up), 0.0)) + sky * clouds.z) \
-			* visible / (PI * d_au * d_au)
+	var mu0 := maxf(sun_direction_itrf.dot(up), 0.0)
+	var down_rgb := (sun_plate * (clouds.x + clouds.y * mu0) + sky * clouds.z) * visible / (PI * d_au * d_au)
+	# The illuminant's colour (field_illuminant; T5b fix round 2, review I1): inside the air the light on the
+	# HORIZONTAL plate, the global illuminance E_sun,n mu0 + E_sky (the light on the ground and the deck the scene is
+	# made of, as daylight is measured: CIE 015 / Judd et al. 1964, Hernandez-Andres et al. 2001); the luminance's
+	# plate above takes the Sun at normal incidence (1 / mu0 more Sun: 4940 K-coloured direct beam over the 10 500 K
+	# sky). Above the air (no ground, no sky) the Sun's own colour, the normal plate.
+	var illuminant_rgb := down_rgb
+	if not outside:
+		illuminant_rgb = (sun_plate * ((clouds.x + clouds.y) * mu0) + sky * clouds.z) * visible / (PI * d_au * d_au)
 	# The direct Sun at the eye for its disability glare (glare_veil): normal illuminance, lux.
 	var direct := sun_plate * clouds.x
 	last_sun_normal_lux = direct.dot(LUMINANCE_WEIGHTS) * visible / (d_au * d_au)
@@ -803,13 +812,16 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 			var moon_sky: Vector3 = _core.atmosphere_illuminance(eye_itrf_m, up, _moon_direction_fixed)["sky_lux"]
 			var moon_clouds := cloud_light_at(eye_itrf_m, _moon_direction_fixed)
 			var moon_plate: Vector3 = solar * sun_factor * moon_t
-			down_rgb += (moon_plate * (moon_clouds.x + moon_clouds.y * maxf(_moon_direction_fixed.dot(up), 0.0))
-					+ moon_sky * moon_clouds.z) * (moon_scale / PI)
-	# The field's illuminant (field_illuminant): the light on a plate at the eye (Sun, sky, Moon), and away from the
+			var moon_mu := maxf(_moon_direction_fixed.dot(up), 0.0)
+			down_rgb += (moon_plate * (moon_clouds.x + moon_clouds.y * moon_mu) + moon_sky * moon_clouds.z) \
+					* (moon_scale / PI)
+			illuminant_rgb += (moon_plate * ((moon_clouds.x + moon_clouds.y) * moon_mu) + moon_sky * moon_clouds.z) \
+					* (moon_scale / PI)
+	# The field's illuminant (field_illuminant): the light on the horizontal plate at the eye (Sun, sky, Moon), and away from the
 	# Earth's air the light of the Earth's side - near the Moon the earthshine (coloured as the Sun, as the shaders draw
 	# it), elsewhere the Earth in view (the orbit's night side). The Moon / Earth in view and the glow are what is seen,
 	# not what lights the scene, and stay out.
-	_illuminant_down_rgb = down_rgb
+	_illuminant_down_rgb = illuminant_rgb
 	_illuminant_far_rgb = Vector3.ZERO
 	if outside:
 		_illuminant_far_rgb = earth_rgb
