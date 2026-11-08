@@ -17,6 +17,7 @@ the previous state into `screenshots/look_fixes/<task>/`, affected tests only, c
 | T7 | Cloud cover from space too closed / smeared vs DSCOVR EPIC (user 2026-11-07): typical-weather monthly means on a 1 deg grid give a near-overcast veil; find what makes real broken cloud fields (snapshot data at 0.25 deg / satellite cloud imagery / sub-grid cloud structure from cover + cloud type) and make the Earth from space read like EPIC | data/model | Opus |
 | T8 | Bug (user 2026-11-07): a jump in cloud cover at ~55 km altitude - the two cloud representations on either side do not match (tier / level-of-detail hand-over) | bug | Opus |
 | T9 | Atmosphere spectrum check (user 2026-11-08): direct beam 4936 K at AM 1.35 from the 3-wavelength model + AOD 0.1 vs measured noon daylight 5500-6500 K; measure a finer spectrum / aerosol assumption and PROPOSE - no atmosphere config change without user OK | investigation | Opus |
+| T10 | Bug (user 2026-11-08): Earth from the lunar night fully overexposed with a blur rim; find the rim source (Godot glow vs physical glare veil) and add local (retinal) adaptation so small bright objects keep detail; switchable | bug/perception | Opus |
 | T6 | F1: DAY_EXPOSURE out of the field rule (the field lands at 0.18, not 0.27); compare against T5, user verdict on brightness (lunar day must stay bright enough - user prefers the bright Moon) | bug fix | Sonnet |
 
 After T6: Opus final review over the whole range, then the M7 cockpit plan continues (look follow-up: helmet shell
