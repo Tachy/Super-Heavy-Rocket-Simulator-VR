@@ -66,10 +66,6 @@ static var moon_field_adaptation := true
 ## 1938, Judd 1940): a field of one surface colour is seen toward neutral, not fully] The share of the adopted white
 ## near the Moon taken from the regolith field's mean light (moon_field_tint); the rest stays the illuminant's.
 const MOON_FIELD_MEAN_WEIGHT := 0.6
-## Fidelity flag (bug hunt 2026-11-08, user: "the Moon is cream, not grey"): near the Moon the field's illuminant takes
-## the regolith's colour by the share of the field the Moon fills (moon_field_tint). Off: the Sun's colour above the air
-## (the T5b look; render_check --moon_field=off).
-static var moon_field_adaptation := true
 ## The regolith's reflectance (shaders/moon_regolith.gdshaderinc, regolith_reflectance here; night-vision fix round I3,
 ## I4): albedo x regolith_scale x E/pi x Lommel-Seeliger x the K&S phase factor (or Hapke x hapke_normalisation, the
 ## default since the moon procedural surface plan Task 9), for the Sun and the earthshine alike.
@@ -765,27 +761,6 @@ func moon_light_colour() -> Vector3:
 	return tint * (sun.dot(LUMINANCE_WEIGHTS) / tinted) if tinted > 0.0 else tint
 
 
-## The adapting field near the Moon (bug hunt 2026-11-08, user: "the Moon looks cream instead of grey"): the field the
-## eye adapts to is the light it receives from its surroundings [S: CIE 159:2004 / CIECAM02, the adopted white is that
-## of the adapting field; von Kries cone gains set by the field's mean light]. On the Earth that light is daylight off
-## a near-neutral world, so the illuminant stands for it (field_illuminant); on and near the Moon the field is regolith
-## against a black sky - every bit of light the eye gets (the Sun's disc masked) carries the regolith's red slope, and a
-## uniformly coloured field is seen as near grey [S: Helson 1938 / Judd 1940, the Helson-Judd effect: a field of one
-## surface colour is perceived toward neutral; Apollo crews reported the regolith grey at high Sun]. The plates'
-## colour therefore takes the regolith's (moon_grey_tint, luminance 1) by the share of the eye's surroundings the Moon
-## fills: 1 - cos(theta), theta the lunar ground sphere's angular radius (1 on the ground, 0.48 at 300 km, 0.23 at
-## 1000 km, ~0 from the Earth) [call: the hemisphere-normalised solid-angle share - view-independent (both VR eyes,
-## head turns) and continuous; the full Moon from the Earth needs no term, its night illuminant is moonlight already].
-## The display keeps the degree of adaptation D (white_degree), so the regolith stays slightly warm, not white.
-## ONE with moon_field_adaptation or moon_colour_correction off.
-static func moon_field_tint(eye_from_moon_m: float, ground_radius_m: float) -> Vector3:
-	if not (moon_field_adaptation and moon_colour_correction) or eye_from_moon_m <= 0.0:
-		return Vector3.ONE
-	var s := clampf(ground_radius_m / eye_from_moon_m, 0.0, 1.0)
-	var share := 1.0 - sqrt(1.0 - s * s)
-	return Vector3.ONE.lerp(moon_grey_tint(), share)
-
-
 ## The adapting field near the Moon (bug hunt 2026-11-08; user: the close-up Moon read cream, approved: the eye partly
 ## adapts to the regolith's own light). CIECAM02's adopted white is the adapting field's [S: CIE 159:2004]; on the Earth
 ## the field is daylight off a near-neutral world and the illuminant stands for it (field_illuminant), but on and near
@@ -933,11 +908,6 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 					EARTH_MEAN_RADIUS_M, moon_itrf_m - eye_itrf_m, moon_ground_m))
 			# Near the Moon the field the eye adapts to is the regolith's light (moon_field_tint): both plates take part
 			# of its colour by the share of the field the Moon fills.
-			var tint := moon_field_tint((moon_itrf_m - eye_itrf_m).length(), moon_ground_m)
-			_illuminant_down_rgb *= tint
-			_illuminant_far_rgb *= tint
-			# Near the Moon the field the eye adapts to is the regolith's light (moon_field_tint): both plates take its
-			# colour by the share of the field the Moon fills (luminance kept).
 			var tint := moon_field_tint((moon_itrf_m - eye_itrf_m).length(), moon_ground_m)
 			_illuminant_down_rgb *= tint
 			_illuminant_far_rgb *= tint
@@ -1796,7 +1766,6 @@ func _load_task(config_dir: String, cache_dir: String) -> void:
 		for key in ["transmittance", "irradiance", "scattering", "single_mie", "single_rayleigh"]:
 			result.erase(key)
 	_result = result
-
 
 func _image_2d(data: PackedFloat32Array, size: Vector2i, format := table_format) -> Image:
 	var image := Image.create_from_data(size.x, size.y, false, Image.FORMAT_RGBAF, data.to_byte_array())
