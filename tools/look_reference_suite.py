@@ -177,6 +177,30 @@ def m_terminator(a):
             "band_warm_share": float((l[band][:, 0] > l[band][:, 2]).mean()) if band.any() else float("nan")}
 
 
+def m_sun_profile(fov_deg):
+    """The Sun's veil: radial mean luma (8-bit display) at 1 / 2 / 3 / 5 / 10 deg from the disc's centre (render_check's
+    vertical fov), the disc white, the halo's monotonic fall (halo_bump). In space the veil is the eye's alone (CIE 146:
+    L_veil = E (10 / theta^3 + 5 / theta^2 + ...), no aureole); from the ground the atmosphere's aureole adds to it."""
+    def measure(a):
+        y = luma(a)
+        h = a.shape[0]
+        px_per_deg = (h / 2) / np.tan(np.radians(fov_deg / 2)) * np.pi / 180
+        white = a.min(axis=2) >= 250
+        if white.any():
+            ys, xs = np.nonzero(white)
+            cy, cx = ys.mean(), xs.mean()
+        else:
+            cy, cx = np.unravel_index(np.argmax(y), y.shape)
+        yy, xx = np.mgrid[0:h, 0:a.shape[1]]
+        r_deg = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2) / px_per_deg
+        out = {"white_px": int(white.sum()), "halo_bump": halo_bump(a)[0]}
+        for d in (1, 2, 3, 5, 10):
+            ring = (r_deg > d * 0.9) & (r_deg < d * 1.1)
+            out[f"luma_{d}deg"] = float(y[ring].mean()) if ring.any() else float("nan")
+        return out
+    return measure
+
+
 def m_cockpit(a):
     return {"frame_luma": float(luma(a.reshape(-1, 3)).mean()), "clipped": clipped(a.reshape(-1, 3))}
 
@@ -266,6 +290,19 @@ SCENES.update(_variants())
 # west, the terminator ~500 km east; view east, 30 deg down).
 SCENES["terminator_half_earth_f10"] = (LUNAR_NIGHT + ["--lon=45", "--utc=2026-12-01T14:00:00", "--look_at_earth",
                                                        "--fov=10"], m_terminator, {})
+# The Sun in space (orchestrator 2026-11-08): a white disc, black sky to the limb, only the eye's CIE 146 veil (no
+# aureole, no Godot glow); from 400 km above the pad at noon and from 100 km above the Moon; 60 and 10 deg. Contrast:
+# sun_in_view* (ground, the atmosphere's aureole + the same veil).
+for _fov in ("60", "10"):
+    _sun_gates = {"white_px": (1, 10 ** 9, "[call] the Sun's disc is display white"),
+                  "halo_bump": (0.0, 3.0, "[CIE 146: the veil falls monotonically with the angle]")}
+    SCENES[f"sun_space_400km_f{_fov}"] = (["--lat=25.9853", "--lon=-97.1873", "--height=400000",
+                                           "--utc=2026-11-07T18:15:00", "--hide_ui", WEATHER, "--look_at_sun",
+                                           f"--fov={_fov}"], m_sun_profile(float(_fov)), _sun_gates)
+    SCENES[f"sun_lunar_orbit_f{_fov}"] = (["--body=moon", "--lat=0.674", "--lon=23.473", "--height=100000",
+                                           "--utc=2026-11-17T08:00:00", "--hide_ui", WEATHER, "--look_at_sun",
+                                           f"--fov={_fov}"], m_sun_profile(float(_fov)), _sun_gates)
+SCENES["sun_in_view_profile_f10"] = (NOON + ["--look_at_sun", "--fov=10"], m_sun_profile(10.0), {})
 SCENES["terminator_400km"] = (["--lat=0", "--lon=0", "--height=400000", "--utc=2026-11-07T18:15:00", "--hide_ui", WEATHER,
                                "--azimuth=90", "--elevation=-30", "--fov=60"], m_terminator, {})
 CROP_SCENES = [n for n in SCENES if n.endswith(("_vr", "_f10"))]
