@@ -97,9 +97,14 @@ func _self_check() -> void:
 	get_tree().quit(0)
 
 
-## F1 shows / hides the old flight HUD.
+## F1 shows / hides the old flight HUD; C toggles the camera between the cockpit and the external view.
 func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
-	if key != null and key.pressed and not key.echo and key.keycode == KEY_F1:
+	if key == null or not key.pressed or key.echo:
+		return
+	if key.keycode == KEY_F1:
 		legacy_hud.visible = not legacy_hud.visible
+		get_viewport().set_input_as_handled()
+	elif key.keycode == KEY_C and not key.ctrl_pressed and not key.alt_pressed and not key.meta_pressed:
+		world.toggle_cockpit()
 		get_viewport().set_input_as_handled()

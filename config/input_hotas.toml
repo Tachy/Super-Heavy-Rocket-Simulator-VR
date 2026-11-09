@@ -50,3 +50,11 @@ strafe_axis = 0             # throttle mini-stick left/right
 strafe_invert = false
 vertical_axis = 1           # throttle mini-stick up/down (up = -1)
 vertical_invert = true
+
+# Stick buttons by role (0-based indices as Godot numbers them; list them with
+#   godot --path game --script res://tests/joy_probe.gd -- --buttons --seconds=30).
+# stick_device is found by a substring of its name like [stick] device_name.
+[buttons]
+stick_device = "T16000M"
+cockpit_toggle = 2   # cockpit <-> external view: T.16000M button 3 ("left of the thumb hat"). [E] unverified, Task 9 measures
+camera_next = 3      # next left-screen camera. [E] unverified, Task 9 measures

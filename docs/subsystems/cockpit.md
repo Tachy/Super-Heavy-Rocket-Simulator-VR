@@ -205,6 +205,25 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
   (`pivot_el_deg` -30) 13 deg behind the opening edge (jsc2024e066389: 19 mm disc ~0.09 m below eye level, ~25 mm behind the seal); `helmet_side_vs_jsc066389`.
 - Debug options of `cockpit_shots.gd`: `--no_shadows`, `--lights_off=<patterns|sun>`, `--no_sky_light`, `--agx_contrast=<c>`.
 
+## Camera mode and toggle
+State after plan Task 6 (code: `game/cockpit/cockpit_camera.gd`, `hotas_buttons.gd`, `World.toggle_cockpit`).
+- `OrbitCamera.Mode.COCKPIT`: the pose is the head (`position_gcrf_m`, `free_basis`) that `World._update_camera` takes from `CockpitCamera`;
+  near plane 0.03 m (`COCKPIT_NEAR_M`). VR: the same path sets the XR base (`XrManager.set_base`), the headset moves on top; toggling in recentres.
+- `CockpitCamera` reads the simulation snapshot in float64, not the scene nodes: head = body position + attitude * ((capsule stage base - CG) along the
+  station axis + `CockpitConfig.eye.origin`), axes = attitude * eye basis, turned by the look. Body found by the capsule stage id and the
+  vehicle id (so the Dragon stack, the Dragon alone and the capsule after the trunk jettison all work). Test: the eye node of the scene graph sits at the
+  floating origin (= the camera) within 1 mm, also through the staging at warp x100.
+- Desktop look: right-drag (OrbitCamera `free_look_rad`), clamped to +-170 deg yaw, +-80 deg pitch relative to the seat, F12 resets it. VR ignores the mouse look.
+- `World.cockpit_active`, `toggle_cockpit()` (signal `cockpit_toggled(active)`), keys: `C` (`main.gd`; `VrPanelMouse.PASS_KEYS`), stick button `cockpit_toggle`.
+  Every switch calls `_view_jumped()` (eye adaptation snaps). A mission start whose controlled vehicle has a cabin starts in the cockpit
+  (`_on_mission_started`); a vehicle without one: the toggle does nothing and logs one line. A focus / ground-site change leaves the cockpit.
+  `launch_vehicle` stays external (the launch is asynchronous). If the capsule body disappears the camera returns to the external view.
+- `_keep_camera_above_surface` is skipped in the cockpit (the vehicle's physics decides where the head is).
+- `HotasButtons` (`config/input_hotas.toml [buttons]`): `stick_device = "T16000M"`, `cockpit_toggle = 2`, `camera_next = 3`; the indices are
+  [E] unverified (T.16000M button 3, 0-based; Task 9's VR run measures). `pressed(role)` is true on the frame of the press; `camera_next` is read by Task 7.
+  Measure with `godot --path game --script res://tests/joy_probe.gd -- --buttons --seconds=30`.
+- Test: `game/tests/cockpit_camera_test.gd` (needs the generated Dragon models; listed in `tools/run_godot_tests.ps1` under `-Gpu`).
+
 ## Validation
 - Wall check (scratch script, Task 1): inner profile >= 0.094 m from the exterior meridian and the neck well everywhere.
 - Tag check: `detail_file.value_lines_without_tag("config/cockpits/crew_dragon.toml")` empty; unit vectors normalised.

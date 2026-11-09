@@ -138,6 +138,17 @@ signal boot_finished
 signal lunar_site_switched(lat_deg: float, lon_deg: float)
 signal lunar_site_switch_failed(report: Dictionary)
 
+## The camera went into / out of the cockpit (toggle_cockpit, a mission start in a Dragon, a focus change).
+signal cockpit_toggled(active: bool)
+
+var cockpit_active := false  ## the camera is the pilot's head in the cabin (CockpitCamera), not an external view
+var cockpit_camera := CockpitCamera.new()
+var hotas_buttons := HotasButtons.new()  ## the stick's buttons by role ([buttons] of input_hotas.toml)
+var view_jump_count := 0  ## how often _view_jumped ran (tests)
+var cockpit_refusal_count := 0  ## toggles refused for lack of a cabin (each logged once; tests)
+var _cockpit_config: CockpitConfig  ## the cabin of the controlled vehicle while the cockpit is active
+var _mode_before_cockpit := OrbitCamera.Mode.ORBIT
+
 var booted := false  ## the whole setup of `_ready` is done (the per-frame update waits for it)
 
 
@@ -153,6 +164,7 @@ func _ready() -> void:
 	sites = TomlLite.load_file(Paths.config_dir().path_join("launch_sites.toml")).get("site", [])
 	flight.setup(Paths.config_dir())
 	free_control.setup(Paths.config_dir())
+	hotas_buttons.setup(Paths.config_dir())
 	add_child(flight)
 	add_child(view_target)
 
@@ -326,6 +338,9 @@ func update_world() -> void:
 	moon.center_gcrf_m = moon_gcrf_m
 	FrameProfiler.end(&"ephemeris")
 
+	hotas_buttons.update()
+	if hotas_buttons.pressed("cockpit_toggle"):
+		toggle_cockpit()
 	FrameProfiler.begin(&"camera")
 	_update_camera(t)
 	FrameProfiler.end(&"camera")
@@ -472,17 +487,90 @@ func _on_mission_started(ok: bool, _report: Dictionary) -> void:
 	clock.set_time(flight.sim.mission_start_tdb_s())
 	clock.warp = 1.0
 	set_focus(FOCUS_VEHICLE)
+	_start_in_cockpit()
 
 
 ## A new view (ground site, focus, Tab target): the viewer is taken as adapted to it.
 func _view_jumped() -> void:
+	view_jump_count += 1
 	atmosphere.snap_adaptation()
+
+
+## A flight whose controlled vehicle has a cabin (CockpitConfig) starts in the cockpit (user 2026-11-07); the others in the
+## external view as before.
+func _start_in_cockpit() -> void:
+	if not cockpit_active and _controlled_cockpit() != null:
+		toggle_cockpit()
+
+
+## The cabin definition of the controlled vehicle that is in the session (null: none, e.g. Starship, Falcon 9 alone).
+func _controlled_cockpit() -> CockpitConfig:
+	var index: int = flight.sim.controlled_index() if flight.sim.is_active() else -1
+	if index < 0 or index >= flight.sim.body_count():
+		return null
+	var stages: Array = flight.sim.body_stages(index)
+	if stages.is_empty():
+		return null
+	var config := CockpitConfig.for_vehicle(String(stages[0].get("vehicle_id", "")).get_slice("/", 0))
+	return config if CockpitCamera.capsule_body(flight.sim, config) >= 0 else null
+
+
+## Stick button 3 / C: the camera between the pilot's seat and the external view (the simulation keeps running). A vehicle
+## without a cabin: nothing changes, one log line. Every switch is a new view (eye adaptation snaps).
+func toggle_cockpit() -> void:
+	if cockpit_active:
+		cockpit_active = false
+		camera.mode = _mode_before_cockpit
+		_cockpit_config = null
+		_view_jumped()
+		cockpit_toggled.emit(false)
+		return
+	var config := _controlled_cockpit()
+	if config == null:
+		cockpit_refusal_count += 1
+		print("World: no cockpit for the controlled vehicle - the view stays external")
+		return
+	_cockpit_config = config
+	_mode_before_cockpit = camera.mode if camera.mode != OrbitCamera.Mode.COCKPIT else OrbitCamera.Mode.ORBIT
+	cockpit_camera.reset_look()
+	cockpit_active = cockpit_camera.update(flight.sim, config)
+	if not cockpit_active:
+		return
+	camera.mode = OrbitCamera.Mode.COCKPIT
+	if _xr != null and _xr.xr_active:
+		_xr.recenter()  # the head at the commander's eye point
+	_view_jumped()
+	cockpit_toggled.emit(true)
+
+
+## Another view (focus, ground site) replaces the cockpit without a toggle: the flag follows the camera mode.
+func _leave_cockpit_for_view() -> void:
+	if cockpit_active:
+		cockpit_active = false
+		_cockpit_config = null
+		cockpit_toggled.emit(false)
+
+
+## One frame of the cockpit camera: the head from the simulation snapshot, the mouse look (desktop) from the orbit camera.
+## The capsule gone (the session ended): back to the external view.
+func _update_cockpit_camera() -> void:
+	if _xr != null and _xr.xr_active:
+		camera.free_look_rad = Vector3.ZERO  # the headset looks around
+	else:
+		cockpit_camera.look(Vector2(camera.free_look_rad.x, camera.free_look_rad.y))
+		camera.free_look_rad = Vector3.ZERO
+	if not flight.sim.is_active() or not cockpit_camera.update(flight.sim, _cockpit_config):
+		toggle_cockpit()
+		return
+	camera.position_gcrf_m = cockpit_camera.position_gcrf_m
+	camera.free_basis = cockpit_camera.basis_render()
 
 
 ## Ground view from an arbitrary site (dictionary like the entries of config/launch_sites.toml; optional eye_height_m
 ## above height_m, default GROUND_EYE_HEIGHT_M; optional body "moon": selenographic coordinates, height_m above the
 ## mean sphere).
 func set_ground_site(site: Dictionary) -> void:
+	_leave_cockpit_for_view()
 	_view_jumped()
 	focus = site.get("id", "custom")
 	ground_site = site
@@ -493,6 +581,7 @@ func set_ground_site(site: Dictionary) -> void:
 
 
 func set_focus(new_focus: String) -> void:
+	_leave_cockpit_for_view()
 	_view_jumped()
 	var was_free := focus == FOCUS_FREE
 	focus = new_focus
@@ -594,7 +683,9 @@ func _free_surface_distance_m() -> float:
 
 
 func _update_camera(t: float) -> void:
-	if camera.mode == OrbitCamera.Mode.FREE:
+	if camera.mode == OrbitCamera.Mode.COCKPIT:
+		_update_cockpit_camera()
+	elif camera.mode == OrbitCamera.Mode.FREE:
 		_update_free_camera()
 	elif camera.mode == OrbitCamera.Mode.GROUND:
 		var lat := deg_to_rad(ground_site["latitude_deg"])
@@ -622,6 +713,8 @@ func _update_camera(t: float) -> void:
 ## No camera closer than SurfaceClearance.MIN_CLEARANCE_M to the Earth's or the Moon's terrain (user 2026-10-29): a
 ## pose below it is moved out along the local vertical; the free camera's own pose follows (no drift into the ground).
 func _keep_camera_above_surface() -> void:
+	if camera.mode == OrbitCamera.Mode.COCKPIT:
+		return  # the head is carried by the vehicle: the physics decides where it is (a capsule afloat has its eye ~1 m above the sea)
 	var p := camera.position_gcrf_m
 	var on_moon := (p - moon_gcrf_m).length() - MOON_RADIUS_M < p.length() - EARTH_SEMI_MAJOR_AXIS_M
 	var rotation := moon.fixed_to_gcrf if on_moon else earth.fixed_to_gcrf
@@ -663,6 +756,8 @@ func _update_vehicle_camera() -> void:
 ## control such as the UTC field of the time panel holds the focus; only when the vehicle view is active.
 func _input(event: InputEvent) -> void:
 	var key := event as InputEventKey
+	if key != null and key.pressed and not key.echo and key.keycode == KEY_F12 and cockpit_active:
+		cockpit_camera.reset_look()  # F12 recentres the active view (VR: XrManager recentres the headset itself)
 	if key == null or not key.pressed or key.echo or key.keycode != KEY_TAB:
 		return
 	if focus != FOCUS_VEHICLE or not flight.sim.is_active():

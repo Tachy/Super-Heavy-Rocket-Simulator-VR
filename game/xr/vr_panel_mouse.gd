@@ -11,8 +11,8 @@ extends Node
 signal pointer_moved(cursor_px: Vector2)
 
 ## Keys that stay with the game (pattern of the sibling's VrEditorHost PASS_KEYS): Tab / Shift+Tab switch the viewed
-## object (the menu would take Tab for its focus traversal), F1 the old HUD, F12 recentres.
-const PASS_KEYS: Array[Key] = [KEY_TAB, KEY_F1, KEY_F12]
+## object (the menu would take Tab for its focus traversal), F1 the old HUD, C the cockpit / external toggle, F12 recentres.
+const PASS_KEYS: Array[Key] = [KEY_TAB, KEY_F1, KEY_C, KEY_F12]
 const POINTER_SIZE := Vector2i(32, 32)  ## covers the arrow shape (Pointer.SHAPE)
 
 var viewport: SubViewport

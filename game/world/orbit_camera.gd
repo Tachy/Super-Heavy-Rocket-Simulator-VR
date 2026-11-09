@@ -10,7 +10,8 @@ extends Camera3D
 ## VR: this camera is not current; its pose is the XR base pose (XrManager.set_base), the headset moves on top.
 
 ## FREE: the pose is the camera's own (position_gcrf_m, free_basis), flown by World with the HOTAS (FreeCameraControl).
-enum Mode { ORBIT, GROUND, FREE }
+## COCKPIT: the pose is the pilot's head (position_gcrf_m, free_basis), set by World from CockpitCamera; the mouse look goes to free_look_rad.
+enum Mode { ORBIT, GROUND, FREE, COCKPIT }
 
 ## [E] Wheel zoom limits: a few metres from a vehicle out to ~10 lunar distances.
 const MIN_DISTANCE_M := 5.0
@@ -19,6 +20,8 @@ const MAX_DISTANCE_M := 4.0e9
 const DRAG_RAD_PER_PX := 0.005
 ## [E] Near plane of the free camera (m): it flies through clouds and close past surfaces.
 const FREE_NEAR_M := 0.5
+## [E] Near plane in the cabin (m): the console and the figure's hands are 0.3 m from the eye.
+const COCKPIT_NEAR_M := 0.03
 ## [E] Ground mode elevation limit (rad).
 const GROUND_ELEVATION_LIMIT := 1.5
 
@@ -74,7 +77,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				distance_m = CameraMath.zoom(distance_m, -1, MIN_DISTANCE_M, MAX_DISTANCE_M)
 	elif event is InputEventMouseMotion and _rotating:
 		var motion := (event as InputEventMouseMotion).relative * DRAG_RAD_PER_PX
-		if mode == Mode.FREE:
+		if mode == Mode.FREE or mode == Mode.COCKPIT:
 			free_look_rad += Vector3(-motion.y, -motion.x, 0.0)
 		elif mode == Mode.ORBIT:
 			yaw -= motion.x
@@ -96,6 +99,9 @@ func update_pose(delta_s: float = 0.0) -> void:
 	elif mode == Mode.FREE:
 		view = free_basis
 		near = FREE_NEAR_M
+	elif mode == Mode.COCKPIT:
+		view = free_basis
+		near = COCKPIT_NEAR_M
 	else:
 		position_gcrf_m = site_gcrf_m
 		var horizontal := site_north_gcrf * cos(azimuth) + site_east_gcrf * sin(azimuth)
