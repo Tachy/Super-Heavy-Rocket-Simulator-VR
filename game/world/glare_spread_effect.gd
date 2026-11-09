@@ -488,12 +488,50 @@ static func _groups(size: Vector2i) -> Vector2i:
 	return Vector2i((size.x - 1) / 8 + 1, (size.y - 1) / 8 + 1)
 
 
-## The view ray parameters (a, b, c, d) of a projection (as AdaptationMeter.sun_mask_parameters).
+## The view ray parameters (a, b, c, d) of a projection (as AdaptationMeter.sun_mask_parameters), in the eye's own axes
+## (eye_frame: also for a render projection with the eye's rotation in it).
 static func ray_parameters(p: Projection) -> PackedFloat32Array:
-	# The render data's projection can come with Vulkan's y flip (p.y.y < 0, p.z.y negated with it): the ratio p.z.y / p.y.y
-	# is the same either way, the scale must be positive (image row 0 is the top, NDC y up). A sign here mirrored the Sun
-	# vertically (a second disc and halo below the view axis).
-	return PackedFloat32Array([1.0 / p.x.x, p.z.x / p.x.x, 1.0 / absf(p.y.y), p.z.y / p.y.y])
+	return eye_frame(p)["ray"]
+
+
+## A projection taken apart into the eye's frustum and the eye's orientation (look fixes final review I1). In stereo the
+## renderer's view projection is correction * P_eye * inverse(view_offset) (renderer_scene_render.cpp), the eye's
+## rotation in the head's axes inside it: canted displays (Pimax default, Valve Index ~5 deg) are rotated against the
+## head. Its rows x, y, w over the direction columns are M = K Q (RQ decomposition) with K = [[P00, 0, P20],
+## [0, P11, P21], [0, 0, -1]] the eye's frustum (P11 < 0 with Vulkan's y flip) and Q's rows the eye's x, y, z axes in the
+## head's: q3 = -row w, q1 = row x without its q3 part (P00 > 0), q2 = q3 x q1 (right-handed). The translation (eye
+## offset) only enters column w. A projection without rotation (desktop, parallel displays) gives Q = identity.
+## {"ray": (a, b, c, d) in the eye's axes, "eye_in_head": Basis (the eye's axes as columns), "y_scale": |P11|, "valid"}.
+static func eye_frame(p: Projection) -> Dictionary:
+	var row_x := Vector3(p.x.x, p.y.x, p.z.x)
+	var row_y := Vector3(p.x.y, p.y.y, p.z.y)
+	var row_w := Vector3(p.x.w, p.y.w, p.z.w)
+	var q3 := -row_w.normalized() if row_w.length_squared() > 0.0 else Vector3(0.0, 0.0, 1.0)
+	var p20 := row_x.dot(q3)
+	var x_part := row_x - p20 * q3
+	var p00 := x_part.length()
+	var q1 := x_part / p00 if p00 > 0.0 else Vector3(1.0, 0.0, 0.0)
+	var q2 := q3.cross(q1)
+	var p11 := row_y.dot(q2)
+	var p21 := row_y.dot(q3)
+	# The image's row 0 is the top (NDC y up): with Vulkan's y flip P11 and P21 change sign together, the ratio stays;
+	# the scale must be positive (a sign here mirrored the Sun vertically: a second disc and halo below the view axis).
+	var valid := p00 > 0.0 and p11 != 0.0
+	var ray := PackedFloat32Array([1.0 / p00, p20 / p00, 1.0 / absf(p11), p21 / p11]) if valid \
+			else PackedFloat32Array([1.0, 0.0, 1.0, 0.0])
+	return {"ray": ray, "eye_in_head": Basis(q1, q2, q3), "y_scale": absf(p11), "valid": valid}
+
+
+## The view's frame data from its render projection and the head's (camera's) orientation: [ray parameters, ppd, Sun
+## direction in the eye's axes]; [] for a degenerate projection. The eye's orientation comes from the projection itself
+## (eye_frame), so the Sun and the pixel rays share one rotation on canted and parallel displays alike.
+static func view_frame(projection: Projection, head: Basis, sun_world: Vector3, size: Vector2i) -> Array:
+	var frame := eye_frame(projection)
+	if not frame["valid"]:
+		return []
+	var to_eye: Basis = (head * (frame["eye_in_head"] as Basis)).transposed()
+	var sun_eye := (to_eye * sun_world).normalized() if sun_world != Vector3.ZERO else Vector3(0.0, 0.0, -1.0)
+	return [frame["ray"], GlareSpread.pixels_per_degree(float(size.y), frame["y_scale"]), sun_eye]
 
 
 ## The spread of one view's colour image: SOURCE, DOWN x (K - 1), BLUR x K (all but the APPLY step; the GPU check reads
@@ -557,17 +595,6 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 		_add(render_data)
 
 
-## The view's frame data: [ray parameters, ppd, Sun direction in the eye's axes]; [] for a degenerate projection.
-func _frame_view(scene_data: RenderSceneData, head: Basis, index: int, size: Vector2i) -> Array:
-	var projection := scene_data.get_view_projection(index)
-	if projection.x.x == 0.0 or projection.y.y == 0.0:
-		return []
-	var eye_in_head := meter.eye_basis_in_head(index) if meter != null else Basis.IDENTITY
-	var sun_eye := ((head * eye_in_head).transposed() * _sun_world).normalized() if _sun_world != Vector3.ZERO \
-			else Vector3(0.0, 0.0, -1.0)
-	return [ray_parameters(projection), GlareSpread.pixels_per_degree(float(size.y), absf(projection.y.y)), sun_eye]
-
-
 func _spread(render_data: RenderData) -> void:
 	_spread_sun.clear()
 	if _rd == null or _pipelines.size() < 5 or not _active:
@@ -583,7 +610,7 @@ func _spread(render_data: RenderData) -> void:
 	if CloudEffect.capture_timestamps:  # render_check --gpu_passes
 		_rd.capture_timestamp("glare_spread")
 	for index in range(buffers.get_view_count()):
-		var frame := _frame_view(scene_data, head, index, size)
+		var frame := view_frame(scene_data.get_view_projection(index), head, _sun_world, size)
 		if frame.is_empty():
 			continue
 		var mask := _mask_cos if _sun_world != Vector3.ZERO else 2.0

@@ -412,14 +412,6 @@ static func sun_mask_parameters(view: Dictionary, eye_index: int) -> PackedFloat
 			float(view.get("sun_mask_cos", 2.0))])
 
 
-## Render thread: the orientation of rendered view `index` in the head's axes (the last measured view; identity before one).
-func eye_basis_in_head(index: int) -> Basis:
-	var eyes: Array = _view.get("eyes", [])
-	if index < eyes.size():
-		return eyes[index][0]
-	return Basis.IDENTITY
-
-
 func _set_on_render_thread(cd_per_scene: float, epoch: int, loading: bool, view: Dictionary, sun_seen: float) -> void:
 	_cd_per_scene = cd_per_scene
 	_epoch = epoch

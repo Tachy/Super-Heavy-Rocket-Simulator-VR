@@ -8,7 +8,11 @@
 # - energy: a point source's level-0 energy is the source's;
 # - the shaders' placeholders; each source's veil at its local adaptation factor (source_factor);
 # - the Sun's analytic veil: the form of Atmosphere.glare_veil (Stiles-Holladay) at the view axis equals the scalar; the
-#   CIE 146 form's ratio to it is reported; behind the eye nothing; held below the Sun's own radius.
+#   CIE 146 form's ratio to it is reported; behind the eye nothing; held below the Sun's own radius;
+# - the view frame from the render projection (final review I1): an eye pair canted +-10 deg (and parallel, and the
+#   desktop view) with Vulkan's y flip and the eye offset in it: the Sun's centre from the ray parameters and the Sun in
+#   the eye's axes lands within 1 px / 0.05 deg of its true projection in both eyes (the old path, raw ray parameters
+#   plus the eye's rotation applied a second time, is reported and must miss by > 1 px when canted).
 # godot --headless --path game --script res://tests/glare_spread_test.gd
 extends SceneTree
 
@@ -30,6 +34,7 @@ func _initialize() -> void:
 	_threshold()
 	_pyramid()
 	_sun()
+	_canted()
 	_shaders()
 	print("glare_spread_test: %s" % ("FAIL" if _failures > 0 else "PASS"))
 	quit(1 if _failures > 0 else 0)
@@ -211,3 +216,49 @@ func _sun() -> void:
 	_check("Sun veil held inside the disc's radius", is_equal_approx(GlareSpread.sun_veil_cd_m2(1.27e5, 0.0, 1.0),
 			GlareSpread.sun_veil_cd_m2(1.27e5, Atmosphere.GLARE_MIN_ANGLE_DEG, 1.0)
 			/ cos(deg_to_rad(Atmosphere.GLARE_MIN_ANGLE_DEG)) * 1.0), "")
+
+
+## The NDC (x, y up) a direction in the eye's axes falls on under ray parameters (a, b, c, d): ray (x a + b, y c + d, -1).
+static func _ndc_of(ray: PackedFloat32Array, eye_dir: Vector3) -> Vector2:
+	return Vector2((eye_dir.x / -eye_dir.z - ray[1]) / ray[0], (eye_dir.y / -eye_dir.z - ray[3]) / ray[2])
+
+
+func _canted() -> void:
+	const SIZE := Vector2i(2560, 2560)
+	var correction := Projection.create_depth_correction(true)
+	var head := Basis.from_euler(Vector3(0.2, 0.7, 0.1))
+	var sun_head := Vector3(0.15, 0.1, -1.0).normalized()
+	var sun_world := head * sun_head
+	for cant_deg: float in [10.0, 0.0, -1.0]:  # -1: the desktop view (one view, no eye offset)
+		var views := 1 if cant_deg < 0.0 else 2
+		for view in range(views):
+			var side := -1.0 if view == 0 else 1.0
+			var eye := Transform3D.IDENTITY
+			var p_eye := Projection.create_perspective(60.0, 16.0 / 9.0, 0.05, 1000.0)
+			if views == 2:
+				# The outer half wider (a Pimax-like asymmetric frustum), the eye yawed outward by the cant.
+				var outer := 1.4 * 0.05
+				var inner := 0.9 * 0.05
+				p_eye = Projection.create_frustum(-outer if side < 0.0 else -inner, inner if side < 0.0 else outer,
+						-1.1 * 0.05, 1.0 * 0.05, 0.05, 1000.0)
+				eye = Transform3D(Basis(Vector3.UP, -side * deg_to_rad(cant_deg)), Vector3(side * 0.032, 0.0, 0.0))
+			var render := correction * p_eye * Projection(eye.affine_inverse())  # RenderSceneDataRD.get_view_projection
+			var clip := render * Vector4(sun_head.x, sun_head.y, sun_head.z, 0.0)
+			var truth := Vector2(clip.x / clip.w, -clip.y / clip.w)  # NDC y up (the correction flips y)
+			var frame := GlareSpreadEffect.view_frame(render, head, sun_world, SIZE)
+			var got := _ndc_of(frame[0], frame[2])
+			var px := ((got - truth) * Vector2(SIZE) * 0.5).length()
+			var eye_axes: Basis = GlareSpreadEffect.eye_frame(render)["eye_in_head"]
+			var ray: PackedFloat32Array = frame[0]
+			var ray_world := (head * eye_axes * Vector3(truth.x * ray[0] + ray[1], truth.y * ray[2] + ray[3], -1.0)).normalized()
+			var angle_deg := rad_to_deg(ray_world.angle_to(sun_world))
+			var label := "desktop" if views == 1 else "cant %s%.0f deg eye %d" % ["+" if side < 0.0 else "-", cant_deg, view]
+			_check("view frame: Sun centre, %s" % label, px < 1.0 and angle_deg < 0.05,
+					"%.3f px, %.4f deg" % [px, angle_deg])
+			if views == 2 and cant_deg > 0.0:
+				# The old path: the raw ray parameters (rotation still inside) and the Sun rotated into the eye's axes.
+				var raw := PackedFloat32Array([1.0 / render.x.x, render.z.x / render.x.x, 1.0 / absf(render.y.y),
+						render.z.y / render.y.y])
+				var old := _ndc_of(raw, (head * eye.basis).transposed() * sun_world)
+				var old_px := ((old - truth) * Vector2(SIZE) * 0.5).length()
+				_check("view frame: old double rotation misses, %s" % label, old_px > 1.0, "%.1f px" % old_px)
