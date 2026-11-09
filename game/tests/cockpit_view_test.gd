@@ -211,6 +211,6 @@ func _check_figures(config: CockpitConfig) -> void:
 		var eye_m: Array = figure_manifest.get("eye_m", [0.0, 0.0, 0.0])
 		var head_m: Array = figure_manifest.get("bones", {}).get("head", {}).get("head", [0.0, 0.0, 0.0])
 		var back := deg_to_rad(float(config.seats[1]["back_angle_deg"]))
-		var figure_eye := head + Vector3(cos(back), -sin(back), 0.0) * (float(eye_m[0]) - float(head_m[0])) 				+ Vector3(sin(back), cos(back), 0.0) * (float(eye_m[1]) - float(head_m[1]))
+		var figure_eye := head + Vector3(cos(back), -sin(back), 0.0) * (float(eye_m[0]) - float(head_m[0])) + Vector3(sin(back), cos(back), 0.0) * (float(eye_m[1]) - float(head_m[1]))
 		_check(figure_eye.distance_to(config.eye.origin) < 0.02, "s2 figure's eye %.3f m from the eye point" % figure_eye.distance_to(config.eye.origin))
 	cockpit.free()

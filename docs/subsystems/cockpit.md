@@ -236,12 +236,13 @@ State after plan Task 6 (code: `game/cockpit/cockpit_camera.gd`, `hotas_buttons.
 - Key labels: optional `label` in `[[button]]` (only where a photo shows it: conv_42860a, the 2020 module row with the same key layout as discovery10, and training2):
   CANCEL, WATER DEORBIT, DEORBIT NOW, BREAKOUT, EXECUTE, DEPRESS RESPONSE, SUPPRESS FIRE, FIRE RESPONSE (cam1-5, 11-13), POWER 1/2, STRING 1A-2C, RESET 1/2 (cam6-10, 14-18),
   MAINS ONLY, DROGUES & MAINS, ENABLE BACKUP G-METER; 21 keys, the others blank faces. `cabin_layout.label_cells` packs one cell per labelled key (key-face aspect,
-  8 px/mm, 1024 x 512); `surface_textures.cockpit_labels` bakes `cockpit_labels.png` (linear coverage; Pillow's bundled Aileron Regular, CC0) in `write_dragon`; the
+  8 px/mm, 1024 x 512); `surface_textures.cockpit_labels` bakes `cockpit_labels.png` (linear coverage; Pillow's bundled Aileron Regular, CC0, recorded in `sources.toml` as `font_aileron_pillow`; needs Pillow >= 10.1 with FreeType for `ImageFont.load_default(size=...)`, an older Pillow would silently fall back to a bitmap font and bake different labels) in `write_dragon`; the
   manifest `cockpit.buttons[id]` carries `label`, `label_cell`, `normal` / `up` / `right`, `cockpit.labels.file`. `CockpitView` gives each labelled key its own
   material (shader label uniforms project the cell onto the key face). Button ids / node names unchanged. The camera keys keep their function (user decision)
   although the real keys carry abort / fire / power labels.
 - Red light strips: `cabin.gdshader` mark uniforms on `console_shelf` (10 mm along each module's bottom lip, red, 40 cd/m2 emitted, scene-referred each frame);
   the centre T-handle housing gets a red marking at its lower right corner (15 % x 40 %). No new geometry (the handle body stays the round-3 pad + T grip).
+  Deviation from the brief ("T-handle at the right end of the shelf"): the 2020 photo (conv_42860a) is cropped at the centre handle, so the existing centre handle is marked red and no second handle was added.
 - Albedo literals (stated linear vs sRGB): keys linear 0.03 (was the sRGB literal 0.09 = 0.009 linear), seat pads linear 0.035 (was sRGB 0.03), HOTAS linear 0.04
   (was sRGB 0.06), all converted for the sRGB uniform; seat shells stay sRGB 0.82 (= linear 0.64, white paint like the walls).
 - Re-check under the unified appearance model (`screenshots/m7-cockpit/look2/`, default field key 0.2): boots 0.15 sRGB, black pads 0.07 (round 5: ~0.5): closed.

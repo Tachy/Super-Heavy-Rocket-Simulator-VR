@@ -3,6 +3,6 @@ rasterio
 pyproj
 pytest
 pystac-client
-Pillow
+Pillow>=10.1
 tzdata
 opencv-python

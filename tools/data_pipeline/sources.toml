@@ -167,6 +167,15 @@ target = "data/fonts/BarlowCondensed-SemiBold.ttf"
 license = "SIL Open Font License 1.1 (https://openfontlicense.org)"
 credit = "Barlow Condensed by Jeremy Tribby (Tribby Design), google/fonts repository"
 
+[[source]]
+id = "font_aileron_pillow"
+name = "Aileron Regular (font bundled with Pillow >= 10.1, rasterised into the cockpit key label atlas cockpit_labels.png)"
+url = "https://github.com/python-pillow/Pillow/tree/main/src/PIL/fonts"
+target = "data/models/crew_dragon/cockpit_labels.png"
+kind = "licence_only"
+license = "CC0 1.0 (public domain dedication; no attribution required)"
+credit = "Aileron by Sorkin Type, bundled with Pillow (ImageFont.load_default)"
+
 # ------------------------------------------------------------------ own telemetry tables (committed)
 # Numbers shown in SpaceX's public webcasts (speed, altitude, propellant gauge, engine icons, mission clock), read by
 # our own OCR tool (tools/telemetry/webcast_telemetry.py). Only the transcribed values are kept; the videos are
