@@ -77,12 +77,24 @@ func _initialize() -> void:
 	# histograms: the shader skips them), so the frame is black and its field 0 whatever the disc's pixel share; the
 	# glare veil (Atmosphere.glare_veil, glare_veil_test) then is the field. The mask's parameters: the Sun at the view
 	# axis of a desktop view is the image centre's ray, a missing Sun masks nothing (cosine 2).
-	var view := {"head": Basis.IDENTITY, "eyes": [[Basis.IDENTITY, Projection.create_perspective(50.0, 16.0 / 9.0, 0.05, 1000.0)]],
-			"sun": Vector3(0, 0, -1), "sun_mask_cos": 0.99999}
-	var mask := AdaptationMeter.sun_mask_parameters(view, 0)
+	var projection := Projection.create_perspective(50.0, 16.0 / 9.0, 0.05, 1000.0)
+	var size := Vector2i(1920, 1080)
+	var view := {"head": Basis.IDENTITY, "eyes": [[Basis.IDENTITY, projection]], "sun": Vector3(0, 0, -1), "sun_mask_cos": 0.99999}
+	var mask := AdaptationMeter.sun_mask_parameters(view, projection, Basis.IDENTITY, size)
 	_near("Sun mask: ray at the image centre", float(mask[1]) * float(mask[1]) + float(mask[3]) * float(mask[3]), 0.0, 0.0)
 	_near("Sun mask: Sun along -Z", float(mask[6]), -1.0, 1e-6)
-	_near("Sun mask: no Sun, no mask", float(AdaptationMeter.sun_mask_parameters({"eyes": view["eyes"]}, 0)[7]), 2.0, 0.0)
+	_near("Sun mask: no Sun, no mask", float(AdaptationMeter.sun_mask_parameters({"eyes": view["eyes"]}, projection,
+			Basis.IDENTITY, size)[7]), 2.0, 0.0)
+	# VR (bug: Sun flicker in VR, 2026-11-09): the view dictionary's eyes are read on the main thread, where OpenXR still
+	# has the PREVIOUS frame's eye poses; the frame is rendered with this frame's. A head turning 0.4 deg per frame (36 deg/s
+	# at 90 Hz) put the mask (radius 1.2 x 0.27 deg) beside the drawn disc. The mask follows the render pose: the Sun on
+	# the render camera's axis is at the mask's centre whatever the stale eyes say.
+	var turned := Basis(Vector3.UP, deg_to_rad(0.4))
+	var stale := {"head": turned, "eyes": [[turned.transposed(), projection]], "sun": turned * Vector3(0, 0, -1),
+			"sun_mask_cos": 0.99999}
+	var render_mask := AdaptationMeter.sun_mask_parameters(stale, projection, turned, size)
+	_near("Sun mask: follows the render pose (VR, stale eyes ignored)", float(render_mask[6]), -1.0, 1e-9)
+	_near("Sun mask: on the render axis, x", float(render_mask[4]), 0.0, 1e-7)
 	_near("Sun masked: the black frame's field", AdaptationMeter.field_log_average(_histogram({0: 1000})), 0.0, 0.0)
 	# The scotopic histogram at its offset.
 	var both := _histogram({k500: 10, BINS + k50: 10})

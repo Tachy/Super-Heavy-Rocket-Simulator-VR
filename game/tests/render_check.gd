@@ -101,7 +101,9 @@
 #          --cloud_quality; run without --xr-mode off, which switches the multiview shader variants off), the eye
 #          images written as <out>_eye0.png / <out>_eye1.png; the log shows "stereo view_count 2". --cloud_view=<id>
 #          (CloudViews: the gate views V1 .. V7, e.g. V3_era5) prepends that view's arguments; an argument given on the
-#          command line wins.
+#          command line wins. With --halo_sequence=<n> both eye images are read back every frame and the Sun's halo rings
+#          measured per eye; --head_turn=<peak deg/frame>,<period frames> yaws the stand-in head sinusoidally, its poses
+#          located right before rendering as OpenXR does (main-thread reads see the previous frame's; bug 2026-11-09).
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
 extends SceneTree
 
@@ -151,6 +153,11 @@ const HALO_MAX_STEP := 0.02  ## --halo_sequence: largest relative frame-to-frame
 var _halo_previous := []
 var _halo_worst := 0.0
 var _halo_frame := 0  ## --halo_sequence: frames measured so far
+## --halo_sequence --stereo: a ring step is relative to at least this mean (linear display luminance; sRGB ~6.6 luma): the
+## near-black rings of the Sun in space (luma 0-3) would otherwise fail on 8-bit steps, an on / off of the halo does not pass.
+const HALO_STEREO_FLOOR := 0.002
+var _halo_visibility_range := Vector2(INF, -INF)  ## --halo_sequence --stereo: the meter's Sun visibility, min / max
+var _halo_pending_terms := ""  ## --halo_sequence --stereo: the Sun terms of the frame whose eye images are being read back
 var _repeat_failed := false  ## --repeat_identical: the frames differ (exit code 1)
 var _gpu_wall_us: Array[int] = []  ## --gpu_series: the wall clock of each measured frame
 var _gpu_ms: Array[float] = []  ## --gpu_time: the measured frames' GPU render times
@@ -963,6 +970,8 @@ func _repeat_frames(world: World) -> bool:
 ## changes can be traced (bug: Sun halo flicker, 2026-11-08). Frames saved as <out>_halo<n>.png.
 func _halo_sequence_done(world: World) -> bool:
 	var frames := maxi(int(_args["halo_sequence"]) if String(_args["halo_sequence"]).is_valid_int() else 30, 2)
+	if _stereo != null:
+		return _halo_sequence_stereo_done(world, frames)
 	var image := root.get_viewport().get_texture().get_image()
 	var camera: Camera3D = world.camera
 	var to_sun: Vector3 = Frames.to_render((world.sun_apparent_from_earth_m - world.camera.position_gcrf_m).normalized())
@@ -1002,6 +1011,99 @@ func _halo_sequence_done(world: World) -> bool:
 	if _args.has("halo_drift"):  # the view drifts by this many degrees per frame (head tremor / slow look: sub-pixel steps)
 		world.camera.azimuth += deg_to_rad(float(_args["halo_drift"]))
 	return _halo_frame >= frames
+
+
+## --halo_sequence with --stereo (bug: Sun flicker in VR, 2026-11-09): every frame both eye images are read back and the
+## halo rings measured around the Sun's position in each eye (from the pose that frame was rendered with); with
+## --head_turn=<peak deg/frame>,<period frames> the stand-in head yaws sinusoidally (StereoMockXr: poses located right before
+## rendering, as OpenXR does). Per frame also the meter's Sun terms the frame was drawn with. Fails if a ring's mean steps by
+## more than HALO_MAX_STEP between consecutive frames (each eye).
+func _halo_sequence_stereo_done(world: World, frames: int) -> bool:
+	if _halo_frame == 0 and _halo_pending_terms.is_empty() and _args.has("head_turn"):
+		var turn := String(_args["head_turn"]).split(",")
+		var peak := deg_to_rad(float(turn[0]))
+		var period := float(turn[1]) if turn.size() > 1 else 40.0
+		_stereo.head_yaw_period_frames = period
+		_stereo._pre_render_count = 0  # the motion starts at yaw 0
+		_stereo.head_yaw_amplitude_rad = peak * period / TAU  # peak rate = amplitude x 2 pi / period
+	var a := world.atmosphere
+	var terms := "gain %.5f, visibility %.4f, mask %s, veil %.1f cd/m^2, Sun veil lux(scene) %s" % [a.exposure_gain,
+			a.last_veil_visibility, a.last_sun_mask_weights, a.last_veil_cd_m2,
+			a.last_sun_normal_lux * a.last_veil_visibility * a.scene_per_cd_m2]
+	if not _halo_pending_terms.is_empty() and not _stereo.captured.is_empty():
+		var to_sun: Vector3 = Frames.to_render((world.sun_apparent_from_earth_m - world.camera.position_gcrf_m).normalized())
+		var origin: Transform3D = (root.get_node("XrManager").get("origin") as Node3D).global_transform
+		var line := "render_check: halo frame %d: head yaw %.4f deg; %s" % [_halo_frame,
+				rad_to_deg(_stereo.captured_head_yaw_rad), _halo_pending_terms]
+		var means_all := []
+		for view in range(_stereo.captured.size()):
+			var image: Image = _stereo.captured[view]
+			var eye := origin * Transform3D(Basis(Vector3.UP, _stereo.captured_head_yaw_rad), Vector3.ZERO) \
+					* _stereo._eye_from_head[view]
+			var means := _eye_halo_rings(image, _stereo.view_projection(view, 0.2, 3.0e7),
+					(eye.basis.orthonormalized().transposed() * to_sun).normalized())
+			means_all.append_array(means)
+			line += "; eye %d ring 0.4-1 %.5f, 1-2.5 %.5f, 3-5 %.5f, 8-12 %.5f" % [view, means[0], means[1], means[2], means[3]]
+			if _args.has("out") and _halo_frame % 10 == 0:
+				image.save_png("%s_halo%03d_eye%d.png" % [String(_args["out"]).get_basename(), _halo_frame, view])
+		print(line)
+		if not _halo_previous.is_empty():
+			for k in range(means_all.size()):
+				_halo_worst = maxf(_halo_worst, absf(means_all[k] - _halo_previous[k]) / maxf(_halo_previous[k], HALO_STEREO_FLOOR))
+		_halo_previous = means_all
+		_halo_frame += 1
+		if _halo_frame >= frames:
+			var ok := _halo_worst < HALO_MAX_STEP
+			print(("render_check: halo stability over %d stereo frames: worst frame-to-frame step %.2f %% (limit %.1f %%): %s;"
+					+ " Sun visibility %.4f .. %.4f") % [frames, 100.0 * _halo_worst, 100.0 * HALO_MAX_STEP, "ok" if ok else "FAIL",
+					_halo_visibility_range.x, _halo_visibility_range.y])
+			_repeat_failed = _repeat_failed or not ok
+			_stereo.head_yaw_period_frames = 0.0
+			return true
+	_halo_pending_terms = terms  # the terms this frame is drawn with
+	_halo_visibility_range = Vector2(minf(_halo_visibility_range.x, a.last_veil_visibility),
+			maxf(_halo_visibility_range.y, a.last_veil_visibility))
+	_stereo.captured.clear()
+	_stereo.capture_requested = true
+	return false
+
+
+## The mean display luminance (linear) of the annuli 0.4-1, 1-2.5, 3-5 and 8-12 deg around the Sun in one eye image: each pixel's
+## ray from the eye's projection (GlareSpreadEffect.eye_frame: (x a + b, y c + d, -1), NDC y up, row 0 the top).
+func _eye_halo_rings(image: Image, projection: Projection, sun_eye: Vector3) -> Array:
+	var ray := GlareSpreadEffect.ray_parameters(projection)
+	var w := image.get_width()
+	var h := image.get_height()
+	var means := [0.0, 0.0, 0.0, 0.0]
+	if sun_eye.z >= 0.0:
+		return means
+	var sx := ((-sun_eye.x / sun_eye.z) - ray[1]) / ray[0]  # NDC of the Sun
+	var sy := ((-sun_eye.y / sun_eye.z) - ray[3]) / ray[2]
+	var cx := (sx * 0.5 + 0.5) * w
+	var cy := (0.5 - sy * 0.5) * h
+	var ppd := 0.5 * h / ray[2] * PI / 180.0  # pixels per degree at the image centre
+	var rings := [[0.4, 1.0], [1.0, 2.5], [3.0, 5.0], [8.0, 12.0]]
+	var sums := [0.0, 0.0, 0.0, 0.0]
+	var counts := [0, 0, 0, 0]
+	# The two inner rings on every pixel (their profile is steep: a sparse grid aliases as the Sun moves), the outer two on
+	# a grid of a quarter degree.
+	for part in range(2):
+		var r_max := (2.6 if part == 0 else 12.5) * ppd * 1.3
+		var step := 1 if part == 0 else maxi(int(ppd * 0.25), 1)
+		for y in range(maxi(int(cy - r_max), 0), mini(int(cy + r_max), h), step):
+			for x in range(maxi(int(cx - r_max), 0), mini(int(cx + r_max), w), step):
+				var nx := (x + 0.5) / w * 2.0 - 1.0
+				var ny := 1.0 - (y + 0.5) / h * 2.0
+				var d := Vector3(nx * ray[0] + ray[1], ny * ray[2] + ray[3], -1.0).normalized()
+				var theta := rad_to_deg(acos(clampf(d.dot(sun_eye), -1.0, 1.0)))
+				for k in range(part * 2, part * 2 + 2):
+					if theta >= rings[k][0] and theta <= rings[k][1]:
+						var c := image.get_pixel(x, y).srgb_to_linear()
+						sums[k] += 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+						counts[k] += 1
+	for k in range(4):
+		means[k] = sums[k] / maxf(counts[k], 1)
+	return means
 
 
 ## --weather, --weather=online or --weather=<max seconds>: the weather service online (downloads); off / analog / a

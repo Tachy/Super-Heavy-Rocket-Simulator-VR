@@ -401,8 +401,15 @@ shaders:
   desktop vs headset), and a Sun just outside the frame did not count at all.
   - Mask: the meter's compute skips every sample whose view ray lies within `SUN_MASK_RADIUS_FACTOR` 1.2 [call: limb
     and the sparse grid] x the Sun's apparent radius of its direction (World `_adaptation_view`: "sun", "sun_mask_cos";
-    per rendered view the ray (x a + b, y c + d, -1) from that eye's projection and the Sun in that eye's axes: both VR
-    eyes). Two counters after the histograms: the masked weight and its part at least `SUN_SEEN_SHARE` 0.05 of the
+    per rendered view the ray (x a + b, y c + d, -1) and the Sun in that eye's axes from the RENDER data on the render
+    thread - the view's render projection and the render camera, `GlareSpreadEffect.view_frame`, as the glare spread's
+    mask: both VR eyes, canted displays). Not from the view dictionary's "eyes": those are read on the main thread during
+    `_process`, where OpenXR still returns the eye poses the previous frame was rendered with (`OpenXRAPI::pre_render`
+    locates the views right before rendering); a head turning faster than the mask's margin per frame put the mask beside
+    the drawn disc, the seen counter fell to 0 and the Sun's veil switched off and on - in VR the Sun flickered between a
+    plain disc and disc with halo (bug 2026-11-09, report `.superpowers/sdd/2026-11-07-look-fixes/bug-sun-vr-report.md`;
+    stereo mock with `--head_turn=0.8,40`: seen 0 .. 78 000, visibility 0 .. 1, the 0.4-1 deg ring 0.0029 <-> 0; fixed:
+    seen 78 000 +- 1 %, visibility 1). Two counters after the histograms: the masked weight and its part at least `SUN_SEEN_SHARE` 0.05 of the
     disc's own (de-gained) luminance (`sun_seen_cd_m2`: the direct beam's normal illuminance / the disc's solid angle,
     or the shader's 6e4 clamp): the disc seen, not hidden behind something.
   - Veil [S: Stiles 1929, Holladay 1926; CIE 146:2002, the Stiles-Holladay disability glare formula]: L_veil = 10 E_gl
@@ -411,7 +418,7 @@ shaders:
     E_gl = E_n cos theta to 0 at 90 deg - nothing from behind). E_n = `last_sun_normal_lux`, the direct Sun's normal
     illuminance at the eye (TOA / d^2 x the transmittance x the clouds' direct beam x the visible fraction). Whether it
     reaches the eye: with the Sun's direction in a rendered view the meter's seen share (seen / (mask x 1/1.44 x
-    `SUN_SEEN_FULL_SHARE` 0.5 [call: the sparse grid puts ~4-6 samples into the mask, measured 0.48 for an open Sun]),
+    `SUN_SEEN_FULL_SHARE` 0.15 [call: the counters are exact per pixel (bug fix 2026-11-08); an open Sun measured 0.25 of the mask]),
     at most 1); outside the frame the surround's V (open 1; an enclosure, whose walls the model does not know, 0).
     Scotopic veil: the direct Sun's colour through the scotopic weights. The veil lies over the whole retinal image, so
     the field's statistics take it as L_f + L_veil and L_anchor + L_veil (a black field becomes the veil; added per
@@ -423,7 +430,10 @@ shaders:
     across the frame edge (25.47 +- 0.1 deg) within 2 %; a hidden Sun (no seen sample), a Sun behind the eye, an
     enclosed view's out-of-frame Sun: no veil; the Sun at the axis finite; stars vanish 20 deg from the Sun (Schaefer
     limiting magnitude -5.3 at that L_a) and stay with the Sun behind (7.9). `adaptation_meter_test.gd`: the mask's
-    parameters (image-centre ray, Sun along -Z, no Sun no mask) and the masked Sun's black frame field 0. Stereo mock
+    parameters (image-centre ray, Sun along -Z, no Sun no mask; the mask follows the render pose, stale eyes ignored) and
+    the masked Sun's black frame field 0. VR gate (GPU): `render_check --stereo=<json> --halo_sequence=40
+    --head_turn=0.8,40` (per frame both eye images, rings 0.4-1 / 1-2.5 / 3-5 / 8-12 deg, step <= 2 % of max(mean, 0.002)
+    and the visibility range printed). Stereo mock
     (both eyes, Moon, Sun 12 deg above the view centre): mask 710 / seen 710, veil 8627 cd/m^2, gain 1.000.
 
 - **Local adaptation: small bright objects keep their detail** [look fixes T10, user 2026-11-08; `local_adaptation.gd`

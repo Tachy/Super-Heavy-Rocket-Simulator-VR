@@ -97,3 +97,15 @@ A/B/C (pre-T5 / T5 / fix round 1, `screenshots/look_fixes/t5_fix1/`): pad noon S
     integrated starlight (a moonless sky is black); Jensen's k on the adaptation luminance, not per pixel; B and S one
     value per view, no Bezold-Bruecke hue shift (lunar day keeps B = 1, S 1.66).
 ```
+
+## Sun mask from the main thread's eye poses (until the VR Sun flicker fix, 2026-11-09)
+
+Superseded text of the "Sun glare" mask entry:
+    per rendered view the ray (x a + b, y c + d, -1) from that eye's projection and the Sun in that eye's axes: both VR
+    eyes).
+The eyes were World `_adaptation_view`'s `interface.get_transform_for_view` / `get_projection_for_view`, read during
+`_process`. In OpenXR these are the poses of the previous frame's `pre_render`, so the mask lagged the drawn Sun by one
+frame of head rotation. Stereo mock with the head yawing 0.8 deg/frame peak (`--head_turn=0.8,40`), Sun in space from
+400 km: seen counter 0 .. 78 061 (20 455 at 0.4 deg/frame), visibility 0 on 22 of 40 frames (the halo gone on 23), the 0.4-1 deg halo ring
+0.0029 <-> 0.0000 (disc with halo <-> plain disc); worst ring step 144 %. Screenshots / logs
+`screenshots/look_fixes/bugs-2026-11-09/sun_vr/A_*`.

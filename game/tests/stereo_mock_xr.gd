@@ -27,6 +27,15 @@ var captured: Array[Image] = []  ## per view (after a capture)
 var capture_error := ""
 var capture_info := ""  ## the captured texture's format, layers and size
 var frames_drawn := 0
+## Head motion (render_check --head_turn): the head yaws about its up axis, yaw(k) = head_yaw_amplitude_rad x
+## sin(TAU k / head_yaw_period_frames) at drawn frame k (0: a still head). As the OpenXR interface does, the view poses are
+## located right before rendering (_pre_render; OpenXRAPI::pre_render's xrLocateViews into render_state), so a main-thread
+## call during _process reads the poses the PREVIOUS frame was rendered with - the real headset's timing.
+var head_yaw_amplitude_rad := 0.0
+var head_yaw_period_frames := 0.0
+var head_yaw_rad := 0.0  ## the pose the frame being (or last) rendered uses
+var _pre_render_count := 0
+var captured_head_yaw_rad := 0.0  ## the pose of the captured frame
 
 
 ## Loads the recorded JSON; false (with a push_error) when the file is missing or malformed.
@@ -138,7 +147,14 @@ func _get_camera_transform() -> Transform3D:
 
 
 func _get_transform_for_view(view: int, cam_transform: Transform3D) -> Transform3D:
-	return cam_transform * _eye_from_head[view]
+	return cam_transform * Transform3D(Basis(Vector3.UP, head_yaw_rad), Vector3.ZERO) * _eye_from_head[view]
+
+
+## Before the views are rendered: this frame's head pose (see head_yaw_amplitude_rad).
+func _pre_render() -> void:
+	_pre_render_count += 1
+	if head_yaw_period_frames > 0.0:
+		head_yaw_rad = head_yaw_amplitude_rad * sin(TAU * float(_pre_render_count) / head_yaw_period_frames)
 
 
 func _get_projection_for_view(view: int, _aspect: float, z_near: float, z_far: float) -> PackedFloat64Array:
@@ -152,6 +168,7 @@ func _post_draw_viewport(render_target: RID, _screen_rect: Rect2) -> void:
 	if not capture_requested:
 		return
 	capture_requested = false
+	captured_head_yaw_rad = head_yaw_rad
 	captured = _read_views(render_target)
 
 

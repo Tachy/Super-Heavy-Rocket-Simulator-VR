@@ -393,23 +393,26 @@ static func shader_source() -> String:
 			.replace("GROUP_EDGE", str(GROUP))
 
 
-## The shader's Sun mask for one rendered view (index into the view's "eyes"): [ray a, b, c, d, Sun x, y, z in the eye's
-## view axes, cos of the mask radius]; the cosine 2 (no mask) without a Sun or an eye. The view ray of NDC (x, y) is
-## (x a + b, y c + d, -1): Godot's Projection maps a view direction v (w = 0) to clip x = P00 v.x + P20 v.z, w = -v.z, so
-## at v.z = -1 v.x = (x + P20) / P00 (y likewise with P11, P21; NDC y up, image row 0 at the top).
-static func sun_mask_parameters(view: Dictionary, eye_index: int) -> PackedFloat32Array:
+## The shader's Sun mask for one rendered view: [ray a, b, c, d, Sun x, y, z in the eye's view axes, cos of the mask
+## radius]; the cosine 2 (no mask) without a Sun or for a degenerate projection. The view ray of NDC (x, y) is
+## (x a + b, y c + d, -1) (GlareSpreadEffect.eye_frame: NDC y up, image row 0 at the top, Vulkan's y flip taken out).
+## The eye's frustum and orientation come from the RENDER data (projection: the view's render projection, head: the render
+## camera's basis; render thread), as the glare spread's Sun mask does (GlareSpreadEffect.view_frame): never from the
+## view dictionary's "eyes". Those are read on the main thread during _process, and in OpenXR the eye poses there are the
+## ones the PREVIOUS frame was rendered with (OpenXRAPI::pre_render locates the views right before rendering), so a head
+## turning by more than the mask's margin per frame put the mask beside the drawn disc: the "seen" counter dropped to 0 and
+## the Sun's veil / halo switched off and on (bug: Sun flicker in VR, 2026-11-09). From view only "sun" (its render-world
+## direction, constant over a frame) and "sun_mask_cos".
+static func sun_mask_parameters(view: Dictionary, projection: Projection, head: Basis, size: Vector2i) -> PackedFloat32Array:
 	var none := PackedFloat32Array([1.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0, 2.0])
-	var eyes: Array = view.get("eyes", [])
-	if not sun_mask_enabled or not view.has("sun") or eye_index >= eyes.size():
+	if not sun_mask_enabled or not view.has("sun"):
 		return none
-	var eye: Array = eyes[eye_index]
-	var p: Projection = eye[1]
-	if p.x.x == 0.0 or p.y.y == 0.0:
+	var frame := GlareSpreadEffect.view_frame(projection, head, view["sun"], size)
+	if frame.is_empty():
 		return none
-	var to_eye: Basis = ((view["head"] as Basis) * (eye[0] as Basis)).transposed()
-	var sun: Vector3 = (to_eye * (view["sun"] as Vector3)).normalized()
-	return PackedFloat32Array([1.0 / p.x.x, p.z.x / p.x.x, 1.0 / p.y.y, p.z.y / p.y.y, sun.x, sun.y, sun.z,
-			float(view.get("sun_mask_cos", 2.0))])
+	var ray: PackedFloat32Array = frame[0]
+	var sun: Vector3 = frame[2]
+	return PackedFloat32Array([ray[0], ray[1], ray[2], ray[3], sun.x, sun.y, sun.z, float(view.get("sun_mask_cos", 2.0))])
 
 
 func _set_on_render_thread(cd_per_scene: float, epoch: int, loading: bool, view: Dictionary, sun_seen: float) -> void:
@@ -473,10 +476,12 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 	var groups_x := (samples_x - 1) / GROUP + 1
 	var groups_y := (samples_y - 1) / GROUP + 1
 	_rd.buffer_clear(_buffer, 0, _BYTES)
+	var scene_data := render_data.get_render_scene_data()
+	var head := scene_data.get_cam_transform().basis.orthonormalized()  # the pose this frame is rendered with
 	for view in range(buffers.get_view_count()):  # both VR eyes into one histogram
 		# The cloud composite (before the transparent pass the image has no clouds yet; after it, it has them).
 		var cloud := cloud_effect.frame_output_layer(view) if cloud_effect != null and not post_transparent else RID()
-		var mask := sun_mask_parameters(_view, view)
+		var mask := sun_mask_parameters(_view, scene_data.get_view_projection(view), head, size)
 		var push := PackedFloat32Array([float(size.x), float(size.y), float(stride), _cd_per_scene,
 				1.0 / (2.0 * CENTRE_SIGMA * CENTRE_SIGMA), float(HISTOGRAM_BINS), LOG_MIN,
 				float(HISTOGRAM_BINS - 1) / (LOG_MAX - LOG_MIN), 1.0 if cloud.is_valid() else 0.0, _sun_seen_cd_m2, 0.0, 0.0])
