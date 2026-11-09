@@ -226,13 +226,17 @@ vec3 cloud_far_angles(vec3 light_dir, vec3 view_prop, vec3 up) {
 // transmitted light - the same source J(t) integrated from the slab's base, attenuated by exp(-w (tau - t) / |mu|)
 // (static clouds Task 8: a camera under a far layer sees its base). light_dir toward the light, view_prop the
 // propagation toward the camera, up the slab's normal; all unit.
-float cloud_far_light_radiance(float tau, vec3 light_dir, vec3 view_prop, vec3 up) {
+// below: the camera's side of the slab, from the layer's geometric up (cloud_far_light_radiance_side): with the light's
+// entry normal turned toward a low Sun (cloud_far_cloudy_radiance) a view from above at less than the turn's angle
+// lies below the turned plane - deciding the side by it drew a cloud deck seen toward the Sun near the limb as its dark
+// base (bugs 2026-11-09: a second, inner horizon line from orbit). The view's cosine against the turned normal is then
+// held at CLOUD_FAR_MU_MIN (continuous through the turned plane).
+float cloud_far_light_radiance_side(float tau, vec3 light_dir, vec3 view_prop, vec3 up, bool below) {
 	if (!(tau > 0.0)) {
 		return 0.0;
 	}
 	float mu_signed = dot(view_prop, up);
-	bool below = mu_signed < 0.0;
-	float mu = max(abs(mu_signed), CLOUD_FAR_MU_MIN);
+	float mu = max(below ? -mu_signed : mu_signed, CLOUD_FAR_MU_MIN);
 	float mu0 = max(dot(light_dir, up), CLOUD_ENTRY_COSINE_MIN);
 	vec3 angles = cloud_far_angles(light_dir, view_prop, up);
 	float phase = cloud_phase_function(1.0 - angles.z, angles.z);
@@ -268,9 +272,14 @@ float cloud_far_light_radiance(float tau, vec3 light_dir, vec3 view_prop, vec3 u
 		float s = min(-log(1.0 - u_end * CLOUD_FAR_GL_X[i]) / r, tau);
 		float t = below ? tau - s : s;
 		sum += CLOUD_FAR_GL_W[i]
-				* cloud_scattering_source(1.0 - angles.z, angles.z, mu_signed < 0.0 ? -mu : mu, mu0, t / mu0, t, tau);
+				* cloud_scattering_source(1.0 - angles.z, angles.z, below ? -mu : mu, mu0, t / mu0, t, tau);
 	}
 	return sum * u_end / k;
+}
+
+// The same with the side taken from up itself (the slab's normal is its geometric up).
+float cloud_far_light_radiance(float tau, vec3 light_dir, vec3 view_prop, vec3 up) {
+	return cloud_far_light_radiance_side(tau, light_dir, view_prop, up, dot(view_prop, up) < 0.0);
 }
 
 // The sky's radiance leaving the slab toward a view of signed cosine mu_view (> 0 from above, reflected; < 0 from
@@ -429,12 +438,15 @@ vec3 cloud_far_cloudy_radiance(vec3 p, vec3 up, vec3 view_prop, float tau, float
 		// raised the register peak)
 		float sun_radiance = 0.0;
 		int normals = w_facet > 0.0 ? 2 : 1;
+		// (the slab's side from its geometric up, cloud_far_light_radiance_side; the facets' from their own normal)
+		bool below = dot(view_prop, up) < 0.0;
 		for (int k = 0; k < normals; k++) {
-			sun_radiance += (k == 0 ? 1.0 - w_facet : w_facet)
-					* cloud_far_light_radiance(tau, sun_dir, view_prop, k == 0 ? entry : facet);
+			vec3 normal = k == 0 ? entry : facet;
+			sun_radiance += (k == 0 ? 1.0 - w_facet : w_facet) * cloud_far_light_radiance_side(tau, sun_dir, view_prop,
+					normal, k == 0 ? below : dot(view_prop, normal) < 0.0);
 		}
 #else
-		float sun_radiance = cloud_far_light_radiance(tau, sun_dir, view_prop, entry);
+		float sun_radiance = cloud_far_light_radiance_side(tau, sun_dir, view_prop, entry, dot(view_prop, up) < 0.0);
 #endif
 		radiance += sun_irradiance * gain * sun_radiance;
 	}

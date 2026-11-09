@@ -665,7 +665,12 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   the Sun's light ~7 x there - a hard day / night edge on the clouds. The edge now ends by the Sun's grazing-path
   transmittance and its disc's visible fraction over the Earth's horizon seen from the cloud (`atm_sun_at`; higher
   tops lit longer), the twilight sky's light going on; daytime (mu0 > 0) unchanged bit for bit. The volume levels'
-  light (`cloud_entry_cosine`) was continuous already. Numbers, images: `baked-outer5-report.md`.
+  light (`cloud_entry_cosine`) was continuous already. Numbers, images: `baked-outer5-report.md`. The turned normal
+  sets only the light's entry: the camera's side of the slab (reflected from above / transmitted from below) is the
+  layer's geometric up (`cloud_far_light_radiance_side`; the view cosine against the turned normal held at
+  `CLOUD_FAR_MU_MIN` through the turned plane) - bugs 2026-11-09: a deck seen from orbit toward a low Sun at less than
+  the turn's angle (~3-8 deg) lay "below" the turned plane and was drawn as its dark base, a dark band with a second,
+  inner horizon line under the limb (suite scene `orbit_limb_212km`, Validation). The facets keep their own normal's side.
 - **3D sky light (look fixes, cloud sky light, 2026-11-08)**: the light bake's sky source was the column's
   (`cloud_sky_scattering_source` on the vertical depth from the column top) while the Sun's entered through the flanks
   (3D Sun light): at 2 km, noon, the near cumulus' sky-lit part was 0.56 of a white top's E_sky / pi (Sun part 1.03 of
@@ -790,6 +795,13 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
 
 ## Validation
 
+- **Double limb from orbit (bugs 2026-11-09; `tools/look_reference_suite.py --only orbit_limb_212km,orbit_limb_212km_gfs`)**:
+  the user's view (212 km over 46.2 N 161.7 E, 2026-11-09 05:52:33 UTC, looking at the Sun 1.5 deg below the nadir's
+  horizon; analog weather and, if cached, the user's GFS snapshot `gfs_1111992_f005`): the columns' median luma profile
+  from the limb down, its mean 3-5 % of the image height under the limb over its maximum (`m_orbit_limb`,
+  `limb_band_rel`), gate >= 0.85. Before the fix (a dark band and an inner horizon line) GFS 0.63 / analog 0.71, after
+  0.97 / 0.93; no weather ~0.97. The band was there over the whole altitude sweep 150 / 212 / 300 / 450 km and is gone
+  in all (images `screenshots/look_fixes/bugs-2026-11-09/orbit/`, `sweepAB.png`).
 - **Fly-up acceptance check** (look fixes T7c fix 3, 2026-11-08; `game/tests/cloud_flyup_check.gd`, run: `docs/setup.md`):
   the game's render (fixed exposure, analog snapshots) climbing 20 -> 2000 km in 20 % steps along a fixed line of sight
   to an aim point 1.5 km up - Gulf 26 N 97 W, cumulus 15 N 45 W, Sc deck 20 S 80 W; straight down, 30 / 45 / 60 deg

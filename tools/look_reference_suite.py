@@ -489,6 +489,48 @@ SCENES["sun_in_view_profile_f10"] = ([a if a != WEATHER else "--weather=off" for
                                      m_sun_profile(10.0), {})
 SCENES["terminator_400km"] = (["--lat=0", "--lon=0", "--height=400000", "--utc=2026-11-07T18:15:00", "--hide_ui", WEATHER,
                                "--azimuth=90", "--elevation=-30", "--fov=60"], m_terminator, {})
+
+
+def m_orbit_limb(a):
+    """Bug 2026-11-09 (user, 212 km, GFS: "die Horizontlinie doppelt"): the cloud deck seen toward a low Sun near the
+    limb was drawn as its dark base (the slab's side decided by the light's turned entry normal), a dark band with a
+    second, inner horizon line under the true limb. Per image column (x 0.3-0.98, every 2nd) the luma profile from the
+    limb (the first row of the lower half with 4 rows above 40 codes) over 12 % of the height; the columns' median
+    profile (a band is coherent across the columns, the gaps of broken cloud are not): its mean 3-5 % of the height
+    under the limb over its maximum (limb_band_rel; GFS 0.62 / analog 0.70 with the band, 0.99 / 0.93 without, no
+    weather 0.97)."""
+    y = luma(a.astype(float))
+    h, w = y.shape
+    n = int(0.12 * h)
+    profiles = []
+    for x in range(int(0.3 * w), int(0.98 * w), 2):
+        r0 = int(0.5 * h)
+        run = np.lib.stride_tricks.sliding_window_view(y[r0:, x], 4).min(axis=1)
+        above = np.nonzero(run > 40.0)[0]
+        if len(above) == 0:
+            continue
+        p = y[r0 + above[0]:r0 + above[0] + n, x]
+        if len(p) == n:
+            profiles.append(p)
+    if len(profiles) < 10:
+        return {"limb_band_rel": float("nan")}
+    p = np.median(np.array(profiles), axis=0)
+    band = p[int(0.03 * h):int(0.05 * h)].mean()
+    return {"limb_band_rel": float(band / max(p.max(), 1e-6))}
+
+
+# The double limb from orbit (bug 2026-11-09): the user's view - 212 km over the NW Pacific (46.2 N 161.7 E) at
+# 05:52:33 UTC, the Sun 1.5 deg below the nadir's horizon, looking at it (it stands ~13 deg above the limb); the shipped
+# analog weather and the user's GFS snapshot if cached.
+_ORBIT_LIMB = ["--utc=2026-11-09T05:52:33", "--lat=46.2", "--lon=161.7", "--height=212000", "--eye_height=0",
+               "--look_at_sun", "--fov=50", "--hide_ui"]
+_ORBIT_LIMB_GATES = {"limb_band_rel": (0.85, 99, "[D: no dark band under the limb - a cloud deck seen from above is "
+                                                 "lit to its horizon; 2026-11-09 before the fix GFS 0.62 / analog 0.70, "
+                                                 "after 0.99 / 0.93; no weather 0.97]")}
+GFS_ORBIT_WTHR = os.path.join(ROOT, "data", "weather", "cache", "gfs_1111992_f005.wthr")
+SCENES["orbit_limb_212km"] = (_ORBIT_LIMB + [WEATHER], m_orbit_limb, _ORBIT_LIMB_GATES)
+if os.path.exists(GFS_ORBIT_WTHR):
+    SCENES["orbit_limb_212km_gfs"] = (_ORBIT_LIMB + ["--weather=" + GFS_ORBIT_WTHR], m_orbit_limb, _ORBIT_LIMB_GATES)
 CROP_SCENES = [n for n in SCENES if n.endswith(("_vr", "_f10"))]
 GAPS = ["cockpit_night_lamps: cockpit_shots.gd has no --utc / night case (T10 note) - not automated yet"]
 
