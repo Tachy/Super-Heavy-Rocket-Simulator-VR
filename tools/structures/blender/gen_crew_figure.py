@@ -1,10 +1,11 @@
 """Crew figure in the newer SpaceX EVA suit: gen_crew_figure.py -- --spec <json> --out <dir> writes crew_figure.gltf.
 
 Own rebuild from config/cockpits/crew_figure.toml (spec["crew_figure"]); no third-party mesh. Frame: origin = the seat's hip reference point,
-X = up the seat back, Y = the seat's chest normal (forward), Z = the crew's left (figure_layout.py, crew_figure.toml header). Rest pose = seated.
-One skinned mesh node `crew_figure` (rigid weights, one bone per segment) under the armature `crew_figure_rig`; surfaces (glTF primitives) =
-the materials suit, boots, gloves, helmet, visor (the closed copper visor is its own surface). Silhouette only: stripes, seams, patches,
-the flag by texture later. The bones are figure_layout.bones(cfg).
+X = up the seat back, Y = the seat's chest normal (forward), Z = the crew's left (figure_layout.py, crew_figure.toml header). Rest pose = seated,
+hands on the thighs. One skinned mesh node `crew_figure` under the armature `crew_figure_rig`: the suit hull of figure_body.py (anatomical
+ANSUR II body plus the suit ease; smooth weights across the joints, corrective shape keys per joint, the atlas UV and the wrinkle-mask UV)
+joined with the rigid parts (helmet, visor, hood, glove lock rings, gloves with five fingers, boots: one bone each). Surfaces (glTF
+primitives) = the materials suit, boots, gloves, helmet, collar, visor. Suit detail (stripes, seams, folds) comes from suit_textures.py.
 """
 import math
 import sys
@@ -12,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bpy  # noqa: E402
+import figure_body as fb  # noqa: E402
 import figure_layout as fl  # noqa: E402
 import vehicle_common as vc  # noqa: E402
 from mathutils import Vector  # noqa: E402
@@ -26,6 +28,7 @@ HELMET_TOP_EL = 89.0  # [E] the columns stop here; a fan closes the crown
 VISOR_COLS, VISOR_ROWS = 24, 16
 RIM_SIDES = 14  # [E] sides of the rim bead's cross section
 PIVOT_SIDES = 20  # [E] sides of the round visor-pivot button
+FINGER_SIDES = 8  # [E] sides of a glove finger
 
 
 def vec(t):
@@ -113,20 +116,6 @@ def blend(rows, s):
 
 
 # ---------- the parts ----------
-
-def build_torso(cfg, parts, bones):
-    fig, ln = cfg["figure"], fl.chain_lengths(cfg)
-    rings_cfg = cfg["suit"]["torso_rings_m"]
-    origin = V((fig["hip_joint_up_m"], fig["hip_joint_forward_m"], 0.0))
-    splits = [rings_cfg[0][0], fl.SPINE_SPLIT_M[0], fl.SPINE_SPLIT_M[1], rings_cfg[-1][0]]
-    for bone, s0, s1 in (("hips", splits[0], splits[1]), ("spine", splits[1], splits[2]), ("chest", splits[2], splits[3])):
-        ss = sorted({s0, s1, *[r[0] for r in rings_cfg if s0 < r[0] < s1]})
-        rings = []
-        for s in ss:
-            hz, hn, fwd = blend(rings_cfg, s)
-            rings.append((s, hn, hz, fwd, 0.0))
-        loft(parts.mesh(bone, "suit"), origin, (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), rings, TORSO_SIDES, ("torso", bone), cap0=(bone == "hips"), cap1=(bone == "chest"))
-
 
 def build_helmet(cfg, parts):
     h, pose = cfg["helmet"], cfg["pose"]
@@ -278,14 +267,13 @@ def sweep_bead(mesh, loop, pts, radius, group):
 
 
 def build_arm(cfg, parts, bones, side):
+    """The rigid hand parts of one side: the glove lock ring at the wrist (helmet white), the glove (palm, index, the middle / ring / little
+    fingers on the bones fingers, fingers_2, fingers_3, the thumb). The sleeve is the suit hull (figure_body)."""
     suit, hand = cfg["suit"], cfg["hand"]
-    b = {n: bones[f"{n}_{side}"] for n in ("shoulder", "upper_arm", "forearm", "hand", "index_1", "index_2", "index_3", "thumb_1", "thumb_2", "fingers")}
-    ua, fa = b["upper_arm"], b["forearm"]
-    limb(parts.mesh(f"upper_arm_{side}", "suit"), ua["head"], ua["tail"], suit["upper_arm_radius_m"][0], suit["upper_arm_radius_m"][1], f"ua_{side}")
-    limb(parts.mesh(f"forearm_{side}", "suit"), fa["head"], fa["tail"], suit["forearm_radius_m"][0], suit["forearm_radius_m"][1], f"fa_{side}", cap1=False, flat1=True)
+    b = {n: bones[f"{n}_{side}"] for n in ("hand", "index_1", "index_2", "index_3", "thumb_1", "thumb_2", "fingers", "fingers_2", "fingers_3")}
     f, d, t = fl.hand_frame(cfg, side)
     wrist = V(b["hand"]["head"])
-    cuff_axis = V(f)
+    cuff_axis = (V(b["hand"]["head"]) - V(bones[f"forearm_{side}"]["head"])).normalized()
     loft(parts.mesh(f"forearm_{side}", "helmet"), wrist - cuff_axis * suit["cuff_length_m"], cuff_axis, (0.0, 0.0, 1.0),
          [(0.0, suit["cuff_radius_m"], suit["cuff_radius_m"], 0.0, 0.0), (suit["cuff_length_m"] + 0.004, suit["cuff_radius_m"], suit["cuff_radius_m"], 0.0, 0.0)],
          SIDES, f"cuff_{side}", True, True)
@@ -298,33 +286,51 @@ def build_arm(cfg, parts, bones, side):
     for k in (1, 2, 3):
         bone = b[f"index_{k}"]
         r = hand["index_radius_m"] * (1.0 - 0.1 * (k - 1))
-        limb(parts.mesh(f"index_{k}_{side}", "gloves"), bone["head"], bone["tail"], r, r * 0.92, f"index{k}_{side}", 10, uref=tuple(t))
-    fb = b["fingers"]
-    fh, ft = V(fb["head"]), V(fb["tail"])
-    loft(parts.mesh(f"fingers_{side}", "gloves"), fh, ft - fh, t,
-         capsule_rings((ft - fh).length, hand["fingers_half_width_m"], hand["fingers_radius_m"], hand["fingers_half_width_m"] * 0.9, hand["fingers_radius_m"] * 0.9, False, True),
-         SIDES, f"fingers_{side}", cap0=True)
+        limb(parts.mesh(f"index_{k}_{side}", "gloves"), bone["head"], bone["tail"], r, r * 0.92, f"index{k}_{side}", FINGER_SIDES, uref=tuple(t))
+    # middle, ring and little finger side by side on the shared bones (one curl), toward the little finger from the middle knuckle
+    for j, share in enumerate(hand["finger_length_share"]):
+        off = V(t) * (-hand["finger_spacing_m"] * j)
+        r0 = hand["finger_radius_m"] * (1.0 - 0.06 * j)
+        for k, name in enumerate(("fingers", "fingers_2", "fingers_3")):
+            bone = b[name]
+            head, tail = V(bone["head"]) + off, V(bone["tail"]) + off
+            tail = head + (tail - head) * share
+            if k > 0:  # the shortened finger's joints follow its own previous phalanx
+                head = prev_tail
+            r = r0 * (1.0 - 0.1 * k)
+            limb(parts.mesh(f"{name}_{side}", "gloves"), head, tail, r, r * 0.92, f"finger{j}{k}_{side}", FINGER_SIDES, uref=tuple(t))
+            prev_tail = tail
     for k in (1, 2):
         bone = b[f"thumb_{k}"]
         r = hand["thumb_radius_m"] * (1.0 - 0.12 * (k - 1))
-        limb(parts.mesh(f"thumb_{k}_{side}", "gloves"), bone["head"], bone["tail"], r, r * 0.9, f"thumb{k}_{side}", 10, uref=tuple(d))
+        limb(parts.mesh(f"thumb_{k}_{side}", "gloves"), bone["head"], bone["tail"], r, r * 0.9, f"thumb{k}_{side}", FINGER_SIDES, uref=tuple(d))
 
 
 def build_leg(cfg, parts, bones, side):
-    suit = cfg["suit"]
-    th, sh, ft = bones[f"thigh_{side}"], bones[f"shin_{side}"], bones[f"foot_{side}"]
-    limb(parts.mesh(f"thigh_{side}", "suit"), th["head"], th["tail"], suit["thigh_radius_m"][0], suit["thigh_radius_m"][1], f"th_{side}")
+    """The boot: a shaft over the suit's lower leg (rigid on the shin) and the foot (rigid on the foot bone)."""
+    suit, body = cfg["suit"], cfg["body"]
+    sh, ft = bones[f"shin_{side}"], bones[f"foot_{side}"]
     knee, ankle = V(sh["head"]), V(sh["tail"])
-    shaft_top = ankle + (knee - ankle) * suit["boot_shaft_fraction"]
-    r_top = suit["shin_radius_m"][0] + (suit["shin_radius_m"][1] - suit["shin_radius_m"][0]) * (1.0 - suit["boot_shaft_fraction"])
-    limb(parts.mesh(f"shin_{side}", "suit"), knee, shaft_top, suit["shin_radius_m"][0], r_top, f"sh_{side}", cap1=False, flat1=True)
-    limb(parts.mesh(f"shin_{side}", "boots"), shaft_top - (shaft_top - ankle).normalized() * 0.0, ankle, r_top + 0.004, suit["shin_radius_m"][1] + 0.004, f"boot_{side}", cap0=False, cap1=False, flat0=True)
+    thigh_len = fl.chain_lengths(cfg)["thigh"]
+    rows = fb._fit_rows(body["leg_sections_m"])
+    n_rings = 6
+    shaft = suit["boot_shaft_fraction"]
+    axis = (ankle - knee).normalized()
+    rings = []
+    for i in range(n_rings + 1):
+        f = 1.0 - shaft + shaft * i / n_rings  # from the shaft top to the ankle
+        a_half, b_half = fb._section(rows, thigh_len + f * (ankle - knee).length)
+        e = suit["ease_shank_m"] + suit["boot_ease_m"]
+        rings.append(((f - (1.0 - shaft)) * (ankle - knee).length, a_half + e, b_half + e, 0.0, 0.0))
+    rings.append((rings[-1][0] + 0.03, rings[-1][1], rings[-1][2], 0.0, 0.0))
+    top = knee + (ankle - knee) * (1.0 - shaft)
+    loft(parts.mesh(f"shin_{side}", "boots"), top, axis, (0.0, 0.0, 1.0), rings, SIDES, f"boot_{side}", True, True)
     # foot: along the foot direction from the heel; sections (s from the heel, half width, half height, centre height above the foot line)
     fdir = V(ft["tail"]) - V(ft["head"])
     fdir.normalize()
     heel = V(ft["head"]) - fdir * suit["boot_heel_m"]
     hw, hh = suit["boot_foot_half_width_m"], suit["boot_foot_half_height_m"]
-    total = cfg["proportion"]["foot_length"] * cfg["figure"]["stature_m"]
+    total = suit["boot_length_m"]
     s_ankle = suit["boot_heel_m"]
     rings = [(0.0, hw * 0.78, hh * 0.80, -0.020, 0.0), (s_ankle * 0.5, hw * 0.92, hh * 0.92, -0.020, 0.0), (s_ankle, hw, hh, -0.020, 0.0),
              (total * 0.55, hw * 1.04, hh * 0.80, -0.030, 0.0), (total * 0.72, hw * 1.04, hh * 0.64, -0.040, 0.0),
@@ -337,7 +343,6 @@ def build_leg(cfg, parts, bones, side):
 def build_figure(cfg):
     bones = fl.bones(cfg)
     parts = Parts()
-    build_torso(cfg, parts, bones)
     build_helmet(cfg, parts)
     for side in fl.SIDES:
         build_arm(cfg, parts, bones, side)
@@ -380,12 +385,49 @@ def make_armature(bones):
     return rig
 
 
+def suit_object(cfg, mats):
+    """The suit hull (figure_body.suit_mesh): smooth weights (vertex groups), the atlas UV (UVMap), the wrinkle mask (UV `joint_mask`:
+    x = joint slot + 1, 0 = none; glTF y = the mask) and the corrective shape keys. Blender UV v is flipped against glTF / the image rows."""
+    m = fb.suit_mesh(cfg)
+    h = m["hull"]
+    aw, ah = cfg["suit_look"]["atlas_m"]
+    mesh = bpy.data.meshes.new("suit_hull")
+    mesh.from_pydata([tuple(p) for p in m["rest"]], [], [tuple(f) for f in h.faces])
+    mesh.update()
+    uv = mesh.uv_layers.new(name="UVMap")
+    mask = mesh.uv_layers.new(name="joint_mask")
+    li = 0
+    for poly, corners in zip(mesh.polygons, h.uv):
+        for k, loop_index in enumerate(poly.loop_indices):
+            u, v = corners[k]
+            uv.data[loop_index].uv = (u / aw, 1.0 - v / ah)
+            slot, val = h.mask[mesh.loops[loop_index].vertex_index]
+            mask.data[loop_index].uv = ((slot + 1) if slot >= 0 else 0.0, 1.0 - (val if slot >= 0 else 0.0))
+            li += 1
+    for poly in mesh.polygons:
+        poly.use_smooth = True
+    ob = bpy.data.objects.new("crew_figure", mesh)
+    bpy.context.scene.collection.objects.link(ob)
+    ob.data.materials.append(mats["suit"])
+    groups = {n: ob.vertex_groups.new(name=n) for n in m["names"]}
+    for i, wd in enumerate(h.w):
+        for bone, wt in wd.items():
+            groups[bone].add([i], wt, "REPLACE")
+    ob.shape_key_add(name="Basis", from_mix=False)
+    for name, d in m["shapes"].items():
+        key = ob.shape_key_add(name=name, from_mix=False)
+        co = m["rest"] + d
+        key.data.foreach_set("co", co.astype("float32").ravel())
+    return ob, len(h.triangles()), m
+
+
 def assemble(cfg):
     """(rig object, mesh object, triangles): the skinned figure in the current scene."""
     bones, parts = build_figure(cfg)
     mats = make_materials(cfg)
     rig = make_armature(bones)
-    objs, tris = [], 0
+    suit, tris, _ = suit_object(cfg, mats)
+    objs = []
     for (bone, material), mesh in sorted(parts.meshes.items()):
         ob, n = mesh.to_object(f"part_{bone}_{material}")
         tris += n
@@ -395,7 +437,8 @@ def assemble(cfg):
     bpy.ops.object.select_all(action="DESELECT")
     for ob in objs:
         ob.select_set(True)
-    bpy.context.view_layer.objects.active = objs[0]
+    suit.select_set(True)
+    bpy.context.view_layer.objects.active = suit  # the joined object keeps the suit's shape keys (the parts get their basis positions)
     bpy.ops.object.join()
     fig = bpy.context.view_layer.objects.active
     fig.name = "crew_figure"

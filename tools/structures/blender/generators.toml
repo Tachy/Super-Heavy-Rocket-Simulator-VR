@@ -28,8 +28,8 @@ outputs = ["falcon9_stage1.gltf", "falcon9_grid_fin.gltf", "falcon9_leg.gltf", "
 
 [crew_dragon]
 kind = "dragon"
-scripts = ["common.py", "vehicle_common.py", "cabin_layout.py", "figure_layout.py"]
-bakers = ["surface_textures"]
+scripts = ["common.py", "vehicle_common.py", "cabin_layout.py", "figure_layout.py", "figure_body.py", "figure_measure.py"]
+bakers = ["surface_textures", "suit_textures"]
 generators = ["gen_dragon.py", "idss_mechanism.py", "gen_dragon_cabin.py", "gen_crew_figure.py"]
 outputs = ["dragon_capsule.gltf", "dragon_nose.gltf", "dragon_trunk.gltf", "idss_mechanism.gltf", "dragon_cabin.gltf", "crew_figure.gltf"]
 

@@ -9,7 +9,8 @@ import math
 SIDES = ("l", "r")
 BONE_NAMES = ["hips", "spine", "chest", "neck", "head"] + [
     f"{n}_{s}" for s in SIDES for n in
-    ("shoulder", "upper_arm", "forearm", "hand", "index_1", "index_2", "index_3", "thumb_1", "thumb_2", "fingers", "thigh", "shin", "foot")]
+    ("shoulder", "upper_arm", "forearm", "hand", "index_1", "index_2", "index_3", "thumb_1", "thumb_2", "fingers", "fingers_2", "fingers_3",
+     "thigh", "shin", "foot")]
 MATERIALS = ("suit", "boots", "gloves", "helmet", "collar", "visor")
 EYE_UP_M, EYE_FORWARD_M = 0.03, 0.06  # [E] the eyes sit this far above / ahead of the helmet centre (behind the visor)
 SPINE_SPLIT_M = (0.12, 0.28)  # [E] heights above the hip joint where hips / spine / chest bones meet
@@ -159,8 +160,9 @@ def helmet_groove_block(cfg):
 
 
 def torso_forward(cfg, s):
-    """Forward offset (y) of the torso axis at height s above the hip joint."""
-    return cfg["figure"]["hip_joint_forward_m"] + lerp_table(cfg["suit"]["torso_rings_m"], s)[2]
+    """Forward offset (y) of the torso axis at height s above the hip joint ([body] torso_levels_m: the sections' forward offsets)."""
+    rows = [[r[0], r[5]] for r in cfg["body"]["torso_levels_m"]]
+    return cfg["figure"]["hip_joint_forward_m"] + lerp_table(rows, s)[0]
 
 
 def seat_basis(back_angle_deg):
@@ -174,14 +176,27 @@ def to_capsule(point, hip_m, back_angle_deg):
     return tuple(hip_m[i] + point[0] * bx[i] + point[1] * by[i] + point[2] * bz[i] for i in range(3))
 
 
+def thigh_frame(cfg):
+    """(thigh direction, the thigh's upper surface normal) of the seated rest pose, both sides (x-y plane)."""
+    a = math.radians(cfg["figure"]["thigh_raise_deg"])
+    return (math.sin(a), math.cos(a), 0.0), (math.cos(a), -math.sin(a), 0.0)
+
+
 def hand_frame(cfg, side):
-    """(forward f, down d, toward-the-thumb t) of the hand of `side` (+1 left, -1 right) in the figure frame."""
+    """(forward f, down d, toward-the-thumb t) of the hand of `side` in the seated rest pose: palm down on the thigh, the fingers toward
+    the knee, turned hand_inward_deg toward the body centre and tilted palm_lift_deg down to the thigh (the wrist sits higher)."""
     s = 1.0 if side == "l" else -1.0
-    f = norm((cfg["pose"]["forearm_dir"][0], cfg["pose"]["forearm_dir"][1], cfg["pose"]["forearm_dir"][2] * s))
-    d0 = (-1.0, 0.0, 0.0)
+    pose = cfg["pose"]
+    td, n = thigh_frame(cfg)
+    inward = math.radians(pose["hand_inward_deg"])
+    f = norm(add(mul(td, math.cos(inward)), mul((0.0, 0.0, -s), math.sin(inward))))
+    lift = math.radians(pose["palm_lift_deg"])
+    f = norm(add(mul(f, math.cos(lift)), mul(n, -math.sin(lift))))
+    d0 = mul(n, -1.0)
     d = norm(sub(d0, mul(f, dot(d0, f))))
-    t0 = (0.0, 0.0, -s)  # the thumb points to the body centre
-    t = norm(sub(sub(t0, mul(f, dot(t0, f))), mul(d, dot(t0, d))))
+    t = norm(cross(d, f)) if s > 0 else norm(cross(f, d))  # the thumb toward the body centre (-s z)
+    if dot(t, (0.0, 0.0, -s)) < 0.0:
+        t = mul(t, -1.0)
     return f, d, t
 
 
@@ -191,17 +206,37 @@ def curl(f, d, deg):
 
 
 def chain_lengths(cfg):
-    p, H = cfg["proportion"], cfg["figure"]["stature_m"]
-    return {"upper_arm": p["upper_arm"] * H, "forearm": p["forearm"] * H, "thigh": (p["hip_height"] - p["knee_height"]) * H,
-            "shin": (p["knee_height"] - p["ankle_height"]) * H, "torso": (p["shoulder_height"] - p["hip_height"]) * H}
+    """Segment lengths (m) from the ANSUR II medians ([anthropometry])."""
+    a = cfg["anthropometry"]
+    return {"upper_arm": a["upper_arm_length"], "forearm": a["forearm_length"], "thigh": a["trochanter_height"] - a["knee_height"],
+            "shin": a["knee_height"] - a["ankle_height"], "torso": a["acromial_height"] - a["trochanter_height"]}
+
+
+def shoulder_joint(cfg, side):
+    """The glenohumeral joint centre (the upper arm bone's head) in the rest frame: shoulder_joint_drop_m under the acromion level,
+    shoulder_joint_inset_m medial of the acromion (biacromial_breadth / 2)."""
+    fig, ln = cfg["figure"], chain_lengths(cfg)
+    s = 1.0 if side == "l" else -1.0
+    up = ln["torso"] - fig["shoulder_joint_drop_m"]
+    return (fig["hip_joint_up_m"] + up, torso_forward(cfg, up), s * (cfg["anthropometry"]["biacromial_breadth"] / 2.0 - fig["shoulder_joint_inset_m"]))
+
+
+def two_bone_elbow(shoulder, wrist, l1, l2, pole):
+    """Elbow of the chain shoulder - wrist (lengths l1, l2), bent toward `pole` (the wrist is pulled in if out of reach)."""
+    d = sub(wrist, shoulder)
+    dist = min(max(length(d), abs(l1 - l2) + 1e-4), (l1 + l2) * 0.9999)
+    dn = norm(d)
+    a = (l1 * l1 - l2 * l2 + dist * dist) / (2.0 * dist)
+    h = math.sqrt(max(l1 * l1 - a * a, 0.0))
+    bend = norm(sub(pole, mul(dn, dot(pole, dn))))
+    return add(add(shoulder, mul(dn, a)), mul(bend, h))
 
 
 def bones(cfg):
-    """{name: {"head": (x, y, z), "tail": (x, y, z), "parent": name or None}} in the figure frame, rest pose = seated."""
+    """{name: {"head": (x, y, z), "tail": (x, y, z), "parent": name or None}} in the figure frame, rest pose = seated (hands on the thighs)."""
     fig, pose, hand, helmet = cfg["figure"], cfg["pose"], cfg["hand"], cfg["helmet"]
-    H, ln = fig["stature_m"], chain_lengths(cfg)
+    ln = chain_lengths(cfg)
     hip = (fig["hip_joint_up_m"], fig["hip_joint_forward_m"], 0.0)
-    shoulder_up = hip[0] + ln["torso"]
     out = {}
 
     def put(name, head, tail, parent):
@@ -218,21 +253,22 @@ def bones(cfg):
     put("neck", on_axis(ln["torso"]), neck_top, "chest")
     put("head", neck_top, (centre[0] + helmet["half_above_m"], centre[1], 0.0), "neck")
     shoulder_base = on_axis(ln["torso"])
+    td, _ = thigh_frame(cfg)
     ang = math.radians(fig["thigh_raise_deg"])
-    thigh_dir = (math.sin(ang), math.cos(ang), 0.0)
     shin_ang = ang - math.radians(180.0 - fig["knee_angle_deg"])  # knee_angle_deg is the interior angle (180 = straight)
     shin_dir = (math.sin(shin_ang), math.cos(shin_ang), 0.0)
     foot_dir = (math.sin(shin_ang + math.pi / 2.0), math.cos(shin_ang + math.pi / 2.0), 0.0)
     for side in SIDES:
         s = 1.0 if side == "l" else -1.0
-        tip = (shoulder_base[0], shoulder_base[1], s * H * cfg["proportion"]["shoulder_width"] / 2.0)
-        put(f"shoulder_{side}", shoulder_base, tip, "chest")
-        ua = norm((pose["upper_arm_dir"][0], pose["upper_arm_dir"][1], pose["upper_arm_dir"][2] * s))
-        elbow = add(tip, mul(ua, ln["upper_arm"]))
-        put(f"upper_arm_{side}", tip, elbow, f"shoulder_{side}")
-        f, d, t = hand_frame(cfg, side)
-        wrist = add(elbow, mul(f, ln["forearm"]))
+        joint = shoulder_joint(cfg, side)
+        put(f"shoulder_{side}", shoulder_base, joint, "chest")
+        wrist = (pose["wrist_m"][0], pose["wrist_m"][1], s * pose["wrist_m"][2])
+        pole = (pose["elbow_pole"][0], pose["elbow_pole"][1], s * pose["elbow_pole"][2])
+        elbow = two_bone_elbow(joint, wrist, ln["upper_arm"], ln["forearm"], pole)
+        wrist = add(elbow, mul(norm(sub(wrist, elbow)), ln["forearm"]))
+        put(f"upper_arm_{side}", joint, elbow, f"shoulder_{side}")
         put(f"forearm_{side}", elbow, wrist, f"upper_arm_{side}")
+        f, d, t = hand_frame(cfg, side)
         knuckle = add(wrist, mul(f, hand["palm_length_m"]))
         put(f"hand_{side}", wrist, knuckle, f"forearm_{side}")
         head, prev = add(knuckle, mul(t, hand["index_offset_m"])), f"hand_{side}"
@@ -240,8 +276,11 @@ def bones(cfg):
             tail = add(head, mul(curl(f, d, hand["finger_curl_deg"] * (k + 1)), seg))
             put(f"index_{k + 1}_{side}", head, tail, prev)
             head, prev = tail, f"index_{k + 1}_{side}"
-        fh = add(knuckle, mul(t, hand["fingers_offset_m"]))
-        put(f"fingers_{side}", fh, add(fh, mul(curl(f, d, hand["finger_curl_deg"] * 2.0), hand["fingers_m"])), f"hand_{side}")
+        head, prev = add(knuckle, mul(t, hand["fingers_offset_m"])), f"hand_{side}"
+        for k, (name, seg) in enumerate(zip(("fingers", "fingers_2", "fingers_3"), hand["fingers_m"])):
+            tail = add(head, mul(curl(f, d, hand["finger_curl_deg"] * (k + 1)), seg))
+            put(f"{name}_{side}", head, tail, prev)
+            head, prev = tail, f"{name}_{side}"
         sp = math.radians(hand["thumb_spread_deg"])
         tdir = norm(add(mul(f, math.cos(sp)), mul(t, math.sin(sp))))
         head, prev = add(add(wrist, mul(f, hand["thumb_root_forward_m"])), mul(t, hand["thumb_root_offset_m"])), f"hand_{side}"
@@ -251,11 +290,11 @@ def bones(cfg):
             put(f"thumb_{k + 1}_{side}", head, tail, prev)
             head, prev = tail, f"thumb_{k + 1}_{side}"
         hj = (hip[0], hip[1], s * fig["hip_joint_half_spacing_m"])
-        knee = add(hj, mul(thigh_dir, ln["thigh"]))
+        knee = add(hj, mul(td, ln["thigh"]))
         put(f"thigh_{side}", hj, knee, "hips")
         ankle = add(knee, mul(shin_dir, ln["shin"]))
         put(f"shin_{side}", knee, ankle, f"thigh_{side}")
-        put(f"foot_{side}", ankle, add(ankle, mul(foot_dir, cfg["proportion"]["foot_length"] * H - cfg["suit"]["boot_heel_m"])), f"shin_{side}")
+        put(f"foot_{side}", ankle, add(ankle, mul(foot_dir, cfg["suit"]["boot_length_m"] - cfg["suit"]["boot_heel_m"])), f"shin_{side}")
     assert sorted(out) == sorted(BONE_NAMES), sorted(set(out) ^ set(BONE_NAMES))
     return out
 
@@ -272,9 +311,60 @@ def eye_point(cfg):
     return (pose["head_centre_up_m"] + EYE_UP_M, pose["head_centre_forward_m"] + EYE_FORWARD_M, 0.0)
 
 
+# ---------- joints: bend angles, wrinkle and corrective weights (figure_body.py bakes, figure_deform.gd evaluates) ----------
+# Each joint: the child bone, the reference (a parent bone's direction, or the torso's down axis = minus a torso bone's direction) and the
+# [joints] row [neutral, full, extension limit] in degrees. The wrinkle slot orders the instance uniforms of crew_suit.gdshader.
+JOINT_KINDS = ("shoulder", "elbow", "hip", "knee")
+JOINT_BONES = {"shoulder": ("upper_arm", "chest", -1.0), "elbow": ("forearm", "upper_arm", 1.0), "hip": ("thigh", "hips", -1.0), "knee": ("shin", "thigh", 1.0)}
+
+
+def joint_names():
+    return [f"{k}_{s}" for s in SIDES for k in JOINT_KINDS]
+
+
+def _tail_bone(b, name):
+    """The child bone whose head is this bone's tail (the game measures a bone's direction head -> that child's head)."""
+    for n in BONE_NAMES:
+        if b[n]["parent"] == name and length(sub(b[n]["head"], b[name]["tail"])) < 1e-9:
+            return n
+    raise ValueError(f"no child at the tail of {name}")
+
+
+def joint_table(cfg):
+    """{joint name: {child, ref, ref_sign, neutral_deg, full_deg, ext_deg, rest_deg, slot, shape_flex, shape_ext}} (slot 0..7: l side first)."""
+    b = bones(cfg)
+    out = {}
+    for slot, name in enumerate(joint_names()):
+        kind, side = name.rsplit("_", 1)
+        child, ref, sign = JOINT_BONES[kind]
+        child_bone = f"{child}_{side}"
+        ref_bone = ref if ref in ("chest", "hips") else f"{ref}_{side}"
+        neutral, full, ext = cfg["joints"][f"{kind}_deg"]
+        rd = mul(norm(sub(b[ref_bone]["tail"], b[ref_bone]["head"])), sign)
+        cd = norm(sub(b[child_bone]["tail"], b[child_bone]["head"]))
+        rest = math.degrees(math.acos(max(-1.0, min(1.0, dot(rd, cd)))))
+        out[name] = {"child": child_bone, "child_tail": _tail_bone(b, child_bone), "ref": ref_bone, "ref_tail": _tail_bone(b, ref_bone),
+                     "ref_sign": sign, "neutral_deg": neutral, "full_deg": full, "ext_deg": ext,
+                     "rest_deg": rest, "slot": slot, "shape_flex": f"{name}_flex", "shape_ext": f"{name}_ext"}
+    return out
+
+
+def bend_weights(joint, theta_deg):
+    """(flex, ext, wrinkle) weights of a joint at bend angle theta: the corrective shapes ramp from the rest angle to the full bend /
+    the extension limit; the wrinkle weight is 0 at the neutral (straight) angle and 1 at the full bend."""
+    rest, full, ext, neutral = joint["rest_deg"], joint["full_deg"], joint["ext_deg"], joint["neutral_deg"]
+    clamp = lambda v: max(0.0, min(1.0, v))
+    flex = clamp((theta_deg - rest) / (full - rest)) if full > rest else 0.0
+    extw = clamp((rest - theta_deg) / (rest - ext)) if rest > ext else 0.0
+    wrinkle = clamp((theta_deg - neutral) / (full - neutral))
+    return flex, extw, wrinkle
+
+
 def figure_manifest(cfg):
-    """The manifest's `crew_figure` block: file, frame convention, bone rest positions, materials, eye point."""
+    """The manifest's `crew_figure` block: file, frame convention, bone rest positions, materials, eye point, joints, suit maps."""
     r = lambda v: [round(c, 5) for c in v]
+    joints = {n: {k: (round(v, 4) if isinstance(v, float) else v) for k, v in j.items()} for n, j in joint_table(cfg).items()}
+    look = cfg["suit_look"]
     return {
         "file": "crew_figure",
         "node": "crew_figure",
@@ -292,4 +382,14 @@ def figure_manifest(cfg):
                        "roughness_low": cfg["helmet"]["visor_low_roughness"], "metallic_low": cfg["helmet"]["visor_low_metallic"]},
         "helmet_material": "helmet",
         "helmet_grooves": helmet_groove_block(cfg),
+        "suit_material": "suit",
+        "suit_maps": {"albedo": SUIT_ALBEDO_FILE, "wrinkle": SUIT_WRINKLE_FILE, "atlas_m": list(look["atlas_m"]),
+                      "fold_depth_m": cfg["joints"]["fold_depth_m"], "slope_range": WRINKLE_SLOPE_RANGE},
+        "joints": joints,
+        "joint_order": joint_names(),
     }
+
+
+SUIT_ALBEDO_FILE = "suit_albedo.png"
+SUIT_WRINKLE_FILE = "suit_wrinkle.png"
+WRINKLE_SLOPE_RANGE = 1.6  # the wrinkle map stores the fold slopes dh/du, dh/dv (m/m) as 0.5 + slope / WRINKLE_SLOPE_RANGE

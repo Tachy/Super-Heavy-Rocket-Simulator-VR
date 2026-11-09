@@ -375,4 +375,45 @@ func _check_figure_arms(config: CockpitConfig) -> void:
 	for b in skeleton.get_bone_count():
 		poses_ok = poses_ok and skeleton.get_bone_pose(b).origin.is_finite() and skeleton.get_bone_pose(b).basis.get_rotation_quaternion().is_finite()
 	_check(poses_ok, "every bone pose is finite after the arm poses")
+	_check_figure_deform(view)
 	view.free()
+
+
+## Task 8b: the joint folds follow the pose: the wrinkle weight is 0 at the straight joint and 1 at full bend; the player's elbow bend
+## drives its corrective blend shapes and wrinkle weight; every figure has a deformer and the suit mesh carries the 16 shapes.
+func _check_figure_deform(view: CockpitView) -> void:
+	var joint := {"rest_deg": 73.6, "full_deg": 140.0, "ext_deg": 0.0, "neutral_deg": 0.0}
+	var w0 := FigureDeform.bend_weights(joint, 0.0)
+	var w1 := FigureDeform.bend_weights(joint, 140.0)
+	var wr := FigureDeform.bend_weights(joint, 73.6)
+	_check(w0.z == 0.0 and w1.z == 1.0 and w0.y == 1.0 and w1.x == 1.0 and wr.x == 0.0 and wr.y == 0.0,
+			"bend weights: wrinkle 0 straight / 1 full bend, shapes 0 at rest (%s %s %s)" % [w0, w1, wr])
+	for seat_id: String in ["s1", "s2", "s3", "s4"]:
+		_check(view.figure_deform(seat_id) != null, "figure %s has its joint deformer" % seat_id)
+	var deform := view.figure_deform("s2")
+	if deform == null:
+		return
+	var mesh: MeshInstance3D = deform._mesh
+	_check(mesh.mesh.get_blend_shape_count() == 16, "the suit carries 16 corrective shapes (%d)" % mesh.mesh.get_blend_shape_count())
+	var strip := ConsoleStrip.from_config(view.config)
+	var far: Vector3 = strip.surface("centre")["centre"]
+	var near := {"l": {"tip": view.idle_tip("l"), "extend": 0.0}, "r": {"tip": view.idle_tip("r"), "extend": 0.0}}
+	view.pose_arms(near)
+	var elbow_r := 5  # slot order: shoulder_l, elbow_l, hip_l, knee_l, shoulder_r, elbow_r, ...
+	var bent := deform.wrinkle[elbow_r]
+	var bent_theta := deform.theta_deg[elbow_r]
+	var flex_index := mesh.find_blend_shape_by_name(&"elbow_r_flex")
+	var bent_flex := mesh.get_blend_shape_value(flex_index) if flex_index >= 0 else -1.0
+	near["r"] = {"tip": far, "extend": 1.0}
+	view.pose_arms(near)
+	var reached := deform.wrinkle[elbow_r]
+	_check(reached < bent and deform.theta_deg[elbow_r] < bent_theta,
+			"reaching for the centre screen straightens the right elbow: %.0f -> %.0f deg, wrinkle %.2f -> %.2f" % [bent_theta, deform.theta_deg[elbow_r], bent, reached])
+	var finite := true
+	for k in deform.wrinkle.size():
+		finite = finite and is_finite(deform.wrinkle[k]) and deform.wrinkle[k] >= 0.0 and deform.wrinkle[k] <= 1.0
+	_check(finite, "wrinkle weights finite and within 0..1: %s" % [deform.wrinkle])
+	var rest_theta := float((view._figure_joints().get("elbow_r", {}) as Dictionary).get("rest_deg", 0.0))
+	var expect := clampf((bent_theta - rest_theta) / (140.0 - rest_theta), 0.0, 1.0)
+	_check(flex_index >= 0 and absf(bent_flex - expect) < 0.02 and (bent_theta <= rest_theta or bent_flex > 0.0),
+			"the elbow bent beyond its rest angle (%.0f > %.0f deg) weights its flex shape %.2f (expected %.2f)" % [bent_theta, rest_theta, bent_flex, expect])

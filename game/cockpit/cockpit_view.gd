@@ -6,6 +6,7 @@ extends Node3D
 ## of the vehicle, so it exists in every view; the pilot camera (a later task) sits at `eye_node`.
 
 const CABIN_SHADER := preload("res://shaders/cabin.gdshader")
+const SUIT_SHADER := preload("res://shaders/crew_suit.gdshader")
 const GLASS_SHADER := preload("res://shaders/cabin_glass.gdshader")
 const DISPLAY_SHADER := preload("res://shaders/display_colour.gdshader")
 const VEHICLE_ID := "crew_dragon"
@@ -58,6 +59,11 @@ const LABEL_ALBEDO := Color(0.80, 0.80, 0.80)
 const LEAN_REACH_SHARE := 0.97
 const MAX_LEAN_DEG := 22.0
 const LEAN_PASSES := 4
+## [E] Task 8b: the elbow hangs down the seat back, a little back and out (skeleton frame, crew's left; mirrored for the right): the rest pole
+## of the hands-on-thighs pose points the elbow sideways, which flares the arm at the HOTAS grip (KSC-20190731, demo1_1: elbows by the sides)
+const ELBOW_POLE := Vector3(-0.8, -0.45, 0.4)
+## [E] Task 8b: a hand closed round a HOTAS grip has its palm on the grip and the index tip this far ahead of it (along the chest normal)
+const GRIP_TIP_AHEAD_M := 0.09
 
 var config: CockpitConfig
 var eye_node := Node3D.new()
@@ -75,6 +81,9 @@ var _figure_bones := {}  # manifest crew_figure.bones (the arm chains' finger le
 var _arm_iks := {}  # side "l" / "r" -> ArmIk of the player's figure
 var _arm_results := {}  # side -> the last solved pose (ArmIk.solve)
 var _lean := Quaternion.IDENTITY  # the torso's lean towards the pointer (skeleton frame)
+var _deforms := {}  # seat id -> FigureDeform (joint folds: corrective shapes, wrinkle weights)
+var _suit_textures := {}  # manifest crew_figure.suit_maps file -> ImageTexture
+var _joint_table := {}  # manifest crew_figure.joints
 
 
 ## Builds the cabin from the model set's `models` (VehicleModels.load_for("crew_dragon")) and the cockpit definition.
@@ -154,8 +163,13 @@ func player_arm(side: String) -> ArmIk:
 	return _arm_iks[side]
 
 
-## The resting fingertip of a side in the cabin frame (the hand on its armrest / HOTAS grip; Zero without the figure).
+## The resting fingertip of a side in the cabin frame (Zero without the figure): with the HOTAS props shown the hand on its grip (the
+## throttle for the crew's left hand, the stick for the right; [hotas] *_grip_m from the eye point, Task 9 calibrates them), otherwise
+## the figure's rest pose (hands on the thighs).
 func idle_tip(side: String) -> Vector3:
+	if hotas_grip(side):
+		var chest := _skeleton_to_cabin().basis.y.normalized() if _skeletons.has(CREW_ORDER[0]) else Vector3.ZERO  # the seat's chest normal
+		return config.eye.origin + CockpitConfig._vec(config.hotas.get("throttle_grip_m" if side == "l" else "stick_grip_m")) + chest * GRIP_TIP_AHEAD_M
 	var arm := player_arm(side)
 	return _skeleton_to_cabin() * arm.rest_tip() if arm != null else Vector3.ZERO
 
@@ -190,9 +204,12 @@ func pose_arms(pose: Dictionary) -> void:
 	for side: String in ["l", "r"]:
 		var arm: ArmIk = arms[side]
 		var shoulder: Vector3 = _waist() + _lean * (arm.shoulder_rest - _waist())
-		var result := arm.solve(shoulder, targets[side])
-		arm.apply(skeleton, result, float(pose[side].get("extend", 0.0)))
+		var result := arm.solve(shoulder, targets[side], _lean * Vector3(ELBOW_POLE.x, ELBOW_POLE.y, ELBOW_POLE.z * (1.0 if side == "l" else -1.0)))
+		var extend := float(pose[side].get("extend", 0.0))
+		arm.apply(skeleton, result, extend, (1.0 - extend) if hotas_grip(side) else 0.0)
 		_arm_results[side] = result
+	if _deforms.has(CREW_ORDER[0]):
+		(_deforms[CREW_ORDER[0]] as FigureDeform).update()
 
 
 func _waist() -> Vector3:
@@ -255,6 +272,12 @@ func set_player_head_hidden(hidden: bool) -> void:
 		skeleton.set_bone_pose_scale(bone, Vector3.ONE * (0.001 if hidden else 1.0))
 
 
+## Whether the idle hand of a side holds its HOTAS grip (the props shown and the grip point configured).
+func hotas_grip(side: String) -> bool:
+	var node: MeshInstance3D = _nodes.get("hotas_throttle" if side == "l" else "hotas_stick")
+	return node != null and node.visible and config != null and config.hotas.has("throttle_grip_m" if side == "l" else "stick_grip_m")
+
+
 ## The stick and throttle props on the commander's armrests (the deliberate deviation, switchable).
 func set_hotas_props(enabled: bool) -> void:
 	for part in ["hotas_stick", "hotas_throttle"]:
@@ -296,7 +319,7 @@ func _process(_delta: float) -> void:
 	var fill := FILL_LUX / PI * scene_per_cd
 	var surround := fill * WALL_ALBEDO.srgb_to_linear().get_luminance()  # the walls' luminance under the same bounced light
 	for material: Material in _materials.values():
-		if material is ShaderMaterial and (material as ShaderMaterial).shader == CABIN_SHADER:
+		if material is ShaderMaterial and ((material as ShaderMaterial).shader == CABIN_SHADER or (material as ShaderMaterial).shader == SUIT_SHADER):
 			(material as ShaderMaterial).set_shader_parameter("fill", fill)
 			(material as ShaderMaterial).set_shader_parameter("fill_surround", surround)
 	for material: ShaderMaterial in _strip_materials:
@@ -345,6 +368,7 @@ func _build_figures(models: Dictionary) -> void:
 	var manifest: Dictionary = (models.get("manifest", {}) as Dictionary).get("crew_figure", {})
 	var look: Dictionary = manifest.get("materials", {})
 	_figure_bones = manifest.get("bones", {})
+	_joint_table = manifest.get("joints", {})
 	var template := VehicleModels.scene_for(VEHICLE_ID, FIGURE_FILE)  # parsed once, duplicated per seat
 	if template == null:
 		return
@@ -371,12 +395,63 @@ func _build_figures(models: Dictionary) -> void:
 					var entry: Dictionary = look[key]
 					var c: Array = entry["albedo"]
 					var material := _cabin_material(Color(c[0], c[1], c[2]).linear_to_srgb(), float(entry["roughness"]), float(entry["metallic"]), 0.0)
-					if key == String(manifest.get("visor_material", "")) and manifest.has("visor_tint"):
+					if key == String(manifest.get("suit_material", "")) and manifest.has("suit_maps"):
+						material = _suit_material(entry, manifest["suit_maps"])
+					elif key == String(manifest.get("visor_material", "")) and manifest.has("visor_tint"):
 						material = _visor_material(material, manifest["visor_tint"])
 					elif key == String(manifest.get("helmet_material", "")) and manifest.has("helmet_grooves"):
 						material = _helmet_material(material, manifest["helmet_grooves"])
 					mesh_node.set_surface_override_material(s, material)
+			var deform := FigureDeform.for_figure(_skeletons.get(seat_id), mesh_node, manifest.get("joints", {}), manifest.get("joint_order", []))
+			if deform != null:
+				_deforms[seat_id] = deform
+				deform.update()
 	template.free()
+
+
+## The manifest's joint table (crew_figure.joints: bend angles, shapes, slots).
+func _figure_joints() -> Dictionary:
+	return _joint_table
+
+
+## The figure's joint deformer of a seat (null without the model).
+func figure_deform(seat_id: String) -> FigureDeform:
+	return _deforms.get(seat_id)
+
+
+## The suit (Task 8b): crew_suit.gdshader with the baked albedo and wrinkle maps (manifest crew_figure.suit_maps); falls back to the
+## plain cabin material without the maps.
+func _suit_material(entry: Dictionary, maps: Dictionary) -> ShaderMaterial:
+	if _materials.has("crew_suit"):
+		return _materials["crew_suit"]
+	var albedo_map := _suit_texture(String(maps.get("albedo", "")))
+	var wrinkle_map := _suit_texture(String(maps.get("wrinkle", "")))
+	var m := ShaderMaterial.new()
+	m.shader = SUIT_SHADER
+	if albedo_map == null or wrinkle_map == null:
+		var c: Array = entry["albedo"]
+		return _cabin_material(Color(c[0], c[1], c[2]).linear_to_srgb(), float(entry["roughness"]), float(entry["metallic"]), 0.0)
+	var atlas: Array = maps.get("atlas_m", [2.56, 1.6])
+	m.set_shader_parameter("suit_albedo", albedo_map)
+	m.set_shader_parameter("suit_wrinkle", wrinkle_map)
+	m.set_shader_parameter("atlas_m", Vector2(float(atlas[0]), float(atlas[1])))
+	m.set_shader_parameter("slope_range", float(maps.get("slope_range", 1.6)))
+	m.set_shader_parameter("roughness", float(entry["roughness"]))
+	m.set_shader_parameter("metallic", float(entry["metallic"]))
+	_materials["crew_suit"] = m
+	return m
+
+
+func _suit_texture(file: String) -> ImageTexture:
+	if file.is_empty():
+		return null
+	if not _suit_textures.has(file):
+		var image := Image.load_from_file(VehicleModels._repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file))
+		if image == null or image.is_empty():
+			return null
+		image.generate_mipmaps()
+		_suit_textures[file] = ImageTexture.create_from_image(image)
+	return _suit_textures[file]
 
 
 func _material_of(part: String) -> Material:

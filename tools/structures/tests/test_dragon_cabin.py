@@ -404,7 +404,7 @@ def test_knee_and_shin_follow_the_hatch_photo(spec):
     ankle = fl.to_capsule(b["shin_l"]["tail"], seat["hip_m"], seat["back_angle_deg"])
     thigh = math.degrees(math.atan2(knee[0] - hip[0], knee[1] - hip[1]))  # from +Y (the hatch side) toward +X
     shin = math.degrees(math.atan2(ankle[0] - knee[0], ankle[1] - knee[1]))
-    assert 10.0 <= thigh <= 20.0, thigh
+    assert 10.0 - 1e-9 <= thigh <= 20.0, thigh  # (float noise: the ANSUR thigh puts the knee at exactly 10 deg)
     assert -65.5 <= shin <= -60.0, shin
     # shins steep toward the floor; round 4: the seat sits ~0.3 m lower than in crew1_1 (the launch posture under the reach-fitted eye, see
     # test_layout_is_one_consistent_fit), so the ankle lies above the floor instead of in the photo's 1.4-1.8 band

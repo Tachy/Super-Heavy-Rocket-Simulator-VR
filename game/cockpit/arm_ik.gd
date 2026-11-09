@@ -4,8 +4,8 @@ extends RefCounted
 ## straight index finger as the end effector. Pure geometry in the skeleton (figure) frame: `solve()` takes the shoulder, the index
 ## tip target and a pole direction and returns the joint positions and the global bases of the bones (the minimal rotation from the
 ## rest bone to the solved direction, so the rest roll is kept). Limits: the wrist bends at most MAX_WRIST_DEG from the forearm, the
-## upper arm at most MAX_SHOULDER_DEG from its rest direction (the mesh is rigidly skinned: above ~60 deg the shoulder shows
-## notches, Task 4 carry), the elbow never fully straightens; a target beyond reach is clamped (`reached` false, no NaN).
+## upper arm at most MAX_SHOULDER_DEG from its rest direction (Task 8b: smooth weights and corrective shapes keep the shoulder; the limit
+## stays as the reach envelope), the elbow never fully straightens; a target beyond reach is clamped (`reached` false, no NaN).
 ## `for_skeleton()` reads the chain from a Skeleton3D rest pose and `apply()` writes the solved pose (rest * delta) to it.
 
 const MAX_WRIST_DEG := 20.0  ## [E] Task 4 carry: wrist bend of the glove / suit
@@ -13,6 +13,7 @@ const MAX_SHOULDER_DEG := 100.0  ## [E] raise of the upper arm from its hanging 
 const ELBOW_SLACK := 0.9995  ## the chain never extends beyond this share of its length (no flipping at full stretch)
 const REACHED_TOLERANCE_M := 1.0e-3
 const GRIP_CURL_DEG := 28.0  ## [E] curl per index joint of a hand at rest (grip); the extended finger is 0
+const FIST_CURL_DEG := 30.0  ## [E] Task 8b: extra curl per joint of the middle / ring / little fingers holding a HOTAS grip (grip = 1)
 const SOLVE_ITERATIONS := 16
 const RELAX_RAD := 0.35  ## the hand direction moves at most this much per pass after the first
 
@@ -31,6 +32,9 @@ var _index_rest_local: Array[Basis] = []  # index_k straight in the hand frame (
 var _index_len: Array[float] = []
 var _index_origin_local := Vector3.ZERO  # index_1 origin in the hand frame
 var _curl_axis := Vector3.RIGHT  # hand frame
+var _finger_rest_local: Array[Basis] = []  # Task 8b: fingers, fingers_2, fingers_3 (middle / ring / little) in the hand frame, as rest
+var _finger_len: Array[float] = []
+var _finger_origin_local := Vector3.ZERO
 
 
 ## A chain from numbers (tests): rest bases give the bone directions (y) and roll.
@@ -88,6 +92,25 @@ static func for_skeleton(skeleton: Skeleton3D, arm_side: String, bones: Dictiona
 		var local: Basis = to_hand * t.basis
 		straight.append(Basis(Quaternion(local.y.normalized(), Vector3.UP)) * local)
 	ik._index_rest_local = straight
+	var finger_names := ["fingers_", "fingers_2_", "fingers_3_"]
+	var finger_ts: Array[Transform3D] = []
+	for prefix: String in finger_names:
+		var idx := skeleton.find_bone(prefix + arm_side)
+		if idx < 0:
+			finger_ts.clear()
+			break
+		ik._bones[prefix] = idx
+		var ft: Transform3D = skeleton.get_bone_global_rest(idx)
+		finger_ts.append(Transform3D(ft.basis.orthonormalized(), ft.origin))
+	if finger_ts.size() == 3:
+		ik._finger_origin_local = to_hand * (finger_ts[0].origin - ha_t.origin)
+		var len3f := 0.02
+		var entry3: Dictionary = bones.get("fingers_3_" + arm_side, {})
+		if entry3.has("head") and entry3.has("tail"):
+			len3f = (CockpitConfig._vec(entry3["tail"]) - CockpitConfig._vec(entry3["head"])).length()
+		ik._finger_len = [(finger_ts[1].origin - finger_ts[0].origin).length(), (finger_ts[2].origin - finger_ts[1].origin).length(), len3f]
+		for t: Transform3D in finger_ts:
+			ik._finger_rest_local.append(to_hand * t.basis)
 	ik.tip_local = ik._index_origin_local + Vector3.UP * (ik._index_len[0] + ik._index_len[1] + ik._index_len[2])
 	var tilt: Vector3 = (to_hand * i3.basis).y
 	tilt = (tilt - Vector3.UP * tilt.dot(Vector3.UP)).normalized()
@@ -163,7 +186,7 @@ func solve(shoulder: Vector3, target: Vector3, pole: Vector3 = Vector3.ZERO) -> 
 
 ## Writes a solved pose to the skeleton: upper arm, forearm, hand and the three index bones (the other hand bones follow the hand).
 ## `extend` 0 = relaxed grip curl, 1 = index straight.
-func apply(skeleton: Skeleton3D, result: Dictionary, extend: float) -> void:
+func apply(skeleton: Skeleton3D, result: Dictionary, extend: float, grip: float = 0.0) -> void:
 	if _bones.is_empty():
 		return
 	var chain := [["upper", result["upper_basis"], result["shoulder"]], ["fore", result["fore_basis"], result["elbow"]], ["hand", result["hand_basis"], result["wrist"]]]
@@ -177,11 +200,20 @@ func apply(skeleton: Skeleton3D, result: Dictionary, extend: float) -> void:
 		var basis: Basis = hand_t.basis * (Basis(_curl_axis, curl * float(k + 1)) * _index_rest_local[k])
 		_set_global(skeleton, _bones[roles[k]], Transform3D(basis.orthonormalized(), origin))
 		origin += basis.y * _index_len[k]
+	# Task 8b: the middle / ring / little fingers keep their rest curl and close around a HOTAS grip (grip 0..1)
+	if _finger_rest_local.size() == 3:
+		var fist := deg_to_rad(FIST_CURL_DEG) * clampf(grip, 0.0, 1.0)
+		var at: Vector3 = hand_t * _finger_origin_local
+		var prefixes := ["fingers_", "fingers_2_", "fingers_3_"]
+		for k in 3:
+			var fb: Basis = hand_t.basis * (Basis(_curl_axis, fist * float(k + 1)) * _finger_rest_local[k])
+			_set_global(skeleton, _bones[prefixes[k]], Transform3D(fb.orthonormalized(), at))
+			at += fb.y * _finger_len[k]
 
 
 ## Back to the rest pose.
 func reset_pose(skeleton: Skeleton3D) -> void:
-	for role: String in ["upper", "fore", "hand", "index1", "index2", "index3"]:
+	for role: String in ["upper", "fore", "hand", "index1", "index2", "index3", "fingers_", "fingers_2_", "fingers_3_"]:
 		if _bones.has(role):
 			skeleton.set_bone_pose(_bones[role], skeleton.get_bone_rest(_bones[role]))
 

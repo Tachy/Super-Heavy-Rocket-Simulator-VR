@@ -30,6 +30,7 @@ import detail_file  # noqa: E402
 import hull_tiles  # noqa: E402
 import iss_textures  # noqa: E402
 import surface_textures  # noqa: E402
+import suit_textures  # noqa: E402
 import mount_textures  # noqa: E402
 import vehicle_spec  # noqa: E402
 import dorsal_layout  # noqa: E402  (blender/, put on the path by vehicle_spec)
@@ -376,6 +377,8 @@ def build_vehicle(vehicle_id: str, out: Path | None = None, force: bool = False,
             surface = surface_textures.write_falcon9(staging, spec)
         elif table["kind"] == "dragon":
             surface = surface_textures.write_dragon(staging, spec)
+            if spec.get("crew_figure"):  # the crew suit's albedo and wrinkle maps (Task 8b)
+                suit_textures.write(staging, spec["crew_figure"])
         for gen in table["generators"]:
             cmd = blender_command(exe, SCRIPT_DIR / gen, "--spec", str(spec_file), "--out", str(staging))
             res = subprocess.run(cmd, capture_output=True, text=True)

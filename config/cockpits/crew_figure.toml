@@ -1,76 +1,197 @@
-# Crew figure in the newer SpaceX EVA suit (M7 cockpit step 1): one adult, seated in a Dragon seat, rebuilt by us (nothing of any
-# photo or model is copied). Silhouette only; stripes, seams, patches and the flag come later by texture.
+# Crew figure in the newer SpaceX EVA suit (M7 cockpit): one adult, seated in a Dragon seat, rebuilt by us (nothing of any photo or model
+# is copied). Task 8b: an anatomical body from ANSUR II measures (figure_body.py), the suit as its own hull with ease over it, suit detail
+# (stripes, seams, chevron, pockets, joint inserts, flag) and dynamic joint wrinkles by texture / shader (suit_textures.py, crew_suit.gdshader).
 # Figure frame (glTF origin = the seat's hip reference point of config/cockpits/crew_dragon.toml [[seat]] hip_m = the point where the
 # seat-back plane meets the pan surface; the figure's hip joint sits 0.10 above and 0.12 ahead of it):
 #   X = up the seat back (toward the head), Y = the seat's chest normal (forward, away from the back), Z = the crew's LEFT.
 # The game places the figure at a seat: origin = hip_m, basis columns (x, y, z) in the capsule frame = ((cos a, -sin a, 0), (sin a, cos a, 0), (0, 0, 1)),
 # a = back_angle_deg. Left parts (_l) are at +Z. Metres; angles degrees. Every value line carries [S] / [E] / [D] with its derivation.
 # Look references (git-ignored, screenshots/m7-cockpit-refs/): sheet_suit.jpg = eva_suit_newatlas (full suit, standing), eva_suit_detail1-4
-# (helmet, collar, shoulder stripes), mielke/discovery*, demo1_*, crew1_1 (seated crew in the cabin).
-# Proportions: Drillis and Contini, "Body segment parameters", 1966 (the standard fractions of stature; adult male, the same table
-# used by NASA-STD-3000 style anthropometry sketches). Tagged [E]: a mid-size adult, not a named crew member.
+# (helmet, collar, shoulder stripes), user/anzug/spacex.jpg (chest chevron, flag), mielke/crew1_1, demo1_1 (seated crew, knee folds),
+# nasa/KSC-20190731-PH_SPX01_0002 (seated profile, hands on the thighs).
+# Body measures: ANSUR II (2012 U.S. Army anthropometric survey, male public database, 4082 subjects; tools/data_pipeline/sources.toml
+# ansur2_male): the MEDIAN (50th percentile) of each measure, read from data/anthropometry/ANSUR_II_MALE_Public.csv (mm -> m). The medians
+# are per measure, not one person's set. The topology follows the edge-loop layout of the Blender Studio Human Base Meshes (CC0, reference only).
 
 [figure]
-stature_m = 1.78                 # [E] adult male, ~50th percentile (the ~1.75-1.80 m of the Discovery crew photos at the iPad / helmet scale of crew_dragon.toml); +-0.05
+stature_m = 1.755                # [S] ANSUR II male median stature (1755 mm)
 hip_joint_up_m = 0.10            # [E] hip joint (trochanter) above the seat pan surface: seated anthropometry, buttock thickness ~0.09-0.10
-hip_joint_forward_m = 0.12       # [E] hip joint ahead of the seat-back plane: back-to-trochanter depth ~0.11-0.13 (suit on)
-hip_joint_half_spacing_m = 0.088  # [E] hip joint centres 0.176 apart (pelvis breadth 0.19 * stature 0.55 of a seated adult; the suit adds to the surface, not to the joints)
+hip_joint_forward_m = 0.12       # [E] hip joint ahead of the seat-back plane: back-to-trochanter depth ~0.11-0.13 (buttock depth 0.246 x back share 0.47, seated compression)
+hip_joint_half_spacing_m = 0.088  # [E] hip joint centres 0.176 apart (about half the ANSUR hip breadth 0.344 plus the greater trochanter offset inward)
 knee_angle_deg = 105.0           # [E] interior knee angle (thigh to shin; 180 = straight leg): crew1_1 (fix round 3, reviewer fit) shows a recliner posture, thigh 10-20 deg above the hatch axis and shin ~60-65 deg below it = 95-105; +-10
 thigh_raise_deg = -25.0          # [E] thigh angle above the SEAT PAN plane (the pan is 35 deg above the hatch axis with the seat back at 35 deg): -25 puts the thighs 10 deg above the hatch axis (crew1_1 fit: 10-20), the shins 65 deg below it; +-10
-arm_reach_fraction = 0.44        # [S] Drillis and Contini: shoulder (acromion) to the tip of the middle finger, fraction of stature (0.78 m at 1.78); tested against the bone chain, +-0.05 m
+arm_reach_fraction = 0.44        # [S] Drillis and Contini 1966: shoulder (acromion) to the tip of the middle finger, fraction of stature; the ANSUR chain is tested against it, +-0.05 m
+shoulder_joint_drop_m = 0.0      # [D] the upper-arm bone starts at the acromion: its length is ANSUR acromion-radiale (measured from the acromion), as the round-4 reach fit of crew_dragon.toml assumes; the deltoid cap rounds the mesh around it
+shoulder_joint_inset_m = 0.0     # [D] see shoulder_joint_drop_m: at the acromion tip (biacromial_breadth / 2)
 
-[proportion]
-shoulder_height = 0.818          # [S] Drillis and Contini: acromion height / stature
-hip_height = 0.530               # [S] Drillis and Contini: trochanter height / stature
-knee_height = 0.285              # [S] Drillis and Contini: knee (centre) height / stature
-ankle_height = 0.039             # [S] Drillis and Contini: ankle height / stature
-upper_arm = 0.186                # [S] Drillis and Contini: shoulder to elbow / stature
-forearm = 0.146                  # [S] Drillis and Contini: elbow to wrist / stature
-hand = 0.108                     # [S] Drillis and Contini: wrist to the middle fingertip / stature
-shoulder_width = 0.259           # [S] Drillis and Contini: acromion to acromion / stature
-head_height = 0.130              # [S] Drillis and Contini: chin to vertex / stature
-foot_length = 0.152              # [S] Drillis and Contini: heel to toe / stature
+[anthropometry]
+# ANSUR II male medians (mm / 1000). Heights are standing heights above the floor; the generator uses differences of them.
+acromial_height = 1.439          # [S] ANSUR II acromialheight
+axilla_height = 1.328            # [S] ANSUR II axillaheight
+chest_height = 1.289             # [S] ANSUR II chestheight
+waist_height = 1.055             # [S] ANSUR II waistheightomphalion
+trochanter_height = 0.899        # [S] ANSUR II trochanterionheight (the hip joint level)
+crotch_height = 0.845            # [S] ANSUR II crotchheight
+knee_height = 0.491              # [S] ANSUR II lateralfemoralepicondyleheight (the knee joint)
+ankle_height = 0.073             # [S] ANSUR II lateralmalleolusheight (the ankle joint)
+cervicale_height = 1.517         # [S] ANSUR II cervicaleheight (neck base, back)
+biacromial_breadth = 0.415       # [S] ANSUR II biacromialbreadth
+bideltoid_breadth = 0.509        # [S] ANSUR II bideltoidbreadth (across the deltoids, arms hanging)
+chest_breadth = 0.289            # [S] ANSUR II chestbreadth
+chest_depth = 0.253              # [S] ANSUR II chestdepth
+chest_circumference = 1.056      # [S] ANSUR II chestcircumference
+waist_breadth = 0.325            # [S] ANSUR II waistbreadth
+waist_depth = 0.234              # [S] ANSUR II waistdepth
+waist_circumference = 0.937      # [S] ANSUR II waistcircumference
+hip_breadth = 0.344              # [S] ANSUR II hipbreadth
+buttock_depth = 0.246            # [S] ANSUR II buttockdepth
+buttock_circumference = 1.017    # [S] ANSUR II buttockcircumference
+thigh_circumference = 0.624      # [S] ANSUR II thighcircumference (at the gluteal furrow)
+lower_thigh_circumference = 0.408  # [S] ANSUR II lowerthighcircumference (just above the knee)
+calf_circumference = 0.392       # [S] ANSUR II calfcircumference
+ankle_circumference = 0.228      # [S] ANSUR II anklecircumference
+wrist_circumference = 0.176      # [S] ANSUR II wristcircumference
+neck_circumference_base = 0.433  # [S] ANSUR II neckcircumferencebase
+upper_arm_length = 0.335         # [S] ANSUR II acromionradialelength (acromion to the elbow joint)
+forearm_length = 0.267           # [S] ANSUR II radialestylionlength (elbow joint to the wrist)
+hand_length = 0.193              # [S] ANSUR II handlength
+hand_breadth = 0.088             # [S] ANSUR II handbreadth
+palm_length = 0.116              # [S] ANSUR II palmlength
+foot_length = 0.271              # [S] ANSUR II footlength
+thigh_clearance = 0.180          # [S] ANSUR II thighclearance (seated thigh thickness): the thigh sections' depth
+
+[body]
+# The anatomical body hull (figure_body.py), WITHOUT the suit. Torso levels as rows [s = height above the hip joint, half breadth, depth,
+# back share of the depth, girth (0 = none: the superellipse exponent is interpolated), forward offset of the section centre]; the
+# exponent of a row with a girth is fitted so the section's perimeter equals it. Heights: ANSUR height minus trochanter_height.
+torso_levels_m = [  # [D] one row per level, each tagged
+  [-0.054, 0.150, 0.215, 0.50, 0.0, 0.0],   # [D] crotch (crotch_height - trochanter_height); [E] pelvis floor narrower than the hips
+  [-0.025, 0.166, 0.238, 0.48, 0.0, 0.0],   # [E] between the crotch and the trochanter
+  [0.000, 0.172, 0.246, 0.47, 1.017, 0.0],  # [S] buttock level: hip_breadth / 2, buttock_depth, buttock_circumference
+  [0.080, 0.166, 0.238, 0.47, 0.0, 0.004],  # [E] iliac crest region, between the buttock and waist rows
+  [0.156, 0.1625, 0.234, 0.47, 0.937, 0.008],  # [S] waist (omphalion): waist_breadth / 2, waist_depth, waist_circumference
+  [0.220, 0.157, 0.238, 0.47, 0.0, 0.010],  # [E] tenth rib (ANSUR tenthribheight 1.119 - 0.899)
+  [0.300, 0.150, 0.246, 0.46, 0.0, 0.012],  # [E] lower chest
+  [0.390, 0.148, 0.258, 0.45, 1.056, 0.014],  # [S] chest (chest_height - trochanter): chest_circumference; [E] half breadth 0.148 / depth 0.258 = ANSUR chest_breadth / 2 + 3.5 mm, chest_depth + 5 mm (the girth of 1.056 needs a near-box section; the subdivided body keeps the breadth and depth within 1 cm of ANSUR)
+  [0.429, 0.148, 0.250, 0.46, 0.0, 0.014],  # [D] axilla (axilla_height - trochanter): bottom of the arm port
+  [0.470, 0.158, 0.236, 0.47, 0.0, 0.013],  # [E] upper chest, pectoral / posterior axillary folds
+  [0.505, 0.170, 0.212, 0.49, 0.0, 0.011],  # [E] under the acromion
+  [0.545, 0.176, 0.170, 0.52, 0.0, 0.008],  # [D] shoulder top just medial of the acromion (acromial_height - trochanter = 0.540): top of the arm port
+  [0.572, 0.150, 0.152, 0.53, 0.0, 0.006],  # [E] trapezius slope toward the neck (a gentle shoulder line, eva_suit_newatlas)
+  [0.598, 0.106, 0.138, 0.54, 0.0, 0.003],  # [E] trapezius near the neck
+  [0.618, 0.069, 0.138, 0.50, 0.433, 0.0],  # [S] neck base (cervicale_height - trochanter): neck_circumference_base
+  [0.650, 0.063, 0.126, 0.50, 0.0, 0.0]]    # [E] neck top inside the hood (closed by a cap)
+arm_port_rows = [8, 11]          # [D] torso level indices of the arm port's bottom (axilla) and top (shoulder top) edges
+arm_port_columns = 3             # [E] the port spans this many columns either side of the side column (32 columns around): 7 vertices front to back
+torso_columns = 32               # [E] vertices around the torso (16 per half: each leg loop takes one half plus the crotch bridge)
+crotch_bridge = 3                # [E] vertices on the crotch line between the two leg loops
+# Limb sections [t = distance from the proximal joint along the limb, lateral half width, front-back half depth, girth (0 = none: as typed;
+# otherwise the lateral half width is fitted so the ellipse's perimeter equals it)].
+arm_sections_m = [  # [D] one row per section, each tagged
+  [0.10, 0.048, 0.058, 0.0],     # [E] upper arm at the axilla: girth ~0.335 (ANSUR bicepscircumferenceflexed 0.357 x ~0.93 relaxed), flatter across (bideltoid_breadth with the arms hanging, tested)
+  [0.20, 0.047, 0.054, 0.0],     # [E] biceps belly, relaxed (girth ~0.32)
+  [0.28, 0.048, 0.044, 0.0],     # [E] above the elbow
+  [0.335, 0.045, 0.039, 0.0],    # [E] elbow (upper_arm_length): elbow girth ~0.265
+  [0.40, 0.047, 0.041, 0.0],     # [E] forearm maximum (forearmcircumferenceflexed 0.310 x ~0.92 relaxed = 0.285)
+  [0.50, 0.039, 0.030, 0.0],     # [E] mid forearm
+  [0.602, 0.0, 0.020, 0.176]]    # [S] wrist (upper_arm_length + forearm_length): wrist_circumference; [E] depth 0.020 (flat wrist)
+leg_sections_m = [  # [D] one row per section, each tagged
+  [0.10, 0.0, 0.088, 0.624],     # [S] upper thigh at the gluteal furrow: thigh_circumference; [D] depth = thigh_clearance / 2 (seated thickness)
+  [0.22, 0.0, 0.080, 0.545],     # [E] mid thigh
+  [0.33, 0.0, 0.066, 0.440],     # [E] lower thigh
+  [0.378, 0.0, 0.062, 0.408],    # [S] lower_thigh_circumference, 0.03 above the knee joint
+  [0.408, 0.0, 0.058, 0.380],    # [E] knee joint (trochanter_height - knee_height)
+  [0.53, 0.0, 0.064, 0.392],     # [S] calf_circumference, ~0.12 below the knee
+  [0.68, 0.0, 0.048, 0.290],     # [E] lower shin
+  [0.80, 0.0, 0.034, 0.228]]     # [S] ankle_circumference just above the malleolus
+thigh_lateral_offset_m = 0.012   # [E] the thigh section's centre sits this far lateral of the bone axis near the hip (gluteal / vastus mass), fading to 0 at the knee
+build_arm_abduction_deg = 35.0   # [E] build pose (the mesh is modelled in it, then posed to the seated rest): arms 35 deg out from the torso (A-pose, base-mesh convention)
+build_leg_abduction_deg = 6.0    # [E] build pose: legs straight down, 6 deg apart (the thighs clear each other at the crotch)
+deltoid_radius_m = 0.070         # [E] the shoulder cap keeps at least this distance from the shoulder joint (the acromion) on its outer side: tested against bideltoid_breadth with the arms hanging
+port_transition_rings = 3        # [E] rings between a port loop and the first limb section (deltoid / gluteal fold)
 
 [pose]
-# Directions in the figure frame (x up the back, y forward, z toward the figure's OWN left; mirrored for the right side). Normalised in the layout.
-upper_arm_dir = [-1.0, 0.12, 0.17]    # [E] upper arm hangs down the torso, 10 deg out and a little forward: forearms rest on the armrests (crew1_1, demo1_1); +-10 deg
-forearm_dir = [0.0, 1.0, -0.12]       # [E] forearm forward along the armrest, 7 deg inward, hands palm down above the thighs; +-10 deg
-neck_lean_m = 0.04                    # [E] the head sits this far ahead of the neck base (helmet against the headrest, crew1_1)
-head_centre_up_m = 0.80               # [D] helmet centre above the origin: hip joint 0.10 + shoulder (0.818 - 0.530) * stature 0.51 + 0.19 (neck ring, helmet centre over the shoulders)
-head_centre_forward_m = 0.17          # [D] helmet rear at the seat-back plane (headrest front face 0.02 ahead): centre - helmet half depth 0.17
+# Seated rest pose (KSC-20190731-PH_SPX01_0002, crew1_1): forearms down beside the torso, hands resting on the thighs, palms down. Left side
+# numbers (+Z); the right side is mirrored. The arm is a two-bone chain from the shoulder joint to the wrist with the elbow toward elbow_pole.
+wrist_m = [0.152, 0.322, 0.115]  # [E] wrist on the thigh: palm centre ~0.30 m along the thigh from the hip joint, on its top surface (thigh_clearance / 2 + glove); +-0.03
+elbow_pole = [-0.35, -0.55, 0.76]  # [E] the elbow points back, out and down: beside the torso, over the armrest (KSC-20190731 side view)
+hand_inward_deg = 12.0           # [E] the hand's direction turns this far toward the body centre from the thigh direction (fingers over the inner thigh)
+palm_lift_deg = 8.0              # [E] the hand's direction rises this far off the thigh surface toward the knee (the wrist sits higher than the fingertips' line)
+neck_lean_m = 0.04               # [E] the head sits this far ahead of the neck base (helmet against the headrest, crew1_1)
+head_centre_up_m = 0.80          # [D] eye contract: the figure's eye (helmet centre + EYE_UP 0.03) = 0.83 up the back = [eye] of crew_dragon.toml minus seat s2's hip_m
+head_centre_forward_m = 0.17     # [D] eye contract: eye 0.23 along the chest normal (helmet centre + EYE_FORWARD 0.06); helmet rear at the headrest
 
 [hand]
-palm_length_m = 0.105            # [E] wrist to the knuckle line, glove; hand 0.108 * 1.78 = 0.192 to the middle fingertip
-palm_half_width_m = 0.046        # [E] glove palm, half width (adult male hand breadth ~0.09 plus glove)
-palm_half_thick_m = 0.022        # [E] glove palm, half thickness
-index_m = [0.040, 0.024, 0.018]  # [E] index phalanges (proximal, middle, distal), glove; index tip 0.187 from the wrist, the finger scale 0.072 of crew_dragon.toml is the free finger
-index_radius_m = 0.011           # [E] glove finger radius
+palm_length_m = 0.118            # [D] ANSUR palm_length 0.116 + glove 0.002
+palm_half_width_m = 0.048        # [D] ANSUR hand_breadth 0.088 / 2 + glove 0.004
+palm_half_thick_m = 0.020        # [E] glove palm, half thickness
+index_m = [0.040, 0.024, 0.018]  # [E] index phalanges (proximal, middle, distal), glove; index tip 0.20 from the wrist
+index_radius_m = 0.0105          # [E] glove finger radius
 index_offset_m = 0.030           # [E] index knuckle toward the thumb side from the palm centre line
-fingers_m = 0.085                # [E] the merged middle / ring / little fingers: one slab from the middle knuckle, length
-fingers_half_width_m = 0.027     # [E] merged finger slab half width (three fingers 0.054 across)
-fingers_radius_m = 0.011         # [E] merged finger slab half thickness
-fingers_offset_m = -0.012        # [E] slab centre line, toward the little finger from the palm centre
+fingers_m = [0.044, 0.027, 0.020]  # [E] middle / ring / little phalanges on the bones fingers, fingers_2, fingers_3 (the middle finger: hand_length 0.193 - palm 0.116 = 0.077 + glove)
+finger_spacing_m = 0.019         # [E] centre spacing of the middle, ring and little fingers (hand_breadth 0.088 / 4.6 with the glove)
+finger_radius_m = 0.0100         # [E] glove finger radius (middle; ring and little 5 / 12 % thinner)
+finger_length_share = [1.0, 0.94, 0.78]  # [E] ring and little finger length relative to the middle finger
+fingers_offset_m = -0.010        # [E] the middle finger's knuckle toward the little finger from the palm centre line
 thumb_m = [0.042, 0.032]         # [E] thumb proximal and distal, glove
-thumb_radius_m = 0.0125          # [E] glove thumb radius
+thumb_radius_m = 0.0120          # [E] glove thumb radius
 thumb_root_offset_m = 0.036      # [E] thumb root toward the thumb side, from the palm centre
 thumb_root_forward_m = 0.020     # [E] thumb root forward of the wrist
 thumb_spread_deg = 35.0          # [E] thumb direction away from the fingers, relaxed
-finger_curl_deg = 8.0            # [E] relaxed curl per finger joint (toward the palm side)
+finger_curl_deg = 14.0           # [E] relaxed curl per finger joint (toward the palm side): fingers drape over the thigh (KSC-20190731)
 
 [suit]
-# Cross-section half sizes with the soft suit on; hz = across the body (z), hn = depth (y). Torso rings: [height above the hip joint, hz, hn, forward offset of the ring centre].
-torso_rings_m = [[-0.09, 0.115, 0.075, 0.0], [-0.06, 0.175, 0.118, 0.0], [0.0, 0.190, 0.125, 0.0], [0.12, 0.170, 0.115, 0.01], [0.25, 0.185, 0.125, 0.015], [0.40, 0.205, 0.138, 0.02], [0.50, 0.212, 0.135, 0.02], [0.555, 0.17, 0.11, 0.02], [0.585, 0.09, 0.075, 0.03]]  # [E] sheet_suit eva_suit_newatlas: broad shoulders, narrow waist; depth 0.25-0.28 chest
-thigh_radius_m = [0.098, 0.074]  # [E] suit thigh radius at the hip and at the knee (the thigh in the photos is slim: about 0.20 across at the knee)
-shin_radius_m = [0.068, 0.056]   # [E] suit calf radius at the knee and at the boot
-upper_arm_radius_m = [0.056, 0.047]  # [E] suit sleeve at the shoulder and at the elbow
-forearm_radius_m = [0.047, 0.040]    # [E] suit sleeve at the elbow and the wrist
-cuff_radius_m = 0.050            # [E] wrist ring (glove lock), the white metal ring of eva_suit_detail1
+# The suit is its own hull over the body: the body sections plus the ease (radial allowance) per region, from the photos (eva_suit_newatlas,
+# crew1_1): loose at the thighs and upper arms, tight at the forearm and shank.
+ease_torso_m = 0.014             # [E] torso: a soft pressure suit over the liner, ~1.5 cm (eva_suit_newatlas: the chest reads ~0.31 wide)
+ease_upper_arm_m = 0.016         # [E] upper arm: loose (eva_suit_newatlas sleeves are full to the elbow)
+ease_forearm_m = 0.007           # [E] forearm: close fitting toward the glove lock
+ease_thigh_m = 0.016             # [E] thigh: loose (crew1_1, eva_suit_newatlas)
+ease_shank_m = 0.006             # [E] shank: close fitting (the boot shaft goes over it)
+cuff_radius_m = 0.042            # [E] wrist ring (glove lock), the white metal ring of eva_suit_detail1
 cuff_length_m = 0.025            # [E] wrist ring length along the forearm
 boot_shaft_fraction = 0.50       # [E] the black boot covers this fraction of the shin from the ankle up (sheet_suit: boots reach mid-calf)
-boot_foot_half_width_m = 0.050   # [E] boot half width at the ball
+boot_ease_m = 0.010              # [E] boot shaft over the suit's lower leg
+boot_foot_half_width_m = 0.052   # [D] boot half width at the ball: ANSUR foot_breadth 0.102 / 2 + boot 0.001 (sole flare)
 boot_foot_half_height_m = 0.045  # [E] boot half height at the ankle (sole + upper)
 boot_heel_m = 0.065              # [E] heel behind the ankle joint
+boot_length_m = 0.290            # [D] heel to toe: ANSUR foot_length 0.271 + boot 0.019
 neck_radius_m = 0.080            # [E] neck ring (suit collar) radius under the helmet
+
+[joints]
+# Dynamic folds and corrective shapes per joint (figure_body.py; the game: figure_deform.gd). Bend angle theta = the angle between the
+# reference direction (shoulder / hip: the torso's down axis; elbow / knee: the parent bone) and the child bone. Rows: [neutral, full bend,
+# extension limit]: the wrinkle weight is 0 at `neutral` (straight joint, the build pose) and 1 at `full`; corrective shapes are baked for
+# the rest pose -> full bend (flex) and rest -> extension limit (ext).
+shoulder_deg = [0.0, 130.0, 0.0]  # [E] arm hanging = 0; raised to the top screen row ~120 deg (brief: 120 deg raise keeps volume)
+elbow_deg = [0.0, 140.0, 0.0]    # [E] straight arm = 0; full flexion of a suited elbow ~140
+hip_deg = [0.0, 110.0, 0.0]      # [E] standing = 0; seated recline 65; the deepest crouch the suit allows ~110
+knee_deg = [0.0, 135.0, 0.0]     # [E] straight leg = 0; seated 75; full knee flexion in the suit ~135
+fold_pitch_m = 0.028             # [E] spacing of the compression folds (crew1_1 knees, demo1_1 elbows: 2-4 cm)
+fold_depth_m = 0.006             # [E] fold height at full bend (soft fabric over a joint, a few mm)
+fold_reach_m = [0.075, 0.075, 0.09, 0.09]  # [E] half length of the fold zone along the limb at the shoulder, elbow, hip, knee
+
+[suit_look]
+# Surface detail of the suit as texture (suit_textures.py bakes suit_albedo.png and suit_wrinkle.png on the suit's UV atlas; nothing of a
+# photo is copied). eva_suit_newatlas: dark grey side panels from the shoulders down the torso sides and the outer thighs, a grey stripe
+# down the back of the upper arm and a grey forearm panel, thin seam lines, the chest plate's chevron edge under the collar (spacex.jpg),
+# thigh pockets, ribbed knee bellows, grey joint inserts, the flag patch on the upper left arm (spacex.jpg).
+atlas_m = [2.56, 1.60]           # [D] the atlas in metres of suit surface (torso 1.10 x 0.72, arms 0.40 x 0.78, legs 0.66 x 1.00, packed)
+texel_m = 0.00125                # [E] albedo texel: 1.25 mm (2048 x 1280; a 3 mm seam is two texels)
+wrinkle_texel_m = 0.0025         # [E] wrinkle map texel: 2.5 mm (folds are 2-4 cm apart)
+stripe_albedo = [0.16, 0.16, 0.17]  # [E] dark grey side panels (eva_suit_newatlas: near charcoal against the white)
+seam_albedo = [0.50, 0.50, 0.52]  # [E] seam lines: thin light grey piping
+insert_albedo = [0.40, 0.40, 0.41]  # [E] grey joint inserts (inner elbow, back of the knee) and the chevron band
+side_stripe_width_m = 0.075      # [E] torso side panel width (eva_suit_newatlas: ~0.07-0.08 at the waist)
+arm_stripe_width_m = 0.040       # [E] stripe down the back of the upper arm
+leg_stripe_width_m = 0.055       # [E] stripe down the outer thigh to above the knee
+seam_width_m = 0.003             # [E] seam piping width
+chevron_width_m = 0.018          # [E] the chest plate's grey chevron band under the collar (spacex.jpg)
+zip_width_m = 0.006              # [E] the front closure line from the chevron to the crotch
+pocket_m = [0.11, 0.13]          # [E] thigh pocket width and height (eva_suit_newatlas: square patches on the front of the thighs)
+flag_m = [0.080, 0.050]          # [E] flag patch on the upper left arm (spacex.jpg: ~0.08 wide)
+bellows_pitch_m = 0.020          # [E] rib pitch of the knee bellows (eva_suit_newatlas: 5-6 ribs over the knee)
+bellows_count = 6                # [E] ribs of the knee bellows
 
 [helmet]
 # Shape (Task 5b) after the clean side profile spacex-anzug.jpg (visor closed, no headrest) with jsc2024e066389 / 066390 (thin shell around the opening) and

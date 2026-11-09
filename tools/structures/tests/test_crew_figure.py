@@ -10,6 +10,7 @@ import struct
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -24,12 +25,12 @@ FIGURE = vehicle_spec.COCKPITS / "crew_figure.toml"
 GLTF = MODELS / "crew_figure.gltf"
 GENERATED = GLTF.is_file()
 BRIEF_BONES = (["hips", "spine", "chest", "neck", "head"] + [f"{n}_{s}" for s in "lr" for n in (
-    "shoulder", "upper_arm", "forearm", "hand", "index_1", "index_2", "index_3", "thumb_1", "thumb_2", "fingers", "thigh", "shin", "foot")])
+    "shoulder", "upper_arm", "forearm", "hand", "index_1", "index_2", "index_3", "thumb_1", "thumb_2", "fingers", "fingers_2", "fingers_3", "thigh", "shin", "foot")])
 ARM_TOL_M = 0.05  # [E] the Drillis and Contini fraction is a population mean; our bone chain is within this of it
 ENVELOPE_TOL_M = 0.01  # [S] brief: nothing below the pan or behind the back by more than 1 cm
 SEAT_PAN_SURFACE_M, SEAT_BACK_SURFACE_M = -0.01, -0.01  # seat boxes of gen_dragon_cabin.build_seat: pan top 0.01 under the hip point, back front face 0.01 behind it
 SEAT_PAN_LENGTH_M, SEAT_BACK_HEIGHT_M = 0.44, 0.80  # gen_dragon_cabin SEAT_THIGH_M, 2 * SEAT_BACK_HALF_M[1]
-EYE_TOL_M = 0.20  # [E] the config's eye is hip + 0.72 up + 0.10 forward (+-0.10 per axis); the figure's own eye point lies within this
+EYE_TOL_M = 0.01  # [S] Task 8b eye contract: the figure's eye on the seat s2 hip point IS the config eye
 
 
 @pytest.fixture(scope="module")
@@ -108,7 +109,7 @@ def _mesh():
 def test_figure_tables_are_tagged_and_load_into_the_spec(spec, cfg):
     assert vehicle_spec.value_lines_without_tag(FIGURE) == []
     assert set(cfg["material"]) == set(fl.MATERIALS)
-    assert cfg["figure"]["stature_m"] == pytest.approx(1.78)
+    assert cfg["figure"]["stature_m"] == pytest.approx(1.755)  # ANSUR II male median
 
 
 def test_validation_names_a_missing_key(cfg):
@@ -242,7 +243,7 @@ def test_mesh_fits_the_seat_envelope_on_the_hip_point(cfg, mesh):
 def test_stature_and_triangle_budget(cfg, mesh):
     _, _, prims = mesh
     tris = sum(len(p[2]) // 3 for p in prims)
-    assert 2000 < tris < 20000
+    assert 10000 < tris < 32000  # Task 8b budget: ~27.5k per figure (suit 14.2k, helmet and visor ~9k, gloves, boots), 4 figures ~110k
     top = max(p[0] for _, pos, _ in prims for p in pos)
     assert 0.85 < top < 1.1  # crown of the helmet above the seat's hip point
 
@@ -309,3 +310,208 @@ def test_visor_is_its_own_surface_and_the_helmet_is_neutral_white(cfg, mesh):
     names = [p[0] for p in prims]
     assert names.count("visor") == 1 and names.count("helmet") == 1
     assert max(cfg["material"]["helmet"]["albedo"]) - min(cfg["material"]["helmet"]["albedo"]) < 0.02  # no blue tint
+
+
+# ---------- Task 8b: anatomical body (ANSUR II), suit hull, joint folds ----------
+ANSUR_TOL_M = 0.01  # [S] brief: the body's measures within 1 cm of the ANSUR II medians
+VOLUME_TOL = 0.01  # [E] a bent joint keeps the limb's volume within 1 % of the rest pose (corrective shapes)
+ANSUR_CSV = build_models.ROOT / "data" / "anthropometry" / "ANSUR_II_MALE_Public.csv"
+ANSUR_COLUMNS = {"acromial_height": "acromialheight", "axilla_height": "axillaheight", "chest_height": "chestheight", "waist_height": "waistheightomphalion",
+                 "trochanter_height": "trochanterionheight", "crotch_height": "crotchheight", "knee_height": "lateralfemoralepicondyleheight",
+                 "ankle_height": "lateralmalleolusheight", "cervicale_height": "cervicaleheight", "biacromial_breadth": "biacromialbreadth",
+                 "bideltoid_breadth": "bideltoidbreadth", "chest_breadth": "chestbreadth", "chest_depth": "chestdepth", "chest_circumference": "chestcircumference",
+                 "waist_breadth": "waistbreadth", "waist_depth": "waistdepth", "waist_circumference": "waistcircumference", "hip_breadth": "hipbreadth",
+                 "buttock_depth": "buttockdepth", "buttock_circumference": "buttockcircumference", "thigh_circumference": "thighcircumference",
+                 "lower_thigh_circumference": "lowerthighcircumference", "calf_circumference": "calfcircumference", "ankle_circumference": "anklecircumference",
+                 "wrist_circumference": "wristcircumference", "neck_circumference_base": "neckcircumferencebase", "upper_arm_length": "acromionradialelength",
+                 "forearm_length": "radialestylionlength", "hand_length": "handlength", "hand_breadth": "handbreadth", "palm_length": "palmlength",
+                 "foot_length": "footlength", "thigh_clearance": "thighclearance"}
+
+
+@pytest.fixture(scope="module")
+def body(cfg):
+    import figure_body as fb
+    return fb.surface(cfg, ease=False)[0]
+
+
+@pytest.fixture(scope="module")
+def suit(cfg):
+    import figure_body as fb
+    return fb.suit_mesh(cfg)
+
+
+def test_anthropometry_rows_are_the_ansur_medians(cfg):
+    """[anthropometry] = the male medians of the ANSUR II public database (skips without data/anthropometry: fetch.py ansur2_male)."""
+    if not ANSUR_CSV.is_file():
+        pytest.skip("ANSUR II CSV not fetched (python tools/data_pipeline/fetch.py ansur2_male)")
+    import csv
+    import statistics
+    rows = list(csv.DictReader(ANSUR_CSV.open(encoding="latin-1")))
+    assert len(rows) == 4082
+    for key, column in ANSUR_COLUMNS.items():
+        median = statistics.median(float(r[column]) for r in rows) / 1000.0
+        assert cfg["anthropometry"][key] == pytest.approx(median, abs=5e-4), key
+    assert cfg["figure"]["stature_m"] == pytest.approx(statistics.median(float(r["stature"]) for r in rows) / 1000.0, abs=5e-4)
+
+
+def test_body_meets_the_ansur_measures_within_1_cm(cfg, body):
+    """Tape measures on the subdivided anatomical body (no suit): torso girths, breadths, depths at the ANSUR levels, limb girths,
+    segment lengths of the skeleton."""
+    import figure_measure as fm
+    a = cfg["anthropometry"]
+    p = body.positions()
+    t0 = a["trochanter_height"]
+    for level, girth, breadth, depth in (("buttock", "buttock_circumference", "hip_breadth", "buttock_depth"),
+                                         ("waist", "waist_circumference", "waist_breadth", "waist_depth"),
+                                         ("chest", "chest_circumference", "chest_breadth", "chest_depth")):
+        s = 0.0 if level == "buttock" else a[f"{level}_height"] - t0
+        g, b, d = fm.torso(body, p, cfg, s)
+        assert g == pytest.approx(a[girth], abs=ANSUR_TOL_M), (level, g)
+        assert b == pytest.approx(a[breadth], abs=ANSUR_TOL_M), (level, b)
+        assert d == pytest.approx(a[depth], abs=ANSUR_TOL_M), (level, d)
+    assert fm.torso(body, p, cfg, a["cervicale_height"] - t0)[0] == pytest.approx(a["neck_circumference_base"], abs=ANSUR_TOL_M)
+    ln = fl.chain_lengths(cfg)
+    for part, t, key in (("leg_l", 0.10, "thigh_circumference"), ("leg_r", ln["thigh"] - 0.03, "lower_thigh_circumference"),
+                         ("leg_l", 0.53, "calf_circumference"), ("leg_r", ln["thigh"] + ln["shin"] - 0.026, "ankle_circumference"),
+                         ("arm_l", ln["upper_arm"] + ln["forearm"], "wrist_circumference"), ("arm_r", ln["upper_arm"] + ln["forearm"], "wrist_circumference")):
+        assert fm.limb(cfg, body, p, part, t) == pytest.approx(a[key], abs=ANSUR_TOL_M), (part, key)
+    b = fl.bones(cfg)
+    seg = lambda n: fl.length(fl.sub(b[n]["tail"], b[n]["head"]))
+    for bone, key in (("upper_arm_l", "upper_arm_length"), ("forearm_r", "forearm_length")):
+        assert seg(bone) == pytest.approx(a[key], abs=1e-6)
+    assert seg("thigh_l") == pytest.approx(a["trochanter_height"] - a["knee_height"], abs=1e-6)
+    assert seg("shin_r") == pytest.approx(a["knee_height"] - a["ankle_height"], abs=1e-6)
+    assert 2.0 * abs(b["upper_arm_l"]["head"][2]) == pytest.approx(a["biacromial_breadth"], abs=ANSUR_TOL_M)
+    assert seg("chest") + (b["chest"]["head"][0] - b["hips"]["head"][0]) == pytest.approx(a["acromial_height"] - t0, abs=0.01)
+
+
+def test_bideltoid_breadth_with_the_arms_hanging(cfg, suit):
+    """ANSUR bideltoid breadth across the shoulder caps (arms hanging parallel to the torso), from the acromion down to the axilla level."""
+    import figure_body as fb
+    m = fb.suit_mesh(cfg, ease=False)
+    p = fb.posed(m, cfg, {"shoulder_l": 0.0, "shoulder_r": 0.0})
+    a = cfg["anthropometry"]
+    top = cfg["figure"]["hip_joint_up_m"] + fl.chain_lengths(cfg)["torso"]
+    band = (p[:, 0] > top - (a["acromial_height"] - a["axilla_height"])) & (p[:, 0] < top + 0.02)
+    assert 2.0 * abs(p[band, 2]).max() == pytest.approx(a["bideltoid_breadth"], abs=ANSUR_TOL_M)
+
+
+def test_eye_contract_the_commander_sees_from_the_config_eye(spec, cfg):
+    """The player's figure puts its eye at CockpitConfig.eye: the seat s2 hip point plus the figure's eye point = [eye] position_m."""
+    assert fl.eye_point(cfg) == pytest.approx((0.83, 0.23, 0.0))
+    s2 = next(s for s in spec["cockpit"]["seat"] if s["id"] == "s2")
+    eye = fl.to_capsule(fl.eye_point(cfg), s2["hip_m"], s2["back_angle_deg"])
+    assert math.dist(eye, spec["cockpit"]["eye"]["position_m"]) < 0.01
+
+
+def test_suit_is_its_own_hull_outside_the_body(cfg, body):
+    """The suit = the body sections plus the ease: loose at the thigh and upper arm, tight at the forearm and shank."""
+    import figure_body as fb
+    import figure_measure as fm
+    s_hull = fb.surface(cfg, ease=True)[0]
+    ps, pb = s_hull.positions(), body.positions()
+    e = cfg["suit"]
+    assert e["ease_thigh_m"] > e["ease_shank_m"] and e["ease_upper_arm_m"] > e["ease_forearm_m"]
+    for part, t, ease in (("leg_l", 0.22, e["ease_thigh_m"]), ("leg_l", 0.53, e["ease_shank_m"]), ("arm_l", 0.20, e["ease_upper_arm_m"]),
+                          ("arm_l", 0.50, e["ease_forearm_m"])):
+        extra = fm.limb(cfg, s_hull, ps, part, t) - fm.limb(cfg, body, pb, part, t)
+        assert extra == pytest.approx(2.0 * math.pi * ease, rel=0.35), (part, t, extra)
+    g_suit = fm.torso(s_hull, ps, cfg, 0.156)[0]
+    assert g_suit > fm.torso(body, pb, cfg, 0.156)[0] + 2.0 * math.pi * e["ease_torso_m"] * 0.6
+
+
+def test_topology_ports_and_closed_hull(suit):
+    """Base-mesh layout: the arm loop cut out of the torso side (axilla to shoulder top), the legs on one crotch split; the hull is closed."""
+    h = suit["hull"]
+    edges = collections.Counter()
+    for f in h.faces:
+        for k in range(len(f)):
+            a, b = f[k], f[(k + 1) % len(f)]
+            edges[(min(a, b), max(a, b))] += 1
+    assert set(edges.values()) == {2}
+    assert set(h.ports) == {"arm_l", "arm_r", "leg_l", "leg_r"}
+    assert len(h.ports["arm_l"]) == len(h.ports["arm_r"]) and len(h.ports["leg_l"]) == len(h.ports["leg_r"])
+
+
+def test_weights_are_smooth_normalised_and_at_most_four(suit):
+    w = suit["w"]
+    assert np.allclose(w.sum(axis=1), 1.0, atol=1e-6)
+    assert ((w > 1e-4).sum(axis=1) <= 4).all()
+    names = suit["names"]
+    blended = ((w[:, names.index("forearm_l")] > 0.05) & (w[:, names.index("upper_arm_l")] > 0.05)).sum()
+    assert blended >= 30  # the elbow blends two bones over its loops (no rigid crease)
+
+
+@pytest.mark.parametrize("part,joint,theta", [("arm_l", "elbow_l", 90.0), ("arm_r", "elbow_r", 0.0), ("arm_l", "elbow_l", 140.0),
+                                              ("leg_l", "knee_l", 90.0), ("leg_r", "knee_r", 135.0), ("arm_r", "shoulder_r", 120.0)])
+def test_joint_volume_is_kept_by_the_corrective_shapes(cfg, suit, part, joint, theta):
+    """A 90 deg elbow / knee and a 120 deg shoulder raise keep the limb's volume (LBS of rest + the corrective shapes, as the game skins it)."""
+    import figure_body as fb
+    h, ref = suit["hull"], suit["refs"][part]
+    v_rest = fb.part_volume(h, suit["rest"], part, ref)
+    v = fb.part_volume(h, fb.posed(suit, cfg, {joint: theta}), part, ref)
+    assert abs(v / v_rest - 1.0) < VOLUME_TOL, (joint, theta, v / v_rest)
+
+
+def test_plain_linear_skinning_would_lose_the_shoulder(cfg, suit):
+    """Why the shapes exist: plain LBS changes the arm's volume by more than 2 % at the 120 deg raise (the corrected pose keeps it within 1 %)."""
+    import figure_body as fb
+    h, ref = suit["hull"], suit["refs"]["arm_l"]
+    v_rest = fb.part_volume(h, suit["rest"], "arm_l", ref)
+    assert abs(fb.part_volume(h, fb.posed(suit, cfg, {"shoulder_l": 120.0}, corrected=False), "arm_l", ref) / v_rest - 1.0) > 0.02
+
+
+def test_wrinkle_weight_is_0_straight_and_1_at_full_bend(cfg):
+    for name, joint in fl.joint_table(cfg).items():
+        assert fl.bend_weights(joint, joint["neutral_deg"])[2] == 0.0, name
+        assert fl.bend_weights(joint, joint["full_deg"])[2] == 1.0, name
+        flex, ext, wr = fl.bend_weights(joint, joint["rest_deg"])
+        assert flex == 0.0 and ext == 0.0 and 0.0 <= wr < 1.0, name
+        assert fl.bend_weights(joint, joint["full_deg"])[0] == 1.0
+    assert sorted(j["slot"] for j in fl.joint_table(cfg).values()) == list(range(8))
+
+
+def test_no_nan_in_the_mesh_shapes_and_poses(cfg, suit):
+    import figure_body as fb
+    assert np.isfinite(suit["rest"]).all()
+    assert all(np.isfinite(d).all() for d in suit["shapes"].values()) and len(suit["shapes"]) == 16
+    p = fb.posed(suit, cfg, {"elbow_l": 140.0, "knee_r": 135.0, "shoulder_r": 130.0, "hip_l": 110.0, "elbow_r": 0.0})
+    assert np.isfinite(p).all()
+
+
+def test_seated_rest_pose_has_the_hands_on_the_thighs(cfg):
+    """KSC-20190731 / crew1_1: the hands rest palm down on the thighs, the elbows beside the torso."""
+    b = fl.bones(cfg)
+    td, n = fl.thigh_frame(cfg)
+    for side in "lr":
+        palm = fl.add(b[f"hand_{side}"]["head"], fl.mul(fl.sub(b[f"hand_{side}"]["tail"], b[f"hand_{side}"]["head"]), 0.5))
+        hip = b[f"thigh_{side}"]["head"]
+        rel = fl.sub(palm, hip)
+        along, up = fl.dot(rel, td), fl.dot(rel, n)
+        assert 0.15 < along < fl.chain_lengths(cfg)["thigh"], (side, along)
+        assert 0.08 < up < 0.16, (side, up)  # on the thigh's top surface (half depth ~0.1 with the suit) plus the glove
+        assert abs(b[f"forearm_{side}"]["head"][2]) > abs(b[f"upper_arm_{side}"]["head"][2])  # the elbow beside the torso
+
+
+def test_suit_maps_are_baked_on_the_atlas(cfg):
+    import suit_textures
+    import figure_layout
+    alb = suit_textures.albedo(cfg)
+    wr = suit_textures.wrinkle(cfg)
+    look = cfg["suit_look"]
+    assert alb.shape[:2] == (round(look["atlas_m"][1] / look["texel_m"]), round(look["atlas_m"][0] / look["texel_m"]))
+    assert np.isfinite(alb).all() and alb.min() >= 0.0 and alb.max() <= 1.0
+    assert np.isclose(alb, cfg["material"]["suit"]["albedo"]).all(axis=2).mean() > 0.6  # mostly white suit
+    assert (np.abs(alb - np.array(look["stripe_albedo"])).max(axis=2) < 1e-3).mean() > 0.01  # the grey panels exist
+    assert np.isfinite(wr).all() and np.abs(wr[..., :2]).max() < figure_layout.WRINKLE_SLOPE_RANGE / 2.0  # slopes fit the encoding
+    assert wr[..., 2].max() > 0.5 and (wr[..., 2] > 0.0).mean() < 0.4  # folds only in the joint zones
+    assert (suit_textures.encode_wrinkle(wr) == suit_textures.encode_wrinkle(suit_textures.wrinkle(cfg))).all()  # deterministic
+
+
+def test_gltf_suit_has_shapes_mask_uv_and_smooth_skin(mesh):
+    doc, node, _ = mesh
+    m = doc["meshes"][node["mesh"]]
+    names = m.get("extras", {}).get("targetNames", [])
+    assert sorted(names) == sorted(f"{j}_{k}" for j in fl.joint_names() for k in ("flex", "ext"))
+    suit_prim = next(p for p in m["primitives"] if doc["materials"][p["material"]]["name"] == "suit")
+    assert "TEXCOORD_1" in suit_prim["attributes"] and len(suit_prim["targets"]) == 16

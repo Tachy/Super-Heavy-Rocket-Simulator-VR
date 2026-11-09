@@ -183,7 +183,7 @@ func _check_crew(cockpit: CockpitView) -> void:
 	_check(cockpit.visible_figures() == 4, "set_crew(4): four figures")
 	cockpit.set_crew(0)
 	_check(cockpit.visible_figures() == 0, "set_crew(0): none")
-	_check(cockpit.figure_skeleton("s2") != null and cockpit.figure_skeleton("s2").get_bone_count() == 31, "commander figure keeps its 31-bone skeleton")
+	_check(cockpit.figure_skeleton("s2") != null and cockpit.figure_skeleton("s2").get_bone_count() == 35, "commander figure keeps its 35-bone skeleton (Task 8b: three-joint middle / ring / little fingers)")
 	cockpit.set_hotas_props(false)
 	_check(not cockpit.cabin_node("hotas_stick").visible, "HOTAS props switch off")
 	cockpit.set_hotas_props(true)

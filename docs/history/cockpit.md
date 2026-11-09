@@ -45,3 +45,28 @@ rim 20 mm, grey pivot housings 24 x 70 x 50 mm.
 - Fix round 5 open point "boots, seal and pivot read ~0.5 sRGB" (AgX pivot at field key 1.2): under the unified appearance model (look fixes, field key 0.2) the
   boots read 0.15 sRGB in hatch_crew1_1 (Task 5b re-check), so the point is closed.
 
+## Crew figure of Task 4 (superseded by Task 8b, 2026-11-09)
+Proportions were Drillis and Contini 1966 fractions of a 1.78 m adult; the suit was lofted capsules per segment with rigid weights (one bone per
+segment): creases at the elbow and knee, the arm root a capsule end against the torso (user 2026-11-09: "very inhuman"). Rest pose: forearms along the
+armrests, palms down (it read as a shrug in the hatch shots); hands were boxes of capsules with one merged slab for the middle / ring / little fingers
+(31 bones). The figure's eye was within 0.20 m of the config eye (round 4 made it exact). 13.2k triangles. Section text before Task 8b:
+### Crew figure (Task 4)
+- `config/cockpits/crew_figure.toml` (every value tagged; proportions = Drillis and Contini 1966 fractions of a 1.78 m adult [E]; suit look from
+  `sheet_suit` / `eva_suit_detail1-4`), `tools/structures/blender/gen_crew_figure.py` (+ pure `figure_layout.py`: bones, seat basis, manifest block) writes
+  `crew_figure.gltf` into the Crew Dragon set (13.2k triangles since Task 5b: faceted helmet 48 x 30, hood, thin beads). `vehicle_spec.load_dragon` loads it into `spec["crew_figure"]`; `VehicleModels` returns
+  the meshes under `"crew_figure"` and counts the TOML for staleness; manifest block `crew_figure` (`bones` head / tail / parent, `eye_m`, `materials`, `frame`).
+- Frame convention: glTF origin = the seat's hip reference point (`[[seat]] hip_m` = seat-back plane meets the pan surface); **x = up the seat back, y = the
+  seat's chest normal, z = the crew's left**. The game places it at a seat with the basis columns `((cos a, -sin a, 0), (sin a, cos a, 0), (0, 0, 1))` in
+  the capsule frame (a = `back_angle_deg`; `figure_layout.to_capsule` / `seat_basis`). The hip joint sits 0.10 above and 0.12 ahead of the origin.
+- One skinned mesh node `crew_figure` under the armature `crew_figure_rig`, rigid weights (one bone per segment), surfaces suit / boots / gloves / helmet /
+  `visor` (closed copper solid, own surface and material). Bones: `hips, spine, chest, neck, head, shoulder / upper_arm / forearm / hand / index_1..3 /
+  thumb_1..2 / fingers (merged middle, ring, little) / thigh / shin / foot`, `_l` at +Z. Rest pose = seated (round 3: thighs 25 deg below the pan plane = 10 deg above the hatch axis, interior knee 105 deg = shins 65 deg below the hatch axis (crew1_1 recliner posture; was 15 deg / 110 deg),
+  forearms along the armrests, hands palm down).
+- Tests (`test_crew_figure.py`): bone set, arm reach shoulder to index tip 0.778 m against 0.44 x stature = 0.783 (+-0.05), mesh inside the s2 seat envelope
+  (nothing more than 1 cm below the pan or behind the back), visor a closed own surface, glTF skeleton = layout, figure eye within 0.20 m of the config eye.
+- Simplifications: rigid skinning (creases at elbow and knee until blend weights are added), suit as lofts (stripes, collar, patches, flag by texture
+  later), hands are boxes of capsules, no head or face inside the helmet. The figure's own eye point (`eye_m`) is 0.06 above and ahead of the helmet centre
+  and about 0.12 m from the config eye (the config eye derives from the hip point, the figure's hip joint is 0.12 ahead of it); the player's eye stays the config.
+- Look shots: `tools/structures/blender/preview_crew_figure.py` (Workbench; builds the cabin, places the figure at s2): `screenshots/m7-cockpit/figure/`.
+
+

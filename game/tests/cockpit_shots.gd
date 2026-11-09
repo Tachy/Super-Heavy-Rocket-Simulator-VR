@@ -17,6 +17,9 @@
 #   --hand: instead of the cabin shots, the console pointer sequences (Task 8): hand_eye_NN (frames of the hand following the pointer to the
 #   left screen, the camera button, the centre screen, a key and the right screen, with taps; from the pilot's eye) and hand_hatch_<place> (the same
 #   places from the hatch camera, the whole arm); the pointer is driven by this script (World.console_pointer.driven_externally)
+#   --body: instead of the cabin shots, the crew body and suit (Task 8b): body_side (the pilot s3 in profile from its right, like
+#   KSC-20190731-PH_SPX01_0002), body_34 (the pilot three-quarter from the front), body_arm_raised (the commander s2 reaching the centre
+#   screen), body_elbow_bent / body_elbow_straight (the commander's right elbow at the HOTAS grip and reaching); + *_vs_<photo> sheets
 #   --tone=agx (Godot's AgX alone, no display tone step), --hunt=day (the Hunt factor against L_day, as before look fixes T5)
 extends SceneTree
 
@@ -137,7 +140,9 @@ func _shoot() -> bool:
 		_define_shots()
 	if _index >= _shots.size():
 		_set_exterior_visible(true)
-		if not _args.has("only") and not _args.has("screen") and not _args.has("hand"):
+		if _args.has("body"):
+			_compose_body()
+		elif not _args.has("only") and not _args.has("screen") and not _args.has("hand"):
 			_compose()
 		quit(0)
 		return true
@@ -149,8 +154,9 @@ func _shoot() -> bool:
 		_world.screen_camera.select(String(shot["screen_id"]))
 	_cockpit.set_player_head_hidden(shot.get("local").origin.is_equal_approx(_cockpit.config.eye.origin) or bool(shot.get("hide_head", false)))
 	var isolate := bool(shot.get("isolate", false))  # close-up of one figure: the other figures and the leg rests are hidden
+	var keep_figure := "figure_" + String(shot.get("isolate_seat", "s3"))
 	for figure in _cockpit.find_children("figure_*", "Node3D", false, false):
-		(figure as Node3D).visible = not isolate or figure.name == "figure_s3"
+		(figure as Node3D).visible = not isolate or figure.name == keep_figure
 	for part: String in ["seat_rest_", "seat_shell_s1", "seat_shell_s2", "seat_shell_s4", "seat_pad_s1", "seat_pad_s2", "seat_pad_s4", "console_", "screen_", "tablet_", "button_", "handle"]:
 		for node in _cockpit.find_children(part + "*" if part.ends_with("_") else part, "MeshInstance3D", false, false):
 			(node as Node3D).visible = not isolate
@@ -165,6 +171,11 @@ func _shoot() -> bool:
 	_world.camera.keep_aspect = Camera3D.KEEP_HEIGHT if shot.get("keep_height", false) else Camera3D.KEEP_WIDTH
 	_world.camera.fov = fov_deg
 	_set_exterior_visible(not (shot.get("hide_exterior", _args.has("hide_exterior"))))
+	if shot.has("aim_bone") and _wait >= 1:  # Task 8b: aim at a bone of the posed commander (after the pointer ops have posed it)
+		var skeleton := _cockpit.figure_skeleton("s2")
+		var bone_at: Vector3 = _cockpit._skeleton_to_cabin() * skeleton.get_bone_global_pose(skeleton.find_bone(String(shot["aim_bone"]))).origin
+		var cam_at: Vector3 = bone_at + (shot["aim_offset"] as Vector3)
+		shot["local"] = Transform3D(Basis.looking_at(bone_at - cam_at, Vector3(1.0, 0.0, 0.0)), cam_at)
 	# the pose in the capsule frame -> render axes of this frame; converge: the view is placed relative to the camera
 	var stage := _cockpit.get_parent() as Node3D
 	var local: Transform3D = shot["local"]
@@ -245,6 +256,9 @@ func _define_shots() -> void:
 	if _args.has("hand"):
 		_define_hand_shots(eye, pilot, hatch_basis)
 		return
+	if _args.has("body"):
+		_define_body_shots(s3)
+		return
 	var rest: Array = [
 		{"name": "helmet_closeup", "local": Transform3D(Basis.looking_at(helmet_c - helmet_cam, up_back), helmet_cam), "fov": 48.0, "hide_exterior": false, "isolate": true},
 		{"name": "pilot_eye", "local": pilot, "fov": PILOT_FOV, "field_key": PILOT_FIELD_KEY},
@@ -305,6 +319,62 @@ func _define_hand_shots(eye: Transform3D, pilot: Transform3D, hatch_basis: Basis
 			n += 1
 		_shots.append({"name": "hand_hatch_%s" % place[0], "local": hatch, "fov": HATCH_VFOV, "keep_height": true, "crop_aspect": 1.5, "hide_exterior": false,
 				"hide_head": false, "pointer_ops": [["wait", 20]], "settle": 8})
+
+
+## Task 8b: the crew body and suit. The pilot (s3) in profile and three-quarter; the commander (s2) reaching the centre screen and its right
+## elbow bent (idle at the HOTAS grip) and straight (reaching), each figure isolated.
+func _define_body_shots(s3: Dictionary) -> void:
+	_pointer = ConsolePointer.new()
+	_world.add_child(_pointer)
+	_pointer.setup(_cockpit.config, _cockpit, _world.screen_camera)
+	_pointer.active = false
+	_pointer.vr_mode = true
+	_world.console_pointer.driven_externally = true
+	var s2: Dictionary = {}
+	for seat: Dictionary in _cockpit.config.seats:
+		if seat["id"] == "s2":
+			s2 = seat
+	_shots.clear()
+	for entry: Array in [[s3, "body_side", -90.0, 1.25, 62.0, "s3"], [s3, "body_34", 35.0, 1.45, 60.0, "s3"]]:
+		var seat: Dictionary = entry[0]
+		var back := deg_to_rad(float(seat["back_angle_deg"]))
+		var up_back := Vector3(cos(back), -sin(back), 0.0)
+		var chest := Vector3(sin(back), cos(back), 0.0)
+		var mid: Vector3 = seat["hip"] + up_back * 0.30 + chest * 0.28
+		var az := deg_to_rad(float(entry[2]))
+		var cam := mid + (chest * cos(az) + Vector3(0.0, 0.0, 1.0) * sin(az)) * float(entry[3]) + up_back * 0.15
+		var up := Vector3(1.0, 0.0, 0.0)
+		_shots.append({"name": entry[1], "local": Transform3D(Basis.looking_at(mid - cam, up), cam), "fov": float(entry[4]), "keep_height": true, "crop_aspect": 1.2, "hide_exterior": true,
+				"isolate": true, "isolate_seat": entry[5], "hide_head": false, "pointer_ops": [["goto", "idle", 0], ["wait", 30]], "settle": 12})
+	# the commander: camera to its right (-Z) and ahead, looking at the right arm
+	var back2 := deg_to_rad(float(s2["back_angle_deg"]))
+	var up2 := Vector3(cos(back2), -sin(back2), 0.0)
+	var chest2 := Vector3(sin(back2), cos(back2), 0.0)
+	var arm_mid: Vector3 = s2["hip"] + up2 * 0.45 + chest2 * 0.30 + Vector3(0.0, 0.0, -0.22)
+	var arm_cam := arm_mid + chest2 * 1.05 + Vector3(0.0, 0.0, -0.75) + up2 * 0.25
+	var arm_view := Transform3D(Basis.looking_at(arm_mid - arm_cam, Vector3(1.0, 0.0, 0.0)), arm_cam)
+	var elbow_mid: Vector3 = s2["hip"] + up2 * 0.36 + chest2 * 0.22 + Vector3(0.0, 0.0, -0.27)
+	var elbow_cam := elbow_mid + chest2 * 0.35 + Vector3(0.0, 0.0, -0.45) + up2 * 0.10
+	var elbow_view := Transform3D(Basis.looking_at(elbow_mid - elbow_cam, Vector3(1.0, 0.0, 0.0)), elbow_cam)
+	var common := {"hide_exterior": true, "isolate": true, "isolate_seat": "s2", "hide_head": false, "settle": 12, "keep_height": true, "crop_aspect": 1.2}
+	var side_offset := chest2 * 0.55 + Vector3(0.0, 0.0, -0.55) + up2 * 0.15  # ahead of and to the right of the commander
+	_shots.append(common.merged({"name": "body_elbow_bent", "local": elbow_view, "fov": 40.0, "aim_bone": "forearm_r", "aim_offset": side_offset * 1.3,
+			"pointer_ops": [["goto", "idle", 0], ["wait", 40]]}))
+	_shots.append(common.merged({"name": "body_arm_bent", "local": arm_view, "fov": 50.0, "aim_bone": "upper_arm_r", "aim_offset": side_offset * 1.8,
+			"pointer_ops": [["wait", 2]]}))
+	_shots.append(common.merged({"name": "body_arm_raised", "local": arm_view, "fov": 50.0, "aim_bone": "upper_arm_r", "aim_offset": side_offset * 1.8,
+			"pointer_ops": [["goto", "centre", 0], ["wait", 40]]}))
+	_shots.append(common.merged({"name": "body_elbow_straight", "local": elbow_view, "fov": 40.0, "aim_bone": "forearm_r", "aim_offset": side_offset * 1.3,
+			"pointer_ops": [["wait", 10]]}))
+
+
+func _compose_body() -> void:
+	_side_by_side("body_side", "../nasa/KSC-20190731-PH_SPX01_0002", "body_side_vs_ksc0002", false)
+	_side_by_side("body_34", "../eva_suit_newatlas", "body_34_vs_newatlas", false)
+	_side_by_side("body_34", "crew1_1", "body_34_vs_crew1_1", false)
+	_side_by_side("body_arm_raised", "../nasa/jsc2024e066391", "body_arm_raised_vs_jsc066391", false)
+	_side_by_side("body_elbow_bent", "demo1_1", "body_elbow_bent_vs_demo1_1", false)
+	_side_by_side("body_elbow_straight", "demo1_1", "body_elbow_straight_vs_demo1_1", false)
 
 
 func _run_pointer_ops(ops: Array) -> void:

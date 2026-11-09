@@ -176,6 +176,23 @@ kind = "licence_only"
 license = "CC0 1.0 (public domain dedication; no attribution required)"
 credit = "Aileron by Sorkin Type, bundled with Pillow (ImageFont.load_default)"
 
+[[source]]
+id = "ansur2_male"
+name = "ANSUR II (2012 U.S. Army Anthropometric Survey), male public working database: medians of the crew figure's body measures (config/cockpits/crew_figure.toml [anthropometry]); the CSV stays in data/, only derived numbers are committed"
+url = "https://tools.openlab.psu.edu/publicData/ANSUR_II_MALE_Public.csv"
+target = "data/anthropometry/ANSUR_II_MALE_Public.csv"
+license = "Public domain: work of the U.S. Government (17 U.S.C. 105); the DoD memorandum on the 2012 working databases clears them for unlimited public release (Gordon et al. 2014, NATICK/TR-15/007: approved for public release, distribution unlimited)"
+credit = "C. C. Gordon et al., 2012 Anthropometric Survey of U.S. Army Personnel (ANSUR II), U.S. Army Natick Soldier Research, Development and Engineering Center; public files hosted by the Penn State Open Design Lab"
+
+[[source]]
+id = "blender_human_base_meshes"
+name = "Blender Studio Human Base Meshes v1.4.1 asset bundle: topology reference only (edge-loop layout at shoulder / axilla, elbow, hip and knee) for our procedural crew body (figure_body.py); no file downloaded, no vertex data used"
+url = "https://www.blender.org/download/demo/asset-bundles/human-base-meshes/human-base-meshes-bundle-v1.4.1.zip"
+target = "tools/structures/blender/figure_body.py"
+kind = "licence_only"
+license = "CC0 1.0 (public domain dedication; https://www.blender.org/download/demo-files/)"
+credit = "Human Base Meshes, Blender Studio and community contributions"
+
 # ------------------------------------------------------------------ own telemetry tables (committed)
 # Numbers shown in SpaceX's public webcasts (speed, altitude, propellant gauge, engine icons, mission clock), read by
 # our own OCR tool (tools/telemetry/webcast_telemetry.py). Only the transcribed values are kept; the videos are
