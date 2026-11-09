@@ -95,7 +95,7 @@ var _lean := Quaternion.IDENTITY  # the torso's lean towards the pointer (skelet
 var _deforms := {}  # seat id -> FigureDeform (joint folds: corrective shapes, wrinkle weights)
 var _suit_textures := {}  # manifest crew_figure.suit_maps file -> ImageTexture
 var _joint_table := {}  # manifest crew_figure.joints
-var _hotas_axes := Vector3.ZERO  # last set_hotas_axes: pitch, roll, yaw (-1..1)
+var _hotas_axes := Vector3.ZERO  # last set_hotas_axes: pitch, sideways, twist (-1..1)
 var _hotas_throttle := 0.0
 var _hotas_nudge := {"stick": Vector3.ZERO, "throttle": Vector3.ZERO}  # dev aid: prop offsets in the capsule frame (m)
 var _nudge_enabled := false
@@ -312,10 +312,11 @@ func set_hotas_props(enabled: bool) -> void:
 			node.visible = enabled
 
 
-## Stick and throttle follow the commander's real inputs (view only): `pitch` > 0 pushes the stick forward, `roll` > 0 to the crew's right,
-## `yaw` > 0 twists it clockwise (seen from above), `throttle` 0..1 moves the lever from idle (back) to full (forward).
-func set_hotas_axes(pitch: float, roll: float, yaw: float, throttle: float) -> void:
-	_hotas_axes = Vector3(clampf(pitch, -1.0, 1.0), clampf(roll, -1.0, 1.0), clampf(yaw, -1.0, 1.0))
+## Stick and throttle follow the commander's real inputs (view only): `pitch` > 0 pushes the stick forward, `sideways` > 0 to the crew's right,
+## `twist` > 0 twists it clockwise (seen from above). These are the PHYSICAL stick axes: with the T.16000M mapping (config/input_hotas.toml [stick])
+## sideways is the game's yaw input and the twist its roll input (World passes them so). `throttle` 0..1 moves the lever from idle (back) to full (forward).
+func set_hotas_axes(pitch: float, sideways: float, twist: float, throttle: float) -> void:
+	_hotas_axes = Vector3(clampf(pitch, -1.0, 1.0), clampf(sideways, -1.0, 1.0), clampf(twist, -1.0, 1.0))
 	_hotas_throttle = clampf(throttle, 0.0, 1.0)
 	_update_hotas_transforms()
 
@@ -349,6 +350,16 @@ static func _about(rotation: Basis, pivot: Vector3, offset: Vector3) -> Transfor
 
 
 ## The tilt (deg) of a prop from its rest pose: the angle its up-the-back axis has turned through.
+## The prop's rotation in the seat frame (tests: direction of tilt and twist).
+func hotas_prop_basis(part: String) -> Basis:
+	var node: MeshInstance3D = _nodes.get(part)
+	return node.transform.basis.orthonormalized() if node != null else Basis.IDENTITY
+
+
+func seat_axes() -> Dictionary:
+	return _seat_axes()
+
+
 func hotas_tilt_deg(part: String) -> float:
 	var node: MeshInstance3D = _nodes.get(part)
 	if node == null:

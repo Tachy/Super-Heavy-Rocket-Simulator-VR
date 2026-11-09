@@ -155,7 +155,7 @@ func _check_eye(cockpit: CockpitView) -> void:
 	# handle housing's red marking
 	var labelled := (cockpit.button_node("cam3") as MeshInstance3D).material_override as ShaderMaterial
 	var blank := (cockpit.button_node("r_led_1") as MeshInstance3D).material_override as ShaderMaterial
-	_check(float(labelled.get_shader_parameter("label_on")) > 0.0 and labelled.get_shader_parameter("label_atlas") != null and float(blank.get_shader_parameter("label_on")) == 0.0,
+	_check(float(labelled.get_shader_parameter("label_on")) > 0.0 and labelled.get_shader_parameter("label_atlas") != null and blank.get_shader_parameter("label_on") in [null, 0.0],
 			"keys: DEORBIT NOW (cam3) has its label, r_led_1 a blank face")
 	var shelf := (cockpit.cabin_node("console_shelf").material_override as ShaderMaterial)
 	var handle := ((cockpit.button_node("handle") as MeshInstance3D).material_override as ShaderMaterial)
@@ -212,6 +212,27 @@ func _check_hotas_axes(cockpit: CockpitView) -> void:
 	_check(absf(cockpit.hotas_tilt_deg("hotas_stick") - CockpitView.STICK_MAX_DEG) < 0.01, "stick roll -1.0 tilts the other way")
 	var left := cockpit.idle_tip("r")
 	_check(forward.distance_to(rest_tip) > 0.01 and left.distance_to(rest_tip) > 0.01 and forward.distance_to(rest_tip) < 0.1, "the hand follows the deflected stick (%.3f m, %.3f m)" % [forward.distance_to(rest_tip), left.distance_to(rest_tip)])
+	# signed: pitch > 0 tips the stick top forward (+n), sideways > 0 to the crew's right (-z), twist > 0 about b by a negative angle
+	var ax := cockpit.seat_axes()
+	var n: Vector3 = ax["n"]
+	var b: Vector3 = ax["b"]
+	var z: Vector3 = ax["z"]
+	cockpit.set_hotas_axes(1.0, 0.0, 0.0, 0.5)
+	var tip: Vector3 = cockpit.hotas_prop_basis("hotas_stick") * b
+	_check(tip.dot(n) > 0.2 and absf(tip.dot(z)) < 1e-4, "stick pitch +1 tips forward")
+	cockpit.set_hotas_axes(-1.0, 0.0, 0.0, 0.5)
+	_check((cockpit.hotas_prop_basis("hotas_stick") * b).dot(n) < -0.2, "stick pitch -1 tips back")
+	cockpit.set_hotas_axes(0.0, 1.0, 0.0, 0.5)
+	tip = cockpit.hotas_prop_basis("hotas_stick") * b
+	_check(tip.dot(z) < -0.2 and absf(tip.dot(n)) < 1e-4, "stick sideways +1 tips to the crew's right")
+	cockpit.set_hotas_axes(0.0, -1.0, 0.0, 0.5)
+	_check((cockpit.hotas_prop_basis("hotas_stick") * b).dot(z) > 0.2, "stick sideways -1 tips to the crew's left")
+	cockpit.set_hotas_axes(0.0, 0.0, 1.0, 0.5)
+	var twisted: Basis = cockpit.hotas_prop_basis("hotas_stick")
+	_check(cockpit.hotas_tilt_deg("hotas_stick") < 0.01 and absf(rad_to_deg((twisted * z).angle_to(z)) - CockpitView.STICK_TWIST_MAX_DEG) < 0.01, "stick twist +1 turns it about its axis by %.0f deg" % CockpitView.STICK_TWIST_MAX_DEG)
+	var twist_sign := z.cross(twisted * z).dot(b)
+	cockpit.set_hotas_axes(0.0, 0.0, -1.0, 0.5)
+	_check(twist_sign * z.cross(cockpit.hotas_prop_basis("hotas_stick") * z).dot(b) < 0.0, "stick twist -1 turns the other way")
 	cockpit.set_hotas_axes(0.0, 0.0, 0.0, 1.0)
 	_check(absf(cockpit.hotas_tilt_deg("hotas_throttle") - CockpitView.THROTTLE_TRAVEL_DEG * 0.5) < 0.01, "throttle 1.0 moves the lever forward by half the travel")
 	cockpit.set_hotas_axes(0.0, 0.0, 0.0, 0.0)

@@ -33,6 +33,7 @@ var throttle := 1.0
 var input_pitch := 0.0  ## the last manual stick input (view only: the cabin's stick prop follows it)
 var input_yaw := 0.0
 var input_roll := 0.0
+var lever_physical := -1.0  ## the TWCS lever position 0..1 whatever the control mode (-1: no lever connected); the cabin's lever prop shows it
 var active_mission_id := ""  ## the mission of the current flight ("" for a free launch; the cabin's crew count follows it)
 var rate_mode := true
 var views: Array[VehicleView] = []
@@ -380,6 +381,8 @@ func _update_instruments() -> void:
 
 
 func _read_input(delta: float) -> void:
+	var lever_device := _find_device(_throttle.get("device_name", ""))
+	lever_physical = (_axis(lever_device, _throttle, "throttle", false) + 1.0) * 0.5 if lever_device >= 0 else -1.0
 	if not manual_control:  # external view: no stick, keys or lever; the autopilot flies
 		input_pitch = 0.0
 		input_yaw = 0.0

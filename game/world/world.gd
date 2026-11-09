@@ -701,7 +701,9 @@ func _update_cabin_occupancy(cabin: CockpitView) -> void:
 			_crew_wanted = MissionCatalogue.crew_count(_crew_mission)
 		if cabin.crew_count() != _crew_wanted:
 			cabin.set_crew(_crew_wanted)
-	cabin.set_hotas_axes(flight.input_pitch, flight.input_roll, flight.input_yaw, flight.throttle)
+	# the prop follows the PHYSICAL axes: stick sideways = yaw input, twist = roll input (config/input_hotas.toml [stick]); the lever shows the
+	# TWCS position when one is connected (else the pilot's keyboard throttle)
+	cabin.set_hotas_axes(flight.input_pitch, flight.input_yaw, flight.input_roll, flight.lever_physical if flight.lever_physical >= 0.0 else flight.throttle)
 
 
 ## The left screen's external camera (ScreenCamera): follows the simulation state, renders while the cabin is the active view.
