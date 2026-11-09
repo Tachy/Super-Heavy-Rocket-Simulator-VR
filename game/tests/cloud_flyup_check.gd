@@ -72,6 +72,7 @@ var _save_dir := ""
 var _sites: PackedStringArray = ["gulf", "cumulus", "deck"]
 var _views: PackedStringArray = ["0", "30", "45", "60", "low"]
 var _ratio := FLYUP_STEP_RATIO
+var _heights_km: Array[float] = []
 var _worst_region := 0.0
 var _worst_global := 0.0
 
@@ -86,6 +87,9 @@ func _initialize() -> void:
 			_views = arg.trim_prefix("--views=").split(",", false)
 		elif arg.begins_with("--ratio="):
 			_ratio = maxf(float(arg.trim_prefix("--ratio=")), 1.01)
+		elif arg.begins_with("--heights_km="):  # explicit camera heights (km) instead of the climb's ratio steps
+			for s in arg.trim_prefix("--heights_km=").split(",", false):
+				_heights_km.append(float(s))
 	_run.call_deferred()
 
 
@@ -114,6 +118,10 @@ func _run() -> void:
 	while h < FLYUP_HEIGHTS_M.y * 1.0001:
 		heights.append(h)
 		h = minf(h * _ratio, FLYUP_HEIGHTS_M.y) if h < FLYUP_HEIGHTS_M.y else h * 2.0
+	if not _heights_km.is_empty():
+		heights.clear()
+		for km in _heights_km:
+			heights.append(km * 1000.0)
 	for key in _sites:
 		if not FLYUP_SITES.has(key):
 			_fail_and_quit("unknown site %s" % key)

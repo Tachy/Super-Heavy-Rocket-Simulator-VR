@@ -568,7 +568,7 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   the height / pixel-angle ranges and the first flat level; the flat geometry bakes in ~41 dispatches of <= 0.5 ms (ISS,
   100 km: ~4.5 ms GPU in all). Diagnostics: `STARSIM_BAKED_DEFINES=CLOUD_BAKED_FLAT_ONLY |
   CLOUD_BAKED_VOLUME_ONLY | CLOUD_BAKED_NO_BLEND | CLOUD_BAKED_FAR_REFERENCE | CLOUD_BAKED_FLAT_TAP_STATS |
-  CLOUD_BAKED_FLAT_NO_TAKEOVER | CLOUD_BAKED_DIAG_NO_BAKE_PATTERN | CLOUD_BAKED_DIAG_NO_PIXEL_PATTERN |
+  CLOUD_BAKED_DIAG_NO_BAKE_PATTERN | CLOUD_BAKED_DIAG_NO_PIXEL_PATTERN |
   CLOUD_BAKED_DIAG_LEVEL` (the last: flat level / blend / optical top as colour); render_check `--centre_dump=<file>` (the march image, raw RGBA16F). Numbers and
   images: `.superpowers/sdd/2026-10-28-cloud-world-volume/baked-outer2-report.md`.
 - **Baked volume steps 4-5: flat levels per pixel (2026-10-30)**: (a) the flat bake takes the field's column with
@@ -614,8 +614,10 @@ its light cache, outline pass, near / far hand-over, F7 / F9 and the old shadow-
   a bright ring; now 115), the small cumulus giving way over the band's last part.
   The marched levels are the footprint's at every height (`CloudBaked.first_level` = `shadow_first`; until fix 2 none
   above 62 km, `VOLUME_TOP_M` - its forced re-bake changed the view 2-3 x as much as 1 km of climb at 45-60 deg off
-  nadir, a new voxel phase); from 40 km the flat levels are
-  shaded from the ray's start (`cloud_baked_flat_takeover`). History: until step 3's takeover the flat levels replaced
+  nadir, a new voxel phase). The flat levels start where their weight first becomes > 0 along the ray
+  (`cloud_baked_flat_start`: l(t) = `cloud_baked_lod` of the max-norm radius and the footprint reaches last - band; the
+  same band and terms as the weight and the volume's keep, no camera-height constant: the former 40 km "shade from the
+  ray's start" switch is gone, I2 of the look-fixes final review). History: until step 3's takeover the flat levels replaced
   the volume region by region over 40-60 km with their own 2-D pattern (4 x 4 regions moved by ~12 codes over 45-65 km);
   T7c drew a vertical column of the volume's shapes and light in render B (straight down the volume's pixel, off nadir
   terraced cloud tops and 11-19 % more in-cloud contrast, T7c review C1); a first fix-2 step marched the volume itself

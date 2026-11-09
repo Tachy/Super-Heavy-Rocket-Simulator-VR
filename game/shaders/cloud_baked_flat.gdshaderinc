@@ -12,11 +12,6 @@ layout(set = 1, binding = 60) uniform sampler2DArray baked_t1;
 
 // [E] Behind a volume transmittance below this the flat levels are not fetched (< 1 % of their light).
 const float CLOUD_BAKED_FLAT_MIN_TRANSMITTANCE = 0.01;
-// [E] The camera heights of the former takeover (step 3 - T7c fix 2: the flat levels replaced the volume region by
-// region over 40-60 km; now the volume is drawn at every height, cloud_baked_set): from .x the flat levels are shaded
-// from the ray's start (cloud_baked_flat_takeover: the footprint can put the volume's hand-over at the nadir).
-// Diagnostics: define CLOUD_BAKED_FLAT_NO_TAKEOVER starts them beyond the volume's extent at every height.
-const vec2 CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M = vec2(40000.0, 60000.0);
 // [E] The sub-cell pattern (step 3; at every cell size since step 4): the pixel's cover is the share of 2 x 2 taps over
 // its footprint (x CLOUD_FAR_COVER_FOOTPRINT_SCALE, / mu along the view) where the shapes' prefiltered value at the
 // taps' mip exceeds the prefilter threshold of the cell's (B-spline reconstructed) cover - the shapes' pattern covering
@@ -83,23 +78,14 @@ float cloud_baked_lod_fp(int si, float footprint_m) {
 	return log2(max(CLOUD_BAKED_LEVEL_DROP * footprint_m, 1.0e-3) / baked.sets[si].axis_x.w);
 }
 
-// True while the flat levels can reach this set's volume samples (they start finer than the volume's end and the camera
-// is high enough, CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M.x): they are then shaded from the ray's start.
-bool cloud_baked_flat_takeover(int si) {
-#ifdef CLOUD_BAKED_FLAT_NO_TAKEOVER
-	return false;
-#endif
-	return baked.sets[si].outer.z < baked.sets[si].axis_y.w && cloud_camera_height_m > CLOUD_BAKED_FLAT_TAKEOVER_HEIGHTS_M.x;
-}
-
-// The distance along the ray where the flat levels' weight starts (x, y linear in it, the footprint too).
+// The distance along the ray where the flat levels' weight (cloud_baked_flat_weight_at) first becomes > 0: the level
+// l(t) = cloud_baked_lod(max-norm radius, footprint) reaches last - band, the radius and the footprint both linear in t
+// (the first of the two crossings; 0 where the ray starts beyond the radius). The same band and terms as the weight and
+// the volume's keep, so the flat levels start exactly where the volume begins to give way - at every camera height.
 float cloud_baked_flat_start(int si, CloudBakedRay g, float pixel_angle) {
 #ifdef CLOUD_BAKED_FLAT_ONLY
 	return 0.0;
 #endif
-	if (cloud_baked_flat_takeover(si)) {
-		return 0.0;
-	}
 	float l0 = baked.sets[si].axis_y.w - 1.0 - max(cloud_baked_band(), CLOUD_BAKED_FLAT_SEAM_BAND);
 	float r0 = (0.5 * baked.sets[si].up0.w - 1.0) * baked.sets[si].axis_x.w * exp2(l0);
 	float t = 1.0e30;
