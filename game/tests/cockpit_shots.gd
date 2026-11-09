@@ -20,6 +20,8 @@
 #   --body: instead of the cabin shots, the crew body and suit (Task 8b): body_side (the pilot s3 in profile from its right, like
 #   KSC-20190731-PH_SPX01_0002), body_34 (the pilot three-quarter from the front), body_arm_raised (the commander s2 reaching the centre
 #   screen), body_elbow_bent / body_elbow_straight (the commander's right elbow at the HOTAS grip and reaching); + *_vs_<photo> sheets
+#   --hotas: instead of the cabin shots, the commander with the HOTAS props (Task 9): hotas_eye_down / hotas_eye_forward (pilot eye), hotas_hatch /
+#   hotas_hatch_deflected (hatch camera, stick and lever deflected)
 #   --tone=agx (Godot's AgX alone, no display tone step), --hunt=day (the Hunt factor against L_day, as before look fixes T5)
 extends SceneTree
 
@@ -142,13 +144,16 @@ func _shoot() -> bool:
 		_set_exterior_visible(true)
 		if _args.has("body"):
 			_compose_body()
-		elif not _args.has("only") and not _args.has("screen") and not _args.has("hand"):
+		elif not _args.has("only") and not _args.has("screen") and not _args.has("hand") and not _args.has("hotas"):
 			_compose()
 		quit(0)
 		return true
 	var shot: Dictionary = _shots[_index]
 	if shot.has("pointer_ops") and _wait == 0:
 		_run_pointer_ops(shot["pointer_ops"])
+	if shot.has("hotas_axes"):
+		var axes: Array = shot["hotas_axes"]
+		_cockpit.set_hotas_axes(float(axes[0]), float(axes[1]), float(axes[2]), float(axes[3]))
 	if shot.has("screen_id"):
 		_world.screen_camera.render_always = true  # the free camera is no cockpit view: the feed renders anyway
 		_world.screen_camera.select(String(shot["screen_id"]))
@@ -259,6 +264,9 @@ func _define_shots() -> void:
 	if _args.has("body"):
 		_define_body_shots(s3)
 		return
+	if _args.has("hotas"):
+		_define_hotas_shots(eye, hatch_basis)
+		return
 	var rest: Array = [
 		{"name": "helmet_closeup", "local": Transform3D(Basis.looking_at(helmet_c - helmet_cam, up_back), helmet_cam), "fov": 48.0, "hide_exterior": false, "isolate": true},
 		{"name": "pilot_eye", "local": pilot, "fov": PILOT_FOV, "field_key": PILOT_FIELD_KEY},
@@ -319,6 +327,29 @@ func _define_hand_shots(eye: Transform3D, pilot: Transform3D, hatch_basis: Basis
 			n += 1
 		_shots.append({"name": "hand_hatch_%s" % place[0], "local": hatch, "fov": HATCH_VFOV, "keep_height": true, "crop_aspect": 1.5, "hide_exterior": false,
 				"hide_head": false, "pointer_ops": [["wait", 20]], "settle": 8})
+
+
+## Task 9: the commander with the HOTAS props: from the pilot's eye (looking down at the hands), from the hatch, and the stick / lever deflected
+## (hotas_axes = [pitch, roll, yaw, throttle]); the hands ride the props (pointer "goto idle").
+func _define_hotas_shots(eye: Transform3D, hatch_basis: Basis) -> void:
+	_pointer = ConsolePointer.new()
+	_world.add_child(_pointer)
+	_pointer.setup(_cockpit.config, _cockpit, _world.screen_camera)
+	_pointer.active = false
+	_pointer.vr_mode = true
+	_world.console_pointer.driven_externally = true
+	var grip: Vector3 = eye.origin + CockpitConfig._vec(_cockpit.config.hotas["stick_grip_m"])
+	var down_aim := Transform3D(Basis.looking_at(grip - eye.origin, eye.basis.y), eye.origin)
+	var hatch := Transform3D(hatch_basis, HATCH_POS)
+	var idle := [["goto", "idle", 0], ["wait", 40]]
+	_shots.clear()
+	_shots.append({"name": "hotas_eye_down", "local": down_aim, "fov": 100.0, "hide_exterior": true, "pointer_ops": idle, "hotas_axes": [0.0, 0.0, 0.0, 0.5], "settle": 50})
+	_shots.append({"name": "hotas_eye_forward", "local": Transform3D(Basis.looking_at(_cockpit.config.screens["centre"]["centre"] - eye.origin, eye.basis.y), eye.origin),
+			"fov": 100.0, "hide_exterior": true, "pointer_ops": idle, "hotas_axes": [0.0, 0.0, 0.0, 0.5], "settle": 50})
+	_shots.append({"name": "hotas_hatch", "local": hatch, "fov": HATCH_VFOV, "keep_height": true, "crop_aspect": 1.5, "hide_exterior": false, "hide_head": false,
+			"pointer_ops": idle, "hotas_axes": [0.0, 0.0, 0.0, 0.5], "settle": 50})
+	_shots.append({"name": "hotas_hatch_deflected", "local": hatch, "fov": HATCH_VFOV, "keep_height": true, "crop_aspect": 1.5, "hide_exterior": false, "hide_head": false,
+			"pointer_ops": idle, "hotas_axes": [0.8, -0.6, 0.0, 1.0], "settle": 50})
 
 
 ## Task 8b: the crew body and suit. The pilot (s3) in profile and three-quarter; the commander (s2) reaching the centre screen and its right

@@ -184,9 +184,39 @@ func _check_crew(cockpit: CockpitView) -> void:
 	cockpit.set_crew(0)
 	_check(cockpit.visible_figures() == 0, "set_crew(0): none")
 	_check(cockpit.figure_skeleton("s2") != null and cockpit.figure_skeleton("s2").get_bone_count() == 35, "commander figure keeps its 35-bone skeleton (Task 8b: three-joint middle / ring / little fingers)")
+	var order := ["s2", "s3", "s1", "s4"]
+	for count in range(1, 5):
+		cockpit.set_crew(count)
+		var ok := true
+		for i in order.size():
+			ok = ok and cockpit.figure_visible(order[i]) == (i < count)
+		_check(ok, "crew %d shows s2, s3, s1, s4 in order" % count)
+	cockpit.set_crew(4)
 	cockpit.set_hotas_props(false)
-	_check(not cockpit.cabin_node("hotas_stick").visible, "HOTAS props switch off")
+	_check(not cockpit.cabin_node("hotas_stick").visible and not cockpit.cabin_node("hotas_throttle").visible, "HOTAS props switch off")
 	cockpit.set_hotas_props(true)
+	_check_hotas_axes(cockpit)
+
+
+## Stick and throttle follow scripted axes; the hand rides the deflected stick.
+func _check_hotas_axes(cockpit: CockpitView) -> void:
+	cockpit.set_hotas_axes(0.0, 0.0, 0.0, 0.5)
+	var rest_tip := cockpit.idle_tip("r")
+	_check(cockpit.hotas_tilt_deg("hotas_stick") < 0.01 and cockpit.hotas_tilt_deg("hotas_throttle") < 0.01, "centred axes: props at rest")
+	cockpit.set_hotas_axes(1.0, 0.0, 0.0, 0.5)
+	_check(absf(cockpit.hotas_tilt_deg("hotas_stick") - CockpitView.STICK_MAX_DEG) < 0.01, "stick pitch 1.0 tilts %.0f deg" % CockpitView.STICK_MAX_DEG)
+	var forward := cockpit.idle_tip("r")
+	cockpit.set_hotas_axes(0.5, 0.0, 0.0, 0.5)
+	_check(absf(cockpit.hotas_tilt_deg("hotas_stick") - CockpitView.STICK_MAX_DEG * 0.5) < 0.01, "stick pitch 0.5 tilts half")
+	cockpit.set_hotas_axes(0.0, -1.0, 0.0, 0.5)
+	_check(absf(cockpit.hotas_tilt_deg("hotas_stick") - CockpitView.STICK_MAX_DEG) < 0.01, "stick roll -1.0 tilts the other way")
+	var left := cockpit.idle_tip("r")
+	_check(forward.distance_to(rest_tip) > 0.01 and left.distance_to(rest_tip) > 0.01 and forward.distance_to(rest_tip) < 0.1, "the hand follows the deflected stick (%.3f m, %.3f m)" % [forward.distance_to(rest_tip), left.distance_to(rest_tip)])
+	cockpit.set_hotas_axes(0.0, 0.0, 0.0, 1.0)
+	_check(absf(cockpit.hotas_tilt_deg("hotas_throttle") - CockpitView.THROTTLE_TRAVEL_DEG * 0.5) < 0.01, "throttle 1.0 moves the lever forward by half the travel")
+	cockpit.set_hotas_axes(0.0, 0.0, 0.0, 0.0)
+	_check(absf(cockpit.hotas_tilt_deg("hotas_throttle") - CockpitView.THROTTLE_TRAVEL_DEG * 0.5) < 0.01, "throttle 0.0 moves the lever back by half the travel")
+	cockpit.set_hotas_axes(0.0, 0.0, 0.0, 0.5)
 
 
 ## The figures placed on the seats: the commander's hip joint stays near the s2 seat's hip point.
@@ -195,6 +225,15 @@ func _check_figures(config: CockpitConfig) -> void:
 	root.add_child(cockpit)
 	cockpit.build(VehicleModels.load_for("crew_dragon"), config)
 	var skeleton := cockpit.figure_skeleton("s2")
+	var props_off := CockpitConfig.for_vehicle("crew_dragon")
+	props_off.hotas_props_enabled = false  # the cached config: restored below
+	var bare := CockpitView.new()
+	root.add_child(bare)
+	bare.build(VehicleModels.load_for("crew_dragon"), props_off)
+	props_off.hotas_props_enabled = true
+	_check(not bare.cabin_node("hotas_stick").visible and not bare.cabin_node("hotas_throttle").visible and not bare.hotas_grip("r"), "props = false: no HOTAS props, the hands stay on the thighs")
+	bare.queue_free()
+	_check(cockpit.cabin_node("hotas_stick").visible and cockpit.cabin_node("hotas_throttle").visible, "props = true: both HOTAS props shown")
 	_check(skeleton != null, "figure skeleton of s2 loaded through the scene path")
 	if skeleton != null:
 		var hips := skeleton.get_bone_global_pose(skeleton.find_bone("hips")).origin

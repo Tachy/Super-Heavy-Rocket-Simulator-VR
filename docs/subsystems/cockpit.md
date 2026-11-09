@@ -170,7 +170,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   exists in every view). Cabin meshes by node name from `VehicleModels.load_for("crew_dragon")["cabin"]`; `eye_node` at `CockpitConfig.eye`; `screen_surface(id)`,
   `button_node(id)`, `set_crew(n)` (seats s2, s3, s1, s4; s2 = player body), `set_hotas_props(b)`, `set_player_head_hidden(b)` (collapses the head bone: the camera sits in
   that helmet), `figure_skeleton(seat)` (Task 8 poses the arm bones). Figures load through `VehicleModels.scene_for` (keeps Skeleton3D / skin; `_meshes_of` does not).
-  Default crew = seat count; the mission's crew count is not wired to the view yet.
+  Default crew = seat count; `World._update_cabin_occupancy` sets `MissionCatalogue.crew_count(FlightController.active_mission_id)` (free launches keep the seat count).
 - Exterior hull parts of the capsule stage cast shadows double-sided (sun enters only through the windows).
 - Look: `shaders/cabin.gdshader` (lit_aerial look; closed cabin: `ambient_light_disabled`, no sky ambient or sky radiance, glossy parts reflect the walls
   (round 5, below); procedural panel seams on the shell),
@@ -383,6 +383,17 @@ State after plan Task 8 (code: `game/cockpit/console_strip.gd`, `console_pointer
   targets beyond the generic key rectangle; the desktop smoothness check is by the user.
 - Tests: `game/tests/console_pointer_test.gd` (config key table, strip, HandMotion, ArmIk numbers, dispatch, figure arms with models). Shots: `cockpit_shots.gd --hand --cabin_keys`
   (`screenshots/m7-cockpit/hand/`: `hand_eye_NN_*` sequences from the eye, `hand_hatch_*`, contact sheets `sheet_*.png`).
+
+## HOTAS props and crew occupancy (Task 9)
+- Props: `hotas_stick` / `hotas_throttle` meshes (baked at the `[hotas]` grips by `gen_dragon_cabin.py`) are tilted by `CockpitView.set_hotas_axes(pitch, roll, yaw, throttle)` about their
+  base (stick base 0.17 m, lever base 0.15 m below the grip along the seat back): stick +-`STICK_MAX_DEG` 15 deg (pitch > 0 forward, roll > 0 to the crew's right, yaw twist
+  +-10 deg), lever `THROTTLE_TRAVEL_DEG` 50 deg centred on throttle 0.5. Source: `FlightController.input_pitch / _roll / _yaw` (last manual input, 0 on the autopilot) and
+  `FlightController.throttle`; `World._update_cabin_occupancy` pushes them every frame (not while a shots / test script drives the pointer). View only.
+- The idle hand rides the deflected prop (`idle_tip` = prop transform x the rest tip), so the commander's arm follows stick and lever.
+- Dev aid `--hotas-nudge` (`Start-VR.cmd --hotas-nudge`): Alt+1 / Alt+2 pick stick / throttle, Alt+arrows (left / right crew side, up / down forward / back), Alt+PageUp / PageDown
+  along the seat back; 1 cm per press, Shift 2 mm; each press prints the new `[hotas] *_grip_m` for `config/cockpits/crew_dragon.toml`.
+- Tests: `cockpit_view_test.gd` (props on / off, crew 1..4 order s2, s3, s1, s4, tilt angles, hand follows the stick); shots `cockpit_shots.gd --hotas`
+  (`screenshots/m7-cockpit/hotas/`). The VR calibration of the grip offsets is the user's run (`.superpowers/sdd/.../vr-run-checklist.md`); results go here.
 
 ## Validation
 - Wall check (scratch script, Task 1): inner profile >= 0.094 m from the exterior meridian and the neck well everywhere.

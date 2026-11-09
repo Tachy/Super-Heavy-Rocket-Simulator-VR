@@ -64,6 +64,17 @@ const LEAN_PASSES := 4
 const ELBOW_POLE := Vector3(-0.8, -0.45, 0.4)
 ## [E] Task 8b: a hand closed round a HOTAS grip has its palm on the grip and the index tip this far ahead of it (along the chest normal)
 const GRIP_TIP_AHEAD_M := 0.09
+## HOTAS props (Task 9): the generator (tools/structures/blender/gen_dragon_cabin.py build_stick / build_throttle) bakes the props at the grip
+## point in the capsule frame; seat back 35 deg from +X toward -Y (b up the back, n the chest normal, z capsule Z = the crew's left), the
+## stick base box a distance below the grip along b. The view tilts the prop about that base.
+const HOTAS_BACK_DEG := 35.0
+const STICK_BASE_BELOW_M := 0.17  # [D] = the generator's stick base offset
+const THROTTLE_BASE_BELOW_M := 0.15  # [D] = the generator's throttle base offset
+const STICK_MAX_DEG := 15.0  # [E] T.16000M: about +-15 deg of tilt at full deflection
+const STICK_TWIST_MAX_DEG := 10.0  # [E] the stick's twist (yaw axis)
+const THROTTLE_TRAVEL_DEG := 50.0  # [E] TWCS lever travel from idle to full
+const NUDGE_STEP_M := 0.01  # dev aid (--hotas-nudge): one key press moves a prop this far (Shift: NUDGE_FINE_M)
+const NUDGE_FINE_M := 0.002
 
 var config: CockpitConfig
 var eye_node := Node3D.new()
@@ -84,6 +95,11 @@ var _lean := Quaternion.IDENTITY  # the torso's lean towards the pointer (skelet
 var _deforms := {}  # seat id -> FigureDeform (joint folds: corrective shapes, wrinkle weights)
 var _suit_textures := {}  # manifest crew_figure.suit_maps file -> ImageTexture
 var _joint_table := {}  # manifest crew_figure.joints
+var _hotas_axes := Vector3.ZERO  # last set_hotas_axes: pitch, roll, yaw (-1..1)
+var _hotas_throttle := 0.0
+var _hotas_nudge := {"stick": Vector3.ZERO, "throttle": Vector3.ZERO}  # dev aid: prop offsets in the capsule frame (m)
+var _nudge_enabled := false
+var _nudge_part := "stick"
 
 
 ## Builds the cabin from the model set's `models` (VehicleModels.load_for("crew_dragon")) and the cockpit definition.
@@ -110,6 +126,8 @@ func build(models: Dictionary, cockpit: CockpitConfig) -> void:
 	_build_figures(models)
 	set_hotas_props(config.hotas_props_enabled)
 	set_crew(config.seats.size())
+	_nudge_enabled = "--hotas-nudge" in OS.get_cmdline_user_args() or "--hotas-nudge" in OS.get_cmdline_args()
+	set_process_unhandled_key_input(_nudge_enabled)
 
 
 func _on_console(part: String) -> bool:
@@ -143,6 +161,12 @@ func crew_count() -> int:
 	return _crew
 
 
+## Whether the figure of a seat is shown (set_crew order: s2, s3, s1, s4).
+func figure_visible(seat_id: String) -> bool:
+	var figure: Node3D = _figures.get(seat_id)
+	return figure != null and figure.visible
+
+
 func visible_figures() -> int:
 	var n := 0
 	for figure: Node3D in _figures.values():
@@ -169,7 +193,9 @@ func player_arm(side: String) -> ArmIk:
 func idle_tip(side: String) -> Vector3:
 	if hotas_grip(side):
 		var chest := _skeleton_to_cabin().basis.y.normalized() if _skeletons.has(CREW_ORDER[0]) else Vector3.ZERO  # the seat's chest normal
-		return config.eye.origin + CockpitConfig._vec(config.hotas.get("throttle_grip_m" if side == "l" else "stick_grip_m")) + chest * GRIP_TIP_AHEAD_M
+		var part := "hotas_throttle" if side == "l" else "hotas_stick"
+		var rest := config.eye.origin + CockpitConfig._vec(config.hotas.get("throttle_grip_m" if side == "l" else "stick_grip_m")) + chest * GRIP_TIP_AHEAD_M
+		return (_nodes[part] as MeshInstance3D).transform * rest  # the hand rides the deflected prop
 	var arm := player_arm(side)
 	return _skeleton_to_cabin() * arm.rest_tip() if arm != null else Vector3.ZERO
 
@@ -284,6 +310,87 @@ func set_hotas_props(enabled: bool) -> void:
 		var node: MeshInstance3D = _nodes.get(part)
 		if node != null:
 			node.visible = enabled
+
+
+## Stick and throttle follow the commander's real inputs (view only): `pitch` > 0 pushes the stick forward, `roll` > 0 to the crew's right,
+## `yaw` > 0 twists it clockwise (seen from above), `throttle` 0..1 moves the lever from idle (back) to full (forward).
+func set_hotas_axes(pitch: float, roll: float, yaw: float, throttle: float) -> void:
+	_hotas_axes = Vector3(clampf(pitch, -1.0, 1.0), clampf(roll, -1.0, 1.0), clampf(yaw, -1.0, 1.0))
+	_hotas_throttle = clampf(throttle, 0.0, 1.0)
+	_update_hotas_transforms()
+
+
+func _seat_axes() -> Dictionary:
+	var a := deg_to_rad(HOTAS_BACK_DEG)
+	return {"n": Vector3(sin(a), cos(a), 0.0), "b": Vector3(cos(a), -sin(a), 0.0), "z": Vector3.BACK}
+
+
+func _update_hotas_transforms() -> void:
+	if config == null or not config.hotas.has("stick_grip_m"):
+		return
+	var axes := _seat_axes()
+	var n: Vector3 = axes["n"]
+	var b: Vector3 = axes["b"]
+	var z: Vector3 = axes["z"]
+	var stick: MeshInstance3D = _nodes.get("hotas_stick")
+	if stick != null:
+		var grip := config.eye.origin + CockpitConfig._vec(config.hotas["stick_grip_m"])
+		var r := Basis(z, deg_to_rad(STICK_MAX_DEG) * _hotas_axes.x) * Basis(n, deg_to_rad(STICK_MAX_DEG) * _hotas_axes.y) * Basis(b, -deg_to_rad(STICK_TWIST_MAX_DEG) * _hotas_axes.z)
+		stick.transform = _about(r, grip - b * STICK_BASE_BELOW_M, _hotas_nudge["stick"])
+	var lever: MeshInstance3D = _nodes.get("hotas_throttle")
+	if lever != null and config.hotas.has("throttle_grip_m"):
+		var grip := config.eye.origin + CockpitConfig._vec(config.hotas["throttle_grip_m"])
+		var r := Basis(z, deg_to_rad(THROTTLE_TRAVEL_DEG) * (_hotas_throttle - 0.5))
+		lever.transform = _about(r, grip - b * THROTTLE_BASE_BELOW_M, _hotas_nudge["throttle"])
+
+
+static func _about(rotation: Basis, pivot: Vector3, offset: Vector3) -> Transform3D:
+	return Transform3D(Basis.IDENTITY, offset) * Transform3D(rotation, pivot - rotation * pivot)
+
+
+## The tilt (deg) of a prop from its rest pose: the angle its up-the-back axis has turned through.
+func hotas_tilt_deg(part: String) -> float:
+	var node: MeshInstance3D = _nodes.get(part)
+	if node == null:
+		return 0.0
+	var b: Vector3 = _seat_axes()["b"]
+	return rad_to_deg(b.angle_to(node.transform.basis * b))
+
+
+## Dev aid (`--hotas-nudge`): Alt+1 / Alt+2 pick stick / throttle, Alt+arrows move it (left/right: crew's left/right, up/down: forward/back),
+## Alt+PageUp / PageDown up / down the seat back; Shift = fine. Prints the new [hotas] value for config/cockpits/crew_dragon.toml.
+func _unhandled_key_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo or not key.alt_pressed or config == null:
+		return
+	var axes := _seat_axes()
+	var step := NUDGE_FINE_M if key.shift_pressed else NUDGE_STEP_M
+	var move := Vector3.ZERO
+	match key.keycode:
+		KEY_1:
+			_nudge_part = "stick"
+		KEY_2:
+			_nudge_part = "throttle"
+		KEY_LEFT:
+			move = (axes["z"] as Vector3) * step
+		KEY_RIGHT:
+			move = -(axes["z"] as Vector3) * step
+		KEY_UP:
+			move = (axes["n"] as Vector3) * step
+		KEY_DOWN:
+			move = -(axes["n"] as Vector3) * step
+		KEY_PAGEUP:
+			move = (axes["b"] as Vector3) * step
+		KEY_PAGEDOWN:
+			move = -(axes["b"] as Vector3) * step
+		_:
+			return
+	_hotas_nudge[_nudge_part] = (_hotas_nudge[_nudge_part] as Vector3) + move
+	_update_hotas_transforms()
+	var cfg_key := "stick_grip_m" if _nudge_part == "stick" else "throttle_grip_m"
+	var v: Vector3 = CockpitConfig._vec(config.hotas[cfg_key]) + _hotas_nudge[_nudge_part]
+	print("[hotas-nudge] %s = [%.3f, %.3f, %.3f]   (offset from the config %.0f / %.0f / %.0f mm)" % [cfg_key, v.x, v.y, v.z,
+		(_hotas_nudge[_nudge_part] as Vector3).x * 1000.0, (_hotas_nudge[_nudge_part] as Vector3).y * 1000.0, (_hotas_nudge[_nudge_part] as Vector3).z * 1000.0])
 
 
 ## Whether a point (render world) lies inside the cabin's inner wall of revolution ([cabin] profile_m, [x, r] about the

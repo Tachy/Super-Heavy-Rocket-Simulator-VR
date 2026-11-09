@@ -30,6 +30,10 @@ signal mission_started(ok: bool, report: Dictionary)
 var sim := FlightSim.new()
 var launch_site_id := ""  ## site of the current flight (its tower shows the flight's arm state)
 var throttle := 1.0
+var input_pitch := 0.0  ## the last manual stick input (view only: the cabin's stick prop follows it)
+var input_yaw := 0.0
+var input_roll := 0.0
+var active_mission_id := ""  ## the mission of the current flight ("" for a free launch; the cabin's crew count follows it)
 var rate_mode := true
 var views: Array[VehicleView] = []
 var trajectory := TrajectoryView.new()
@@ -71,6 +75,7 @@ func setup(config_dir: String) -> void:
 func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 90.0, countdown_s := LAUNCH_COUNTDOWN_S,
 		vehicle_name_key := "") -> bool:
 	_clear_views()
+	active_mission_id = ""
 	# External view: the onboard computer plans the launch to the configured target and engages the ascent autopilot in
 	# the same command (the countdown holds until the plan is in); manual control only places the vehicle.
 	var target := {} if manual_control else ascent_target
@@ -91,14 +96,15 @@ func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 9
 ## start at their own epoch. `on_pad`: the mission starts from a pad (the onboard computer plans its ascent first).
 ## `options`: FlightSim.start_mission's (a lunar landing: `lunar = {lat_deg, lon_deg, stay_s, mission_start_tdb_s,
 ## touchdown_tdb_s}`, the site and window the LunarPicker chose). Outcome: signal mission_started.
-func start_mission(mission_id: String, tdb_s: float, on_pad := false, options := {}) -> bool:
+func start_mission(mission_name: String, tdb_s: float, on_pad := false, options := {}) -> bool:
 	_clear_views()
-	var id := sim.start_mission(mission_id, tdb_s, true, LAUNCH_COUNTDOWN_S, options)
+	active_mission_id = mission_name
+	var id := sim.start_mission(mission_name, tdb_s, true, LAUNCH_COUNTDOWN_S, options)
 	launch_site_id = ""
 	if id <= 0:
 		last_event_report = {"key": "event.start_failed"}
 		return false
-	_pending_mission = {"id": id, "mission_id": mission_id}
+	_pending_mission = {"id": id, "mission_id": mission_name}
 	last_event_report = PLANNING_EVENT if on_pad else MISSION_START_EVENT
 	sim.advance_to(MISSION_HOLD_TDB_S)  # at once: the old target (the clock) must not outlive the post
 	return true
@@ -375,6 +381,9 @@ func _update_instruments() -> void:
 
 func _read_input(delta: float) -> void:
 	if not manual_control:  # external view: no stick, keys or lever; the autopilot flies
+		input_pitch = 0.0
+		input_yaw = 0.0
+		input_roll = 0.0
 		sim.set_input(0.0, 0.0, 0.0, throttle)
 		return
 	var pitch := _key_axis(KEY_S, KEY_W)
@@ -406,7 +415,10 @@ func _read_input(delta: float) -> void:
 			for axis in 6:
 				values.append("%d:%+.2f" % [axis, Input.get_joy_axis(device, axis)])
 			print("[joydump] %d %s  %s" % [device, Input.get_joy_name(device), " ".join(values)])
-	sim.set_input(clampf(pitch, -1.0, 1.0), clampf(yaw, -1.0, 1.0), clampf(roll, -1.0, 1.0), throttle)
+	input_pitch = clampf(pitch, -1.0, 1.0)
+	input_yaw = clampf(yaw, -1.0, 1.0)
+	input_roll = clampf(roll, -1.0, 1.0)
+	sim.set_input(input_pitch, input_yaw, input_roll, throttle)
 
 
 ## Index of the first connected joypad whose name contains `name_part`, or -1.

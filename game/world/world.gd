@@ -148,6 +148,8 @@ var screen_camera := ScreenCamera.new()  ## the cabin's left screen: external ca
 var console_pointer := ConsolePointer.new()  ## the mouse on the console: suited hand follows it, taps and operates screen / keys
 var view_jump_count := 0  ## how often _view_jumped ran (tests)
 var cockpit_refusal_count := 0  ## toggles refused for lack of a cabin (each logged once; tests)
+var _crew_mission := ""  ## mission whose crew count _crew_wanted holds
+var _crew_wanted := 0
 var _cockpit_config: CockpitConfig  ## the cabin of the controlled vehicle while the cockpit is active
 var _mode_before_cockpit := OrbitCamera.Mode.ORBIT
 
@@ -689,6 +691,19 @@ func _free_surface_distance_m() -> float:
 	return SurfaceClearance.surface_distance_m(earth.fixed_to_gcrf.transposed() * p, _earth_heights)
 
 
+## The cabin shows the mission's crew and the commander's stick and throttle (view only: FlightController's last input).
+func _update_cabin_occupancy(cabin: CockpitView) -> void:
+	if cabin == null:
+		return
+	if flight.active_mission_id != "":
+		if flight.active_mission_id != _crew_mission:
+			_crew_mission = flight.active_mission_id
+			_crew_wanted = MissionCatalogue.crew_count(_crew_mission)
+		if cabin.crew_count() != _crew_wanted:
+			cabin.set_crew(_crew_wanted)
+	cabin.set_hotas_axes(flight.input_pitch, flight.input_roll, flight.input_yaw, flight.throttle)
+
+
 ## The left screen's external camera (ScreenCamera): follows the simulation state, renders while the cabin is the active view.
 func _update_screen_camera(camera_gcrf_m: Vector3) -> void:
 	var config := _cockpit_config if cockpit_active else _controlled_cockpit()
@@ -703,7 +718,8 @@ func _update_screen_camera(camera_gcrf_m: Vector3) -> void:
 			break
 	screen_camera.update(flight.sim, config, cabin, camera_gcrf_m, _delta, cockpit_active, atmosphere.exposure_gain * atmosphere.brightness)
 	if console_pointer.driven_externally:
-		return  # a shots / test script runs the pointer itself
+		return  # a shots / test script runs the pointer, the crew and the props itself
+	_update_cabin_occupancy(cabin)
 	if console_pointer.cabin != cabin or console_pointer.config != config:
 		console_pointer.setup(config, cabin, screen_camera)
 	console_pointer.active = cockpit_active
