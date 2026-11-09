@@ -1150,7 +1150,7 @@ heat_load.label = "Wärmelast"
 
 [cockpit]
 camera.chase = "Verfolger"
-camera.stage1_aft = "Erststufe achtern"
-camera.stage2_engine = "Zweitstufe Triebwerk"
+camera.stage1_aft = "Heck 1. Stufe"
+camera.stage2_engine = "Triebwerk 2. Stufe"
 camera.dragon_nose = "Dragon Bug"
 camera.dragon_trunk = "Dragon Trunk"
