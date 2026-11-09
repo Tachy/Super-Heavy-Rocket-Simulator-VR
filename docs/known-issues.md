@@ -296,3 +296,5 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   fix 1 state). Open user decision: the Gilchrist area rule or the Moon-day lever (eye-adaptation.md).
 - `moon_surface_check` fails 2 checks, pre-existing (the same 2 at HEAD with the look-fixes T5 round stashed, T5 report,
   not colour): the rock layer's camera-jump timing (see "Boulder-field camera jump" above) and the detail-off leaf morph.
+
+- `terrain_quadtree_test` (slow): 6 Moon data FAILs, pre-existing (identical at 3eee254e^ and after; noted 2026-11-09).

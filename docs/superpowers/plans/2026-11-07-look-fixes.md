@@ -28,3 +28,6 @@ from `screenshots/m7-cockpit-refs/user/anzug/spacex-anzug.jpg`, console modules 
 T-handle; then Task 6). Local (retinal) adaptation for the Earth from the lunar night: offered, not yet decided.
 
 Ledger: `.superpowers/sdd/2026-11-07-look-fixes/progress.md`.
+
+## Status (2026-11-09): COMPLETE
+All tasks done (T11/T12 folded into T13). Opus final review 0 critical / 4 important, all fixed (a93d4938, 6ff0c4ef, 6fdd8525, 42e08cdd); user-reported bugs fixed: VR Sun flicker (5e3d327e), double limb from orbit (a7c5e811), Moon free-camera descent artefact (3eee254e). Gates re-baselined by the user after T9b (5f802a20). Open minors in the ledger. Next: M7 look follow-up, then M7 Task 6.
