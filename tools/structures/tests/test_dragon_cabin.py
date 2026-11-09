@@ -444,3 +444,26 @@ def test_layout_is_one_consistent_fit(spec):
     fig_eye = fl.to_capsule(fl.eye_point(cfg), s2["hip_m"], s2["back_angle_deg"])
     assert math.dist(fig_eye, eye) < 0.01
     assert c["console"]["upper_top_x_m"] < c["cabin"]["ceiling_x_m"] - 0.3
+
+
+def test_key_labels_only_where_a_photo_shows_them_and_ids_stay(spec):
+    """Task 5b: labels come from conv_42860a (the 2020 module row, same key layout as discovery10) / training2; every labelled key gets one atlas cell
+    of its face's aspect, unlabelled keys none (blank faces); the 39 button ids and node names are unchanged (Task 8 uses button_node(id))."""
+    import surface_textures
+    cockpit = spec["cockpit"]
+    labelled = {b["id"]: b["label"] for b in cockpit["button"] if b.get("label")}
+    assert labelled["cam3"] == "DEORBIT NOW" and labelled["cam1"] == "CANCEL" and labelled["c_mains_only"] == "MAINS ONLY"
+    assert "handle" not in labelled and "r_led_1" not in labelled and "c_upper_1" not in labelled  # unreadable: blank
+    cells, (w, h) = cl.label_cells(cockpit)
+    assert set(cells) == set(labelled) and w == cl.LABEL_ATLAS_WIDTH and h & (h - 1) == 0
+    size = {b["id"]: b["size_m"] for b in cockpit["button"]}
+    for bid, (u0, v0, u1, v1) in cells.items():
+        assert 0.0 <= u0 < u1 <= 1.0 and 0.0 <= v0 < v1 <= 1.0
+        assert abs((u1 - u0) * w / ((v1 - v0) * h) - size[bid][0] / size[bid][1]) < 0.02  # the cell has the key face's aspect
+    m = cl.cockpit_manifest(cockpit)
+    assert len(m["button_ids"]) == 39 and m["buttons"]["cam3"]["node"] == "button_cam3" and m["buttons"]["handle"]["node"] == "handle"
+    assert m["buttons"]["cam3"]["label_cell"] == cells["cam3"] and "label_cell" not in m["buttons"]["r_led_1"]
+    atlas = surface_textures.cockpit_labels(cockpit)
+    assert atlas.shape == (h, w, 4)
+    for bid, (u0, v0, u1, v1) in cells.items():  # every labelled cell has letters in it
+        assert atlas[round(v0 * h):round(v1 * h), round(u0 * w):round(u1 * w), 0].max() > 200, bid

@@ -1,7 +1,7 @@
 # Cockpit (M7): Crew Dragon cabin
 
 Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
-`docs/superpowers/plans/2026-11-07-m7-cockpit-crew-dragon.md`. State after plan Task 5 (cabin in the game): typed tables (Task 1), config loader (Task 2), Blender cabin and console generator (Task 3), crew figure (Task 4).
+`docs/superpowers/plans/2026-11-07-m7-cockpit-crew-dragon.md`. State after plan Task 5b (helmet shell, key labels; Task 5: cabin in the game): typed tables (Task 1), config loader (Task 2), Blender cabin and console generator (Task 3), crew figure (Task 4).
 
 ## Model
 - `config/cockpits/crew_dragon.toml`: `[cabin]` (inner wall of revolution, floor, ceiling, forward tunnel, windows /
@@ -43,7 +43,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 ### Crew figure (Task 4)
 - `config/cockpits/crew_figure.toml` (every value tagged; proportions = Drillis and Contini 1966 fractions of a 1.78 m adult [E]; suit look from
   `sheet_suit` / `eva_suit_detail1-4`), `tools/structures/blender/gen_crew_figure.py` (+ pure `figure_layout.py`: bones, seat basis, manifest block) writes
-  `crew_figure.gltf` into the Crew Dragon set (4.8k triangles). `vehicle_spec.load_dragon` loads it into `spec["crew_figure"]`; `VehicleModels` returns
+  `crew_figure.gltf` into the Crew Dragon set (13.2k triangles since Task 5b: faceted helmet 48 x 30, hood, thin beads). `vehicle_spec.load_dragon` loads it into `spec["crew_figure"]`; `VehicleModels` returns
   the meshes under `"crew_figure"` and counts the TOML for staleness; manifest block `crew_figure` (`bones` head / tail / parent, `eye_m`, `materials`, `frame`).
 - Frame convention: glTF origin = the seat's hip reference point (`[[seat]] hip_m` = seat-back plane meets the pan surface); **x = up the seat back, y = the
   seat's chest normal, z = the crew's left**. The game places it at a seat with the basis columns `((cos a, -sin a, 0), (sin a, cos a, 0), (0, 0, 1))` in
@@ -142,7 +142,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 - Hatch (crew1_1): joint fit (below): (1.839, 1.454, 0.013), pitched 8.2 deg up, f 536 px on 1200 x 800 = 96.4 x 73.4 deg (3:2). The camera sits 0.15 m inside
   the inner wall (the photographer leans in through the hatch; the near-field boots of the outer crew confirm a close camera).
 - pilot_eye: the config eye, turned toward the screen row (aim 0.15 m to the commander's side of the centre screen centre), 105 deg horizontal, field key 0.5
-  (`--field_key` per shot; the dark console dominates the metering). Debug options of `cockpit_shots.gd`: `--only=<shots>`, `--no_lamp_shadows`, `--hide=<nodes>`.
+  (`--field_key` per shot; the dark console dominates the metering). Task 5b: `helmet_profile` (pure side view from the pilot's right, 1.1 m, 40 deg) with `helmet_side_vs_spacex_anzug`, and `helmet_side_vs_jsc066389` in the composed set. Debug options of `cockpit_shots.gd`: `--only=<shots>`, `--no_lamp_shadows`, `--hide=<nodes>`.
 
 ### Fix round 3 (legs)
 - Legs (crew1_1 fit of the review): `crew_figure.toml` `thigh_raise_deg` -25 (thigh 10 deg above the hatch axis; the seat pan is built along the thigh, `build_seat(pan_raise_deg)`), `knee_angle_deg` 105
@@ -177,10 +177,8 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
 - Console lamps: the console parts (console_*, tablets, buttons, handle, lamp panels) are on render layer `CONSOLE_LAYER` (1 << 11) and the console lamps'
   `light_cull_mask` excludes it (the lamps hang 8 cm in front of the console face and face the crew; ring and fill lights still light the console). The figures
   keep the lamp shadows. (Round 4 took this for the moire's cause; round 5 found the real one, below.)
-- Helmet against eva_suit_detail2: egg-shaped shell (`egg_taper` 0.08, narrower at the front) with a low crown ridge (6 mm, fades before the visor); larger
-  opening +-62 deg x -40..+38 deg; closed visor (35 mm dome) two-tone by shader (`visor_tint_split` 0.55: copper top, dark clear glass below, manifest
-  `crew_figure.visor_tint`); white frame bead (r 16 mm) with a black seal bead (r 12 mm) just inside; round 5: round grey pivot buttons instead of the round-4 brackets (below) (round 4: 8 x 80 x 18 mm, beside the
-  frame at eye height) instead of the grey blocks; grey collar (`[material.collar]` 0.30). Visor stays closed and copper (user decision).
+- Helmet: superseded by Task 5b (below; round-4 shape in the history file). The closed visor stays two-tone by shader (`visor_tint_split` 0.55: copper top,
+  dark clear glass below, manifest `crew_figure.visor_tint`), closed and copper (user decision).
 - Tests: `test_layout_is_one_consistent_fit` (eye to centre screen 0.60-0.75, shoulders 0.62-0.75 within the reach, gaze < 30 deg off the screen normal, figure eye =
   config eye, upper panel under the ceiling); foot trays move with the hip and stay above the floor (the crew1_1 x band no longer applies: launch posture); helmet test
   on the round-4 ranges; cockpit_config_test eye forward; cockpit_view_test figure eye at the config eye.
@@ -198,11 +196,9 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
   `fill_surround` = fill x wall albedo (`CockpitView.WALL_ALBEDO`, set each frame) weighted with the split-sum environment BRDF (Karis 2014 fit);
   `ambient_visibility` is gone. The console albedos are linear photo measures and are now converted for the sRGB uniform (they went in as sRGB:
   0.07 became 0.006 linear, the face read pure black once the sky lift was gone).
-- Still grey: the figures' boots, seal and pivot (albedo 0.05) read ~0.5 sRGB. Not light: they sit at the AgX pivot. At the shots' field key 1.2 a 5 %
-  albedo is ~0.18 scene value, which AgX maps to mid grey; AgX contrast 2.0 (`--agx_contrast`) leaves them at ~0.53 while the console goes black. A darker
-  rendering needs a cabin exposure / tone rule (eye-adaptation subsystem, user decision).
+- The round-5 "boots read grey" point is closed under the unified appearance model (Task 5b re-check below).
 - Helmet: the visor pivot is a round grey button (`pivot_button_radius_m` 9.5 mm, `pivot_button_height_m` 4 mm, collar grey) at jaw height
-  (`pivot_el_deg` -30) 13 deg behind the opening edge (jsc2024e066389: 19 mm disc ~0.09 m below eye level, ~25 mm behind the seal); `helmet_side_vs_jsc066389`.
+  (`pivot_el_deg` -30) 9 deg (Task 5b; round 5: 13) behind the opening edge (jsc2024e066389: 19 mm disc ~0.09 m below eye level, ~25 mm behind the seal); `helmet_side_vs_jsc066389`.
 - Debug options of `cockpit_shots.gd`: `--no_shadows`, `--lights_off=<patterns|sun>`, `--no_sky_light`, `--agx_contrast=<c>`.
 
 ## Camera mode and toggle
@@ -224,6 +220,35 @@ State after plan Task 6 (code: `game/cockpit/cockpit_camera.gd`, `hotas_buttons.
   Measure with `godot --path game --script res://tests/joy_probe.gd -- --buttons --seconds=30`.
 - Test: `game/tests/cockpit_camera_test.gd` (needs the generated Dragon models; listed in `tools/run_godot_tests.ps1` under `-Gpu`).
 
+### Task 5b (helmet shell, console modules, re-check under the appearance model)
+- Helmet shell (`[helmet]` of crew_figure.toml, `figure_layout.helmet_*`, `gen_crew_figure.build_shell`): fitted to the clean side profile spacex-anzug.jpg at the
+  opening-height ruler (opening top edge to chin tip 265 px = the round-4 opening height 0.232 m -> 1142 px/m; helmet centre = figure eye - EYE_UP / EYE_FORWARD).
+  Star-shaped about the helmet centre: a superellipsoid (exponent 2.5; front 0.125, rear 0.155, above 0.215, below 0.15, half width 0.135 with the egg taper) cut by flat
+  facets (rear face y = -0.135, the sloped upper rear facet, flat sides z = +-0.125); the open bottom follows a sloped cut (rear corner (0.036, -0.134), 36 deg down
+  to the chin). Result 0.27 m deep x 0.33 m tall (round 4: 0.375 x 0.33); 12 outline points of the photo within -1.6..+1.3 cm (scratch fit). One smooth group
+  (per-facet groups gave a zig-zag of shading along the facet edges). The head bone and eye are unchanged (`head_centre_*` kept, the rear 0.03 ahead of the seat back).
+- Face opening: `visor_outline` rows [el, half az], bottom (chin tip, 12 deg) to top (brow, 18 deg), widest 92 deg at the temple: the photo's boundary points projected
+  onto the shell (0.2-1 mm). Visor dome 12 mm (flush in its frame), thin frame bead r 9 mm, black seal r 6 mm 2.5 deg inside; pivot buttons 9 deg behind the opening
+  edge at el -30. Grey knit neck hood (`collar` material): a loft from an ellipse on the shoulders (`collar_height_m` 0.18 below the centre, `collar_radius_m` 0.105)
+  up to the shell's lower edge.
+- Panel lines: `grooves` (planes [n, offset, limit vector, limit] in the helmet frame) -> manifest `crew_figure.helmet_grooves` (figure frame) -> `cabin.gdshader`
+  groove uniforms on the helmet surface only (`CockpitView._helmet_material`): the groove over the crown down the side through the notch, the line across the rear face.
+- Key labels: optional `label` in `[[button]]` (only where a photo shows it: conv_42860a, the 2020 module row with the same key layout as discovery10, and training2):
+  CANCEL, WATER DEORBIT, DEORBIT NOW, BREAKOUT, EXECUTE, DEPRESS RESPONSE, SUPPRESS FIRE, FIRE RESPONSE (cam1-5, 11-13), POWER 1/2, STRING 1A-2C, RESET 1/2 (cam6-10, 14-18),
+  MAINS ONLY, DROGUES & MAINS, ENABLE BACKUP G-METER; 21 keys, the others blank faces. `cabin_layout.label_cells` packs one cell per labelled key (key-face aspect,
+  8 px/mm, 1024 x 512); `surface_textures.cockpit_labels` bakes `cockpit_labels.png` (linear coverage; Pillow's bundled Aileron Regular, CC0) in `write_dragon`; the
+  manifest `cockpit.buttons[id]` carries `label`, `label_cell`, `normal` / `up` / `right`, `cockpit.labels.file`. `CockpitView` gives each labelled key its own
+  material (shader label uniforms project the cell onto the key face). Button ids / node names unchanged. The camera keys keep their function (user decision)
+  although the real keys carry abort / fire / power labels.
+- Red light strips: `cabin.gdshader` mark uniforms on `console_shelf` (10 mm along each module's bottom lip, red, 40 cd/m2 emitted, scene-referred each frame);
+  the centre T-handle housing gets a red marking at its lower right corner (15 % x 40 %). No new geometry (the handle body stays the round-3 pad + T grip).
+- Albedo literals (stated linear vs sRGB): keys linear 0.03 (was the sRGB literal 0.09 = 0.009 linear), seat pads linear 0.035 (was sRGB 0.03), HOTAS linear 0.04
+  (was sRGB 0.06), all converted for the sRGB uniform; seat shells stay sRGB 0.82 (= linear 0.64, white paint like the walls).
+- Re-check under the unified appearance model (`screenshots/m7-cockpit/look2/`, default field key 0.2): boots 0.15 sRGB, black pads 0.07 (round 5: ~0.5): closed.
+  Whites no longer clip at the frame edges; instead they read grey where the frame is dark-dominated or wide (hatch_crew1_1 wall ~0.46 sRGB, p90 0.59; pilot_eye wall
+  0.73, p90 0.77) against the near-white walls of crew1_1 (appearance model, not changed here). Shelf modules 0.20 sRGB against the housing 0.10: lighter than the
+  housing as in discovery2, a little lighter than conv_42860a.
+
 ## Validation
 - Wall check (scratch script, Task 1): inner profile >= 0.094 m from the exterior meridian and the neck well everywhere.
 - Tag check: `detail_file.value_lines_without_tag("config/cockpits/crew_dragon.toml")` empty; unit vectors normalised.
@@ -234,7 +259,7 @@ State after plan Task 6 (code: `game/cockpit/cockpit_camera.gd`, `hotas_buttons.
   9.3 m3 vessel of this height; either the published figure is a free / habitable volume or the floor / ceiling sit
   higher or lower than read. Re-check against a dimensioned source if one appears.
 - Screen size has no published value; 0.382 x 0.215 m rests on one finger scale (+-15 %).
-- Button labels on the flight panel are unreadable at video resolution; functions beyond the four named stay `none`.
+- Labels exist only for the 21 keys conv_42860a / training2 show legibly (Task 5b); functions beyond the four named stay `none`.
   Candidates from reports (fire suppression, cabin pressure, trunk jettison, deorbit) are not tied to a button.
 - Seat poses: one launch / entry recline (35 deg) for all seats; the real seats reportedly tilt between phases (not
   measured). Outer seats may be toed in (crew1_1); not modelled.

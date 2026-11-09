@@ -247,26 +247,61 @@ def test_stature_and_triangle_budget(cfg, mesh):
     assert 0.85 < top < 1.1  # crown of the helmet above the seat's hip point
 
 
-def test_visor_sits_in_a_face_opening_with_a_white_shell_around_it(cfg, mesh):
-    """Helmet shape (USER 2026-11-07, round 4 against eva_suit_detail2): a large opening (+-58-66 deg, top +33-43 deg, down past the chin), a white
-    frame bead of 30-45 mm with a black seal inside it, the closed visor seated in it (domed), round pivot buttons (round 5, jsc2024e066389), an egg-shaped shell with a crown
-    ridge, and the neck collar is a distinct grey ring wider than the neck."""
+def _shell_extent(h):
+    """(rear y, front y, crown x, chin bottom x, rear lower-edge x) of the helmet shell in the helmet-centre frame (figure_layout.helmet_*)."""
+    sag = [fl.helmet_point(h, el, az)[0] for el in range(-89, 90) for az in (0.0, 180.0)]
+    sag = [p for p in sag if p[0] >= fl.helmet_cut_x(h, p[1]) - 1e-9]
+    rear_edge = fl.helmet_point(h, fl.helmet_bottom_el(h, 180.0), 180.0)[0][0]
+    return min(p[1] for p in sag), max(p[1] for p in sag), max(p[0] for p in sag), min(p[0] for p in sag), rear_edge
+
+
+def test_helmet_shell_is_compact_and_faceted_after_the_spacex_profile(cfg):
+    """Task 5b (replaces round 4's egg / crown-ridge bounds): the side profile of spacex-anzug.jpg at the opening-height ruler (1142 px/m) is
+    0.28 m deep (rear face to the visor front) and 0.33 m tall (crown to the chin), so the shell is TALLER than deep (round 4: 0.375 deep,
+    'bulbous'); the crown slopes back over a flat upper rear facet to a flat rear face; the lower edge rises from the chin to the rear by
+    ~0.16 m (the grey hood shows under it); the opening (the ruler: round-4 height 0.232 m) is wide at the temple and narrows to the chin."""
     h = cfg["helmet"]
-    assert 58.0 <= h["visor_half_angle_deg"] <= 66.0 and 33.0 <= h["visor_up_deg"] <= 43.0 and h["visor_down_deg"] <= -35.0
-    assert 0.030 <= 2.0 * h["rim_radius_m"] <= 0.045 and 0.0 < h["liner_radius_m"] < h["rim_radius_m"]
-    # round 5: the pivot is a low round button (066389: ~19 mm across), at jaw height behind the frame bead, not a slab at eye height
+    rear, front, crown, chin, rear_edge = _shell_extent(h)
+    depth = front + h["visor_proud_m"] - rear
+    height = crown - chin
+    assert 0.25 <= depth <= 0.31, depth
+    assert 0.30 <= height <= 0.36, height
+    assert depth < 0.95 * height  # compact: taller than deep
+    assert abs(rear + h["rear_flat_m"]) < 1e-6  # the flat rear face is the rearmost part
+    assert rear_edge - chin >= 0.12  # the sloped lower edge: high at the rear, low at the chin
+    facets = {fl.helmet_facet(h, fl.helmet_direction(el, az)) for el in range(-20, 80, 5) for az in range(0, 360, 10)}
+    assert {1, 2, 3, 4} <= facets  # rear face, both sides and the upper rear facet all exist
+    e0, e1 = fl.visor_el_range(h)
+    p0 = fl.helmet_point(h, e0, 0.0)[0]
+    p1 = fl.helmet_point(h, e1, 0.0)[0]
+    assert 0.20 <= math.dist(p0, p1) <= 0.26  # opening height at the ruler (round 4: 0.232 m)
+    widest = max(row[1] for row in h["visor_outline"])
+    assert 80.0 <= widest <= 95.0 and h["visor_outline"][0][1] <= 20.0 and h["visor_outline"][-1][1] <= 20.0
+    assert [row[0] for row in h["visor_outline"]] == sorted(row[0] for row in h["visor_outline"])
+    assert e0 > fl.helmet_bottom_el(h, 0.0)  # the chin tip of the opening stays on the shell above the lower edge
+    assert len(h["grooves"]) >= 1 and all(len(row) == 8 for row in h["grooves"])
+    block = fl.figure_manifest(cfg)["helmet_grooves"]
+    assert len(block["planes"]) == len(h["grooves"]) and block["radius_m"] > 0.15
+
+
+def test_visor_sits_in_a_face_opening_with_a_white_shell_around_it(cfg, mesh):
+    """Helmet details (round 5 / Task 5b): a thin white frame bead (spacex-anzug, jsc2024e066389: 15-22 mm; round 4's 30-45 mm band was the
+    bulbous shell's) with a black seal inside it, the closed visor domed in the opening, round pivot buttons behind the opening at jaw height,
+    the neck hood a distinct grey part wider than the neck."""
+    h = cfg["helmet"]
+    assert 0.015 <= 2.0 * h["rim_radius_m"] <= 0.022 and 0.0 < h["liner_radius_m"] < h["rim_radius_m"]
     assert 0.007 <= h["pivot_button_radius_m"] <= 0.013 and 0.0 < h["pivot_button_height_m"] <= 0.006
     assert -40.0 <= h["pivot_el_deg"] <= -20.0 and h["pivot_az_offset_deg"] > 0.0
-    assert 0.0 < h["egg_taper"] < 0.2 and 0.0 < h["crown_ridge_m"] < 0.015 and 0.3 <= h["visor_tint_split"] <= 0.7
-    assert cfg["material"]["collar"]["albedo"][0] < 0.5 * cfg["material"]["helmet"]["albedo"][0]  # grey collar against the white shell
-    assert h["visor_proud_m"] > h["visor_edge_m"] and h["half_depth_m"] > h["half_width_m"]
+    assert 0.0 < h["egg_taper"] < 0.2 and 0.3 <= h["visor_tint_split"] <= 0.7
+    assert cfg["material"]["collar"]["albedo"][0] < 0.5 * cfg["material"]["helmet"]["albedo"][0]  # grey hood against the white shell
+    assert h["visor_proud_m"] > h["visor_edge_m"]
     assert h["collar_radius_m"] > cfg["suit"]["neck_radius_m"] * 1.25
     _, _, prims = mesh
     _, pos, _ = next(p for p in prims if p[0] == "visor")
     front = max(p[1] for p in pos) - cfg["pose"]["head_centre_forward_m"]
-    assert front >= h["half_depth_m"] + 0.5 * h["visor_proud_m"]  # the dome leaves the shell's front
+    assert front >= h["half_depth_front_m"] + 0.5 * h["visor_proud_m"]  # the dome leaves the shell's front
     zs = [p[2] for p in pos]
-    assert max(zs) - min(zs) <= 2.0 * h["half_width_m"] * 0.95  # the visor does not wrap to the ears: white cheeks stay beside it
+    assert max(zs) - min(zs) <= 2.0 * (h["side_flat_m"] + h["visor_proud_m"])  # the visor stays on the shell (it wraps to the temple, not past the sides)
 
 
 def test_visor_is_its_own_surface_and_the_helmet_is_neutral_white(cfg, mesh):

@@ -55,6 +55,109 @@ def lerp_table(rows, s):
     return tuple(rows[-1][1:])
 
 
+# ---------- helmet shell (Task 5b: compact faceted shell after spacex-anzug.jpg) ----------
+# Helmet-centre frame: x up, y forward, z left (the figure frame shifted to [pose] head_centre_*). The shell is star-shaped about the centre:
+# a superellipsoid (front / rear, above / below, half width with the egg taper; exponent shell_exponent) cut by flat facets (the rear face, the
+# sloped upper rear facet, the two flat sides): rho(direction) = min(superellipsoid, facet planes). Elevation / azimuth are GEOMETRIC angles of
+# the direction from the centre (az 0 = forward, + toward the left). The open bottom follows the sloped cut plane (rear high, chin low).
+
+def helmet_direction(el_deg, az_deg):
+    e, a = math.radians(el_deg), math.radians(az_deg)
+    return (math.sin(e), math.cos(e) * math.cos(a), math.cos(e) * math.sin(a))
+
+
+def helmet_planes(h):
+    """Facet planes (unit normal, offset) in the helmet-centre frame: the shell keeps n . p <= offset."""
+    return [((0.0, -1.0, 0.0), h["rear_flat_m"]), ((0.0, 0.0, 1.0), h["side_flat_m"]), ((0.0, 0.0, -1.0), h["side_flat_m"]),
+            (norm(tuple(h["rear_facet_normal"])), h["rear_facet_offset_m"])]
+
+
+def helmet_rho(h, d):
+    """Distance from the helmet centre to the shell along the unit direction d."""
+    p = h["shell_exponent"]
+    rx = h["half_above_m"] if d[0] > 0.0 else h["half_below_m"]
+    ry = h["half_depth_front_m"] if d[1] > 0.0 else h["half_depth_rear_m"]
+    horiz = math.hypot(d[1], d[2])
+    rz = h["half_width_m"] * (1.0 - h["egg_taper"] * (d[1] / horiz if horiz > 1e-9 else 0.0))
+    rho = (abs(d[0] / rx) ** p + abs(d[1] / ry) ** p + abs(d[2] / rz) ** p) ** (-1.0 / p)
+    for n, off in helmet_planes(h):
+        c = dot(n, d)
+        if c > 1e-9:
+            rho = min(rho, off / c)
+    return rho
+
+
+def helmet_facet(h, d):
+    """Which surface the direction d hits: 0 = the curved shell, 1.. = helmet_planes index + 1 (the tests check that every facet exists)."""
+    rho = helmet_rho(h, d)
+    for i, (n, off) in enumerate(helmet_planes(h)):
+        c = dot(n, d)
+        if c > 1e-9 and abs(off / c - rho) < 1e-9:
+            return i + 1
+    return 0
+
+
+def helmet_point(h, el_deg, az_deg):
+    """(point, outward unit normal) on the shell in the helmet-centre frame; the normal from the surface's own tangents."""
+    def at(e, a):
+        d = helmet_direction(e, a)
+        return mul(d, helmet_rho(h, d))
+    p = at(el_deg, az_deg)
+    step = 0.05
+    t_el = sub(at(min(el_deg + step, 89.99), az_deg), at(max(el_deg - step, -89.99), az_deg))
+    t_az = sub(at(el_deg, az_deg + step), at(el_deg, az_deg - step))
+    n = cross(t_az, t_el)
+    if length(n) < 1e-12:
+        return p, helmet_direction(el_deg, az_deg)
+    n = norm(n)
+    return p, (n if dot(n, p) > 0.0 else mul(n, -1.0))
+
+
+def helmet_cut_x(h, y):
+    """Height (x) of the sloped bottom cut at depth y: through cut_rear_m = [x, y], falling toward the front by cut_slope_deg."""
+    x0, y0 = h["cut_rear_m"]
+    return x0 - (y - y0) * math.tan(math.radians(h["cut_slope_deg"]))
+
+
+def helmet_bottom_el(h, az_deg):
+    """Lowest elevation of the shell at this azimuth: where the meridian meets the bottom cut (bisection)."""
+    def f(e):
+        p = helmet_point(h, e, az_deg)[0]
+        return p[0] - helmet_cut_x(h, p[1])
+    lo, hi = -89.0, 80.0
+    if f(lo) >= 0.0:
+        return lo
+    for _ in range(40):
+        mid = 0.5 * (lo + hi)
+        if f(mid) >= 0.0:
+            hi = mid
+        else:
+            lo = mid
+    return hi
+
+
+def visor_half_az(h, el_deg):
+    """Half width (azimuth) of the face opening at this elevation: visor_outline rows [el_deg, half_az_deg], bottom to top."""
+    return lerp_table(h["visor_outline"], el_deg)[0]
+
+
+def visor_el_range(h):
+    rows = h["visor_outline"]
+    return rows[0][0], rows[-1][0]
+
+
+def helmet_groove_block(cfg):
+    """The manifest's helmet panel lines (surface detail, drawn by cabin.gdshader on the helmet surface): plane rows in the FIGURE frame."""
+    h, pose = cfg["helmet"], cfg["pose"]
+    c = (pose["head_centre_up_m"], pose["head_centre_forward_m"], 0.0)
+    planes = []
+    for row in h["grooves"]:
+        n, m = norm(tuple(row[0:3])), tuple(row[4:7])
+        planes.append([round(v, 6) for v in (*n, row[3] + dot(n, c), *m, row[7] + dot(m, c))])
+    return {"planes": planes, "centre": [round(v, 6) for v in c], "radius_m": h["groove_radius_m"], "width_m": h["groove_width_m"],
+            "albedo": h["groove_albedo"]}
+
+
 def torso_forward(cfg, s):
     """Forward offset (y) of the torso axis at height s above the hip joint."""
     return cfg["figure"]["hip_joint_forward_m"] + lerp_table(cfg["suit"]["torso_rings_m"], s)[2]
@@ -187,4 +290,6 @@ def figure_manifest(cfg):
         "visor_material": "visor",
         "visor_tint": {"split": cfg["helmet"]["visor_tint_split"], "albedo_low": cfg["helmet"]["visor_low_albedo"],
                        "roughness_low": cfg["helmet"]["visor_low_roughness"], "metallic_low": cfg["helmet"]["visor_low_metallic"]},
+        "helmet_material": "helmet",
+        "helmet_grooves": helmet_groove_block(cfg),
     }

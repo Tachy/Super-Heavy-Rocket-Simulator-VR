@@ -149,7 +149,17 @@ func _check_eye(cockpit: CockpitView) -> void:
 	_check(shell != null and pad != null and shell.material_override != pad.material_override, "seats: shell and pad are separate nodes with separate materials")
 	var shell_albedo: Color = (shell.material_override as ShaderMaterial).get_shader_parameter("albedo")
 	var pad_albedo: Color = (pad.material_override as ShaderMaterial).get_shader_parameter("albedo")
-	_check(shell_albedo.get_luminance() > 0.6 and pad_albedo.get_luminance() < 0.1, "seats: white shells, black pads")
+	# Task 5b: the uniform is sRGB-encoded; the pads are now a LINEAR 0.035 converted (sRGB 0.2), so compare linear albedos
+	_check(shell_albedo.srgb_to_linear().get_luminance() > 0.6 and pad_albedo.srgb_to_linear().get_luminance() < 0.1, "seats: white shells, black pads")
+	# Task 5b: labelled keys carry the label atlas cell (conv_42860a), keys without a legible label a blank face; red strips under the shelf modules; the
+	# handle housing's red marking
+	var labelled := (cockpit.button_node("cam3") as MeshInstance3D).material_override as ShaderMaterial
+	var blank := (cockpit.button_node("r_led_1") as MeshInstance3D).material_override as ShaderMaterial
+	_check(float(labelled.get_shader_parameter("label_on")) > 0.0 and labelled.get_shader_parameter("label_atlas") != null and float(blank.get_shader_parameter("label_on")) == 0.0,
+			"keys: DEORBIT NOW (cam3) has its label, r_led_1 a blank face")
+	var shelf := (cockpit.cabin_node("console_shelf").material_override as ShaderMaterial)
+	var handle := ((cockpit.button_node("handle") as MeshInstance3D).material_override as ShaderMaterial)
+	_check(float(shelf.get_shader_parameter("mark_on")) > 0.0 and float(handle.get_shader_parameter("mark_on")) > 0.0, "shelf red strips and the handle's red marking")
 	_check(cockpit.cabin_node("console_shelf") != null and cockpit.cabin_node("console_back") != null and cockpit.cabin_node("console_lockers") != null, "console: shelf modules, back and lockers are nodes of their own")
 
 
@@ -194,9 +204,13 @@ func _check_figures(config: CockpitConfig) -> void:
 		# orientation (the seat basis is duplicated from figure_layout.seat_basis): the head sits near the eye point
 		var head_bone := skeleton.find_bone("head")
 		var head := (skeleton.global_transform * Transform3D(Basis(), skeleton.get_bone_global_pose(head_bone).origin)).origin
-		# round 4: the config eye IS the figure's eye (crew_figure.toml helmet half_below 0.17 + figure_layout EYE_UP_M 0.03 up the back, EYE_FORWARD_M 0.06
-		# along the chest normal from the head bone's head), so the player's body sits under the camera
+		# round 4: the config eye IS the figure's eye, so the player's body sits under the camera. The eye's offset from the head bone's head comes
+		# from the manifest (crew_figure eye_m and bones.head.head, figure frame: x up the back, y the chest normal); Task 5b: was the literal
+		# 0.20 / 0.06 of the round-4 helmet (half_below 0.17 + EYE_UP_M 0.03)
+		var figure_manifest: Dictionary = (VehicleModels.load_for("crew_dragon").get("manifest", {}) as Dictionary).get("crew_figure", {})
+		var eye_m: Array = figure_manifest.get("eye_m", [0.0, 0.0, 0.0])
+		var head_m: Array = figure_manifest.get("bones", {}).get("head", {}).get("head", [0.0, 0.0, 0.0])
 		var back := deg_to_rad(float(config.seats[1]["back_angle_deg"]))
-		var figure_eye := head + Vector3(cos(back), -sin(back), 0.0) * 0.20 + Vector3(sin(back), cos(back), 0.0) * 0.06
+		var figure_eye := head + Vector3(cos(back), -sin(back), 0.0) * (float(eye_m[0]) - float(head_m[0])) 				+ Vector3(sin(back), cos(back), 0.0) * (float(eye_m[1]) - float(head_m[1]))
 		_check(figure_eye.distance_to(config.eye.origin) < 0.02, "s2 figure's eye %.3f m from the eye point" % figure_eye.distance_to(config.eye.origin))
 	cockpit.free()

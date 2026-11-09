@@ -109,12 +109,42 @@ def node_names(cockpit):
     return sorted(names)
 
 
+LABEL_FILE = "cockpit_labels.png"  # the key-label atlas (surface_textures.write_dragon bakes it)
+LABEL_PX_PER_M = 8000.0  # [E] 8 px per mm of key face: 2-3 mm letters stay sharp at the eye's 0.6-0.8 m (about 1.3 px per arcminute)
+LABEL_ATLAS_WIDTH = 1024
+
+
+def label_cells(cockpit):
+    """({button id: [u0, v0, u1, v1]} in the atlas (v down from the top, 0..1), (width, height) in px): one cell per labelled key, the cell
+    the key face's size at LABEL_PX_PER_M, packed in rows in file order."""
+    cells, x, y, row_h = {}, 0, 0, 0
+    sized = [(b["id"], round(b["size_m"][0] * LABEL_PX_PER_M), round(b["size_m"][1] * LABEL_PX_PER_M))
+             for b in cockpit["button"] if b.get("label") and b["kind"] != "handle"]
+    for bid, w, h in sized:
+        if x + w > LABEL_ATLAS_WIDTH:
+            x, y, row_h = 0, y + row_h, 0
+        cells[bid] = (x, y, w, h)
+        x, row_h = x + w, max(row_h, h)
+    height = max(1, 1 << max(0, (y + row_h - 1).bit_length())) if cells else 1
+    return ({bid: [x0 / LABEL_ATLAS_WIDTH, y0 / height, (x0 + w) / LABEL_ATLAS_WIDTH, (y0 + h) / height] for bid, (x0, y0, w, h) in cells.items()},
+            (LABEL_ATLAS_WIDTH, height))
+
+
+def button_frame(cockpit, b):
+    """The key face's axes: its panel's normal (toward the crew), up and right."""
+    s = next(s for s in cockpit["screen"] if s["id"] == b["panel"])
+    return {"normal": list(s["normal"]), "up": list(s["up"]), "right": [round(v, 6) for v in screen_right(s)]}
+
+
 def cockpit_manifest(cockpit):
-    """The manifest's `cockpit` block: node names, screen frames and button rectangles in the capsule frame."""
+    """The manifest's `cockpit` block: node names, screen frames and button rectangles in the capsule frame, the key-label atlas."""
+    cells, size = label_cells(cockpit)
     return {
         "nodes": node_names(cockpit),
         "screens": {s["id"]: {"centre": s["centre_m"], "normal": s["normal"], "up": s["up"], "size": s["size_m"]} for s in cockpit["screen"]},
-        "buttons": {b["id"]: {"centre": b["centre_m"], "size": b["size_m"], "node": button_node(b)} for b in cockpit["button"]},
+        "buttons": {b["id"]: {"centre": b["centre_m"], "size": b["size_m"], "node": button_node(b), "shape": b["shape"], **button_frame(cockpit, b),
+                              **({"label": b["label"], "label_cell": cells[b["id"]]} if b["id"] in cells else {})} for b in cockpit["button"]},
+        "labels": {"file": LABEL_FILE, "size": list(size)},
         "button_ids": [b["id"] for b in cockpit["button"]],
         "tablets": {t["id"]: {"node": f"tablet_{t['id']}", "centre": t["centre_m"], "normal": t["normal"], "up": t["up"], "size": t["size_m"]} for t in cockpit["tablet"]},
     }

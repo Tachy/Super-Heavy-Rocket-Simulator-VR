@@ -41,6 +41,18 @@ const SCREEN_COLOUR := Color(0.025, 0.07, 0.17)
 const CONSOLE_LAYER := 1 << 11
 const CONSOLE_VENT_UP_M := Vector2(-0.11, 0.07)
 const CONSOLE_VENT_HALF_WIDTH_M := 0.58
+## [E] Task 5b, conv_42860a / discovery10: a red light strip along the bottom lip of each shelf module (the strip's height on the module face) and its
+## luminance (an indicator strip, dim red: it reads saturated red, not white, in the 2020 photo); colour linear Rec.709 at luminance 1.
+const SHELF_STRIP_HEIGHT_M := 0.010
+const SHELF_STRIP_CD_M2 := 40.0
+const SHELF_STRIP_COLOUR := Vector3(4.2, 0.08, 0.05)
+## [E] conv_42860a: the T-handle housing ends in a red marking at its lower right (the crew's right) corner: share of the housing width and
+## height and its colour (sRGB); the first render's full-height 22 % block read far larger than the photo's red tab.
+const HANDLE_MARK_SHARE := 0.15
+const HANDLE_MARK_HEIGHT_SHARE := 0.40
+const HANDLE_MARK_ALBEDO := Color(0.55, 0.03, 0.03)
+## [E] Key labels: printed light grey letters on the dark keys (conv_42860a), sRGB.
+const LABEL_ALBEDO := Color(0.80, 0.80, 0.80)
 
 var config: CockpitConfig
 var eye_node := Node3D.new()
@@ -51,6 +63,9 @@ var _figures := {}  # seat id -> Node3D (figure root)
 var _skeletons := {}  # seat id -> Skeleton3D
 var _crew := 0
 var _materials := {}
+var _strip_materials: Array[ShaderMaterial] = []
+var _cockpit_manifest := {}
+var _label_atlas: ImageTexture = null
 
 
 ## Builds the cabin from the model set's `models` (VehicleModels.load_for("crew_dragon")) and the cockpit definition.
@@ -61,6 +76,7 @@ func build(models: Dictionary, cockpit: CockpitConfig) -> void:
 	eye_node.transform = config.eye
 	add_child(eye_node)
 	var cabin: Dictionary = models.get("cabin", {})
+	_cockpit_manifest = (models.get("manifest", {}) as Dictionary).get("cockpit", {})
 	for part: String in cabin:
 		var instance := MeshInstance3D.new()
 		instance.name = part
@@ -176,6 +192,8 @@ func _process(_delta: float) -> void:
 		if material is ShaderMaterial and (material as ShaderMaterial).shader == CABIN_SHADER:
 			(material as ShaderMaterial).set_shader_parameter("fill", fill)
 			(material as ShaderMaterial).set_shader_parameter("fill_surround", surround)
+	for material: ShaderMaterial in _strip_materials:
+		material.set_shader_parameter("mark_emission", SHELF_STRIP_COLOUR * SHELF_STRIP_CD_M2 * scene_per_cd)
 
 
 func _build_lights() -> void:
@@ -247,6 +265,8 @@ func _build_figures(models: Dictionary) -> void:
 					var material := _cabin_material(Color(c[0], c[1], c[2]).linear_to_srgb(), float(entry["roughness"]), float(entry["metallic"]), 0.0)
 					if key == String(manifest.get("visor_material", "")) and manifest.has("visor_tint"):
 						material = _visor_material(material, manifest["visor_tint"])
+					elif key == String(manifest.get("helmet_material", "")) and manifest.has("helmet_grooves"):
+						material = _helmet_material(material, manifest["helmet_grooves"])
 					mesh_node.set_surface_override_material(s, material)
 	template.free()
 
@@ -270,7 +290,7 @@ func _material_of(part: String) -> Material:
 	if part == "console_housing":
 		return _cabin_material(Color(0.028, 0.028, 0.032).linear_to_srgb(), 0.9, 0.0, 0.0, 0.1)
 	if part == "console_shelf":
-		return _cabin_material(Color(0.07, 0.07, 0.075).linear_to_srgb(), 0.8, 0.0, 0.0, 0.05)  # discovery2: dark grey modules, ~0.05-0.09 linear
+		return _shelf_material()
 	if part == "console_back":
 		return _console_back_material()
 	if part == "console_under":
@@ -279,14 +299,124 @@ func _material_of(part: String) -> Material:
 		return _cabin_material(Color(0.02, 0.02, 0.024).linear_to_srgb(), 0.85, 0.0, 0.0, 0.03)
 	## [E] Seats (review item 4, crew1_1): white shells, black pads and black carbon leg-rest frames.
 	if part.begins_with("seat_shell_"):
-		return _cabin_material(Color(0.82, 0.82, 0.81), 0.5, 0.0, 0.0)
+		return _cabin_material(Color(0.82, 0.82, 0.81), 0.5, 0.0, 0.0)  # sRGB 0.82 = linear 0.64: white paint, like the walls (WALL_ALBEDO, sRGB)
 	if part.begins_with("seat_"):
-		return _cabin_material(Color(0.03, 0.03, 0.032), 0.7, 0.0, 0.0, 0.2)
+		return _cabin_material(Color(0.035, 0.035, 0.037).linear_to_srgb(), 0.7, 0.0, 0.0, 0.2)  # Task 5b: LINEAR 0.035 (black pads / carbon), was the sRGB literal 0.03 = 0.0023 linear
 	if part.begins_with("tablet_"):
 		return _cabin_material(Color(0.03, 0.03, 0.036).linear_to_srgb(), 0.85, 0.0, 0.0, 0.03)  # glass front: dark, no metal sheen under the lamps
 	if part.begins_with("hotas_"):
-		return _cabin_material(Color(0.06, 0.06, 0.065), 0.5, 0.4, 0.0)
-	return _cabin_material(Color(0.09, 0.09, 0.1), 0.45, 0.3, 0.0)  # buttons, handle
+		return _cabin_material(Color(0.04, 0.04, 0.043).linear_to_srgb(), 0.5, 0.4, 0.0)  # Task 5b: LINEAR 0.04 (black plastic), was the sRGB literal 0.06 = 0.005 linear
+	if part == "handle":
+		return _handle_material()
+	var key_id := part.trim_prefix("button_")
+	var entry: Dictionary = (_cockpit_manifest.get("buttons", {}) as Dictionary).get(key_id, {})
+	if entry.has("label_cell"):
+		return _label_material(key_id, entry)
+	return _key_base()  # buttons without a legible label: blank key faces
+
+
+## [E] The keys: dark grey (conv_42860a: near-black keys on the dark grey modules). Task 5b: the earlier Color(0.09, 0.09, 0.1) literal went into
+## the sRGB uniform unconverted (0.009 linear, darker than the module); now a linear 0.03 converted like the console colours.
+func _key_base() -> ShaderMaterial:
+	return _cabin_material(Color(0.03, 0.03, 0.033).linear_to_srgb(), 0.45, 0.3, 0.0)
+
+
+## The shelf modules (discovery2 / conv_42860a: dark grey) with the red light strip along each module's bottom lip (mark, emission set each frame).
+func _shelf_material() -> ShaderMaterial:
+	if _materials.has("console_shelf"):
+		return _materials["console_shelf"]
+	var m := _cabin_material(Color(0.07, 0.07, 0.075).linear_to_srgb(), 0.8, 0.0, 0.0, 0.05).duplicate() as ShaderMaterial
+	var centre: Dictionary = config.screens.get("centre", {})
+	if not centre.is_empty():
+		var n: Vector3 = (centre["normal"] as Vector3).normalized()
+		var up: Vector3 = (centre["up"] as Vector3).normalized()
+		var bottom := -0.5 * (centre["size"] as Vector2).y - float(config.console.get("shelf_top_gap_m", 0.0175)) - float(config.console.get("shelf_height_m", 0.10))
+		_set_mark(m, centre["centre"], (-n).cross(up).normalized(), up, n, Vector2(-1.0, 1.0), Vector2(bottom - 0.01, bottom + SHELF_STRIP_HEIGHT_M), Color(0.35, 0.02, 0.02))
+		_strip_materials.append(m)
+	_materials["console_shelf"] = m
+	return m
+
+
+## The centre T-handle housing: the key colour with the red marking at its right end (conv_42860a).
+func _handle_material() -> ShaderMaterial:
+	var m := _key_base().duplicate() as ShaderMaterial
+	var entry: Dictionary = (_cockpit_manifest.get("buttons", {}) as Dictionary).get("handle", {})
+	if not entry.is_empty():
+		var w := float((entry["size"] as Array)[0])
+		var h := float((entry["size"] as Array)[1])
+		_set_mark(m, CockpitConfig._vec(entry["centre"]), CockpitConfig._vec(entry["right"]), CockpitConfig._vec(entry["up"]), CockpitConfig._vec(entry["normal"]),
+				Vector2(0.5 * w - HANDLE_MARK_SHARE * w, 0.5 * w + 0.01), Vector2(-0.5 * h - 0.01, -0.5 * h + HANDLE_MARK_HEIGHT_SHARE * h), HANDLE_MARK_ALBEDO)
+	_materials["handle"] = m
+	return m
+
+
+func _set_mark(m: ShaderMaterial, origin: Vector3, right: Vector3, up: Vector3, normal: Vector3, lat: Vector2, up_range: Vector2, albedo: Color) -> void:
+	m.set_shader_parameter("mark_on", 1.0)
+	m.set_shader_parameter("mark_origin", origin)
+	m.set_shader_parameter("mark_right", right)
+	m.set_shader_parameter("mark_up", up)
+	m.set_shader_parameter("mark_normal", normal)
+	m.set_shader_parameter("mark_lat", lat)
+	m.set_shader_parameter("mark_up_range", up_range)
+	m.set_shader_parameter("mark_albedo", albedo)
+
+
+## A labelled key: its own material with the atlas cell on the key face (manifest cockpit.buttons[id].label_cell; atlas cockpit.labels.file).
+func _label_material(key_id: String, entry: Dictionary) -> ShaderMaterial:
+	var atlas := _labels()
+	if atlas == null:
+		return _key_base()
+	var m := _key_base().duplicate() as ShaderMaterial
+	var cell: Array = entry["label_cell"]
+	m.set_shader_parameter("label_on", 1.0)
+	m.set_shader_parameter("label_atlas", atlas)
+	m.set_shader_parameter("label_cell", Vector4(cell[0], cell[1], cell[2], cell[3]))
+	m.set_shader_parameter("label_centre", CockpitConfig._vec(entry["centre"]))
+	m.set_shader_parameter("label_right", CockpitConfig._vec(entry["right"]))
+	m.set_shader_parameter("label_up", CockpitConfig._vec(entry["up"]))
+	m.set_shader_parameter("label_normal", CockpitConfig._vec(entry["normal"]))
+	m.set_shader_parameter("label_size", Vector2(float((entry["size"] as Array)[0]), float((entry["size"] as Array)[1])))
+	m.set_shader_parameter("label_albedo", LABEL_ALBEDO)
+	_materials["label_" + key_id] = m
+	return m
+
+
+func _labels() -> ImageTexture:
+	if _label_atlas == null:
+		var file := String((_cockpit_manifest.get("labels", {}) as Dictionary).get("file", ""))
+		if file.is_empty():
+			return null
+		var image := Image.load_from_file(VehicleModels._repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file))
+		if image == null or image.is_empty():
+			return null
+		image.generate_mipmaps()
+		_label_atlas = ImageTexture.create_from_image(image)
+	return _label_atlas
+
+
+## The helmet shell with its panel lines (manifest crew_figure.helmet_grooves, crew_figure.toml [helmet] grooves; planes in the figure frame).
+func _helmet_material(base: ShaderMaterial, grooves: Dictionary) -> ShaderMaterial:
+	if not _materials.has("helmet_grooves"):
+		var m := base.duplicate() as ShaderMaterial
+		var planes: Array = grooves.get("planes", [])
+		var plane_rows: Array[Vector4] = []
+		var limit_rows: Array[Vector4] = []
+		for row: Array in planes.slice(0, 2):
+			plane_rows.append(Vector4(row[0], row[1], row[2], row[3]))
+			limit_rows.append(Vector4(row[4], row[5], row[6], row[7]))
+		while plane_rows.size() < 2:
+			plane_rows.append(Vector4.ZERO)
+			limit_rows.append(Vector4.ZERO)
+		var a: Array = grooves.get("albedo", [0.08, 0.08, 0.085])
+		m.set_shader_parameter("groove_count", mini(planes.size(), 2))
+		m.set_shader_parameter("groove_plane", plane_rows)
+		m.set_shader_parameter("groove_limit", limit_rows)
+		m.set_shader_parameter("groove_centre", CockpitConfig._vec(grooves.get("centre")))
+		m.set_shader_parameter("groove_radius", float(grooves.get("radius_m", 0.25)))
+		m.set_shader_parameter("groove_width", float(grooves.get("width_m", 0.004)))
+		m.set_shader_parameter("groove_albedo", Color(a[0], a[1], a[2]).linear_to_srgb())
+		_materials["helmet_grooves"] = m
+	return _materials["helmet_grooves"]
 
 
 ## The visor: copper tint on the upper part, dark clear glass below (manifest crew_figure.visor_tint, crew_figure.toml [helmet]).

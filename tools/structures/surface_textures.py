@@ -1,4 +1,4 @@
-"""Baked surfaces of the Falcon 9 and the Crew Dragon (numpy, deterministic, no photo pixels, no logos or lettering): the silhouette is the mesh, the fine structure is here.
+"""Baked surfaces of the Falcon 9 and the Crew Dragon (numpy, deterministic, no photo pixels, no logos or lettering except the cockpit key labels): the silhouette is the mesh, the fine structure is here.
 
 Written by the driver into data/models/<id>/. UVs are metres (arc at the part's radius, station); a map repeats over its period. Mips are made by the game with box averages, which is why every value is
 LINEAR data: the shader reads
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import struct
+import sys
 import zlib
 from pathlib import Path
 
@@ -19,6 +20,9 @@ import numpy as np
 
 import hull_textures
 import vehicle_spec
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "blender"))
+import cabin_layout  # noqa: E402
 
 png_bytes = hull_textures.png_bytes
 SEED = 20261102
@@ -493,9 +497,64 @@ def write_dragon(out, spec: dict) -> dict:
     maps = {SKIN_FILE: capsule_skin(spec), SHIELD_FILE: shield_tile(spec), BAND_FILE: band_tile(spec), ARRAY_FILE: array_tile(spec), RADIATOR_FILE: radiator_tile(spec)}
     for name, image in maps.items():
         (out / name).write_bytes(png_bytes(image))
+    if spec.get("cockpit"):
+        (out / cabin_layout.LABEL_FILE).write_bytes(png_bytes(cockpit_labels(spec["cockpit"])))
     skin = {"file": SKIN_FILE, "period_m": [SKIN_ARC_M, SKIN_LENGTH_M], "gain": 1.0}
     return {"paint_capsule": dict(skin), "paint_cowl": dict(skin),
             "paint_shield": {"file": SHIELD_FILE, "period_m": [SHIELD_SPAN_M, SHIELD_SPAN_M], "gain": 1.0},
             "paint_band": {"file": BAND_FILE, "period_m": list(BAND_PERIOD_M), "gain": 1.0},
             "paint_array": {"file": ARRAY_FILE, "period_m": [s["array_period_m"], s["array_period_m"]], "gain": s["array_gain"]},
             "paint_radiator": {"file": RADIATOR_FILE, "period_m": list(radiator_period_m(spec)), "gain": 1.0}}
+
+
+# ---------- cockpit key labels (Task 5b) ----------
+LABEL_LINE_SHARE = 0.30  # [E] letter line height as a share of the key face height (two lines on a 16 mm key: ~3.5 mm capitals, conv_42860a)
+LABEL_MARGIN_SHARE = 0.10  # [E] free border of the key face
+
+
+def _label_lines(text: str, font_for, width_px: int, height_px: float, max_lines: int = 3) -> tuple:
+    """Greedy word wrap; the font shrinks until every line fits the width and the block the height. Returns (lines, font)."""
+    words = text.split()
+    for size_share in (1.0, 0.9, 0.8, 0.72, 0.64, 0.56, 0.5, 0.44):
+        font = font_for(size_share)
+        lines, cur = [], ""
+        for w in words:
+            trial = (cur + " " + w).strip()
+            if font.getlength(trial) <= width_px or not cur:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = w
+        lines.append(cur)
+        if (len(lines) <= max_lines and all(font.getlength(l) <= width_px for l in lines)
+                and len(lines) * font.getbbox("HG")[3] * 1.15 <= height_px):
+            return lines, font
+    return lines, font
+
+
+def cockpit_labels(cockpit: dict) -> np.ndarray:
+    """The key-label atlas (cabin_layout.label_cells): per labelled key a cell of its face size with the label in capitals, centred; a round
+    key carries its label in the upper half and a ring below it (the photo's round keys). LINEAR coverage in RGB (A = 255): the cabin shader
+    mixes the label albedo by it. Font: Pillow's bundled Aileron Regular (CC0)."""
+    from PIL import Image, ImageDraw, ImageFont
+    cells, (width, height) = cabin_layout.label_cells(cockpit)
+    image = Image.new("L", (width, height), 0)
+    draw = ImageDraw.Draw(image)
+    buttons = {b["id"]: b for b in cockpit["button"]}
+    for bid, (u0, v0, u1, v1) in cells.items():
+        x0, y0, x1, y1 = round(u0 * width), round(v0 * height), round(u1 * width), round(v1 * height)
+        w, h = x1 - x0, y1 - y0
+        round_key = buttons[bid]["shape"] == "round"
+        text_h = h * (0.5 if round_key else 1.0)
+        margin = LABEL_MARGIN_SHARE * min(w, h)
+        lines, font = _label_lines(buttons[bid]["label"].upper(), lambda s: ImageFont.load_default(size=max(6, round(LABEL_LINE_SHARE * h * s))), round(w - 2 * margin), text_h - 2 * margin, 1 if round_key else 3)
+        line_h = font.getbbox("HG")[3] * 1.15
+        top = y0 + margin + max(0.0, (text_h - 2 * margin - line_h * len(lines)) / 2.0)
+        for k, line in enumerate(lines):
+            draw.text((x0 + w / 2.0, top + k * line_h), line, fill=255, font=font, anchor="mt")
+        if round_key:
+            r = 0.17 * min(w, h)
+            cx, cy = x0 + w / 2.0, y0 + 0.72 * h
+            draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=255, width=max(2, round(0.035 * h)))
+    a = np.asarray(image, dtype=np.uint8)
+    return np.dstack([a, a, a, np.full_like(a, 255)])

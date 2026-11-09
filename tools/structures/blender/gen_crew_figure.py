@@ -19,10 +19,10 @@ from mathutils import Vector  # noqa: E402
 V = Vector
 SIDES = 14  # [E] sides of limb sections
 TORSO_SIDES = 20  # [E] sides of the torso sections
-HELMET_SIDES = 36  # [E] sides of the helmet shell (a smooth silhouette at close range)
+HELMET_SIDES = 48  # [E] columns (azimuth) of the helmet shell (a smooth silhouette at close range, the facets crisp)
 CAP_STEPS = 3  # [E] rings of a rounded end
-HELMET_BOTTOM_T = -0.75  # [E] the helmet shell is cut flat at this fraction of its height below the centre (the neck ring closes it)
-HELMET_RINGS = 24  # [E] rings of the helmet shell
+HELMET_RINGS = 30  # [E] rows of the helmet shell from the sloped bottom cut to the crown
+HELMET_TOP_EL = 89.0  # [E] the columns stop here; a fan closes the crown
 VISOR_COLS, VISOR_ROWS = 24, 16
 RIM_SIDES = 14  # [E] sides of the rim bead's cross section
 PIVOT_SIDES = 20  # [E] sides of the round visor-pivot button
@@ -131,65 +131,77 @@ def build_torso(cfg, parts, bones):
 def build_helmet(cfg, parts):
     h, pose = cfg["helmet"], cfg["pose"]
     c = V((pose["head_centre_up_m"], pose["head_centre_forward_m"], 0.0))
-    # ellipsoid shell about the centre: axis up (x), u = depth (y), v = width (z)
-    build_shell(h, parts.mesh("head", "helmet"), c)
-    # collar: a wider grey ring under the helmet shell (eva_suit_detail2), slightly flared at the top where the helmet's lower rim sits on it
-    top = c.x + HELMET_BOTTOM_T * h["half_below_m"] + 0.02
-    cr, ch, nr = h["collar_radius_m"], h["collar_height_m"], cfg["suit"]["neck_radius_m"]
-    loft(parts.mesh("neck", "collar"), V((top - ch, c.y, 0.0)), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0),
-         [(0.0, nr * 1.15, nr * 1.15, 0.0, 0.0), (0.2 * ch, cr * 0.94, cr * 0.94, 0.0, 0.0), (0.7 * ch, cr, cr, 0.0, 0.0), (ch, cr * 1.04, cr * 1.04, 0.0, 0.0)],
-         SIDES, "neck_ring", True, True)
+    rim = build_shell(h, parts.mesh("head", "helmet"), c)
+    build_hood(cfg, parts.mesh("neck", "collar"), c, rim)
     build_visor(cfg, parts, c)
 
 
-def shell_point(h, c, t, phi):
-    """Egg-shaped shell (round 4, eva_suit_detail2): ellipsoid rings about the up axis, narrower toward the front (egg_taper), with a low crown
-    ridge along the sagittal line over the top (crown_ridge_m / crown_ridge_width_m). t = height fraction (-1..1), phi = 0 forward, + toward the left."""
-    r = math.sqrt(max(0.0, 1.0 - t * t))
-    y = h["half_depth_m"] * r * math.cos(phi)
-    z = h["half_width_m"] * r * math.sin(phi) * (1.0 - h["egg_taper"] * math.cos(phi))
-    x = t * (h["half_above_m"] if t > 0 else h["half_below_m"])
-    lift = min(1.0, max(0.0, (t - 0.3) / 0.4))
-    front = min(1.0, max(0.0, (y / h["half_depth_m"] - 0.2) / 0.3))  # the ridge fades out before the visor's top edge
-    x += (h["crown_ridge_m"] * lift * lift * (3.0 - 2.0 * lift) * (1.0 - front * front * (3.0 - 2.0 * front))
-          * math.exp(-(z / h["crown_ridge_width_m"]) ** 2))
-    return c + V((x, y, z))
+def shell_at(h, c, el, az):
+    """(point, normal) on the helmet shell (figure_layout.helmet_point) in the figure frame."""
+    p, n = fl.helmet_point(h, el, az)
+    return c + V(p), V(n)
 
 
 def build_shell(h, mesh, c):
-    ts = [HELMET_BOTTOM_T + (1.0 - HELMET_BOTTOM_T) * i / (HELMET_RINGS - 1) for i in range(HELMET_RINGS)]
-    rings = [[shell_point(h, c, t, 2.0 * math.pi * k / HELMET_SIDES) for k in range(HELMET_SIDES)] for t in ts]
-    for i in range(len(ts) - 1):
-        for k in range(HELMET_SIDES):
-            k1 = (k + 1) % HELMET_SIDES
-            quad = [rings[i][k], rings[i][k1], rings[i + 1][k1], rings[i + 1][k]]
-            mid = sum(quad, V((0, 0, 0))) / 4.0
-            if len({(round(p.x, 7), round(p.y, 7), round(p.z, 7)) for p in quad}) < 3:
-                continue
-            mesh.face(quad, [(k / HELMET_SIDES, i / len(ts)), (k1 / HELMET_SIDES, i / len(ts)), (k1 / HELMET_SIDES, (i + 1) / len(ts)), (k / HELMET_SIDES, (i + 1) / len(ts))],
-                      mid - c, "helmet")
-    bottom = c + V((ts[0] * h["half_below_m"], 0.0, 0.0))
+    """Task 5b: the compact faceted shell (figure_layout.helmet_*): columns of constant azimuth from the sloped bottom cut to the crown, one
+    smooth group (per-facet groups left a zig-zag of shading along the facet edges, which cross the columns at an angle). Returns the bottom rim [(point, normal)] per column (the hood's top)."""
+    azs = [360.0 * k / HELMET_SIDES for k in range(HELMET_SIDES)]
+    cols = []
+    for az in azs:
+        e0 = fl.helmet_bottom_el(h, az)
+        cols.append([shell_at(h, c, e0 + (HELMET_TOP_EL - e0) * i / (HELMET_RINGS - 1), az) for i in range(HELMET_RINGS)])
     for k in range(HELMET_SIDES):
         k1 = (k + 1) % HELMET_SIDES
-        mesh.face([bottom, rings[0][k1], rings[0][k]], [(0.5, 0.5), (1.0, 0.0), (0.0, 0.0)], V((-1.0, 0.0, 0.0)), "helmet")
+        for i in range(HELMET_RINGS - 1):
+            quad = [cols[k][i][0], cols[k1][i][0], cols[k1][i + 1][0], cols[k][i + 1][0]]
+            if len({(round(p.x, 7), round(p.y, 7), round(p.z, 7)) for p in quad}) < 3:
+                continue
+            mid = sum(quad, V((0, 0, 0))) / 4.0
+            mesh.face(quad, [(k / HELMET_SIDES, i / HELMET_RINGS), (k1 / HELMET_SIDES, i / HELMET_RINGS), (k1 / HELMET_SIDES, (i + 1) / HELMET_RINGS),
+                             (k / HELMET_SIDES, (i + 1) / HELMET_RINGS)], mid - c, "shell")
+    top = c + V((fl.helmet_rho(h, (1.0, 0.0, 0.0)), 0.0, 0.0))
+    for k in range(HELMET_SIDES):  # close the crown (the columns stop just under the pole)
+        k1 = (k + 1) % HELMET_SIDES
+        mesh.face([cols[k][-1][0], cols[k1][-1][0], top], [(0.0, 0.0), (1.0, 0.0), (0.5, 1.0)], V((1.0, 0.0, 0.0)), "shell")
+    return [col[0] for col in cols]
 
 
-def ellipsoid_point(h, c, el_deg, az_deg):
-    """Point and outward unit normal on the helmet ellipsoid at elevation / azimuth (az 0 = forward, positive toward the figure's left)."""
-    e, a = math.radians(el_deg), math.radians(az_deg)
-    d = V((math.sin(e), math.cos(e) * math.cos(a), math.cos(e) * math.sin(a)))
-    rx = h["half_above_m"] if d.x > 0 else h["half_below_m"]
-    radii = V((rx, h["half_depth_m"], h["half_width_m"] * (1.0 - h["egg_taper"] * math.cos(a))))  # the shell's egg taper (shell_point)
-    p = c + V((radii.x * d.x, radii.y * d.y, radii.z * d.z))
-    n = V((d.x / radii.x, d.y / radii.y, d.z / radii.z)).normalized()
-    return p, n
+def build_hood(cfg, mesh, c, rim):
+    """The grey knit neck hood (spacex-anzug): from an elliptical base ring on the shoulders (collar_height_m below the helmet centre,
+    neck_lean_m behind it, half depth collar_radius_m, half width 0.9 of it) up to the shell's sloped lower edge (3 mm inside it)."""
+    h, pose = cfg["helmet"], cfg["pose"]
+    base = V((c.x - h["collar_height_m"], c.y - pose["neck_lean_m"], 0.0))
+    ry, rz = h["collar_radius_m"], 0.9 * h["collar_radius_m"]
+    n = len(rim)
+    rings = []
+    for t in (0.0, 0.35, 0.7, 1.0):
+        ring = []
+        for k, (p_top, n_top) in enumerate(rim):
+            az = 2.0 * math.pi * k / n
+            p_base = base + V((0.0, ry * math.cos(az), rz * math.sin(az)))
+            p = p_base.lerp(p_top - n_top * 0.003, t)
+            ring.append(p)
+        rings.append(ring)
+    axis_top = sum((p for p, _ in rim), V((0, 0, 0))) / n
+    for i in range(len(rings) - 1):
+        for k in range(n):
+            k1 = (k + 1) % n
+            quad = [rings[i][k], rings[i][k1], rings[i + 1][k1], rings[i + 1][k]]
+            mid = sum(quad, V((0, 0, 0))) / 4.0
+            axis = base.lerp(axis_top, (i + 0.5) / (len(rings) - 1))
+            mesh.face(quad, [(k / n, i / 3.0), (k1 / n, i / 3.0), (k1 / n, (i + 1) / 3.0), (k / n, (i + 1) / 3.0)], mid - axis, "hood")
+    for k in range(n):  # flat bottom on the shoulders (hidden in the suit)
+        k1 = (k + 1) % n
+        mesh.face([base, rings[0][k1], rings[0][k]], [(0.5, 0.5), (1.0, 0.0), (0.0, 0.0)], V((-1.0, 0.0, 0.0)), "hood_base")
 
 
-def opening_node(i, j):
-    """Grid node (i, j) mapped from the square grid onto a rounded opening (square-to-disc blend): (az fraction, el fraction) in -1..1."""
-    a, b = 2.0 * j / VISOR_COLS - 1.0, 2.0 * i / VISOR_ROWS - 1.0
-    k = 0.55
-    return a * (1.0 - k + k * math.sqrt(max(0.0, 1.0 - 0.5 * b * b))), b * (1.0 - k + k * math.sqrt(max(0.0, 1.0 - 0.5 * a * a)))
+def opening_node(h, i, j, inset=0.0):
+    """Grid node (i, j) of the face opening (visor_outline): (elevation, azimuth) in degrees; i = 0 the chin tip row, VISOR_ROWS the brow."""
+    e0, e1 = fl.visor_el_range(h)
+    el = e0 + inset + (e1 - e0 - 2.0 * inset) * i / VISOR_ROWS
+    half = fl.visor_half_az(h, e0 + (e1 - e0) * i / VISOR_ROWS)  # the width of the frame's row: an inset bead never reaches past the frame
+    half = max(half - inset, 0.4 * half)
+    return el, (2.0 * j / VISOR_COLS - 1.0) * half
 
 
 def visor_bulge(h, i, j):
@@ -201,21 +213,17 @@ def visor_bulge(h, i, j):
 
 
 def build_visor(cfg, parts, c):
-    """The closed visor: a forward-domed outer and an inner patch over the helmet ellipsoid and a rim, one solid (own surface), plus the white rim ring (helmet surface)."""
+    """The closed visor: a forward-domed outer and an inner patch over the shell and a rim, one solid (own surface), plus the white frame bead
+    (helmet surface), the black seal inside it and the pivot buttons."""
     h = cfg["helmet"]
     mesh = parts.mesh("head", "visor")
-    outer, inner, shell_pts, normals = {}, {}, {}, {}
+    outer, inner = {}, {}
     for i in range(VISOR_ROWS + 1):
         for j in range(VISOR_COLS + 1):
-            fa, fe = opening_node(i, j)
-            el = 0.5 * (h["visor_up_deg"] + h["visor_down_deg"]) + 0.5 * (h["visor_up_deg"] - h["visor_down_deg"]) * fe
-            az = h["visor_half_angle_deg"] * fa
-            p, n = ellipsoid_point(h, c, el, az)
+            p, n = shell_at(h, c, *opening_node(h, i, j))
             bulge = visor_bulge(h, i, j)
             outer[i, j] = p + n * bulge
             inner[i, j] = p + n * (bulge - h["visor_thickness_m"])
-            normals[i, j] = n
-            shell_pts[i, j] = p + n * (h["visor_edge_m"] * 0.5)
     for i in range(VISOR_ROWS):
         for j in range(VISOR_COLS):
             ids = [(i, j), (i, j + 1), (i + 1, j + 1), (i + 1, j)]
@@ -230,26 +238,23 @@ def build_visor(cfg, parts, c):
     for a, b in edges:
         mid = (outer[a] + outer[b]) / 2.0
         mesh.face([outer[a], outer[b], inner[b], inner[a]], [(0, 0), (1, 0), (1, 1), (0, 1)], mid - centre)
-    # the rim ring: a round bar along the visor's boundary (the white brow band of detail2), in the helmet material
+    # one continuous swept bead each (smooth, shared vertices): the thin white visor frame on the opening's edge and, just inside it, the black
+    # seal that lines the face opening (spacex-anzug: a thin dark line between the white shell and the visor)
     loop = ([(0, j) for j in range(VISOR_COLS + 1)] + [(i, VISOR_COLS) for i in range(1, VISOR_ROWS + 1)]
             + [(VISOR_ROWS, j) for j in range(VISOR_COLS - 1, -1, -1)] + [(i, 0) for i in range(VISOR_ROWS - 1, 0, -1)])
-    # one continuous swept bead each (smooth, shared vertices): the white visor frame on the opening's edge and, just inside it, the black seal
-    # that lines the face opening (eva_suit_detail2: a black ring between the white shell and the visor)
-    el_mid = 0.5 * (h["visor_up_deg"] + h["visor_down_deg"])
     for material, radius, inset in (("helmet", h["rim_radius_m"], 0.0), ("boots", h["liner_radius_m"], h["liner_inset_deg"])):
         pts = {}
         for key in loop:
-            fa, fe = opening_node(*key)
-            half_el = 0.5 * (h["visor_up_deg"] - h["visor_down_deg"]) - inset
-            p, n = ellipsoid_point(h, c, el_mid + half_el * fe, (h["visor_half_angle_deg"] - inset) * fa)
+            p, n = shell_at(h, c, *opening_node(h, *key, inset=inset))
             pts[key] = (p + n * (h["visor_edge_m"] * 0.5), n)
         sweep_bead(parts.mesh("head", material), loop, pts, radius, ("rim", material))
-    # the visor-pivot buttons: a low round grey disc on each side of the shell behind the opening, at jaw height (jsc2024e066389 / 066390;
-    # round 4's slim black bracket at eye height read as a flat slab). Its foot sinks into the shell so the curved surface leaves no gap.
+    # the visor-pivot buttons: a low round grey disc on each side of the shell behind the opening, at jaw height (jsc2024e066389 / 066390).
+    # Its foot sinks into the shell so the curved surface leaves no gap.
     button = parts.mesh("head", "collar")
     r_b, h_b = h["pivot_button_radius_m"], h["pivot_button_height_m"]
+    az_b = fl.visor_half_az(h, h["pivot_el_deg"]) + h["pivot_az_offset_deg"]
     for side in (-1.0, 1.0):
-        p, n = ellipsoid_point(h, c, h["pivot_el_deg"], side * (h["visor_half_angle_deg"] + h["pivot_az_offset_deg"]))
+        p, n = shell_at(h, c, h["pivot_el_deg"], side * az_b)
         vc.tube(button, p - n * (0.5 * r_b), p + n * h_b, r_b, PIVOT_SIDES, ("pivot", side), cap0=False, radius1=0.85 * r_b)
 
 

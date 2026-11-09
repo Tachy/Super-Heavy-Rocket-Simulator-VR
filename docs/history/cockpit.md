@@ -35,3 +35,13 @@ rim 20 mm, grey pivot housings 24 x 70 x 50 mm.
 ## Fix round 2 helmet (superseded by rounds 3 and 4)
 - Helmet: shell half width 0.150 x depth 0.170, visor +-72 deg x -28..+58 deg with a 45 mm dome bulge, white rim ring (tube loop), collar r 0.112. Visor stays closed and copper (dark coating, metallic 0.8).
   Helmet shell albedo neutral (0.80). Materials: housing matte near black (specular 0.1; the beige sheen came from the metallic 0.1 / roughness 0.55 specular of the lamps), tablets no metal sheen.
+
+## Rounds 4-5 helmet shell and the fix-round-5 grey parts (superseded by Task 5b)
+- Round 4 / 5 helmet against eva_suit_detail2: egg-shaped ellipsoid shell (half width 0.150, half depth 0.170, above 0.20, below 0.17, `egg_taper` 0.08), cut flat at
+  -0.75 of the lower half, a low crown ridge (6 mm, 1/e width 30 mm, fading before the visor), opening +-62 deg x -40..+38 deg (square-to-disc map), closed visor
+  dome 35 mm, white frame bead r 16 mm with the black seal r 12 mm 4 deg inside, round pivot buttons 13 deg behind the opening at el -30, grey collar ring r 0.112 x 0.07 m.
+  Why superseded: the user's clean side profile (spacex-anzug.jpg) showed the shell 0.375 m deep against 0.28 m measured at the opening-height ruler ("bulbous"),
+  no crown ridge, a faceted rear, a sloped lower edge with the grey hood under it and a much larger opening (to the temple).
+- Fix round 5 open point "boots, seal and pivot read ~0.5 sRGB" (AgX pivot at field key 1.2): under the unified appearance model (look fixes, field key 0.2) the
+  boots read 0.15 sRGB in hatch_crew1_1 (Task 5b re-check), so the point is closed.
+

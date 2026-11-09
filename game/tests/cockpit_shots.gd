@@ -5,6 +5,8 @@
 #                          + gopro_vs_discovery2 / gopro_overlay_discovery2 and, as discovery1 has the same framing, gopro_vs_discovery1
 #   hatch_crew1_1          from the open hatch toward the seat row (3:2, fitted: 96 deg horizontal, 8 deg up), hatch frame and exterior hull
 #                          hidden; + hatch_vs_crew1_1
+#   helmet_34 / helmet_side / helmet_profile / helmet_closeup  the pilot's (s3) helmet, isolated; + helmet_vs_detail2 / _detail1 / _demo1_2,
+#                          helmet_side_vs_jsc066389, helmet_side_vs_spacex_anzug (pure side view, Task 5b)
 # godot --path game --script res://tests/cockpit_shots.gd -- --mission=falcon9_crew_dragon --t_plus=-60 --out_dir=<abs>/screenshots/m7-cockpit/look
 #   --fov=100 (pilot_eye, horizontal deg)  --crew=<n> (default the mission's)  --refs=<abs dir of the reference photos>
 #   --field_key=<0.2..1> (the eye adaptation's field background for every shot; default the game's Y_b 0.2, look fixes T13;
@@ -211,7 +213,9 @@ func _define_shots() -> void:
 	var helmet_c: Vector3 = s3["hip"] + up_back * 0.80 + chest * 0.17
 	var helmet_cam := helmet_c + chest * 0.75 + Vector3(0.0, 0.0, 0.30) - up_back * 0.02
 	var helmet_views: Array = []
-	for view: Array in [["helmet_34", 38.0, 0.75, 48.0], ["helmet_side", 62.0, 0.75, 48.0]]:  # like-for-like with eva_suit_detail2 (three-quarter), detail1 / demo1_2 (more from the side)
+	# like-for-like with eva_suit_detail2 (three-quarter), detail1 / demo1_2 / jsc2024e066389 (more from the side); helmet_profile: the pure side view
+	# from the pilot's right (facing right in the image) like spacex-anzug.jpg (Task 5b)
+	for view: Array in [["helmet_34", 38.0, 0.75, 48.0], ["helmet_side", 62.0, 0.75, 48.0], ["helmet_profile", -90.0, 1.1, 40.0]]:
 		var az := deg_to_rad(float(view[1]))
 		var cam := helmet_c + (chest * cos(az) + Vector3(0.0, 0.0, 1.0) * sin(az)) * float(view[2])
 		helmet_views.append({"name": view[0], "local": Transform3D(Basis.looking_at(helmet_c - cam, up_back), cam), "fov": float(view[3]), "hide_exterior": false, "isolate": true})
@@ -310,6 +314,8 @@ func _compose() -> void:
 	_side_by_side("helmet_34", "../eva_suit_detail2", "helmet_vs_detail2", false)
 	_side_by_side("helmet_side", "../eva_suit_detail1", "helmet_vs_detail1", false)
 	_side_by_side("helmet_side", "demo1_2", "helmet_vs_demo1_2", false)
+	_side_by_side("helmet_side", "../nasa/jsc2024e066389", "helmet_side_vs_jsc066389", false)
+	_side_by_side("helmet_profile", "../user/anzug/spacex-anzug", "helmet_side_vs_spacex_anzug", false)
 
 
 ## Our shot and the photo (reference photos stay outside the repo) scaled to our height, next to each other or blended 50 %.

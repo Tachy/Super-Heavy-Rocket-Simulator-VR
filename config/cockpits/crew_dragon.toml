@@ -162,11 +162,14 @@ size_m = [0.15, 0.165]              # [E] see 5
 # its normal; +-0.02 m along the row, +-0.03 m elsewhere. panel = the screen above (its normal and up apply). shape round = a
 # round push button with a ring, rect = a labelled push button. Functions only with evidence; "none" = drawn, inert.
 # Under the left screen (clusters A and B): camera direct keys by the user's decision (spec 2026-11-07 item 5), slots upper row
-# left to right, then lower row. The real labels there are unreadable; Engadget 2018 names the panel groups Commands, Pyros,
-# Displays, Power (no per-button functions).
+# left to right, then lower row. Engadget 2018 names the panel groups Commands, Pyros, Displays, Power (no per-button functions).
+# label (Task 5b, optional): the text printed on the key, only where a photo shows it legibly (conv_42860a, the Crew Dragon 2020 module row:
+# the same 5 + 3 / 5 + 5 / 4 + 3 key layout as discovery10); keys without `label` get a blank key face. The camera keys keep their
+# function (user decision) although the real keys carry the abort / fire / power labels.
 
 [[button]]
 id = "cam1"                         # [E] cluster A upper row, round
+label = "CANCEL"                  # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, round key at its left end
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
 centre_m = [2.3697, 0.0558, 0.5450]   # [E] shifted 0.025 with the screen row; discovery10 x 402 px on the left screen's edge 340-830
@@ -179,6 +182,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam2"                         # [E] cluster A upper row
+label = "WATER DEORBIT"           # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
 centre_m = [2.3705, 0.0569, 0.5240]   # [E] shifted 0.025 with the screen row; discovery10 x 429 px
@@ -191,6 +195,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam3"                         # [E] cluster A upper row
+label = "DEORBIT NOW"             # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
 centre_m = [2.3705, 0.0569, 0.4990]   # [E] shifted 0.025 with the screen row; discovery10 x 460 px
@@ -203,6 +208,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam4"                         # [E] cluster A upper row
+label = "BREAKOUT"                # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
 centre_m = [2.3705, 0.0569, 0.4720]   # [E] shifted 0.025 with the screen row; discovery10 x 496 px
@@ -215,6 +221,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam5"                         # [E] cluster A upper row, round
+label = "EXECUTE"                 # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, round key at its right end
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
 centre_m = [2.3697, 0.0558, 0.4440]   # [E] shifted 0.025 with the screen row; discovery10 x 531 px
@@ -227,6 +234,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam6"                         # [E] cluster B upper row, round
+label = "POWER 1"                 # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, round key
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
 centre_m = [2.3705, 0.0569, 0.4060]   # [E] shifted 0.025 with the screen row; discovery10 x 580 px
@@ -239,6 +247,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam7"                         # [E] cluster B upper row
+label = "STRING 1A"               # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
 centre_m = [2.3707, 0.0560, 0.3780]   # [E] shifted 0.025 with the screen row; discovery10 x 616 px
@@ -251,6 +260,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam8"                         # [E] cluster B upper row
+label = "STRING 1B"               # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
 centre_m = [2.3705, 0.0569, 0.3470]   # [E] shifted 0.025 with the screen row; discovery10 x 656 px
@@ -263,6 +273,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam9"                         # [E] cluster B upper row
+label = "STRING 1C"               # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
 centre_m = [2.3695, 0.0568, 0.3150]   # [E] shifted 0.025 with the screen row; discovery10 x 696 px
@@ -275,6 +286,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam10"                        # [E] cluster B upper row, round
+label = "RESET 1"                 # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, round key
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
 centre_m = [2.3695, 0.0568, 0.2810]   # [E] shifted 0.025 with the screen row; discovery10 x 741 px
@@ -287,6 +299,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam11"                        # [E] cluster A lower row
+label = "DEPRESS RESPONSE"        # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
 centre_m = [2.3496, 0.0776, 0.5110]   # [E] shifted 0.025 with the screen row; discovery10 x 446 px
@@ -299,6 +312,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam12"                        # [E] cluster A lower row
+label = "SUPPRESS FIRE"           # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
 centre_m = [2.3496, 0.0776, 0.4880]   # [E] shifted 0.025 with the screen row; discovery10 x 475 px
@@ -311,6 +325,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam13"                        # [E] cluster A lower row
+label = "FIRE RESPONSE"           # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
 centre_m = [2.3486, 0.0775, 0.4620]   # [E] shifted 0.025 with the screen row; discovery10 x 509 px
@@ -323,6 +338,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam14"                        # [E] cluster B lower row, round
+label = "POWER 2"                 # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, round key
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
 centre_m = [2.3496, 0.0776, 0.3950]   # [E] shifted 0.025 with the screen row; discovery10 x 594 px
@@ -335,6 +351,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam15"                        # [E] cluster B lower row
+label = "STRING 2A"               # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
 centre_m = [2.3486, 0.0775, 0.3680]   # [E] shifted 0.025 with the screen row; discovery10 x 629 px
@@ -347,6 +364,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam16"                        # [E] cluster B lower row
+label = "STRING 2B"               # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
 centre_m = [2.3484, 0.0784, 0.3390]   # [E] shifted 0.025 with the screen row; discovery10 x 667 px
@@ -359,6 +377,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam17"                        # [E] cluster B lower row
+label = "STRING 2C"               # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
 centre_m = [2.3496, 0.0776, 0.3060]   # [E] shifted 0.025 with the screen row; discovery10 x 708 px
@@ -371,6 +390,7 @@ evidence = "user decision: keys under the left screen = cameras; real label unre
 
 [[button]]
 id = "cam18"                        # [E] cluster B lower row, round
+label = "RESET 2"                 # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, round key
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
 centre_m = [2.3494, 0.0786, 0.2720]   # [E] shifted 0.025 with the screen row; discovery10 x 752 px
@@ -407,6 +427,7 @@ evidence = "training2 (2018 mock-up) JETTISON + unreadable second line; discover
 
 [[button]]
 id = "c_mains_only"                 # [E] cluster C upper row
+label = "MAINS ONLY"              # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), right module, upper row (training2 the same)
 panel = "centre"                    # [E] discovery10
 row = 1                             # [E] discovery10
 centre_m = [2.3697, 0.0558, 0.2000]   # [E] discovery10 x 888 px
@@ -418,6 +439,7 @@ evidence = "label MAINS ONLY: training2 (Engadget 2018 mock-up, readable); disco
 
 [[button]]
 id = "c_drogues_mains"              # [E] cluster C upper row
+label = "DROGUES & MAINS"         # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), right module, upper row (training2 the same)
 panel = "centre"                    # [E] discovery10
 row = 1                             # [E] discovery10
 centre_m = [2.3697, 0.0558, 0.1730]   # [E] discovery10 x 938 px
@@ -475,6 +497,7 @@ evidence = "training2 handle labelled EJECT (2018 mock-up); Engadget 2018-08-14 
 
 [[button]]
 id = "r_backup_g_meter"             # [E] three-line label right of the handle
+label = "ENABLE BACKUP G-METER"   # [E] key label: training2 mock-up label right of the handle (Task 1)
 panel = "centre"                    # [E] discovery10
 row = 2                             # [E] discovery10
 centre_m = [2.3486, 0.0775, -0.1460]  # [E] discovery10 x 1531 px
