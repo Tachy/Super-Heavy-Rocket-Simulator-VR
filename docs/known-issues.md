@@ -289,3 +289,10 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   sun-only / sky-only renders at 5 km) against the plate's 14 % expected for a thick top (Sun and sky light reflected
   alike) - clouds lit in the direct beam's colour.
   Report: `.superpowers/sdd/2026-11-07-look-fixes/bug-horizon-report.md`.
+
+## Look-fixes plan, open gate misses (final review 2026-11-09)
+
+- Suite gate `lunar_day_apollo11.ground_luma` (`tools/look_reference_suite.py`): 114.5 against the lower bound 115 (T13
+  fix 1 state). Open user decision: the Gilchrist area rule or the Moon-day lever (eye-adaptation.md).
+- `moon_surface_check` fails 2 checks, pre-existing (the same 2 at HEAD with the look-fixes T5 round stashed, T5 report,
+  not colour): the rock layer's camera-jump timing (see "Boulder-field camera jump" above) and the detail-off leaf morph.

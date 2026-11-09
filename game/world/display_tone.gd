@@ -8,14 +8,15 @@ extends RefCounted
 ## the ocean's colour ratio B/R at mid-high scene values and turns their OkLab hue by ~7 deg (look investigation
 ## 2026-11-07, F3). A plain luminance curve keeps B/R but its clip (a channel above 1 pulled toward grey in linear RGB)
 ## turns saturated blues violet. Here, per pixel x (scene-linear Rec.709 after the eye's post step):
-## 1. the luminance Y = BT.709 . x goes through AgX's own grey curve (the allenwp curve, Godot's contrast and white):
-##    g = awp(Y) - the tonality of the former image on the grey axis, unchanged;
+## 1. the luminance Y = BT.709 . x goes through the fixed display curve g = display_curve(Y) (since T13: linear to the
+##    knee, log-quadratic shoulder to the display white, BT.2408 headroom; T5 .. T12 and `--display_curve=agx`: AgX's own
+##    grey curve awp(Y), the allenwp curve with Godot's contrast and white);
 ## 2. the colour keeps its chromaticity: d0 = x g / Y. OkLab [S: B. Ottosson 2020, "A perceptual color space for image
 ##    processing", bottosson.github.io/posts/oklab] is homogeneous of degree 1/3, so d0 has x's OkLab hue exactly and
 ##    its chroma / lightness ratio;
 ## 3. the daylight Hunt factor (EyeAdaptation.display_hunt, >= 1): OkLab chroma x S at constant lightness and hue;
 ## 4. path to white [call]: the chroma fades to 0 (smoothstep in log2 Y) from PATH_TO_WHITE_START (scene 2, above a
-##    sunlit white plate at DAY_EXPOSURE 1.5) to AgX's white (16.29) - the Sun's disc, glints and the brightest highlights
+##    sunlit white plate) to AgX's white (16.29; above the display curve's own white, so the path still runs there) - the Sun's disc, glints and the brightest highlights
 ##    end in display white as with AgX;
 ## 5. gamut mapping at constant OkLab lightness and hue [call]: C_max(L, h) is the largest chroma AgX can still show
 ##    (in the sRGB cube and reachable from a non-negative AgX input, bisection); C / C_max is compressed softly above

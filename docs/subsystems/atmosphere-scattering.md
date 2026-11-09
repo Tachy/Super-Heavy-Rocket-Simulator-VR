@@ -38,7 +38,8 @@ vehicles still fly through `Us76Atmosphere`).
   over a footprint of radius max(50 km [E], 0.5 x the distance to the horizon) [call] (a 2x2-mean pyramid from 1024 x 512,
   bilinear in place, blended between levels: continuous). Starbase pad ~0.5, open Gulf 1, inland Texas 0, ISS orbit the
   footprint's mix. The single Mie part is carried against the continental phase function (single_mie x p_c, with the
-  maritime part x p_m / p_c), exact at every nu. `render_check --maritime=<w>` fixes w (A/B).- **WGS84.** Evaluated in a space where the ellipsoid becomes the sphere of radius a (polar axis x a/b = 1.00336):
+  maritime part x p_m / p_c), exact at every nu. `render_check --maritime=<w>` fixes w (A/B).
+- **WGS84.** Evaluated in a space where the ellipsoid becomes the sphere of radius a (polar axis x a/b = 1.00336):
   ground matches the ellipsoid (test: < 1 mm at 0/30/60/90 deg), optical paths off by at most 0.34 %. Rays and the
   Sun map by that stretch, normals by its inverse transpose; the direct-sun cosine is taken in true ITRF geometry. CPU
   and shaders use the same mapping.

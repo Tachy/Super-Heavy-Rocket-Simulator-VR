@@ -275,9 +275,10 @@ var glare_add := GlareSpreadEffect.new(true, GlareSpreadEffect.Stage.ADD, glare_
 ## The field beyond the frame (look fixes T4; AdaptationSurround, fidelity flag AdaptationSurround.enabled): the
 ## out-of-frame directions within 70 deg of the view axis, from the analytic model (_surround_luminance).
 var adaptation_surround := AdaptationSurround.new()
-## Set by World every frame before update: the frame's view for the surround ({} = none: the frame alone) and the near
-## imagery's albedo profile around the eye (GroundAlbedoNear; empty: the tables' ground albedo).
+## Set by World every frame before update: the frame's view for the surround ({} = none: the frame alone).
 var adaptation_view := {}
+## Set by World every frame before update: the near imagery's albedo profile around the eye (GroundAlbedoNear; empty:
+## the tables' ground albedo).
 var surround_albedo_profile := PackedVector3Array()
 ## Fidelity flag (Task 14): the eye adapts to the field it sees (AdaptationMeter, EyeAdaptation.FIELD_MID_GREY); off,
 ## or until the meter has measured the view: the white-plate rule (adaptation_luminance). The user argument

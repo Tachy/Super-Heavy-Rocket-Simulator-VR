@@ -1,6 +1,7 @@
 # Eye adaptation, night vision and Moon light (M8)
 
-History and the reasons behind superseded decisions: `docs/history/atmosphere-rendering.md`.
+History and the reasons behind superseded decisions: `docs/history/atmosphere-rendering.md`,
+`docs/history/eye-adaptation.md` (fix-round accounts, A/B numbers).
 
 Plan `docs/superpowers/archive/plans/2026-10-24-m8-atmosphere.md`, spec
 `docs/superpowers/archive/specs/2026-10-24-m8-atmosphere-design.md`.
@@ -297,11 +298,14 @@ shaders:
     Active only while the Moon's plate is at least 0.1 % of the adaptation luminance. Its colour: the regolith's on the
     Sun's (`moon_light_colour`, global `atmosphere_moon_colour`, luminance kept; T5b fix round 1). Left out [call]:
     in-scattered moonlight between ground point and eye, the Moon's parallax (up to 1 deg).
-  - Limits: one adaptation per view (no local / foveal adaptation: bright parts in a dim view still saturate - the
-    full Earth from the lunar night, the full Moon's disc, city lights take the rods' tint); no loss of acuity; glare
-    only of the Sun (the Moon's and the Earth's disability glare not modelled); rods' slower dark adaptation (~30 min) paced like the cones' (110 s); no airglow, zodiacal light or
-    integrated starlight (a moonless sky is black); Jensen's k on the adaptation luminance, not per pixel; B and S one
-    value per view, no Bezold-Bruecke hue shift (lunar day keeps B = 1, S 1.66).
+  - Limits (current): the global adaptation is one value per view (both VR eyes); bright regions adapt locally (T10,
+    `LocalAdaptation`, gaze-free, no foveal weighting) but a structure narrower than ~2 blocks stays white; disability
+    glare is the CIE 146 veil of every source (Sun, Moon, Earth: `GlareSpread`, shown at its source's local factor, the
+    far veil > ~10 deg below the field is invisible); no loss of acuity; the cones' degree of adaptation D is mesopic
+    (CIE 191), the Moon's field tinted toward the regolith; the rods' slower dark adaptation (~30 min) is paced like the
+    cones' (110 s); no airglow, zodiacal light or integrated starlight (a moonless sky is black); Jensen's k on the
+    adaptation luminance, not per pixel; B and S one value per view, no Bezold-Bruecke hue shift (lunar day keeps
+    B = 1, S 1.66). See "Open points and known limits".
 
 - **White balance: the adopted white follows the scene** [look fixes T2, 2026-11-07; T5b fix round 1, user 2026-11-08;
   `EyeAdaptation.white_balance`, `degree_of_adaptation`, `advance_white`, `cone_map`; `Atmosphere.field_illuminant`,
@@ -326,14 +330,6 @@ shaders:
     1 - cos(theta) (1 on the ground, 0.48 at 300 km, 0.23 at 1000 km, ~1e-5 from the Earth: the full Moon from the Earth
     is unchanged). Ground tint B/R 0.786; lunar day ground (suite `lunar_day_apollo11`) displayed B/R 0.638 -> 0.922, full Moon from the Earth 0.788 unchanged; see the
     bug-moon report, gate 0.75-0.95 [Apollo crews: grey, brownish-grey at low Sun]. Test `moon_colour_test.gd`.
-    Why horizontal (fix round 2, review I1): CIECAM02's adopted white is the illuminant of the scene; the scene is
-    mostly horizontal (ground, deck, sea) and daylight is measured as global horizontal light [S: CIE 015:2018 daylight;
-    Judd et al. 1964; Hernandez-Andres et al. 2001, JOSA A 18, 1325]. The luminance plate (Sun at normal incidence +
-    horizontal sky, below) is unchanged; as a colour it weighted the Sun 1 / mu0 too much (1.35 at Sun 48 deg). Units
-    checked (headless print at the pad): `sky_lux` and E_sun are both lux (sky 15 834 lx, Sun 74 646 lx horizontal /
-    100 446 lx normal at Sun 48 deg; sky 17.5 % of the horizontal), so the sky had its weight; the white was warm
-    because the direct beam is (AOD 0.1 at 550 nm, air mass 1.35; with the T9b channel wavelengths 628 / 546 / 444 nm the
-    direct beam is 5135 K, B/R 0.657, as a 1 nm spectrum; before T9b 4940 K = D50).
     Illuminant B/R and CCT [linear Rec.709, McCamy]: pad Sun 48 deg 0.803 / 5706 K since T9b (direct 5135 K, sky 10 726 K,
     sky 17.3 %; white_balance_test, maritime weight of the pad 0.55); before T9b (the values below): 90 deg 0.784 /
     5620 K, 60 deg 0.772 / 5570 K, 48 deg 0.758 / 5510 K (was 0.724 / 5370 K), 30 deg 0.718, 15 deg 0.654, 5 deg 0.753 (sky-dominated; was 0.181), 0 deg
@@ -361,12 +357,6 @@ shaders:
     continuous in L_a. Values: m = 1 for L_A >= 5.06 cd/m^2 (L_a >= 25.3: day, cabin, the lit Moon, space - D
     unchanged, 1e-12), m = 0 for L_mes <= 0.005 (moonless night: the cones keep the colourimetric light, below the rods
     anyway). D at S/P 3 (twilight sky): L_a 10 0.730, 3.16 0.605, 1 0.484, 0.1 0.246.
-    Renders (A = photopic D / B = mesopic D, Starbase, fov 100, el 5, display-linear B/R; `screenshots/look_fixes/
-    t5b_fix3/`): dusk Sun -5.5 deg (L_a 12.2) D 0.829 -> 0.751, sky 1.25 -> 1.36, ground 0.95 -> 1.05; blue hour Sun
-    -7.7 deg (L_a 1.51) D 0.825 -> 0.523, sky 1.42 -> 1.91, ground 1.11 -> 1.38; full-Moon night (L_a 0.067) D 0.824
-    -> 0.186, ground 2.31 -> 2.24, sky 2.79 -> 2.67 (the rods' tint dominates); noon pad, Moon day, cockpit identical
-    (D 1 / m 1). At Sun -5.5 deg the blue stays weak: its L_a is the anchored adaptation (the white-plate rule ~9
-    cd/m^2), photopic by CIE 191 (L_A 2.4: m 0.91), while the frame's own mean is ~2 cd/m^2.
   - Transform: von Kries in CAT02's cone space with CIE 159's partial form, gains D grey / white + 1 - D (grey: the
     display's grey at the illuminant's luminance), W = M^-1 diag(gains) M - D = 0 the identity (the display white
     D65), D = 1 the illuminant drawn grey.
@@ -377,8 +367,6 @@ shaders:
   - Moonlight's colour (`Atmosphere.moon_light_colour`, global `atmosphere_moon_colour`): the moonlit sky, ground, sea
     and vehicles take the regolith's mean colour on the Sun's light (`moon_grey_tint`, luminance kept: K&S's moonlight
     stays the photometric value) - the full Moon's B-V 0.92 against the Sun's 0.65, before left out [call].
-  Numbers, A (HEAD 3dd8340a) / B (this round), display sRGB of named regions, `screenshots/look_fixes/t5b_fix1/`
-  (numbers.txt, sheet_*_ab.png): see the T5b report's "Fix round 1" (`.superpowers/sdd/2026-11-07-look-fixes/t5b-report.md`).
   Test `white_balance_test.gd` (below).
   Why a white balance at all (T2): the renderer's colours are colourimetric linear sRGB (white D65), but the Sun above
   the air is warmer: the core's TOA spectrum in linear sRGB is (1.123, 1, 0.961), B/R 0.856. Without adaptation a sunlit
@@ -606,12 +594,7 @@ shaders:
   never below the chroma the step shows without the boost (unbounded): the boost starts no glow and strengthens none
   (written <= max(threshold, max x, the S = 1 value)); at S <= 1 the step is as without the bound, so display-referred
   emitters (their S = 1 value is their former c) keep their former glow. The aureole is then written at max 3.91
-  (unbounded 4.90). A/B/C (pre-T5 / T5 / fix round 1, `screenshots/look_fixes/t5_fix1/`): pad noon Sun view, displayed
-  luma of the aureole r 40-60 px 0.760 / 0.839 / 0.760, r 60-100 0.737 / 0.805 / 0.736, r 100-200 0.652 / 0.660 /
-  0.651 (the T5 blue glow gone; the colour stays the scene's, B/R 1.07 / 1.38 / 1.35); night plume halo (97-99.5 %
-  band) 0.144 / 0.153 / 0.153, noon plume 0.403 / 0.399 / 0.399; cabin (pilot eye, 97-99.5 %) 0.822 / 0.826 / 0.825.
-  The night plume's ~6 % wider halo is the emitters' inverse under additive blending (T5), not the Hunt boost (S < 1
-  there). Active only while
+  (unbounded 4.90). Active only while
   the environment's tone mapper is AgX at `tonemap_exposure` 1 with SDR output (`DisplayServer.
   window_is_hdr_output_enabled` false: the inverse assumes AgX's output max 1; the linear camera exposures and the
   GPU checks' linear environments stay colourimetric). Display-referred emitters take the step's inverse (above)
@@ -626,16 +609,6 @@ shaders:
   `game/tests/display_tone_check.gd` (GPU: 10 patches (with the noon aureole) through the shader at S 1 and 1.64, at
   S 1.64 with glow on (threshold 4, intensity 0) and with the step off against the CPU mirror, largest error 7e-4 of
   display-linear, tolerance 3e-3; 3 display-referred emitter patches = AgX, largest 1.9e-3, tolerance 1e-2).
-  A/B (A = AgX + S against L_day, B = this step + S against the display; `screenshots/look_fixes/t5/`, report
-  `.superpowers/sdd/2026-11-07-look-fixes/t5-report.md`): pad noon el 5 (S 1.58) sky el ~29 sRGB (82, 118, 154) B/R
-  3.81 -> (62, 111, 182) B/R 9.85, OkLab hue -110.3 -> -102.4 deg = the scene's -102.4 (AgX turned it 7.9 deg); zenith
-  (el 85, S 1.53) (105, 133, 163) -> (87, 128, 192), hue -109.0 -> -101.1 (scene -101.1); displayed luma within 7 %.
-  Start view (weather analog, S 1.61): ocean (60, 81, 110) B/R 3.50 -> (61, 82, 125) 4.36 (EPIC 4.8-5.6); 400 km nadir
-  ocean (48, 72, 102) -> (39, 68, 117) (ISS photo (24, 76, 123)). Sun disc unchanged (75 px at display white in both,
-  centre (247, 247, 247) -> (245, 250, 254)); plume core noon (253, 233, 219) -> (255, 234, 221), night (254, 228, 202)
-  -> (255, 231, 213). Cost (the step + its bisection only where C / 0.75 leaves the gamut): pad view 1600 x 900 median
-  1.858 / 1.860 -> 1.923 / 1.905 ms (+0.06 ms), stereo mock 3534 x 2838 per eye 5.910 / 5.732 -> 6.041 / 6.034 ms
-  (+0.13 / +0.30 ms, two rounds).
 
 - **Lamps in view** [call 2026-10-31, `Atmosphere.lamp_adaptation_cd_m2`]: one more candidate of L_a's maximum (white, and its scotopic
   equivalent), set by `World` from `TowerView.lamp_adaptation_cd_m2`: 3 % of the lit pad's luminance (Pad B deck 16.8 cd/m^2 at night) x the
@@ -668,12 +641,6 @@ shaders:
   D). Purpose kept: a Sun disc or glints of up to 2 % of the lit weight never set the field (`adaptation_meter_test`: a
   1 % Sun disc in a 90 % black field is cut; a 2.4 % lit area in a black field is the field; `adaptation_surround_test`:
   lunar el 60).
-  Side effects (renders `screenshots/look_fixes/t5b/`): the visibility V keeps the old cut of the whole weight
-  (`field_log_average(.., cut_of_whole)`), else a small lit object only the frame has (the Earth's disc in the lunar
-  sky, absent from the model) closes V (first render: gain 12.99). A lone small lit object now enters the combined field
-  (lunar day el 60: the Earth disc, near the view centre, field 2617 -> 4048 cd/m^2, gain 2.98 -> 1.93); the start view
-  1.401 -> 1.269 (the cut of the ~30 % lit weight leaves more bright cloud in the field). The Sun's disc no longer
-  depends on this cut: it is masked out by its direction and its glare is added as a veil ("Sun glare" above).
 
 - Eye model: Ferwerda 1996 cone/rod t.v.i. with Jensen 2000 rod saturation, CIECAM02 brightness / chroma terms,
   Schaefer 1990 star threshold (user decision 2026-10-25, "like the eye").
@@ -720,7 +687,7 @@ shaders:
   round 3 numbers. The full
   Moon at a VR fov stays display white (B/R 1.00 in A and B): adapted to the moonlit night (L_a 0.04 cd/m^2, gain 1.2e4)
   the disc is far above white - the Moon's own disability glare (10 x 0.3 lux / 0.27^2 ~ 40 cd/m^2 looking at it) is
-  not modelled; local adaptation (T10) now brings a disc that is resolved (>= ~2 blocks wide) into range: fov 12 at
+  added as a CIE 146 veil (T13); local adaptation (T10) now brings a disc that is resolved (>= ~2 blocks wide) into range: fov 12 at
   gain 6645, disc sRGB (255, 255, 255) -> (233, 211, 189) with the maria; pale cream (B/R 0.81) is the white balance's
   (the adopted white of the moonlit night with the mesopic D), not the local step's. At fov 100 the 3-4 px disc keeps
   its look. The surround
@@ -763,16 +730,3 @@ shaders:
 - The VR panel was not in the stereo mock's lunar-night view (`--keep_vr_panel`), and the night plume seen from
   500 m (fov 25 deg) stays inside the 2 % highlight cut; the run-away the meter now avoids was therefore not
   reproduced in a render, only excluded by construction (display-referred shaders in the transparent pass, test).
-- Anchored rule alone (2026-11-07, render_check / cockpit_shots, `--hide_ui`, PNGs and sheets
-  `screenshots/eye_adaptation/anchored/`; field L_f / anchor L_anchor cd/m^2, gain A field / B white plate / C anchored):
-  Apollo 11 day 1345 / 2710, 5.80 / 1.00 / 14.4 (ground sRGB luma mean 156 / 71 / 190); lunar night 0 N 45 E 0.045 /
-  0.063, 8844 / 3012 / 10 843; Starbase noon 4526 / 8013, 1.72 / 1.15 / 4.85; dusk (Sun -3.6 deg) 19.6 / 86.0, 397 / 778
-  / 452; 400 km day 2638 / 5649, 2.95 / 1.00 / 6.88; cockpit pilot_eye (A at the game key 0.18, not the shot's 0.5)
-  15.9 / 242, 480 / 1.98 / 157. The anchor is only 2-4.4x the field in these centre-weighted fields, so C is brighter
-  than A outdoors everywhere; at noon and from orbit the anchor is the sky / the hazy limb (a self-luminous area seen
-  as a white surface), which washes the ground out. Open: percentile, ANCHOR_WHITE, a surface-only anchor.
-- The rendered Apollo 11 regolith (490 cd/m^2 in the foreground probe, field 660-710) is 3-6x below the core's Hapke
-  I/F x E_sun,n / pi at that geometry (I/F 0.08-0.10 at 25-30 deg down-Sun -> 3400-4300 cd/m^2 with the highland w
-  0.429); the photo's f/11 1/250 ISO 160 exposure (mid grey 2363 cd/m^2) also points to ~2000+ cd/m^2. The field rule
-  hides this (it normalises the field), the camera mode does not: an open point of the Moon shading, not of the
-  adaptation.

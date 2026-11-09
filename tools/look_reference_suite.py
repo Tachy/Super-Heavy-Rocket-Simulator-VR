@@ -518,8 +518,11 @@ def render(name, args, label, extra):
         out_dir = os.path.join(OUT, f"{label}_cockpit")
         cmd = [GODOT, "--path", "game", "--script", "res://tests/cockpit_shots.gd", "--",
                "--mission=falcon9_crew_dragon", "--t_plus=-60", "--out_dir=" + out_dir] + extra
-        run_watched(cmd, log, 1800)
         src = os.path.join(out_dir, "pilot_eye.png")
+        for stale in (src, png):  # an old pilot_eye.png of an earlier run must never pass as this run's
+            if os.path.exists(stale):
+                os.remove(stale)
+        run_watched(cmd, log, 1800)
         if os.path.exists(src):
             Image.open(src).save(png)
         return png
@@ -555,11 +558,12 @@ def main():
         OUT = os.path.abspath(o.out)
     os.makedirs(OUT, exist_ok=True)
     names = [n for n in SCENES if not o.only or n in o.only.split(",")]
-    results, failed = {}, []
+    results, failed, skipped = {}, [], []
     for name in names:
         args, measure, gates = SCENES[name]
         if name == "earth_from_space_epic" and not (os.path.exists(EPIC_REF) and os.path.exists(EPIC_WTHR)):
             results[name] = {"skipped": "reference data missing"}
+            skipped.append(name)
             continue
         png = os.path.join(OUT, f"{o.label}_{name}.png")
         if not o.measure_only:
@@ -586,10 +590,17 @@ def main():
             sheet(name, o.compare, o.label)
     results["_gaps"] = GAPS
     results["_failed"] = failed
+    results["_skipped"] = skipped
     with open(os.path.join(OUT, f"{o.label}_results.json"), "w") as f:
         json.dump(results, f, indent=1)
-    print("FAILED: " + ", ".join(failed) if failed else "ALL GATES PASS", "| gaps:", "; ".join(GAPS))
-    return 1 if failed else 0
+    if failed:
+        verdict = "FAILED: " + ", ".join(failed)
+    elif skipped:
+        verdict = "NOT ALL GATES RUN (skipped: " + ", ".join(skipped) + "), the run gates passed"
+    else:
+        verdict = "ALL GATES PASS"
+    print(verdict, "| gaps:", "; ".join(GAPS))
+    return 1 if failed else (2 if skipped else 0)
 
 
 def crop(png, out, half=160):
