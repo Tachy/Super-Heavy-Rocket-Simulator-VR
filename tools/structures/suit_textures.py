@@ -91,7 +91,7 @@ def albedo(cfg) -> np.ndarray:
             tip, rise = 0.470, 0.75
             sv = tip + rise * np.abs(_wrap(U - 0.5)) * uw
             m = _band(s, sv, look["chevron_width_m"] / 2.0, aa) * (np.abs(_wrap(U - 0.5)) * uw < 0.12)
-            _paint(sub, m, insert)
+            _paint(sub, m, stripe)  # fix round 1: the chevron trim is the dark panel grey (KSC-20190731, eva_suit_newatlas), not the light insert grey
             # princess seams down the chest, the hip seam all around, the front closure
             for side in (1.0, -1.0):
                 m = _band(U, 0.5 + side * 0.085, look["seam_width_m"] / 2.0 / uw, aa / uw) * (s < sv - 0.01) * (s > 0.10)

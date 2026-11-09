@@ -69,4 +69,13 @@ armrests, palms down (it read as a shrug in the hatch shots); hands were boxes o
   and about 0.12 m from the config eye (the config eye derives from the hip point, the figure's hip joint is 0.12 ahead of it); the player's eye stays the config.
 - Look shots: `tools/structures/blender/preview_crew_figure.py` (Workbench; builds the cabin, places the figure at s2): `screenshots/m7-cockpit/figure/`.
 
-
+## Tasks 8 / 8b before fix round 1 (2026-11-09)
+- Camera keys: five blank keys (`c_upper_1`, `c_upper_2`, `c_lower_1`, `c_lower_2` + `c_lower_round` under the centre screen, right hand) = slots 1..5 in
+  catalog order (chase, stage1_aft, stage2_engine, dragon_nose, dragon_trunk). Replaced by the user's second decision: four left-hand keys, dragon_nose last
+  in the catalog and only on the on-screen button.
+- `r_upper_5` gap hidden as a 40 mm test tolerance (34 mm short after Task 8, 30.7 mm after 8b); now a named known gap in the test.
+- Leg posture: thigh_raise_deg -25, knee 105, legs in the sagittal plane (knees together; thigh exactly on the 10 deg photo-band edge), foot rest
+  hip + (-0.185, 0.753), normal (0.9063, -0.4226, 0). Hand inward on the sagittal thigh, wrist_m (0.152, 0.322, 0.115).
+- Suit: torso u = column index / 32 (equal angles; the panels squeezed into the section corners), chevron in the light insert grey 18 mm, gloves light grey
+  0.62, shoulder / hip shapes weighted by bend angle only (any swing direction), elbow weight blend +-0.05 m, cavity shade 0.35, one joined mesh with the 16
+  morph targets on every primitive (10.5 MB .bin), the non-index fingers flat while pointing.

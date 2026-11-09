@@ -30,6 +30,7 @@ ELBOW_LOOPS = (-0.05, -0.025, 0.0, 0.025, 0.05)  # [E] five loops around the elb
 FOREARM_STATIONS = (0.43, 0.50, 0.56)  # [E] forearm rings before the wrist ring
 LEG_STATIONS = (0.10, 0.16, 0.22, 0.30)
 KNEE_LOOPS = (-0.06, -0.03, 0.0, 0.03, 0.06)
+ELBOW_BLEND_M = 0.07  # [E] half width of the upper arm -> forearm weight blend (fix round 1: 0.05 left a hard inner-elbow crease at 90 deg)
 SHIN_STATIONS = (0.53, 0.62, 0.71, 0.80)
 TUBE_TAIL_M = 0.03  # [E] the sleeve / leg runs on past the wrist / ankle into the glove lock / boot (the wrist ring is no end ring)
 CROTCH_SAG_M = 0.012  # [E] the crotch bridge dips this far below the bottom ring
@@ -286,20 +287,29 @@ def hull(cfg, ease=True, factors=None):
     def in_port(r, c):
         return r_ax <= r < r_top and any(port_cols[s] - pc <= c < port_cols[s] + pc for s in fl.SIDES)
 
-    def torso_uv(r, c):
-        u = ((c - n_t // 2) % n_t) / n_t
-        return u
+    # u around the torso = the ARC-LENGTH share of the row's ring from the back centre (u 0) over the right side to the front (u 0.5): the
+    # columns sit at equal angles, which crowds them at the corners of the near-box sections, so a column-index u squeezed the painted panels
+    # (metres along tu) into the corners (fix round 1: the side panels and the chevron did not read)
+    arc = []
+    for r in range(rows):
+        ring = [h.v[grid[r][(n_t // 2 + k) % n_t]] for k in range(n_t + 1)]
+        seg = np.array([np.linalg.norm(ring[k + 1] - ring[k]) for k in range(n_t)])
+        arc.append(np.concatenate([[0.0], np.cumsum(seg)]) / seg.sum())
+
+    def torso_uv(r, c, closing=False):
+        return 1.0 if closing else float(arc[r][(c - n_t // 2) % n_t])
 
     for r in range(rows - 1):
         for c in range(n_t):
             if in_port(r, c):
                 continue
             c1 = (c + 1) % n_t
-            u0 = torso_uv(r, c)
-            u1 = torso_uv(r, c1) if c1 != n_t // 2 else 1.0
+            closing = c1 == n_t // 2
+            u0, u0b = torso_uv(r, c), torso_uv(r + 1, c)
+            u1, u1b = torso_uv(r, c1, closing), torso_uv(r + 1, c1, closing)
             v0, v1 = secs[r][0] - s_min, secs[r + 1][0] - s_min
             idx = (grid[r][c], grid[r][c1], grid[r + 1][c1], grid[r + 1][c])
-            uv = [(tx + u0 * tu, ty + v0), (tx + u1 * tu, ty + v0), (tx + u1 * tu, ty + v1), (tx + u0 * tu, ty + v1)]
+            uv = [(tx + u0 * tu, ty + v0), (tx + u1 * tu, ty + v0), (tx + u1b * tu, ty + v1), (tx + u0b * tu, ty + v1)]
             axis = np.array([hip_up + 0.5 * (secs[r][0] + secs[r + 1][0]), 0.5 * (secs[r][5] + secs[r + 1][5]), 0.0])
             h.face(idx, uv, "torso", axis)
     top = h.add(np.array([hip_up + secs[-1][0] + 0.01, secs[-1][5], 0.0]), _torso_weights(secs[-1][0]))
@@ -379,7 +389,7 @@ def hull(cfg, ease=True, factors=None):
             rings.append(ids)
             ring_t.append(None)
         for t in stations:
-            w_fa = float(smoothstep(elbow_t - 0.05, elbow_t + 0.05, t))
+            w_fa = float(smoothstep(elbow_t - ELBOW_BLEND_M, elbow_t + ELBOW_BLEND_M, t))
             w_ua = 1.0 - w_fa
             w_ch = 0.0 if t > stations[0] + 1e-9 else 0.06
             m_sh = 1.0 - float(smoothstep(0.12, 0.22, t))
@@ -680,16 +690,7 @@ def joint_pose(cfg, joint, theta_deg):
     ref = _n(ref) * joint["ref_sign"]
     head = np.array(b[joint["child"]]["head"])
     cd = _n(np.array(b[joint["child"]]["tail"]) - head)
-    kind = joint["child"].rsplit("_", 1)[0]
-    side = joint["child"].rsplit("_", 1)[1]
-    s = 1.0 if side == "l" else -1.0
-    if kind == "upper_arm":
-        plane = np.array([0.0, 1.0, 0.25 * s])
-    elif kind == "thigh":
-        plane = np.array([0.0, 1.0, 0.0])
-    else:
-        plane = cd
-    p = _n(plane - ref * (plane @ ref))
+    p = _n(np.array(joint["plane"]))  # figure_layout.bake_direction: the swing direction the shapes are baked for
     th = math.radians(theta_deg)
     target = math.cos(th) * ref + math.sin(th) * p
     t = rigid(min_rot(cd, target), head)

@@ -18,8 +18,9 @@ stature_m = 1.755                # [S] ANSUR II male median stature (1755 mm)
 hip_joint_up_m = 0.10            # [E] hip joint (trochanter) above the seat pan surface: seated anthropometry, buttock thickness ~0.09-0.10
 hip_joint_forward_m = 0.12       # [E] hip joint ahead of the seat-back plane: back-to-trochanter depth ~0.11-0.13 (buttock depth 0.246 x back share 0.47, seated compression)
 hip_joint_half_spacing_m = 0.088  # [E] hip joint centres 0.176 apart (about half the ANSUR hip breadth 0.344 plus the greater trochanter offset inward)
-knee_angle_deg = 105.0           # [E] interior knee angle (thigh to shin; 180 = straight leg): crew1_1 (fix round 3, reviewer fit) shows a recliner posture, thigh 10-20 deg above the hatch axis and shin ~60-65 deg below it = 95-105; +-10
-thigh_raise_deg = -25.0          # [E] thigh angle above the SEAT PAN plane (the pan is 35 deg above the hatch axis with the seat back at 35 deg): -25 puts the thighs 10 deg above the hatch axis (crew1_1 fit: 10-20), the shins 65 deg below it; +-10
+knee_angle_deg = 102.0           # [E] interior knee angle (thigh to shin; 180 = straight leg): crew1_1 (fix round 3, reviewer fit) shows a recliner posture, thigh 10-20 deg above the hatch axis and shin ~60-65 deg below it = 95-105; +-10. Fix 8/8b round 1: 105 -> 102 with the thigh raise and the knee swing (seen from the hatch: thigh 12.3, shin -62.3 deg, both inside the photo bands with >= 2 deg margin)
+thigh_raise_deg = -21.0          # [E] thigh angle above the SEAT PAN plane (the pan is 35 deg above the hatch axis with the seat back at 35 deg): -21 with knee_out_deg puts the thighs 12.3 deg above the hatch axis as the hatch camera sees them (crew1_1 fit: 10-20; was -25 = exactly 10, the band edge), the shins 62 deg below it; +-10
+knee_out_deg = 20.0              # [E] the knee swings out about the hip-ankle line (ankle and knee angle kept): crew1_1 shows the knees apart (about shoulder width) and the boots side by side on the tray; 20 deg puts the knees 0.35 m apart, the ankles stay 0.18 m apart; +-10
 arm_reach_fraction = 0.44        # [S] Drillis and Contini 1966: shoulder (acromion) to the tip of the middle finger, fraction of stature; the ANSUR chain is tested against it, +-0.05 m
 shoulder_joint_drop_m = 0.0      # [D] the upper-arm bone starts at the acromion: its length is ANSUR acromion-radiale (measured from the acromion), as the round-4 reach fit of crew_dragon.toml assumes; the deltoid cap rounds the mesh around it
 shoulder_joint_inset_m = 0.0     # [D] see shoulder_joint_drop_m: at the acromion tip (biacromial_breadth / 2)
@@ -113,7 +114,7 @@ port_transition_rings = 3        # [E] rings between a port loop and the first l
 [pose]
 # Seated rest pose (KSC-20190731-PH_SPX01_0002, crew1_1): forearms down beside the torso, hands resting on the thighs, palms down. Left side
 # numbers (+Z); the right side is mirrored. The arm is a two-bone chain from the shoulder joint to the wrist with the elbow toward elbow_pole.
-wrist_m = [0.152, 0.322, 0.115]  # [E] wrist on the thigh: palm centre ~0.30 m along the thigh from the hip joint, on its top surface (thigh_clearance / 2 + glove); +-0.03
+wrist_m = [0.166, 0.318, 0.115]  # [E] wrist on the (sagittal) thigh: palm centre ~0.30 m along the thigh from the hip joint, on its top surface (thigh_clearance / 2 + glove); +-0.03. Rotated with the thigh raise -25 -> -21; the wrist rides along when the knee swings out (figure_layout.bones)
 elbow_pole = [-0.35, -0.55, 0.76]  # [E] the elbow points back, out and down: beside the torso, over the armrest (KSC-20190731 side view)
 hand_inward_deg = 12.0           # [E] the hand's direction turns this far toward the body centre from the thigh direction (fingers over the inner thigh)
 palm_lift_deg = 8.0              # [E] the hand's direction rises this far off the thigh surface toward the knee (the wrist sits higher than the fingertips' line)
@@ -181,12 +182,12 @@ texel_m = 0.00125                # [E] albedo texel: 1.25 mm (2048 x 1280; a 3 m
 wrinkle_texel_m = 0.0025         # [E] wrinkle map texel: 2.5 mm (folds are 2-4 cm apart)
 stripe_albedo = [0.16, 0.16, 0.17]  # [E] dark grey side panels (eva_suit_newatlas: near charcoal against the white)
 seam_albedo = [0.50, 0.50, 0.52]  # [E] seam lines: thin light grey piping
-insert_albedo = [0.40, 0.40, 0.41]  # [E] grey joint inserts (inner elbow, back of the knee) and the chevron band
+insert_albedo = [0.40, 0.40, 0.41]  # [E] grey joint inserts (inner elbow, back of the knee); the chevron band takes stripe_albedo (fix round 1)
 side_stripe_width_m = 0.075      # [E] torso side panel width (eva_suit_newatlas: ~0.07-0.08 at the waist)
 arm_stripe_width_m = 0.040       # [E] stripe down the back of the upper arm
 leg_stripe_width_m = 0.055       # [E] stripe down the outer thigh to above the knee
 seam_width_m = 0.003             # [E] seam piping width
-chevron_width_m = 0.018          # [E] the chest plate's grey chevron band under the collar (spacex.jpg)
+chevron_width_m = 0.022          # [E] the chest plate's dark grey chevron band under the collar (spacex.jpg, KSC-20190731: ~2 cm)
 zip_width_m = 0.006              # [E] the front closure line from the chevron to the crotch
 pocket_m = [0.11, 0.13]          # [E] thigh pocket width and height (eva_suit_newatlas: square patches on the front of the thighs)
 flag_m = [0.080, 0.050]          # [E] flag patch on the upper left arm (spacex.jpg: ~0.08 wide)
@@ -247,7 +248,7 @@ albedo = [0.05, 0.05, 0.055]     # [E] black boots (sheet_suit)
 roughness = 0.55                 # [E] leather / rubber
 metallic = 0.0                   # [E] not metal
 [material.gloves]
-albedo = [0.62, 0.62, 0.64]      # [E] light grey gloves with the white cuff ring (eva_suit_detail1)
+albedo = [0.09, 0.09, 0.095]     # [E] dark grey gloves (KSC-20190731-PH_SPX01_0002, jsc2024e066391, demo1_1: charcoal fabric, the knuckle pads a touch darker; fix round 1, was 0.62 light grey after eva_suit_detail1)
 roughness = 0.7                  # [E] fabric
 metallic = 0.0                   # [E] fabric
 [material.helmet]

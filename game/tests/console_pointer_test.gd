@@ -5,6 +5,11 @@
 extends SceneTree
 
 const DT := 1.0 / 90.0
+## KNOWN GAP (not a tolerance): keys the commander's index tip cannot touch even with the torso lean at its limit, with the
+## measured shortfall in m. The pointer clamps to the reach (finite pose, the click still fires). Task 9 calibrates the seat /
+## eye position and the HOTAS grips, which moves the shoulder; re-measure this table then (cockpit.md "Console pointer").
+const KNOWN_REACH_GAP_M := {"button:r_upper_5": 0.0307}
+const REACH_GAP_TOLERANCE_M := 0.002  ## the measured shortfall must stay within 2 mm of the table: a change shows up
 
 var _failures := 0
 
@@ -71,8 +76,18 @@ func _check_config_keys(config: CockpitConfig) -> void:
 			cameras += 1
 			slots[int(b.get("camera_slot", 0))] = b["id"]
 			labelled_camera = labelled_camera or b.has("label")
-	_check(cameras == CameraCatalog.all_ids(config).size() and cameras == 5, "five camera keys, one per catalog camera (%d)" % cameras)
-	_check(slots.keys().size() == 5 and slots.has(1) and slots.has(5), "camera slots 1..5, each once (%s)" % [slots])
+	_check(cameras == 4 and CameraCatalog.all_ids(config).size() == 5, "four camera keys for the first four of the five catalog cameras (%d)" % cameras)
+	_check(slots.keys().size() == 4 and slots.has(1) and slots.has(4) and not slots.has(5), "camera slots 1..4, each once (%s)" % [slots])
+	var by_order := []
+	for slot in range(1, 5):
+		by_order.append(slots.get(slot, ""))
+	_check(by_order == ["c_upper_1", "c_upper_2", "c_lower_1", "c_lower_2"], "slots 1..4 are c_upper_1, c_upper_2, c_lower_1, c_lower_2 (%s)" % [by_order])
+	_check(CameraCatalog.all_ids(config)[4] == "dragon_nose", "the fifth catalog camera is dragon_nose (on-screen button only)")
+	var round_key := {}
+	for b: Dictionary in config.buttons:
+		if b["id"] == "c_lower_round":
+			round_key = b
+	_check(not round_key.is_empty() and round_key["function"] == "none" and not round_key.has("camera_slot"), "c_lower_round is function none (no camera slot)")
 	_check(not labelled_camera, "no camera key carries a label (camera selection is on blank key faces)")
 	var cam1 := {}
 	for b: Dictionary in config.buttons:
@@ -253,8 +268,17 @@ func _check_arm_ik_numbers() -> void:
 	_check(clamp_ok, "a target beyond reach is clamped to the reach")
 	var degenerate := arm.solve(shoulder, shoulder)
 	_check((degenerate["tip"] as Vector3).is_finite(), "a target at the shoulder does not produce NaN")
-	var nan_target := arm.solve(shoulder, Vector3(NAN, 0.0, 0.0))
-	_check((nan_target["tip"] as Vector3).is_finite() or true, "a NaN target does not crash")
+	var at_rest := arm.solve(shoulder, arm.rest_tip())
+	for bad: Vector3 in [Vector3(NAN, 0.0, 0.0), Vector3(0.0, INF, 0.0)]:
+		var res := arm.solve(shoulder, bad)
+		var joints_finite := true
+		for key: String in ["elbow", "wrist", "tip"]:
+			joints_finite = joints_finite and (res[key] as Vector3).is_finite()
+		for key: String in ["upper_basis", "fore_basis", "hand_basis"]:
+			joints_finite = joints_finite and (res[key] as Basis).get_rotation_quaternion().is_finite()
+		_check(joints_finite, "a non-finite target %s gives a finite tip and finite bones" % bad)
+		var back_to_rest := (res["tip"] as Vector3).distance_to(at_rest["tip"]) < 1e-6 and (res["elbow"] as Vector3).distance_to(at_rest["elbow"]) < 1e-6
+		_check(back_to_rest, "a non-finite target %s returns the rest pose (tip off by %s m)" % [bad, (res["tip"] as Vector3).distance_to(at_rest["tip"])])
 
 
 # ---- click dispatch ----
@@ -294,7 +318,7 @@ func _check_dispatch(config: CockpitConfig) -> void:
 		if String(b.get("function", "")) == "camera":
 			by_slot[int(b["camera_slot"])] = b
 	var all_selected := true
-	for slot in range(1, 6):
+	for slot in range(1, 5):
 		var key: Dictionary = by_slot[slot]
 		screen.select("chase")
 		pointer.point_at(strip.to_strip(key["centre"]))
@@ -365,9 +389,12 @@ func _check_figure_arms(config: CockpitConfig) -> void:
 		var res := view.arm_result(side)
 		report.append("%s %s err %.1f mm bend %.1f deg lean %.1f deg" % [id, side, err * 1000.0, rad_to_deg(float(res["wrist_bend_rad"])), rad_to_deg(view._lean.get_angle())])
 		_check(res["tip"].is_finite() and view.cabin_node("screen_centre") != null, "%s: finite pose" % id)
-		# the outermost right key lies 3.4 cm beyond the reach even with the lean at its limit (documented in cockpit.md): the tip stops short
-		var tolerance := 0.040 if id == "button:r_upper_5" else 0.002
-		_check(err < tolerance, "%s is touched by the %s hand (error %.1f mm, tolerance %.0f mm)" % [id, side, err * 1000.0, tolerance * 1000.0])
+		if KNOWN_REACH_GAP_M.has(id):
+			# known gap: the key lies beyond the reach even with the lean at its limit; the tip stops short (clamped, finite pose)
+			var gap: float = KNOWN_REACH_GAP_M[id]
+			_check(absf(err - gap) < REACH_GAP_TOLERANCE_M, "%s stays the known %.1f mm short of the %s hand (measured %.1f mm; Task 9 calibration)" % [id, gap * 1000.0, side, err * 1000.0])
+		else:
+			_check(err < 0.002, "%s is touched by the %s hand (error %.1f mm)" % [id, side, err * 1000.0])
 	for line in report:
 		print("  ", line)
 	var skeleton := view.figure_skeleton("s2")
@@ -417,3 +444,15 @@ func _check_figure_deform(view: CockpitView) -> void:
 	var expect := clampf((bent_theta - rest_theta) / (140.0 - rest_theta), 0.0, 1.0)
 	_check(flex_index >= 0 and absf(bent_flex - expect) < 0.02 and (bent_theta <= rest_theta or bent_flex > 0.0),
 			"the elbow bent beyond its rest angle (%.0f > %.0f deg) weights its flex shape %.2f (expected %.2f)" % [bent_theta, rest_theta, bent_flex, expect])
+	# fix round 1: swing gate (mirrors figure_layout.swing_gate): the shoulder's forward-baked shape acts only near its baked swing direction
+	var gated := {"gated": true}
+	_check(FigureDeform.swing_gate(gated, 1.0) == 1.0 and FigureDeform.swing_gate(gated, cos(deg_to_rad(20.0))) == 1.0
+			and FigureDeform.swing_gate(gated, 0.0) == 0.0 and FigureDeform.swing_gate(gated, -1.0) == 0.0
+			and FigureDeform.swing_gate({"gated": false}, -1.0) == 1.0, "swing gate: 1 within 25 deg, 0 sideways / backward, hinges ungated")
+	var shoulder_r := 4
+	var reach_gate := deform.gate[shoulder_r]
+	_check(reach_gate > 0.5, "reaching forward to the centre screen keeps the shoulder's baked shape (gate %.2f)" % reach_gate)
+	view.pose_arms({"l": {"tip": view.idle_tip("l"), "extend": 0.0}, "r": {"tip": view.idle_tip("r"), "extend": 0.0}})
+	var idle_flex := mesh.get_blend_shape_value(mesh.find_blend_shape_by_name(&"shoulder_r_flex"))
+	print("  shoulder_r at the idle grip: theta %.1f deg, gate %.2f, flex %.2f; reaching: gate %.2f" % [deform.theta_deg[shoulder_r], deform.gate[shoulder_r], idle_flex, reach_gate])
+	_check(is_finite(idle_flex) and idle_flex <= 1.0 and idle_flex >= 0.0, "the idle shoulder flex weight is finite (%.2f)" % idle_flex)

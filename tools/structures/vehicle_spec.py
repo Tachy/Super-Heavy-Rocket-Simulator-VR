@@ -366,7 +366,7 @@ def load_cockpit(cockpit_id: str, cockpits_dir: Path = COCKPITS) -> dict:
 
 
 FIGURE_KEYS = {
-    "figure": ("stature_m", "hip_joint_up_m", "hip_joint_forward_m", "hip_joint_half_spacing_m", "knee_angle_deg", "thigh_raise_deg", "arm_reach_fraction",
+    "figure": ("stature_m", "hip_joint_up_m", "hip_joint_forward_m", "hip_joint_half_spacing_m", "knee_angle_deg", "thigh_raise_deg", "knee_out_deg", "arm_reach_fraction",
                "shoulder_joint_drop_m", "shoulder_joint_inset_m"),
     "anthropometry": ("acromial_height", "axilla_height", "chest_height", "waist_height", "trochanter_height", "crotch_height", "knee_height", "ankle_height",
                       "cervicale_height", "biacromial_breadth", "bideltoid_breadth", "chest_breadth", "chest_depth", "chest_circumference", "waist_breadth",

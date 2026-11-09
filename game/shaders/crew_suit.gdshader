@@ -17,7 +17,7 @@ uniform sampler2D suit_albedo : source_color, filter_linear_mipmap_anisotropic, 
 uniform sampler2D suit_wrinkle : hint_default_black, filter_linear_mipmap, repeat_disable;
 uniform vec2 atlas_m = vec2(2.56, 1.60);  // the atlas in metres of suit surface (UV 1 = this many metres)
 uniform float slope_range = 1.6;  // figure_layout.WRINKLE_SLOPE_RANGE
-uniform float cavity_shade = 0.35;  // albedo darkening in a fold's valley at full weight
+uniform float cavity_shade = 0.25;  // albedo darkening in a fold's valley at full weight (fix round 1: 0.35 read as hard creases)
 uniform float roughness : hint_range(0.0, 1.0) = 0.65;
 uniform float metallic : hint_range(0.0, 1.0) = 0.0;
 uniform float specular : hint_range(0.0, 1.0) = 0.4;

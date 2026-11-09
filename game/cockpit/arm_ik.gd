@@ -14,6 +14,8 @@ const ELBOW_SLACK := 0.9995  ## the chain never extends beyond this share of its
 const REACHED_TOLERANCE_M := 1.0e-3
 const GRIP_CURL_DEG := 28.0  ## [E] curl per index joint of a hand at rest (grip); the extended finger is 0
 const FIST_CURL_DEG := 30.0  ## [E] Task 8b: extra curl per joint of the middle / ring / little fingers holding a HOTAS grip (grip = 1)
+const POINT_CURL_DEG := 45.0  ## [E] fix round 1: extra curl per joint of the middle / ring / little fingers while the index points (extend = 1): a pointing hand, not a flat one
+const MAX_FINGER_CURL_DEG := 65.0  ## [E] the curl per joint never exceeds this (a gloved fist)
 const SOLVE_ITERATIONS := 16
 const RELAX_RAD := 0.35  ## the hand direction moves at most this much per pass after the first
 
@@ -200,9 +202,10 @@ func apply(skeleton: Skeleton3D, result: Dictionary, extend: float, grip: float 
 		var basis: Basis = hand_t.basis * (Basis(_curl_axis, curl * float(k + 1)) * _index_rest_local[k])
 		_set_global(skeleton, _bones[roles[k]], Transform3D(basis.orthonormalized(), origin))
 		origin += basis.y * _index_len[k]
-	# Task 8b: the middle / ring / little fingers keep their rest curl and close around a HOTAS grip (grip 0..1)
+	# Task 8b: the middle / ring / little fingers keep their rest curl and close around a HOTAS grip (grip 0..1); fix round 1: they also
+	# fold in while the index points (extend 0..1), so a reaching / tapping hand is a relaxed pointing hand
 	if _finger_rest_local.size() == 3:
-		var fist := deg_to_rad(FIST_CURL_DEG) * clampf(grip, 0.0, 1.0)
+		var fist := deg_to_rad(minf(FIST_CURL_DEG * clampf(grip, 0.0, 1.0) + POINT_CURL_DEG * clampf(extend, 0.0, 1.0), MAX_FINGER_CURL_DEG))
 		var at: Vector3 = hand_t * _finger_origin_local
 		var prefixes := ["fingers_", "fingers_2_", "fingers_3_"]
 		for k in 3:

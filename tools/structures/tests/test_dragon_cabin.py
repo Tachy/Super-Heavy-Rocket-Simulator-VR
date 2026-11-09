@@ -404,8 +404,13 @@ def test_knee_and_shin_follow_the_hatch_photo(spec):
     ankle = fl.to_capsule(b["shin_l"]["tail"], seat["hip_m"], seat["back_angle_deg"])
     thigh = math.degrees(math.atan2(knee[0] - hip[0], knee[1] - hip[1]))  # from +Y (the hatch side) toward +X
     shin = math.degrees(math.atan2(ankle[0] - knee[0], ankle[1] - knee[1]))
-    assert 10.0 - 1e-9 <= thigh <= 20.0, thigh  # (float noise: the ANSUR thigh puts the knee at exactly 10 deg)
-    assert -65.5 <= shin <= -60.0, shin
+    # fix 8/8b round 1: the posture keeps >= 2 deg margin to the photo bands (it sat exactly on the 10 deg edge before)
+    assert 10.0 + 2.0 <= thigh <= 20.0 - 2.0, thigh
+    assert -65.5 + 1.0 <= shin <= -60.0 - 2.0, shin
+    # crew1_1: the knees apart (about shoulder width), the boots side by side on the tray at hip width
+    knee_r = fl.to_capsule(b["shin_r"]["head"], seat["hip_m"], seat["back_angle_deg"])
+    ankle_r = fl.to_capsule(b["shin_r"]["tail"], seat["hip_m"], seat["back_angle_deg"])
+    assert 0.30 <= knee[2] - knee_r[2] <= 0.40 and knee[2] - knee_r[2] > ankle[2] - ankle_r[2] + 0.10
     # shins steep toward the floor; round 4: the seat sits ~0.3 m lower than in crew1_1 (the launch posture under the reach-fitted eye, see
     # test_layout_is_one_consistent_fit), so the ankle lies above the floor instead of in the photo's 1.4-1.8 band
     assert ankle[0] >= spec["cockpit"]["cabin"]["floor_x_m"] + 0.10 and knee[0] > ankle[0] + 0.3
@@ -418,7 +423,7 @@ def test_foot_rest_is_a_tray_facing_up_the_shin(spec):
     for seat in spec["cockpit"]["seat"]:
         n, c, hip = seat["foot_rest_normal"], seat["foot_rest_m"], seat["hip_m"]
         assert n[0] > 0.8 and -0.6 < n[1] < -0.3 and n[2] == 0.0, n
-        assert c[0] - hip[0] == pytest.approx(-0.185, abs=0.002) and c[1] - hip[1] == pytest.approx(0.753, abs=0.002), (seat["id"], c)
+        assert c[0] - hip[0] == pytest.approx(-0.152, abs=0.002) and c[1] - hip[1] == pytest.approx(0.754, abs=0.002), (seat["id"], c)
         low_edge = c[0] - 0.16 * abs(n[1]) - 0.02 * n[0]  # tray half length 0.16 along the foot (z x n), thickness 0.02
         assert low_edge >= floor + 0.01, (seat["id"], low_edge)
 

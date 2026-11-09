@@ -176,10 +176,41 @@ def to_capsule(point, hip_m, back_angle_deg):
     return tuple(hip_m[i] + point[0] * bx[i] + point[1] * by[i] + point[2] * bz[i] for i in range(3))
 
 
-def thigh_frame(cfg):
-    """(thigh direction, the thigh's upper surface normal) of the seated rest pose, both sides (x-y plane)."""
+def _rotate(v, k, a):
+    """v rotated by a (rad) about the unit axis k (Rodrigues)."""
+    c, s = math.cos(a), math.sin(a)
+    return add(add(mul(v, c), mul(cross(k, v), s)), mul(k, dot(k, v) * (1.0 - c)))
+
+
+def leg_joints(cfg, side):
+    """(hip joint, knee, ankle) of the seated rest pose of `side`. The leg is first laid in the sagittal plane (thigh_raise_deg above the
+    seat-pan plane, the interior knee_angle_deg), then the knee swings OUT about the hip-ankle line by knee_out_deg (crew1_1: knees
+    apart, the boots on the tray at hip width): the ankle and the knee angle stay, the knee moves outward and a little toward that line."""
+    fig = cfg["figure"]
+    ln = chain_lengths(cfg)
+    s = 1.0 if side == "l" else -1.0
+    hj = (fig["hip_joint_up_m"], fig["hip_joint_forward_m"], s * fig["hip_joint_half_spacing_m"])
+    a = math.radians(fig["thigh_raise_deg"])
+    sa = a - math.radians(180.0 - fig["knee_angle_deg"])  # knee_angle_deg is the interior angle (180 = straight)
+    knee = add(hj, mul((math.sin(a), math.cos(a), 0.0), ln["thigh"]))
+    ankle = add(knee, mul((math.sin(sa), math.cos(sa), 0.0), ln["shin"]))
+    axis = norm(sub(ankle, hj))
+    out = math.radians(fig.get("knee_out_deg", 0.0))
+    swung = [add(hj, _rotate(sub(knee, hj), axis, sign * out)) for sign in (1.0, -1.0)]
+    knee = max(swung, key=lambda p: s * p[2])  # the swing that moves the knee away from the body centre
+    return hj, knee, ankle
+
+
+def thigh_frame(cfg, side=None):
+    """(thigh direction, the thigh's upper surface normal) of the seated rest pose. Without `side`: the sagittal (x-y plane) thigh before
+    the knee swings out; with `side`: that leg's own thigh (knee_out_deg), the normal kept perpendicular to it."""
     a = math.radians(cfg["figure"]["thigh_raise_deg"])
-    return (math.sin(a), math.cos(a), 0.0), (math.cos(a), -math.sin(a), 0.0)
+    td, n = (math.sin(a), math.cos(a), 0.0), (math.cos(a), -math.sin(a), 0.0)
+    if side is None:
+        return td, n
+    hj, knee, _ = leg_joints(cfg, side)
+    td3 = norm(sub(knee, hj))
+    return td3, norm(sub(n, mul(td3, dot(n, td3))))
 
 
 def hand_frame(cfg, side):
@@ -187,7 +218,7 @@ def hand_frame(cfg, side):
     the knee, turned hand_inward_deg toward the body centre and tilted palm_lift_deg down to the thigh (the wrist sits higher)."""
     s = 1.0 if side == "l" else -1.0
     pose = cfg["pose"]
-    td, n = thigh_frame(cfg)
+    td, n = thigh_frame(cfg, side)
     inward = math.radians(pose["hand_inward_deg"])
     f = norm(add(mul(td, math.cos(inward)), mul((0.0, 0.0, -s), math.sin(inward))))
     lift = math.radians(pose["palm_lift_deg"])
@@ -256,13 +287,18 @@ def bones(cfg):
     td, _ = thigh_frame(cfg)
     ang = math.radians(fig["thigh_raise_deg"])
     shin_ang = ang - math.radians(180.0 - fig["knee_angle_deg"])  # knee_angle_deg is the interior angle (180 = straight)
-    shin_dir = (math.sin(shin_ang), math.cos(shin_ang), 0.0)
-    foot_dir = (math.sin(shin_ang + math.pi / 2.0), math.cos(shin_ang + math.pi / 2.0), 0.0)
+    foot_dir = (math.sin(shin_ang + math.pi / 2.0), math.cos(shin_ang + math.pi / 2.0), 0.0)  # the boot stays flat on the tray
     for side in SIDES:
         s = 1.0 if side == "l" else -1.0
         joint = shoulder_joint(cfg, side)
         put(f"shoulder_{side}", shoulder_base, joint, "chest")
+        hj, knee, ankle = leg_joints(cfg, side)
+        # pose wrist_m is given on the sagittal thigh; the hand rides along when the knee swings out (the share of the knee's move at the
+        # wrist's station along the thigh)
         wrist = (pose["wrist_m"][0], pose["wrist_m"][1], s * pose["wrist_m"][2])
+        knee0 = add(hj, mul(td, ln["thigh"]))
+        share = max(0.0, min(1.0, dot(sub(wrist, hj), td) / ln["thigh"]))
+        wrist = add(wrist, mul(sub(knee, knee0), share))
         pole = (pose["elbow_pole"][0], pose["elbow_pole"][1], s * pose["elbow_pole"][2])
         elbow = two_bone_elbow(joint, wrist, ln["upper_arm"], ln["forearm"], pole)
         wrist = add(elbow, mul(norm(sub(wrist, elbow)), ln["forearm"]))
@@ -289,10 +325,7 @@ def bones(cfg):
             tail = add(head, mul(dirk, seg))
             put(f"thumb_{k + 1}_{side}", head, tail, prev)
             head, prev = tail, f"thumb_{k + 1}_{side}"
-        hj = (hip[0], hip[1], s * fig["hip_joint_half_spacing_m"])
-        knee = add(hj, mul(td, ln["thigh"]))
         put(f"thigh_{side}", hj, knee, "hips")
-        ankle = add(knee, mul(shin_dir, ln["shin"]))
         put(f"shin_{side}", knee, ankle, f"thigh_{side}")
         put(f"foot_{side}", ankle, add(ankle, mul(foot_dir, cfg["suit"]["boot_length_m"] - cfg["suit"]["boot_heel_m"])), f"shin_{side}")
     assert sorted(out) == sorted(BONE_NAMES), sorted(set(out) ^ set(BONE_NAMES))
@@ -330,8 +363,32 @@ def _tail_bone(b, name):
     raise ValueError(f"no child at the tail of {name}")
 
 
+SHOULDER_BAKE_OUT = 0.25  # [E] the shoulder's flex shape is baked for a raise toward the console: forward plus this share outward
+SWING_GATE_DEG = (25.0, 65.0)  # [E] a swing joint's flex shape acts fully within 25 deg of its baked swing direction and not beyond 65 deg
+
+
+def bake_direction(kind, side, ref, child_dir):
+    """Unit direction (perpendicular to `ref`) toward which the joint's flex shape is baked: shoulder = forward and a little out (the raise
+    to the console), hip = the thigh forward, elbow / knee = the hinge's own bend (the child's direction)."""
+    s = 1.0 if side == "l" else -1.0
+    plane = {"shoulder": (0.0, 1.0, SHOULDER_BAKE_OUT * s), "hip": (0.0, 1.0, 0.0)}.get(kind, child_dir)
+    return norm(sub(plane, mul(ref, dot(plane, ref))))
+
+
+def swing_gate(joint, swing_cos):
+    """Factor on a SWING joint's (shoulder, hip) flex shape: the shape is baked for one swing direction, so it acts only near it.
+    swing_cos = cos of the angle between the current swing (child direction minus its part along the reference) and the baked one;
+    1 within SWING_GATE_DEG[0], 0 beyond SWING_GATE_DEG[1], smoothstep between. Hinges (elbow, knee) are not gated."""
+    if not joint.get("gated", False):
+        return 1.0
+    lo, hi = math.cos(math.radians(SWING_GATE_DEG[1])), math.cos(math.radians(SWING_GATE_DEG[0]))
+    t = max(0.0, min(1.0, (swing_cos - lo) / (hi - lo)))
+    return t * t * (3.0 - 2.0 * t)
+
+
 def joint_table(cfg):
-    """{joint name: {child, ref, ref_sign, neutral_deg, full_deg, ext_deg, rest_deg, slot, shape_flex, shape_ext}} (slot 0..7: l side first)."""
+    """{joint name: {child, ref, ref_sign, neutral_deg, full_deg, ext_deg, rest_deg, slot, shape_flex, shape_ext, plane, gated}} (slot 0..7:
+    l side first). plane = the baked swing direction in the figure frame (bake_direction), gated = a swing joint (swing_gate)."""
     b = bones(cfg)
     out = {}
     for slot, name in enumerate(joint_names()):
@@ -345,7 +402,8 @@ def joint_table(cfg):
         rest = math.degrees(math.acos(max(-1.0, min(1.0, dot(rd, cd)))))
         out[name] = {"child": child_bone, "child_tail": _tail_bone(b, child_bone), "ref": ref_bone, "ref_tail": _tail_bone(b, ref_bone),
                      "ref_sign": sign, "neutral_deg": neutral, "full_deg": full, "ext_deg": ext,
-                     "rest_deg": rest, "slot": slot, "shape_flex": f"{name}_flex", "shape_ext": f"{name}_ext"}
+                     "rest_deg": rest, "slot": slot, "shape_flex": f"{name}_flex", "shape_ext": f"{name}_ext",
+                     "plane": list(bake_direction(kind, side, rd, cd)), "gated": kind in ("shoulder", "hip")}
     return out
 
 
@@ -363,7 +421,9 @@ def bend_weights(joint, theta_deg):
 def figure_manifest(cfg):
     """The manifest's `crew_figure` block: file, frame convention, bone rest positions, materials, eye point, joints, suit maps."""
     r = lambda v: [round(c, 5) for c in v]
-    joints = {n: {k: (round(v, 4) if isinstance(v, float) else v) for k, v in j.items()} for n, j in joint_table(cfg).items()}
+    def rnd(v):
+        return round(v, 4) if isinstance(v, float) else ([round(c, 5) for c in v] if isinstance(v, list) else v)
+    joints = {n: {k: rnd(v) for k, v in j.items()} for n, j in joint_table(cfg).items()}
     look = cfg["suit_look"]
     return {
         "file": "crew_figure",

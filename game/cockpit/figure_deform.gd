@@ -7,11 +7,14 @@ extends RefCounted
 ## direction (ref bone towards ref_tail, times ref_sign) and the child bone (towards child_tail); bend_weights() mirrors
 ## figure_layout.bend_weights.
 
+const SWING_GATE_DEG := Vector2(25.0, 65.0)  ## figure_layout.SWING_GATE_DEG
+
 var _skeleton: Skeleton3D
 var _mesh: MeshInstance3D
 var _joints: Array[Dictionary] = []  # manifest entries + bone indices + blend shape indices, in slot order
 var wrinkle := PackedFloat32Array()  ## the last wrinkle weights per slot (tests)
 var theta_deg := PackedFloat32Array()  ## the last bend angles per slot (tests)
+var gate := PackedFloat32Array()  ## the last swing gate factors per slot (tests)
 
 
 ## The deformer of a figure; null when the skeleton or the manifest lacks the joints.
@@ -21,6 +24,14 @@ static func for_figure(skeleton: Skeleton3D, mesh: MeshInstance3D, joints: Dicti
 	var d := FigureDeform.new()
 	d._skeleton = skeleton
 	d._mesh = mesh
+	# skeleton frame -> figure frame: the transforms between the skeleton and the figure root (CockpitView names it figure_<seat>;
+	# its own transform places the figure frame in the cabin)
+	var to_figure := Basis.IDENTITY
+	var node: Node = skeleton
+	while node != null and not String(node.name).begins_with("figure_"):
+		if node is Node3D:
+			to_figure = (node as Node3D).transform.basis.orthonormalized() * to_figure
+		node = node.get_parent()
 	for name: String in order:
 		var j: Dictionary = (joints.get(name, {}) as Dictionary).duplicate()
 		var bones := {}
@@ -29,11 +40,15 @@ static func for_figure(skeleton: Skeleton3D, mesh: MeshInstance3D, joints: Dicti
 			if bones[key] < 0:
 				return null
 		j["bones"] = bones
+		# the baked swing direction (manifest `plane`, figure frame) in the skeleton's frame, rest pose
+		var plane: Array = j.get("plane", [0.0, 0.0, 0.0])
+		j["plane_skeleton"] = (to_figure.inverse() * Vector3(float(plane[0]), float(plane[1]), float(plane[2]))).normalized()
 		j["flex_index"] = mesh.find_blend_shape_by_name(StringName(String(j.get("shape_flex", ""))))
 		j["ext_index"] = mesh.find_blend_shape_by_name(StringName(String(j.get("shape_ext", ""))))
 		d._joints.append(j)
 	d.wrinkle.resize(d._joints.size())
 	d.theta_deg.resize(d._joints.size())
+	d.gate.resize(d._joints.size())
 	return d
 
 
@@ -49,6 +64,15 @@ static func bend_weights(joint: Dictionary, theta: float) -> Vector3:
 	return Vector3(flex, extw, clampf((theta - neutral) / (full - neutral), 0.0, 1.0))
 
 
+## Factor on a swing joint's (shoulder, hip: manifest `gated`) flex shape, mirrors figure_layout.swing_gate: the shape is baked for one
+## swing direction, so it acts fully within SWING_GATE_DEG.x of it and not beyond SWING_GATE_DEG.y (smoothstep between); a sideways or
+## backward swing gets plain skinning instead of a forward-baked bulge (fix round 1: the pinched shoulder at the HOTAS grip).
+static func swing_gate(joint: Dictionary, swing_cos: float) -> float:
+	if not bool(joint.get("gated", false)):
+		return 1.0
+	return smoothstep(cos(deg_to_rad(SWING_GATE_DEG.y)), cos(deg_to_rad(SWING_GATE_DEG.x)), swing_cos)
+
+
 ## Reads the pose and sets the blend shapes and the shader's instance uniforms.
 func update() -> void:
 	var slots := PackedFloat32Array()
@@ -60,6 +84,16 @@ func update() -> void:
 		var child := _origin(b["child_tail"]) - _origin(b["child"])
 		var theta := rad_to_deg(ref.angle_to(child)) if ref.length() > 1e-6 and child.length() > 1e-6 else float(j["rest_deg"])
 		var w := bend_weights(j, theta)
+		var g := 1.0
+		if bool(j.get("gated", false)) and ref.length() > 1e-6:
+			var r := ref.normalized()
+			var swing := child - r * r.dot(child)
+			if swing.length() > 1e-3 * child.length():
+				var ref_rot := (_skeleton.get_bone_global_pose(b["ref"]).basis.orthonormalized()
+						* _skeleton.get_bone_global_rest(b["ref"]).basis.orthonormalized().inverse())
+				g = swing_gate(j, swing.normalized().dot((ref_rot * (j["plane_skeleton"] as Vector3)).normalized()))
+		w.x *= g
+		gate[k] = g
 		if int(j["flex_index"]) >= 0:
 			_mesh.set_blend_shape_value(int(j["flex_index"]), w.x)
 		if int(j["ext_index"]) >= 0:

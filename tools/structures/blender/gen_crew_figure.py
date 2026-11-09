@@ -2,10 +2,10 @@
 
 Own rebuild from config/cockpits/crew_figure.toml (spec["crew_figure"]); no third-party mesh. Frame: origin = the seat's hip reference point,
 X = up the seat back, Y = the seat's chest normal (forward), Z = the crew's left (figure_layout.py, crew_figure.toml header). Rest pose = seated,
-hands on the thighs. One skinned mesh node `crew_figure` under the armature `crew_figure_rig`: the suit hull of figure_body.py (anatomical
-ANSUR II body plus the suit ease; smooth weights across the joints, corrective shape keys per joint, the atlas UV and the wrinkle-mask UV)
-joined with the rigid parts (helmet, visor, hood, glove lock rings, gloves with five fingers, boots: one bone each). Surfaces (glTF
-primitives) = the materials suit, boots, gloves, helmet, collar, visor. Suit detail (stripes, seams, folds) comes from suit_textures.py.
+hands on the thighs. Two skinned mesh nodes under the armature `crew_figure_rig`: `crew_figure` = the suit hull of figure_body.py
+(anatomical ANSUR II body plus the suit ease; smooth weights across the joints, corrective shape keys per joint, the atlas UV and the
+wrinkle-mask UV; the only mesh with morph targets) and `crew_figure_parts` = the rigid parts (helmet, visor, hood, glove lock rings,
+gloves with five fingers, boots: one bone each). Surfaces (glTF primitives) = the materials suit | boots, gloves, helmet, collar, visor. Suit detail (stripes, seams, folds) comes from suit_textures.py.
 """
 import math
 import sys
@@ -29,6 +29,7 @@ VISOR_COLS, VISOR_ROWS = 24, 16
 RIM_SIDES = 14  # [E] sides of the rim bead's cross section
 PIVOT_SIDES = 20  # [E] sides of the round visor-pivot button
 FINGER_SIDES = 8  # [E] sides of a glove finger
+PARTS_NODE = "crew_figure_parts"  # the rigid parts' mesh node (no shape keys)
 
 
 def vec(t):
@@ -434,19 +435,23 @@ def assemble(cfg):
         ob.data.materials.append(mats[material])
         ob.vertex_groups.new(name=bone).add(list(range(len(ob.data.vertices))), 1.0, "REPLACE")
         objs.append(ob)
+    # fix round 1: the rigid parts (helmet, visor, collar, gloves, boots) are their own mesh WITHOUT shape keys; only the suit carries the 16
+    # corrective morph targets (a joined mesh exported them on every primitive: 10.5 MB .bin and morph work on the rigid vertices)
     bpy.ops.object.select_all(action="DESELECT")
     for ob in objs:
         ob.select_set(True)
-    suit.select_set(True)
-    bpy.context.view_layer.objects.active = suit  # the joined object keeps the suit's shape keys (the parts get their basis positions)
+    bpy.context.view_layer.objects.active = objs[0]
     bpy.ops.object.join()
-    fig = bpy.context.view_layer.objects.active
-    fig.name = "crew_figure"
-    fig.data.name = "crew_figure"
-    fig.parent = rig
-    mod = fig.modifiers.new("Armature", "ARMATURE")
-    mod.object = rig
-    return rig, fig, tris
+    rigid_parts = bpy.context.view_layer.objects.active
+    rigid_parts.name = PARTS_NODE
+    rigid_parts.data.name = PARTS_NODE
+    suit.name = "crew_figure"
+    suit.data.name = "crew_figure"
+    for ob in (suit, rigid_parts):
+        ob.parent = rig
+        mod = ob.modifiers.new("Armature", "ARMATURE")
+        mod.object = rig
+    return rig, suit, tris
 
 
 def main():

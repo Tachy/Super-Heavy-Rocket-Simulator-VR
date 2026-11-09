@@ -13,9 +13,10 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   +X), (Y, Z) = r (cos az, sin az), az 0 = side hatch. The crew face the hatch side and the console: Y toward the hatch,
   **Z = az +90 = the crew's left**. Seats s1..s4 from the crew's left (s1 at +Z), s2 = commander (player), s3 = pilot.
 - Buttons: `panel` = the screen above (its normal / up apply), `row` 1 upper / 2 lower, `shape` round / rect,
-  `kind` push / covered / handle, `function` only with evidence, else `"none"`; the five BLANK-faced keys at the left
-  screen's right edge (`c_upper_1`, `c_upper_2`, `c_lower_1`, `c_lower_2`, `c_lower_round`) are `camera` with `camera_slot` 1..5 (user decision
-  2026-11-09: camera selection on unlabelled keys; the 18 labelled keys cam1..cam18 keep their ids and are `none`).
+  `kind` push / covered / handle, `function` only with evidence, else `"none"`; the four BLANK-faced keys at the left
+  screen's right edge (`c_upper_1`, `c_upper_2`, `c_lower_1`, `c_lower_2`) are `camera` with `camera_slot` 1..4 (user decisions
+  2026-11-09: camera selection on unlabelled keys; second decision: four keys, left hand only; the 18 labelled keys cam1..cam18 keep their ids
+  and are `none`, so is the blank `c_lower_round`).
   Known functions: `abort` (centre handle), `chute_mains_only`, `chute_drogues_and_mains`, `backup_g_meter`; nothing is
   wired in Task 1.
 - `[hotas]`: deliberate deviation (real Dragon has none): T.16000M stick on the commander's right armrest, TWCS throttle
@@ -46,15 +47,20 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   (bones, seat basis, joints, manifest block), `figure_body.py` (the body / suit hull), `figure_measure.py` (tape measures) and the baker
   `tools/structures/suit_textures.py`; writes `crew_figure.gltf`, `suit_albedo.png`, `suit_wrinkle.png` into the Crew Dragon set. `vehicle_spec.load_dragon`
   loads the TOML into `spec["crew_figure"]`; `VehicleModels` returns the meshes under `"crew_figure"` and counts the TOML for staleness; manifest block
-  `crew_figure` (`bones`, `eye_m`, `materials`, `frame`, `joints`, `joint_order`, `suit_material`, `suit_maps`, helmet / visor entries).
+  `crew_figure` (`bones`, `eye_m`, `materials`, `frame`, `joints`, `joint_order`, `suit_material`, `suit_maps`, helmet / visor entries). Two skinned mesh
+  nodes on one armature (fix round 1): `crew_figure` = the suit (the only mesh with morph targets) and `crew_figure_parts` = the rigid parts (helmet, visor,
+  hood, glove lock rings, gloves, boots).
 - Frame convention: glTF origin = the seat's hip reference point (`[[seat]] hip_m` = seat-back plane meets the pan surface); **x = up the seat back, y = the
   seat's chest normal, z = the crew's left**. The game places it at a seat with the basis columns `((cos a, -sin a, 0), (sin a, cos a, 0), (0, 0, 1))` in
   the capsule frame (a = `back_angle_deg`; `figure_layout.to_capsule` / `seat_basis`). The hip joint sits 0.10 above and 0.12 ahead of the origin.
 - Eye contract: the figure's eye point (helmet centre + 0.03 up, 0.06 ahead) = (0.83, 0.23) in the figure frame = `[eye]` minus seat s2's `hip_m` (tested < 1 cm).
 - Skeleton (35 bones): `hips, spine, chest, neck, head`, per side `shoulder / upper_arm / forearm / hand / index_1..3 / thumb_1..2 / fingers, fingers_2,
-  fingers_3 (middle / ring / little, three phalanges on shared bones) / thigh / shin / foot`, `_l` at +Z. Rest pose = seated: thighs 25 deg below the pan
-  plane (10 deg above the hatch axis), interior knee 105 deg, the upper arms hanging (12 deg from the torso axis), the elbows beside the torso, the hands palm
-  down on the thighs (`[pose] wrist_m`, `elbow_pole`, KSC-20190731-PH_SPX01_0002 / crew1_1).
+  fingers_3 (middle / ring / little, three phalanges on shared bones) / thigh / shin / foot`, `_l` at +Z. Rest pose = seated launch posture (fix round 1, crew1_1):
+  thighs 21 deg below the pan plane, interior knee 102 deg, then the knee swings OUT about the hip-ankle line by `knee_out_deg` 20 (`figure_layout.leg_joints`:
+  ankle and knee angle kept; knees 0.35 m apart, the boots side by side on the tray 0.18 m apart); seen from the hatch the thigh is 12.3 deg above and the shin
+  62.3 deg below the hatch axis (photo bands 10-20 / 60-65.5, >= 2 deg margin; before: exactly on the 10 deg edge). The upper arms hang (12 deg from the torso
+  axis), the elbows beside the torso, the hands palm down on the thighs (`[pose] wrist_m` on the sagittal thigh, riding along with the knee swing; `elbow_pole`,
+  KSC-20190731-PH_SPX01_0002 / crew1_1). The seats' `foot_rest_m` / `foot_rest_normal` follow the ankle (hip + (-0.152, 0.754)).
 
 ### Crew body and suit (Task 8b)
 - Measures: ANSUR II (2012 U.S. Army survey, male public database, 4082 subjects, public domain; `sources.toml` `ansur2_male`, CSV in
@@ -74,33 +80,48 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   arms, tight at the forearm and shank, eva_suit_newatlas / crew1_1); the body itself is not exported (covered). Geometry for the silhouette only: suit hull,
   glove lock rings, gloves (palm, index, middle / ring / little, thumb), boot shafts over the suit's lower legs and the feet, the helmet as before.
 - Surface detail by texture (`suit_textures.py`, atlas 2.56 x 1.60 m of suit surface, 1.25 mm texel, `[suit_look]`): dark grey side panels (hip to axilla, up
-  the front of the shoulder to the collar), the stripe down the back of the upper arm, the grey forearm panel, the chest plate's grey chevron, seam piping,
+  the front of the shoulder to the collar), the stripe down the back of the upper arm, the grey forearm panel, the chest plate's dark chevron (stripe grey,
+  22 mm), seam piping,
   the front closure, thigh pockets, ribbed knee bellows (shading), grey joint inserts (inner elbow, back of the knee), the flag on the upper left arm.
+  Torso UV (fix round 1): u around each ring is its ARC-LENGTH share from the back centre (front = 0.5); the torso columns sit at equal angles and crowd at the
+  corners of the near-box sections, so the earlier column-index u squeezed the 75 mm panels into ~15 mm at the chest corners (the cause of the "uniform grey"
+  look, not the lighting). Gloves dark grey 0.09 (KSC-20190731, jsc2024e066391, demo1_1). Under the direct sun patch of the pad shots the AgX shoulder still
+  compresses white suit and grey parts (the studio photos are evenly lit).
 - Dynamic folds: (a) `suit_wrinkle.png` (2.5 mm texel): compression folds per joint zone at full bend (RG = height slopes, B = cavity; pitch 28 mm, depth
   6 mm, strongest on the compressed side); every suit vertex carries its zone (UV2: slot + 1, mask). `game/shaders/crew_suit.gdshader` blends them by the
   joint's wrinkle weight (instance uniforms `wrinkle_l` / `wrinkle_r` = shoulder, elbow, hip, knee), the normal through the surface gradient of the height
-  (no tangents needed), the cavity darkens the albedo. (b) 16 corrective blend shapes `<joint>_<side>_flex` / `_ext`: the bind-space offsets that make
+  (no tangents needed), the cavity darkens the albedo (`cavity_shade` 0.25). The elbow's upper arm -> forearm weight blend spans +-0.07 m (`ELBOW_BLEND_M`,
+  fix round 1: +-0.05 left a hard inner-elbow crease). (b) 16 corrective blend shapes `<joint>_<side>_flex` / `_ext`: the bind-space offsets that make
   the game's linear skinning equal the dual-quaternion pose at full bend / the extension limit, with the joint zone pushed out along its normals until the
   limb keeps its rest volume (cloth bunching instead of a collapse). No cloth simulation.
 - `game/cockpit/figure_deform.gd` (`FigureDeform`, one per figure, `CockpitView.figure_deform(seat)`): theta = the angle between the reference direction
   (shoulder / hip: minus the chest / hips bone; elbow / knee: the parent bone) and the child bone, measured between bone heads; flex weight ramps from the
   rest angle to `[joints]` full, ext weight from the rest angle to the extension limit, wrinkle weight 0 at the straight joint and 1 at full bend
-  (`figure_layout.bend_weights` mirrors it). Updated after every `pose_arms` (the commander) and once at build (the others are static).
+  (`figure_layout.bend_weights` mirrors it). Swing gate (fix round 1): the shoulder / hip flex shapes are baked for ONE swing direction (manifest joint
+  `plane`, `figure_layout.bake_direction`: shoulder forward + 25 % out, hip forward), so their weight is multiplied by `swing_gate` (1 within 25 deg of
+  that direction, 0 beyond 65 deg, smoothstep; `figure_layout.swing_gate` mirrors `FigureDeform.swing_gate`); the plane rides with the reference bone's
+  pose. Measured: commander's right shoulder at the HOTAS grip (swung back, 39 deg) gate 0 (was a forward bulge at 0.2 weight = the crumpled shoulder),
+  reaching to the centre screen gate 1. Updated after every `pose_arms` (the commander) and once at build (the others are static); only the suit mesh
+  node gets a deformer.
 - Volumes (part volume from the fixed rest port loop, `figure_body.part_volume`): with the shapes the arm / leg keeps its rest volume within 0.5 % at a
   90 deg elbow and knee, a straight elbow, a 140 deg elbow, a 135 deg knee and a 120 deg shoulder raise; plain LBS changes the arm by ~3-5 % at the 120 deg
-  raise. The shoulder shapes are baked for a forward raise (toward the console, 25 % outward); other swing directions get the same weight by angle only.
+  raise. The shoulder shapes are baked for a forward raise (toward the console, 25 % outward); other swing directions are gated off (plain skinning).
 - Seated launch pose (all figures): hands on the thighs; the commander's idle hands on the HOTAS grips while the props are shown (`CockpitView.idle_tip`:
   `[hotas] *_grip_m` + 0.09 m along the chest normal to the index tip, `GRIP_TIP_AHEAD_M`; the fingers close by `ArmIk.FIST_CURL_DEG` x grip; Task 9
-  calibrates the grips). The commander's IK elbow pole is `ELBOW_POLE` (down the seat back, a little back and out).
-- Budget: 28.1k triangles per figure (suit 14.2k, helmet / visor / beads ~9k, gloves, boots), ~112k for four figures; 16 morph targets on every surface
-  of the mesh (Blender's exporter writes no sparse accessors; ~8 MB .bin). VR check in Task 9.
+  calibrates the grips). Pointing hand (fix round 1): while the index is extended (reach / tap) the middle / ring / little fingers fold in by
+  `ArmIk.POINT_CURL_DEG` 45 per joint (cap `MAX_FINGER_CURL_DEG` 65). The commander's IK elbow pole is `ELBOW_POLE` (down the seat back, a little back and out).
+- Budget: 28.1k triangles per figure (suit 14.2k, helmet / visor / beads ~9k, gloves, boots), ~112k for four figures. Morph targets (fix round 1) only on
+  the suit primitive (7966 vertices x 16 targets, POSITION + NORMAL); the rigid parts (15.3k vertices) are a separate mesh without targets: `crew_figure.bin`
+  4.5 MB (was 10.5 MB with the targets on every primitive), morphed vertex-target pairs 127k per figure (was 373k, -66 %), 0.51M for four. VR check in Task 9.
 - Tests: `tools/structures/tests/test_crew_figure.py` (ANSUR rows = the CSV medians; body measures within 1 cm: buttock / waist / chest girths, breadths
   and depths, neck base, thigh, lower thigh, calf, ankle, wrist girths, segment lengths, biacromial and bideltoid breadths; eye contract; suit = body + ease;
-  closed hull with the four ports; weights; joint volumes; wrinkle weights; no NaN; maps; glTF shapes and mask UV), `console_pointer_test.gd`
+  closed hull with the four ports; weights; joint volumes; wrinkle weights; swing gate; torso arc-length UV; no NaN; maps; glTF shapes and mask UV; morph
+  targets only on the suit, .bin < 6 MB), `test_dragon_cabin.py` (knee / shin in the photo bands with margin, knees apart, foot plate), `console_pointer_test.gd`
   (`_check_figure_deform`), `cockpit_view_test.gd` (35 bones). Shots: `cockpit_shots.gd --body` (`screenshots/m7-cockpit/body/`: `body_side`, `body_34`,
   `body_arm_bent`, `body_arm_raised`, `body_elbow_bent`, `body_elbow_straight`, `*_vs_<photo>`).
-- Open: the shoulder still pinches under large sideways swings (abduction is not a baked direction); the knee bellows are shading only; no face inside the
-  helmet; the gloves' fingers are separate rigid capsules per phalanx.
+- Open: a backward / sideways shoulder swing gets plain skinning (no corrective baked for it; a soft front-shoulder fold remains at the HOTAS grip); the reach
+  to the centre screen needs a near-straight arm (round-4 fit, 0.69 of 0.80 m); the knee bellows are shading only; no face inside the helmet; the gloves'
+  fingers are separate rigid capsules per phalanx; the non-player figures' hands rest on the thighs (no armrest grips modelled).
 
 ### Windows and hatch against the exterior table
 - `[cabin] windows` / `hatch` are copies [D] of `config/vehicles/detail/crew_dragon.toml` (outer-surface convention);
@@ -266,10 +287,11 @@ State after plan Task 6 (code: `game/cockpit/cockpit_camera.gd`, `hotas_buttons.
 ## External cameras (left screen, Task 7)
 State after plan Task 7 (code: `game/cockpit/camera_catalog.gd`, `screen_camera.gd`, `game/shaders/screen_feed.gdshader`, `World._update_screen_camera`).
 - Cameras are configuration: `[[camera]]` entries of `config/cockpits/crew_dragon.toml` (`id`, `name_key`, `stage`, optional `vehicle` fragment and
-  `requires` = a `capsule_state` flag, `mount_m` / `look` / `up` in the stage's body frame, `fov_deg` = horizontal). Order = cycling order. Texts:
+  `requires` = a `capsule_state` flag, `mount_m` / `look` / `up` in the stage's body frame, `fov_deg` = horizontal). Order = cycling order = key slot order (slot k = k-th entry). Texts:
   `cockpit.camera.<id>` in `config/i18n/{de,en}.toml`. Five cameras, all poses [E] (own choices after the spec list, none measured): `chase` (on the capsule,
   16 m to the side, looking at it), `stage1_aft` (first stage interstage, looking aft), `stage2_engine` (boom at the second stage base, toward the nozzle),
-  `dragon_nose` (docking camera, only while `capsule_state.nose_cone_open`), `dragon_trunk` (capsule side, looking aft along the trunk).
+  `dragon_trunk` (capsule side, looking aft along the trunk), `dragon_nose` (docking camera, only while `capsule_state.nose_cone_open`; last, so it has no
+  key and is reached only by the on-screen camera button, user decision 2026-11-09 second).
 - `CameraCatalog` (static, float64 from the snapshot like `CockpitCamera`): `available(sim, config = Crew Dragon)` = the ids whose stage a live body carries (a camera
   on a separated stage stays while that body exists, then vanishes), `mount_pose_gcrf(sim, id)` = body position + attitude * (stage base - CG + mount),
   camera axes attitude * (look, up). `body_of`, `entry_of`, `all_ids`.
@@ -338,8 +360,9 @@ State after plan Task 7 (code: `game/cockpit/camera_catalog.gd`, `screen_camera.
 ## Console pointer, hand and touch (Task 8)
 State after plan Task 8 (code: `game/cockpit/console_strip.gd`, `console_pointer.gd`, `hand_motion.gd`, `arm_ik.gd`, `CockpitView.pose_arms`, `ScreenCamera.CAMERA_BUTTON_UV`).
 - Standing decision (user 2026-11-09): camera selection is on keys WITHOUT a label; labelled keys (DEORBIT NOW, SUPPRESS FIRE, ...) are `function = "none"` (the tap animates, nothing
-  happens) until their real function is implemented. Ids stay stable. Camera keys: `c_upper_1`, `c_upper_2`, `c_lower_1`, `c_lower_2` (blank, under the left screen's right end)
-  and `c_lower_round` (blank, 0.14 m left of the centre line, under the centre screen) = slots 1..5 in catalog order. Plus the on-screen camera button on `screen_left`
+  happens) until their real function is implemented. Ids stay stable. Standing decision (user 2026-11-09, second): FOUR camera keys, all for the left hand:
+  `c_upper_1`, `c_upper_2`, `c_lower_1`, `c_lower_2` (blank, under the left screen's right end) = slots 1..4 = chase, stage1_aft, stage2_engine, dragon_trunk (catalog order);
+  the fifth camera `dragon_nose` (last in the catalog) only through the on-screen button; `c_lower_round` (blank, under the centre screen, right hand) is `none`. Plus the on-screen camera button on `screen_left`
   (`ScreenCamera.CAMERA_BUTTON_UV`, bottom right, ~3.8 x 4.3 cm, drawn into the feed, flashes on use): tap = `ScreenCamera.next()`.
 - `ConsoleStrip`: the console as a 2D strip (u to the crew's right, v up, from the centre screen centre); surfaces = 3 screens + 39 keys, each a rectangle with its 3D face. `clamp`
   moves any point to the nearest surface (gaps, module faces, strip edges), `to_surface` gives {surface_id, point_m, normal, uv}, `pick` casts a ray on the console plane.
@@ -353,7 +376,8 @@ State after plan Task 8 (code: `game/cockpit/console_strip.gd`, `console_pointer
   fingers follow the hand). `extend` 0 = relaxed grip curl (28 deg per joint), 1 = index straight, smoothed like the hand.
 - `CockpitView.pose_arms({l|r: {tip, extend}})`, `idle_tip(side)` (the rest hand), `posed_tip`, `arm_result`: the torso leans about the waist (spine bone, <= 22 deg [E], 4 passes) when the
   target is beyond 97 % of the straight reach. Measured (centre screen at 0.69 m from the eye): centre and left screen and all left keys need no lean and are touched to < 1 mm; the right
-  screen centre needs 14.5 deg, `r_upper_3` 21 deg; `r_upper_5` (outermost right key) stays 34 mm short at the lean limit (tip clamped).
+  screen centre needs 14.5 deg, `r_upper_3` 21 deg; `r_upper_5` (outermost right key) is a KNOWN GAP: 30.7 mm short at the lean limit (tip clamped, the click still fires), stated in
+  `console_pointer_test.gd` `KNOWN_REACH_GAP_M` (the test fails when the shortfall moves by more than 2 mm); Task 9 re-measures after the seat / eye calibration. `r_lower_3` is reached.
 - Idle hands: Task 8b, see "Crew body and suit" (HOTAS grips while the props are shown, else the hands on the thighs).
 - Open: VR input path untested (VrPanelMouse captures the mouse when its panel shows; the VR run of Task 9 decides who owns the mouse in the cockpit); tablets and the handle are not touch
   targets beyond the generic key rectangle; the desktop smoothness check is by the user.

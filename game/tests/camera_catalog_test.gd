@@ -93,7 +93,7 @@ func _stack(nose_open := false) -> Dictionary:
 func _check_catalog_logic() -> void:
 	var config := CockpitConfig.for_vehicle("crew_dragon")
 	_check(config != null and config.cameras.size() == 5, "five [[camera]] entries in the Crew Dragon cabin")
-	_check(_same(CameraCatalog.all_ids(config), ["chase", "stage1_aft", "stage2_engine", "dragon_nose", "dragon_trunk"]), "config order chase, stage1_aft, stage2_engine, dragon_nose, dragon_trunk")
+	_check(_same(CameraCatalog.all_ids(config), ["chase", "stage1_aft", "stage2_engine", "dragon_trunk", "dragon_nose"]), "config order chase, stage1_aft, stage2_engine, dragon_trunk, dragon_nose (the fifth has no key)")
 	var sim := StubSim.new()
 	sim.bodies.append(_stack())
 	_check(_same(CameraCatalog.available(sim, config), ["chase", "stage1_aft", "stage2_engine", "dragon_trunk"]), "a closed-nose stack offers chase, stage1_aft, stage2_engine, dragon_trunk (no dragon_nose)")

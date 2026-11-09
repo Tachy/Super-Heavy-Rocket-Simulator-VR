@@ -95,11 +95,13 @@ def _node_world(doc):
 
 
 def _mesh():
-    """(doc, [(material name, positions, triangle index list)]) of the skinned mesh node `crew_figure`."""
+    """(doc, suit node, [(material name, positions, triangle index list)]) of the skinned mesh nodes `crew_figure` (the suit) and
+    `crew_figure_parts` (the rigid parts)."""
     doc, bufs = _doc()
     node = next(n for n in doc["nodes"] if n.get("name") == "crew_figure")
+    parts = next(n for n in doc["nodes"] if n.get("name") == "crew_figure_parts")
     prims = []
-    for p in doc["meshes"][node["mesh"]]["primitives"]:
+    for p in doc["meshes"][node["mesh"]]["primitives"] + doc["meshes"][parts["mesh"]]["primitives"]:
         pos = _read(doc, bufs, p["attributes"]["POSITION"], 3)
         idx = _read(doc, bufs, p["indices"], 1)
         prims.append((doc["materials"][p["material"]]["name"], pos, idx))
@@ -187,11 +189,24 @@ def mesh():
     return _mesh()
 
 
-def test_gltf_has_one_skinned_mesh_and_the_bones(cfg, mesh):
+def test_gltf_has_the_suit_and_the_parts_mesh_on_one_skeleton(cfg, mesh):
     doc, node, prims = mesh
-    assert "skin" in node and len([n for n in doc["nodes"] if "mesh" in n]) == 1
+    meshed = [n for n in doc["nodes"] if "mesh" in n]
+    assert sorted(n["name"] for n in meshed) == ["crew_figure", "crew_figure_parts"] and all("skin" in n for n in meshed)
     joints = {doc["nodes"][j]["name"] for j in doc["skins"][node["skin"]]["joints"]}
     assert joints == set(BRIEF_BONES)
+    for n in meshed:
+        assert {doc["nodes"][j]["name"] for j in doc["skins"][n["skin"]]["joints"]} <= set(BRIEF_BONES)
+
+
+def test_morph_targets_only_on_the_suit(mesh):
+    """Fix round 1: the 16 corrective shapes move only the suit; the rigid parts' mesh carries none (asset size, GPU morph work)."""
+    doc, node, _ = mesh
+    parts = next(n for n in doc["nodes"] if n.get("name") == "crew_figure_parts")
+    assert all("targets" not in p for p in doc["meshes"][parts["mesh"]]["primitives"])
+    suit_prims = doc["meshes"][node["mesh"]]["primitives"]
+    assert [doc["materials"][p["material"]]["name"] for p in suit_prims] == ["suit"]
+    assert (MODELS / "crew_figure.bin").stat().st_size < 6_000_000
 
 
 def test_gltf_skeleton_equals_the_layout(cfg, mesh):
@@ -469,6 +484,39 @@ def test_wrinkle_weight_is_0_straight_and_1_at_full_bend(cfg):
         assert flex == 0.0 and ext == 0.0 and 0.0 <= wr < 1.0, name
         assert fl.bend_weights(joint, joint["full_deg"])[0] == 1.0
     assert sorted(j["slot"] for j in fl.joint_table(cfg).values()) == list(range(8))
+
+
+def test_swing_shapes_act_only_near_their_baked_direction(cfg):
+    """Fix round 1 (pinched shoulder at the HOTAS grip): a swing joint's (shoulder, hip) flex shape is baked for one swing direction
+    (`plane`, perpendicular to the reference); its gate is 1 there, 0 for a sideways (90 deg) or backward swing; hinges are not gated."""
+    for name, joint in fl.joint_table(cfg).items():
+        ref = fl.mul(fl.norm(fl.sub(fl.bones(cfg)[joint["ref"]]["tail"], fl.bones(cfg)[joint["ref"]]["head"])), joint["ref_sign"])
+        assert abs(fl.dot(joint["plane"], ref)) < 1e-9 and fl.length(joint["plane"]) == pytest.approx(1.0), name
+        if name.startswith(("shoulder", "hip")):
+            assert joint["gated"], name
+            assert fl.swing_gate(joint, 1.0) == 1.0 and fl.swing_gate(joint, math.cos(math.radians(20.0))) == 1.0
+            assert fl.swing_gate(joint, 0.0) == 0.0 and fl.swing_gate(joint, -1.0) == 0.0
+            assert 0.0 < fl.swing_gate(joint, math.cos(math.radians(45.0))) < 1.0
+        else:
+            assert not joint["gated"] and fl.swing_gate(joint, -1.0) == 1.0, name
+
+
+def test_torso_uv_runs_along_the_arc(cfg):
+    """Fix round 1: u around the torso is the arc-length share of each ring (the painted panels keep their width in metres on the
+    near-box sections); along one ring du / edge length is constant."""
+    import figure_body as fb
+    h, layout = fb.hull(cfg, ease=True)
+    tu = layout["parts"]["torso"]["u_width"]
+    rows = collections.defaultdict(list)
+    for f, uv, part in zip(h.faces, h.uv, h.part):
+        if part != "torso" or len(f) != 4:
+            continue
+        for a, b in ((0, 1), (3, 2)):
+            if abs(uv[a][1] - uv[b][1]) < 1e-12 and abs(uv[a][0] - uv[b][0]) < 0.5 * tu:
+                rows[round(uv[a][1], 6)].append(abs(uv[b][0] - uv[a][0]) / np.linalg.norm(h.v[f[b]] - h.v[f[a]]))
+    assert len(rows) > 10
+    for v, ratios in rows.items():
+        assert max(ratios) / min(ratios) < 1.0 + 1e-6, (v, min(ratios), max(ratios))
 
 
 def test_no_nan_in_the_mesh_shapes_and_poses(cfg, suit):

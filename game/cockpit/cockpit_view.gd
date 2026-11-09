@@ -402,6 +402,8 @@ func _build_figures(models: Dictionary) -> void:
 					elif key == String(manifest.get("helmet_material", "")) and manifest.has("helmet_grooves"):
 						material = _helmet_material(material, manifest["helmet_grooves"])
 					mesh_node.set_surface_override_material(s, material)
+			if mesh_node.mesh.get_blend_shape_count() == 0:
+				continue  # fix round 1: only the suit mesh carries the corrective shapes (the rigid parts are a separate mesh)
 			var deform := FigureDeform.for_figure(_skeletons.get(seat_id), mesh_node, manifest.get("joints", {}), manifest.get("joint_order", []))
 			if deform != null:
 				_deforms[seat_id] = deform
