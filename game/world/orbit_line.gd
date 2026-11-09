@@ -15,6 +15,7 @@ var _immediate := ImmediateMesh.new()
 
 func _ready() -> void:
 	mesh = _immediate
+	RenderLayers.mark_overlay(self)
 	# A display-referred UI colour, past night vision's rod step unchanged (shaders/display_colour.gdshader).
 	var material := ShaderMaterial.new()
 	material.shader = preload("res://shaders/display_colour.gdshader")

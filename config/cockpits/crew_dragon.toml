@@ -672,10 +672,10 @@ id = "stage2_engine"                # [E] spec item 3: the vacuum nozzle with th
 name_key = "cockpit.camera.stage2_engine"
 stage = "second_stage"
 vehicle = "falcon9"
-mount_m = [1.0, 3.8, 0.0]           # [E] 1 m above the stage base, 2 m off the skin (radius 1.83 m): clears the hull edge to see the nozzle
-look = [-0.4657, -0.8849, 0.0]      # [D] toward the nozzle on the axis 1 m below the base: (-2, -3.8, 0) / 4.294
+mount_m = [0.5, 4.5, 0.0]           # [E] on a boom 4.5 m off the axis, 0.5 m above the stage base: the hull edge stays at the frame's right, the bell in the middle
+look = [-0.4062, -0.9138, 0.0]      # [D] toward the nozzle on the axis 1.5 m below the base: (-2, -4.5, 0) / 4.924
 up = [0.0, 0.0, 1.0]
-fov_deg = 50.0                      # [E]
+fov_deg = 60.0                      # [E]
 
 [[camera]]
 id = "dragon_nose"                  # [E] spec item 4: docking camera, forward under the open nose cone

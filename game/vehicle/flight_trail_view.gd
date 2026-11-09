@@ -102,6 +102,7 @@ func _trail(index: int) -> Trail:
 	trail.material.set_shader_parameter("fade_in_start_m", FADE_IN_START_M)
 	trail.material.set_shader_parameter("fade_in_length_m", FADE_IN_LENGTH_M)
 	for instance in [trail.body, trail.head]:
+		RenderLayers.mark_overlay(instance)
 		instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		instance.custom_aabb = NEVER_CULLED
 		add_child(instance)

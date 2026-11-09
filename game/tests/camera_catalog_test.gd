@@ -111,6 +111,19 @@ func _check_catalog_logic() -> void:
 	_check(CameraCatalog.available(sim, config).has("stage1_aft"), "after staging stage1_aft stays while the first stage body exists")
 	sim.bodies.remove_at(1)
 	_check(not CameraCatalog.available(sim, config).has("stage1_aft"), "stage1_aft vanishes once the first stage body is gone")
+	# the catalog's rule for stage2_engine: offered while ANY body still carries the second stage (the Dragon leaving it does not matter),
+	# gone when no body does; the camera is mounted on the stage's own frame
+	sim.bodies[0] = {"stages": [
+			{"id": "trunk", "vehicle_id": "falcon9_block5+crew_dragon", "base_station_m": 0.0},
+			{"id": "capsule", "vehicle_id": "falcon9_block5+crew_dragon", "base_station_m": 3.25}],
+			"position": Vector3(6.5e6, 0.0, 0.0), "attitude": Quaternion.IDENTITY, "cg": 2.0, "capsule": {"present": true}}
+	sim.bodies.append({"stages": [{"id": "second_stage", "vehicle_id": "falcon9_block5", "base_station_m": 0.0}],
+			"position": Vector3(6.49e6, 0.0, 0.0), "attitude": Quaternion.IDENTITY, "cg": 5.0})
+	_check(CameraCatalog.available(sim, config).has("stage2_engine"), "after the Dragon leaves, stage2_engine stays while the second stage body exists")
+	var s2_pose := CameraCatalog.mount_pose_gcrf(sim, "stage2_engine", config)
+	_check(absf(s2_pose.origin.x - (6.49e6 - 5.0 + 0.5)) < 1.0e-3, "stage2_engine rides the second stage body (origin x %.3f)" % s2_pose.origin.x)
+	sim.bodies.remove_at(1)
+	_check(not CameraCatalog.available(sim, config).has("stage2_engine"), "stage2_engine vanishes once no body carries the second stage")
 	sim.active = false
 	_check(CameraCatalog.available(sim, config).is_empty(), "nothing is offered without an active simulation")
 	# mount pose = body pose * mount, to 1 mm
@@ -157,6 +170,24 @@ func _check_screen_logic() -> void:
 	screen.select("stage1_aft")
 	screen.update(sim, config, null, Vector3.ZERO, 0.0, false)
 	_check(screen.current_id == "chase", "the current camera falling out switches to chase")
+	# the feed is a physical camera image: no guidance overlay (RenderLayers.OVERLAY), no console geometry
+	_check((screen.camera.cull_mask & RenderLayers.OVERLAY) == 0 and (screen.camera.cull_mask & CockpitView.CONSOLE_LAYER) == 0 and (screen.camera.cull_mask & 1) != 0,
+			"the feed camera culls the overlay and console layers, keeps the default one")
+	var overlay := TrajectoryView.new()
+	var map_label := MapLabel.new()
+	var orbit := OrbitLine.new()
+	var trails := FlightTrailView.new()
+	overlay._ready()  # not in a tree: _ready by hand
+	orbit._ready()
+	_check(overlay.layers == RenderLayers.OVERLAY and orbit.layers == RenderLayers.OVERLAY, "TrajectoryView and OrbitLine sit on the overlay layer only (the main camera's default mask still sees them)")
+	_check((screen.camera.cull_mask & overlay.layers) == 0 and (1048575 & overlay.layers) != 0, "the overlay layer is invisible to the feed camera and visible to the default cull mask")
+	map_label.setup("x", Color.WHITE)
+	_check(map_label.layers == RenderLayers.OVERLAY and (map_label.get_child(0) as MeshInstance3D).layers == RenderLayers.OVERLAY, "MapLabel and its outline copies sit on the overlay layer")
+	overlay.free()
+	map_label.free()
+	orbit.free()
+	trails.free()
+	_check(screen._label.text != "" and screen._label.text != "cockpit.camera.chase", "the camera's name is on the feed's label (%s)" % screen._label.text)
 	screen.free()
 
 

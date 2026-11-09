@@ -225,7 +225,7 @@ State after plan Task 7 (code: `game/cockpit/camera_catalog.gd`, `screen_camera.
 - Cameras are configuration: `[[camera]]` entries of `config/cockpits/crew_dragon.toml` (`id`, `name_key`, `stage`, optional `vehicle` fragment and
   `requires` = a `capsule_state` flag, `mount_m` / `look` / `up` in the stage's body frame, `fov_deg` = horizontal). Order = cycling order. Texts:
   `cockpit.camera.<id>` in `config/i18n/{de,en}.toml`. Five cameras, all poses [E] (own choices after the spec list, none measured): `chase` (on the capsule,
-  16 m to the side, looking at it), `stage1_aft` (first stage interstage, looking aft), `stage2_engine` (second stage base, toward the nozzle),
+  16 m to the side, looking at it), `stage1_aft` (first stage interstage, looking aft), `stage2_engine` (boom at the second stage base, toward the nozzle),
   `dragon_nose` (docking camera, only while `capsule_state.nose_cone_open`), `dragon_trunk` (capsule side, looking aft along the trunk).
 - `CameraCatalog` (static, float64 from the snapshot like `CockpitCamera`): `available(sim, config = Crew Dragon)` = the ids whose stage a live body carries (a camera
   on a separated stage stays while that body exists, then vanishes), `mount_pose_gcrf(sim, id)` = body position + attitude * (stage base - CG + mount),
@@ -237,12 +237,26 @@ State after plan Task 7 (code: `game/cockpit/camera_catalog.gd`, `screen_camera.
   (`HotasButtons`, only in the cockpit) calls `next()`. The console camera keys (cam1-18) are not wired (pending user decision).
 - Screen material: `screen_feed.gdshader` on `screen_left` (`material_override`), the display-referred path (`vision_display_referred`) as the placeholder
   before it. The feed is 1.6:1, the screen 16:9: the screen shows the feed's middle 90 % of the height (`crop_y`), nothing stretched.
-- Exposure [call]: the shaders scale the scene by the pilot eye's gain (a bright cabin at night: ~1300, the feed clipped white). The feed's camera takes it back out
-  (`exposure_multiplier = FEED_GAIN / (exposure_gain * brightness)`, `FEED_GAIN` 1 = a sunlit scene as the day eye): daylight scenes read right, the night shows
-  only the lit parts (a camera does not adapt to the cabin). Far cameras: terrain / clouds / atmosphere are centred on the main camera (spec "Far cameras"), accepted coarse.
+- Exposure [call] (user decision, fix round 1): the feed has its OWN simple auto-exposure, independent of the pilot eye's adaptation: the feed camera's
+  `CameraAttributesPractical.auto_exposure_enabled` (Godot's luminance reduction = the mean of the feed's own buffer, scale 0.4, `AUTO_SPEED` 1.4: a ~1.5 s time
+  constant at 60 fps, ~3 s at 90 fps because Godot steps it per feed render by frame time). The buffer still holds the scene times the eye's gain (shaders apply it, ~1 by day, up to
+  several 1000 at night in the lit cabin), which the metering divides out; the clamp (`AUTO_MIN/MAX_SENSITIVITY`, 1 .. 1e9 = luminance 1.25e-3 ..) is wide and fixed: it only guards
+  the division on an all-black frame. A gain-scaled clamp was tried and dropped (each attribute change makes Godot re-meter at once). Limits: a night frame that is
+  black except for a few lit parts (pad floodlights, a sunlit rim) shows exactly that (the mean is dominated by the black, the lit parts clip; nothing unlit is brightened
+  that the scene does not light); the sunlit day views read right. Far cameras: terrain / clouds / atmosphere are centred on the main camera (spec "Far cameras"), accepted coarse.
+- No overlays in the image: guidance / HUD geometry in the world (`TrajectoryView` target orbit, `OrbitLine`, `FlightTrailView`, `MapLabel`) is moved to the
+  `RenderLayers.OVERLAY` layer only (bit 12, `game/world/render_layers.gd`); the feed camera's `cull_mask` excludes it and `CockpitView.CONSOLE_LAYER`, the main camera keeps
+  the default mask (sees all). New overlay geometry calls `RenderLayers.mark_overlay(node)`.
+- Camera name: a `Label` (`CameraName`, top left inside the visible 90 %, white with black outline) in the feed's SubViewport shows the selected camera's `name_key`
+  through `I18n` (follows the language). It is set every frame the screen updates and `show()`n every time (a Control under that SubViewport came up hidden).
+- Deviation from the plan interface: `chase` is a fixed mount on the capsule (the config entry), NOT the `OrbitCamera` chase pose of the plan; a free orbit around the
+  vehicle would need the main camera's controls on the feed. Deliberate.
+- `stage2_engine` (rule the catalog implements: offered while ANY body carries the second stage, whatever the Dragon does; vanishes when no body does; test in
+  `camera_catalog_test`). Mounted on a boom 0.5 m above the stage base, 4.5 m off the axis, looking at the nozzle with a 60 deg field: during the first stage burn the
+  nozzle is inside the interstage (the view shows the interstage hull), it is visible from the staging on (T+200 shot: bell, Earth behind). Poses stay [E] in the TOML.
 - Tests: `game/tests/camera_catalog_test.gd` (stub simulation: offered ids, `requires`, staging, fall-out, cycling, pose to 1 mm; real session: T-60 list, mount =
   scene node * mount within 1 mm, staging at warp x100, feed renders in / not outside the cockpit, `camera_next`). Shots: `cockpit_shots.gd --screen`
-  (`screenshots/m7-cockpit/screen/`). Frame time: `game/tests/screen_perf.gd`.
+  (`screenshots/m7-cockpit/screen/`; fix round 1: `.../fix1/{night_tm60,day_tp60,day_tp200,night_tp200}`). Frame time: `game/tests/screen_perf.gd`.
 - Desktop frame time (RTX 4090, root viewport 1.65 x scale as the VR pixel proxy, vsync 60 Hz, Crew Dragon at T-60 in the cockpit): frame 16.7 ms in every state;
   root GPU median 2.5 ms (feed off), 2.7 (30 Hz 1024 x 640), 2.9 (30 Hz 512 x 320), 2.4-2.9 (60 Hz). The feed's own GPU time at a render: chase 1.7 ms mean
   (3.2 max), stage1_aft 0.3 (0.9 max) at 1024 x 640. At 30 Hz a render lands on every third frame of 90 Hz. Open (Task 9): the headset measurement against the

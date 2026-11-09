@@ -743,3 +743,5 @@ shaders:
 - The VR panel was not in the stereo mock's lunar-night view (`--keep_vr_panel`), and the night plume seen from
   500 m (fov 25 deg) stays inside the 2 % highlight cut; the run-away the meter now avoids was therefore not
   reproduced in a render, only excluded by construction (display-referred shaders in the transparent pass, test).
+
+- The cabin screen's external-camera feed does not use this adaptation: it has its own simple camera auto-exposure (`docs/subsystems/cockpit.md`, "External cameras").

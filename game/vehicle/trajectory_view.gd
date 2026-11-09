@@ -28,6 +28,7 @@ var _material := ShaderMaterial.new()
 
 func _ready() -> void:
 	mesh = _mesh
+	RenderLayers.mark_overlay(self)
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_material.shader = SHADER
 	_material.set_shader_parameter("earth_radius_m", World.EARTH_MEAN_RADIUS_M)

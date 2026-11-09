@@ -39,6 +39,7 @@ func _on_language_changed(_language: String) -> void:
 
 func setup(text: String, colour: Color) -> void:
 	mesh = _text_mesh(text, OFFSET_PX)
+	RenderLayers.mark_overlay(self)
 	material_override = _material(colour, 1)
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var outline_material := _material(Color(0, 0, 0, colour.a), 0)
@@ -47,6 +48,7 @@ func setup(text: String, colour: Color) -> void:
 		var copy := MeshInstance3D.new()
 		copy.mesh = _text_mesh(text, OFFSET_PX + Vector2(cos(angle), sin(angle)) * OUTLINE_PX)
 		copy.material_override = outline_material
+		RenderLayers.mark_overlay(copy)
 		copy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(copy)
 
