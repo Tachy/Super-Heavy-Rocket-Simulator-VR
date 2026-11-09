@@ -216,9 +216,37 @@ State after plan Task 6 (code: `game/cockpit/cockpit_camera.gd`, `hotas_buttons.
   `launch_vehicle` stays external (the launch is asynchronous). If the capsule body disappears the camera returns to the external view.
 - `_keep_camera_above_surface` is skipped in the cockpit (the vehicle's physics decides where the head is).
 - `HotasButtons` (`config/input_hotas.toml [buttons]`): `stick_device = "T16000M"`, `cockpit_toggle = 2`, `camera_next = 3`; the indices are
-  [E] unverified (T.16000M button 3, 0-based; Task 9's VR run measures). `pressed(role)` is true on the frame of the press; `camera_next` is read by Task 7.
+  [E] unverified (T.16000M button 3, 0-based; Task 9's VR run measures). `pressed(role)` is true on the frame of the press; `camera_next` calls `ScreenCamera.next()` (Task 7).
   Measure with `godot --path game --script res://tests/joy_probe.gd -- --buttons --seconds=30`.
 - Test: `game/tests/cockpit_camera_test.gd` (needs the generated Dragon models; listed in `tools/run_godot_tests.ps1` under `-Gpu`).
+
+## External cameras (left screen, Task 7)
+State after plan Task 7 (code: `game/cockpit/camera_catalog.gd`, `screen_camera.gd`, `game/shaders/screen_feed.gdshader`, `World._update_screen_camera`).
+- Cameras are configuration: `[[camera]]` entries of `config/cockpits/crew_dragon.toml` (`id`, `name_key`, `stage`, optional `vehicle` fragment and
+  `requires` = a `capsule_state` flag, `mount_m` / `look` / `up` in the stage's body frame, `fov_deg` = horizontal). Order = cycling order. Texts:
+  `cockpit.camera.<id>` in `config/i18n/{de,en}.toml`. Five cameras, all poses [E] (own choices after the spec list, none measured): `chase` (on the capsule,
+  16 m to the side, looking at it), `stage1_aft` (first stage interstage, looking aft), `stage2_engine` (second stage base, toward the nozzle),
+  `dragon_nose` (docking camera, only while `capsule_state.nose_cone_open`), `dragon_trunk` (capsule side, looking aft along the trunk).
+- `CameraCatalog` (static, float64 from the snapshot like `CockpitCamera`): `available(sim, config = Crew Dragon)` = the ids whose stage a live body carries (a camera
+  on a separated stage stays while that body exists, then vanishes), `mount_pose_gcrf(sim, id)` = body position + attitude * (stage base - CG + mount),
+  camera axes attitude * (look, up). `body_of`, `entry_of`, `all_ids`.
+- `ScreenCamera` (child of `World`, `World.screen_camera`): a `SubViewport` (`size_px` 1024 x 640, `update_hz` 30, `UPDATE_ONCE` per interval) with its own
+  `Camera3D` in the same World3D, own empty `Compositor` (none of the main view's cloud / meter / display-tone passes) and `CameraAttributesPractical`. The camera
+  sits at mount pose - main camera (floating origin) in double. It renders only while the cockpit is the active view (`render_always` for shots).
+  `select(id)`, `next()` (config order over the offered ids), `current_id`; the current camera falling out switches to `chase`. The stick button `camera_next`
+  (`HotasButtons`, only in the cockpit) calls `next()`. The console camera keys (cam1-18) are not wired (pending user decision).
+- Screen material: `screen_feed.gdshader` on `screen_left` (`material_override`), the display-referred path (`vision_display_referred`) as the placeholder
+  before it. The feed is 1.6:1, the screen 16:9: the screen shows the feed's middle 90 % of the height (`crop_y`), nothing stretched.
+- Exposure [call]: the shaders scale the scene by the pilot eye's gain (a bright cabin at night: ~1300, the feed clipped white). The feed's camera takes it back out
+  (`exposure_multiplier = FEED_GAIN / (exposure_gain * brightness)`, `FEED_GAIN` 1 = a sunlit scene as the day eye): daylight scenes read right, the night shows
+  only the lit parts (a camera does not adapt to the cabin). Far cameras: terrain / clouds / atmosphere are centred on the main camera (spec "Far cameras"), accepted coarse.
+- Tests: `game/tests/camera_catalog_test.gd` (stub simulation: offered ids, `requires`, staging, fall-out, cycling, pose to 1 mm; real session: T-60 list, mount =
+  scene node * mount within 1 mm, staging at warp x100, feed renders in / not outside the cockpit, `camera_next`). Shots: `cockpit_shots.gd --screen`
+  (`screenshots/m7-cockpit/screen/`). Frame time: `game/tests/screen_perf.gd`.
+- Desktop frame time (RTX 4090, root viewport 1.65 x scale as the VR pixel proxy, vsync 60 Hz, Crew Dragon at T-60 in the cockpit): frame 16.7 ms in every state;
+  root GPU median 2.5 ms (feed off), 2.7 (30 Hz 1024 x 640), 2.9 (30 Hz 512 x 320), 2.4-2.9 (60 Hz). The feed's own GPU time at a render: chase 1.7 ms mean
+  (3.2 max), stage1_aft 0.3 (0.9 max) at 1024 x 640. At 30 Hz a render lands on every third frame of 90 Hz. Open (Task 9): the headset measurement against the
+  11.1 ms frame budget with weather and pad / ascent scenes (the cabin pad scene is GPU-light), and lowering `update_hz` / `size_px` if it does not fit.
 
 ### Task 5b (helmet shell, console modules, re-check under the appearance model)
 - Helmet shell (`[helmet]` of crew_figure.toml, `figure_layout.helmet_*`, `gen_crew_figure.build_shell`): fitted to the clean side profile spacex-anzug.jpg at the

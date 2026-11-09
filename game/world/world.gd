@@ -144,6 +144,7 @@ signal cockpit_toggled(active: bool)
 var cockpit_active := false  ## the camera is the pilot's head in the cabin (CockpitCamera), not an external view
 var cockpit_camera := CockpitCamera.new()
 var hotas_buttons := HotasButtons.new()  ## the stick's buttons by role ([buttons] of input_hotas.toml)
+var screen_camera := ScreenCamera.new()  ## the cabin's left screen: external cameras (renders only while the cockpit is active)
 var view_jump_count := 0  ## how often _view_jumped ran (tests)
 var cockpit_refusal_count := 0  ## toggles refused for lack of a cabin (each logged once; tests)
 var _cockpit_config: CockpitConfig  ## the cabin of the controlled vehicle while the cockpit is active
@@ -165,6 +166,7 @@ func _ready() -> void:
 	flight.setup(Paths.config_dir())
 	free_control.setup(Paths.config_dir())
 	hotas_buttons.setup(Paths.config_dir())
+	add_child(screen_camera)
 	add_child(flight)
 	add_child(view_target)
 
@@ -341,10 +343,13 @@ func update_world() -> void:
 	hotas_buttons.update()
 	if hotas_buttons.pressed("cockpit_toggle"):
 		toggle_cockpit()
+	if hotas_buttons.pressed("camera_next") and cockpit_active:
+		screen_camera.next()
 	FrameProfiler.begin(&"camera")
 	_update_camera(t)
 	FrameProfiler.end(&"camera")
 	var cam := camera.position_gcrf_m
+	_update_screen_camera(cam)
 
 	# Apparent directions: as seen from the Earth's centre for Earth shading, from the camera for
 	# what the camera sees directly (solar disk, light direction).
@@ -680,6 +685,20 @@ func _free_surface_distance_m() -> float:
 		return SurfaceClearance.surface_distance_m(moon.fixed_to_gcrf.transposed() * (p - moon_gcrf_m), _moon_heights) \
 				if _moon_heights != null else (p - moon_gcrf_m).length() - MOON_RADIUS_M
 	return SurfaceClearance.surface_distance_m(earth.fixed_to_gcrf.transposed() * p, _earth_heights)
+
+
+## The left screen's external camera (ScreenCamera): follows the simulation state, renders while the cabin is the active view.
+func _update_screen_camera(camera_gcrf_m: Vector3) -> void:
+	var config := _cockpit_config if cockpit_active else _controlled_cockpit()
+	if config == null or not flight.sim.is_active():
+		screen_camera.update(flight.sim, null, null, camera_gcrf_m, _delta, false)
+		return
+	var cabin: CockpitView = null
+	for view in flight.views:
+		if view.cockpit != null:
+			cabin = view.cockpit
+			break
+	screen_camera.update(flight.sim, config, cabin, camera_gcrf_m, _delta, cockpit_active, atmosphere.exposure_gain * atmosphere.brightness)
 
 
 func _update_camera(t: float) -> void:

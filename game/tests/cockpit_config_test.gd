@@ -17,7 +17,7 @@ func _initialize() -> void:
 		_check(commanders.size() == 1 and commanders[0]["id"] == "s2", "commander is s2")
 		for screen_id in ["left", "centre", "right"]:
 			_check(cockpit.screens.has(screen_id), "screen %s" % screen_id)
-		_check(cockpit.buttons.size() > 10 and cockpit.cameras.is_empty(), "buttons present, no cameras yet")
+		_check(cockpit.buttons.size() > 10 and cockpit.cameras.size() == 5, "buttons present, five external cameras (Task 7)")
 		_check(cockpit.tablets.size() == 2 and cockpit.lights.size() == 2 and cockpit.hotas_props_enabled, "extras")
 		_check(cockpit.cabin.has("profile_m") and ((cockpit.cabin["profile_m"] as Array)[0] as Array).size() == 2, "nested profile")
 		_check(absf((-cockpit.eye.basis.z).dot(Vector3(0.37956, 0.92517, 0.0)) - 1.0) < 1e-4, "eye looks along forward")  # round 4 [eye] forward

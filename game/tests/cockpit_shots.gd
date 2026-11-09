@@ -12,6 +12,8 @@
 #   --field_key=<0.2..1> (the eye adaptation's field background for every shot; default the game's Y_b 0.2, look fixes T13;
 #   not used with --anchored_adaptation); --cabin_keys: the hand keys before T13 (the shot's key or CABIN_FIELD_KEY)
 #   --fixed_exposure (eye adaptation off; default: on as in the game, snapped to each shot)
+#   --screen: instead of the cabin shots, one shot per external camera offered on the left screen (Task 7): screen_<id> = the pilot's
+#   view of the screen (field of view --fov, default 40), screen_feed_<id> = the SubViewport's image itself
 #   --tone=agx (Godot's AgX alone, no display tone step), --hunt=day (the Hunt factor against L_day, as before look fixes T5)
 extends SceneTree
 
@@ -131,11 +133,14 @@ func _shoot() -> bool:
 		_define_shots()
 	if _index >= _shots.size():
 		_set_exterior_visible(true)
-		if not _args.has("only"):
+		if not _args.has("only") and not _args.has("screen"):
 			_compose()
 		quit(0)
 		return true
 	var shot: Dictionary = _shots[_index]
+	if shot.has("screen_id"):
+		_world.screen_camera.render_always = true  # the free camera is no cockpit view: the feed renders anyway
+		_world.screen_camera.select(String(shot["screen_id"]))
 	_cockpit.set_player_head_hidden(shot.get("local").origin.is_equal_approx(_cockpit.config.eye.origin) or bool(shot.get("hide_head", false)))
 	var isolate := bool(shot.get("isolate", false))  # close-up of one figure: the other figures and the leg rests are hidden
 	for figure in _cockpit.find_children("figure_*", "Node3D", false, false):
@@ -179,6 +184,10 @@ func _shoot() -> bool:
 		var width := roundi(image.get_height() * float(shot["crop_aspect"]))
 		image = image.get_region(Rect2i((image.get_width() - width) / 2, 0, width, image.get_height()))
 	print("cockpit_shots: saved %s (error %d), %s" % [path, image.save_png(path), _brightness(image)])
+	if shot.has("screen_id"):
+		var feed := _world.screen_camera.viewport.get_texture().get_image()
+		feed.convert(Image.FORMAT_RGB8)
+		print("cockpit_shots: saved feed %s (error %d), %s, %d renders" % [shot["screen_id"], feed.save_png(_out_dir.path_join("screen_feed_%s.png" % shot["screen_id"])), _brightness(feed), _world.screen_camera.render_count])
 	var a := _world.atmosphere
 	print("cockpit_shots: %s adaptation rule %s: gain %.3f, L_a %s cd/m^2, field %s, anchor %s, field key %s, from the field %s" % [
 			shot["name"], "analytic" if not a.scene_referred_adaptation else a.field_rule_name(),
@@ -219,6 +228,14 @@ func _define_shots() -> void:
 		var az := deg_to_rad(float(view[1]))
 		var cam := helmet_c + (chest * cos(az) + Vector3(0.0, 0.0, 1.0) * sin(az)) * float(view[2])
 		helmet_views.append({"name": view[0], "local": Transform3D(Basis.looking_at(helmet_c - cam, up_back), cam), "fov": float(view[3]), "hide_exterior": false, "isolate": true})
+	if _args.has("screen"):
+		var left: Dictionary = _cockpit.config.screens["left"]
+		var aim_left: Vector3 = left["centre"]
+		var eye_left := Transform3D(Basis.looking_at(aim_left - eye.origin, eye.basis.y), eye.origin)
+		_shots.clear()
+		for id in CameraCatalog.available(_world.flight.sim):
+			_shots.append({"name": "screen_" + id, "local": eye_left, "fov": float(_args.get("fov", 40.0)), "screen_id": id})
+		return
 	var rest: Array = [
 		{"name": "helmet_closeup", "local": Transform3D(Basis.looking_at(helmet_c - helmet_cam, up_back), helmet_cam), "fov": 48.0, "hide_exterior": false, "isolate": true},
 		{"name": "pilot_eye", "local": pilot, "fov": PILOT_FOV, "field_key": PILOT_FIELD_KEY},

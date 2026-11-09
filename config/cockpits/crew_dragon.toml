@@ -641,6 +641,63 @@ kind = "push"                       # [E] discovery10
 function = "none"                   # [E] label unreadable
 evidence = "discovery10 label unreadable"  # [E]
 
+# External cameras of the left screen (spec 2026-11-07 "External cameras", proposal accepted by the user). Configuration, not code:
+# `stage` = the stage id the camera is mounted on (the camera rides the body that carries it; a camera whose stage no longer exists is
+# not offered, one on a separated stage keeps showing that stage), `vehicle` (optional) = substring of the body's vehicle id,
+# `mount_m` / `look` / `up` in that stage's body frame (X = station above the stage base, nose +X; same frame as the cabin), `fov_deg` =
+# horizontal field of view, `requires` (optional) = a capsule_state flag that must be true, `name_key` = I18n key. The order is the cycling order.
+# All poses [E]: own choices modelled on the webcast cameras (spec list), not measured; the stage dimensions are those of config/vehicles.
+
+[[camera]]
+id = "chase"                        # [E] spec item 1: the vehicle seen from the side and behind, riding the capsule
+name_key = "cockpit.camera.chase"
+stage = "capsule"
+mount_m = [2.0, 16.0, 7.0]          # [E] 16 m to the hatch side, 7 m to the crew's left, level with the capsule's middle: sees capsule and trunk side-on
+look = [-0.0286, -0.9164, -0.4009]  # [D] toward the capsule's centre (1.5, 0, 0): (-0.5, -16, -7) / 17.46
+up = [1.0, 0.0, 0.0]                # [E] nose up in the image
+fov_deg = 60.0                      # [E] horizontal (the feed keeps its width)
+
+[[camera]]
+id = "stage1_aft"                   # [E] spec item 2: on the Falcon 9 interstage looking along the stage to the engines and the plume
+name_key = "cockpit.camera.stage1_aft"
+stage = "first_stage"
+vehicle = "falcon9"
+mount_m = [45.8, 1.95, 0.0]         # [E] 1.9 m below the stage top (length 47.7 m), on the skin (radius 1.83 m + 0.12 m)
+look = [-0.9928, 0.1191, 0.0]       # [E] aft, 7 deg out from the skin so that the hull edge stays in the frame
+up = [0.0, 0.0, 1.0]
+fov_deg = 90.0                      # [E]
+
+[[camera]]
+id = "stage2_engine"                # [E] spec item 3: the vacuum nozzle with the Earth behind it
+name_key = "cockpit.camera.stage2_engine"
+stage = "second_stage"
+vehicle = "falcon9"
+mount_m = [1.0, 3.8, 0.0]           # [E] 1 m above the stage base, 2 m off the skin (radius 1.83 m): clears the hull edge to see the nozzle
+look = [-0.4657, -0.8849, 0.0]      # [D] toward the nozzle on the axis 1 m below the base: (-2, -3.8, 0) / 4.294
+up = [0.0, 0.0, 1.0]
+fov_deg = 50.0                      # [E]
+
+[[camera]]
+id = "dragon_nose"                  # [E] spec item 4: docking camera, forward under the open nose cone
+name_key = "cockpit.camera.dragon_nose"
+stage = "capsule"
+vehicle = "crew_dragon"
+requires = "nose_cone_open"
+mount_m = [4.4, 0.0, 0.0]           # [E] on the axis, 0.45 m below the nose tip (capsule length 4.85 m)
+look = [1.0, 0.0, 0.0]
+up = [0.0, 1.0, 0.0]
+fov_deg = 70.0                      # [E]
+
+[[camera]]
+id = "dragon_trunk"                 # [E] spec item 5: aft over the trunk (second-stage separation)
+name_key = "cockpit.camera.dragon_trunk"
+stage = "capsule"
+vehicle = "crew_dragon"
+mount_m = [0.6, 0.0, 2.1]           # [E] on the capsule's side at the crew's left (away from the hatch), 0.6 m above the shield apex plane, just off the 4 m body
+look = [-0.9988, 0.0, -0.0499]      # [E] aft, along the trunk (radius 1.85 m), 3 deg in
+up = [0.0, 1.0, 0.0]
+fov_deg = 80.0                      # [E]
+
 [hotas]
 # Deliberate deviation (user 2026-11-07): the real Dragon has no stick or throttle. Thrustmaster T.16000M stick on the commander's
 # right armrest, TWCS throttle on the left, placed where the player's real HOTAS is; calibrated in the VR run (plan Task 9).

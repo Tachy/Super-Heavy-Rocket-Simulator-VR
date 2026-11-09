@@ -20,6 +20,7 @@ $needsGpuOrModels = @(
     'docking_mechanism_test',  # generated Dragon models
     'cockpit_view_test',       # generated Dragon models and a mission session
     'cockpit_camera_test',     # generated Dragon models and a mission session (World)
+    'camera_catalog_test',     # generated Dragon models and a mission session (World, left screen cameras)
     'tower_view_test',         # data/models/starbase_olp2
     'vehicle_view_test'        # Starship / Super Heavy detail models
 )

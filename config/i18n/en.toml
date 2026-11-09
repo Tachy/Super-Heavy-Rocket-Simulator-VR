@@ -1145,3 +1145,10 @@ dynamic_pressure.label = "Dyn. press."
 mach.label = "Mach"
 heat_flux.label = "Heat flux"
 heat_load.label = "Heat load"
+
+[cockpit]
+camera.chase = "Chase"
+camera.stage1_aft = "First stage aft"
+camera.stage2_engine = "Second stage engine"
+camera.dragon_nose = "Dragon nose"
+camera.dragon_trunk = "Dragon trunk"

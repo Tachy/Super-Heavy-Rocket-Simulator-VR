@@ -1147,3 +1147,10 @@ dynamic_pressure.label = "Staudruck"
 mach.label = "Mach"
 heat_flux.label = "Wärmestrom"
 heat_load.label = "Wärmelast"
+
+[cockpit]
+camera.chase = "Verfolger"
+camera.stage1_aft = "Erststufe achtern"
+camera.stage2_engine = "Zweitstufe Triebwerk"
+camera.dragon_nose = "Dragon Bug"
+camera.dragon_trunk = "Dragon Trunk"
