@@ -551,6 +551,9 @@ shaders:
   factor; before the Sun fix 255 / 255 / 251 / 211). Cost (stereo mock at the headset's resolution, shared GPU): SPREAD 1.10 + ADD 0.72 ms (frame +1.9 ms). Tests
   `glare_spread_test.gd` (headless, slow), `glare_spread_gpu_check.gd` (GPU). The scalar Sun veil of the adaptation
   (Stiles-Holladay 10 / theta^2) is unchanged (CIE 146 is 0.68-0.86 x it at 3-25 deg; open point).
+  Stereo: each eye's frustum and orientation in the head come from its render projection (RQ decomposition,
+  `GlareSpreadEffect.eye_frame` / `view_frame`), canted displays included (final-review fix a93d4938; test
+  `glare_spread_test.gd` `_canted`: Sun centre within 0.000 px at +-10 deg cant; the Pimax Dream Air views are parallel).
 - **Reference scenes (definition of done for every appearance change)** [look fixes T13; `tools/look_reference_suite.py`,
   needs a GPU, ~2 h for all 34 scenes; `--only`, `--label`, `--extra`, `--compare`]: pad noon el 5 / 60, dusk -5.5 and
   blue hour -7.7, lunar day (Apollo 11 site), lunar night with full / half / crescent Earth, the full Moon from
