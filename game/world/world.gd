@@ -145,6 +145,7 @@ var cockpit_active := false  ## the camera is the pilot's head in the cabin (Coc
 var cockpit_camera := CockpitCamera.new()
 var hotas_buttons := HotasButtons.new()  ## the stick's buttons by role ([buttons] of input_hotas.toml)
 var screen_camera := ScreenCamera.new()  ## the cabin's left screen: external cameras (renders only while the cockpit is active)
+var console_pointer := ConsolePointer.new()  ## the mouse on the console: suited hand follows it, taps and operates screen / keys
 var view_jump_count := 0  ## how often _view_jumped ran (tests)
 var cockpit_refusal_count := 0  ## toggles refused for lack of a cabin (each logged once; tests)
 var _cockpit_config: CockpitConfig  ## the cabin of the controlled vehicle while the cockpit is active
@@ -167,6 +168,7 @@ func _ready() -> void:
 	free_control.setup(Paths.config_dir())
 	hotas_buttons.setup(Paths.config_dir())
 	add_child(screen_camera)
+	add_child(console_pointer)
 	add_child(flight)
 	add_child(view_target)
 
@@ -692,6 +694,7 @@ func _update_screen_camera(camera_gcrf_m: Vector3) -> void:
 	var config := _cockpit_config if cockpit_active else _controlled_cockpit()
 	if config == null or not flight.sim.is_active():
 		screen_camera.update(flight.sim, null, null, camera_gcrf_m, _delta, false)
+		console_pointer.active = false
 		return
 	var cabin: CockpitView = null
 	for view in flight.views:
@@ -699,6 +702,13 @@ func _update_screen_camera(camera_gcrf_m: Vector3) -> void:
 			cabin = view.cockpit
 			break
 	screen_camera.update(flight.sim, config, cabin, camera_gcrf_m, _delta, cockpit_active, atmosphere.exposure_gain * atmosphere.brightness)
+	if console_pointer.driven_externally:
+		return  # a shots / test script runs the pointer itself
+	if console_pointer.cabin != cabin or console_pointer.config != config:
+		console_pointer.setup(config, cabin, screen_camera)
+	console_pointer.active = cockpit_active
+	console_pointer.vr_mode = _xr != null and _xr.xr_active
+	console_pointer.update(_delta, get_viewport().get_camera_3d())
 
 
 func _update_camera(t: float) -> void:

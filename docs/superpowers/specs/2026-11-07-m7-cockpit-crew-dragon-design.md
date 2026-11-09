@@ -33,6 +33,7 @@ camera screen, mouse / VR cursor interaction, cockpit <-> external toggle.
 5. **Left screen = external cameras, always** (user 2026-11-07). A button on the screen cycles through the cameras;
    the physical buttons under the left screen are direct camera keys; a HOTAS key also cycles. **Centre and right
    screens** are the space for our own UI later; in step 1 they are switched on but empty (dark Dragon-style background).
+   *Note 2026-11-09 (user): camera selection moved to the keys without a label (blank faces); keys with a real label are `function = "none"` until implemented. The cam1-18 mapping above is superseded.*
 6. **Toggle cockpit <-> external view** (today's 3D view with the webcast overlay, VR included) with **stick button 3**
    ("the left one, left of the thumb hat at the top" of the T.16000M stick; user 2026-11-07). The index is measured on
    the user's stick and written to `config/input_hotas.toml` (first button entry there). A keyboard key does the same on

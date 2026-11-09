@@ -161,11 +161,12 @@ size_m = [0.15, 0.165]              # [E] see 5
 # edges (fraction of the screen above), rows 0.17 / 0.20 m below the screen centre on the screen's up axis, 0.03 m proud along
 # its normal; +-0.02 m along the row, +-0.03 m elsewhere. panel = the screen above (its normal and up apply). shape round = a
 # round push button with a ring, rect = a labelled push button. Functions only with evidence; "none" = drawn, inert.
-# Under the left screen (clusters A and B): camera direct keys by the user's decision (spec 2026-11-07 item 5), slots upper row
-# left to right, then lower row. Engadget 2018 names the panel groups Commands, Pyros, Displays, Power (no per-button functions).
+# Camera direct keys (user decision 2026-11-09, replaces the cam1-18 mapping of 2026-11-07): the five BLANK-faced keys next to the left
+# screen's right edge (c_upper_1, c_upper_2, c_lower_1, c_lower_2, c_lower_round) are function = "camera" with camera_slot 1..5 (one per
+# catalog camera, config order). The 18 keys under the left screen (cam1..cam18, ids kept) carry real labels (DEORBIT NOW, SUPPRESS FIRE, ...)
+# and are function = "none" (tap animates, nothing happens) until their real function is implemented. Engadget 2018 names the panel groups Commands, Pyros, Displays, Power (no per-button functions).
 # label (Task 5b, optional): the text printed on the key, only where a photo shows it legibly (conv_42860a, the Crew Dragon 2020 module row:
-# the same 5 + 3 / 5 + 5 / 4 + 3 key layout as discovery10); keys without `label` get a blank key face. The camera keys keep their
-# function (user decision) although the real keys carry the abort / fire / power labels.
+# the same 5 + 3 / 5 + 5 / 4 + 3 key layout as discovery10); keys without `label` get a blank key face.
 
 [[button]]
 id = "cam1"                         # [E] cluster A upper row, round
@@ -176,9 +177,8 @@ centre_m = [2.3697, 0.0558, 0.5450]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.016, 0.016]             # [E] round, ~0.6 of the 0.027 m pitch
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07 (spec item 5)
-camera_slot = 1                     # [D] order: upper row left to right, then lower row
-evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam2"                         # [E] cluster A upper row
@@ -189,9 +189,8 @@ centre_m = [2.3705, 0.0569, 0.5240]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.024, 0.016]             # [E] labelled key, pitch 0.027-0.035
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 2                     # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam3"                         # [E] cluster A upper row
@@ -202,9 +201,8 @@ centre_m = [2.3705, 0.0569, 0.4990]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 3                     # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam4"                         # [E] cluster A upper row
@@ -215,9 +213,8 @@ centre_m = [2.3705, 0.0569, 0.4720]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 4                     # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam5"                         # [E] cluster A upper row, round
@@ -228,9 +225,8 @@ centre_m = [2.3697, 0.0558, 0.4440]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 5                     # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam6"                         # [E] cluster B upper row, round
@@ -241,9 +237,8 @@ centre_m = [2.3705, 0.0569, 0.4060]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 6                     # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable (possibly POWER 1)"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam7"                         # [E] cluster B upper row
@@ -254,9 +249,8 @@ centre_m = [2.3707, 0.0560, 0.3780]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 7                     # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam8"                         # [E] cluster B upper row
@@ -267,9 +261,8 @@ centre_m = [2.3705, 0.0569, 0.3470]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 8                     # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam9"                         # [E] cluster B upper row
@@ -280,9 +273,8 @@ centre_m = [2.3695, 0.0568, 0.3150]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 9                     # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam10"                        # [E] cluster B upper row, round
@@ -293,9 +285,8 @@ centre_m = [2.3695, 0.0568, 0.2810]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 10                    # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable (possibly RESET 1)"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam11"                        # [E] cluster A lower row
@@ -306,9 +297,8 @@ centre_m = [2.3496, 0.0776, 0.5110]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 11                    # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam12"                        # [E] cluster A lower row
@@ -319,9 +309,8 @@ centre_m = [2.3496, 0.0776, 0.4880]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 12                    # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam13"                        # [E] cluster A lower row
@@ -332,9 +321,8 @@ centre_m = [2.3486, 0.0775, 0.4620]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 13                    # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam14"                        # [E] cluster B lower row, round
@@ -345,9 +333,8 @@ centre_m = [2.3496, 0.0776, 0.3950]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 14                    # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable (possibly POWER 2)"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam15"                        # [E] cluster B lower row
@@ -358,9 +345,8 @@ centre_m = [2.3486, 0.0775, 0.3680]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 15                    # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam16"                        # [E] cluster B lower row
@@ -371,9 +357,8 @@ centre_m = [2.3484, 0.0784, 0.3390]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 16                    # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam17"                        # [E] cluster B lower row
@@ -384,9 +369,8 @@ centre_m = [2.3496, 0.0776, 0.3060]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 17                    # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
 id = "cam18"                        # [E] cluster B lower row, round
@@ -397,9 +381,8 @@ centre_m = [2.3494, 0.0786, 0.2720]   # [E] shifted 0.025 with the screen row; d
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "camera"                 # [S] user decision 2026-11-07
-camera_slot = 18                    # [D] order
-evidence = "user decision: keys under the left screen = cameras; real label unreadable (possibly RESET 2)"  # [S] spec 2026-11-07
+function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
+evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 # Cluster C (centre-left, between the left screen and the handle; its housing straddles the screen gap, placed in the centre screen's frame).
 
@@ -411,8 +394,9 @@ centre_m = [2.3697, 0.0558, 0.2520]   # [E] discovery10 x 792 px, centre screen 
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "none"                   # [E] no readable label; training2 mock-up shows ENABLE BACKUP ... at about this place (incomplete)
-evidence = "discovery10 two-line label unreadable; training2 (2018 mock-up) ENABLE BACKUP ... second word hidden"  # [E]
+function = "camera"                 # [S] user decision 2026-11-09: camera on unlabelled keys (blank key faces under / next to the left screen)
+camera_slot = 1                    # [D] 1..5 = catalog camera in config order; upper row left to right, then lower row
+evidence = "user decision 2026-11-09: camera on unlabelled keys; no readable label in the photos"  # [S]
 
 [[button]]
 id = "c_upper_2"                    # [E] cluster C upper row
@@ -422,8 +406,9 @@ centre_m = [2.3697, 0.0558, 0.2240]   # [E] discovery10 x 844 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "none"                   # [E] training2 mock-up reads JETTISON with an unreadable object word: function not known
-evidence = "training2 (2018 mock-up) JETTISON + unreadable second line; discovery10 label unreadable"  # [E]
+function = "camera"                 # [S] user decision 2026-11-09: camera on unlabelled keys (blank key faces under / next to the left screen)
+camera_slot = 2                    # [D] 1..5 = catalog camera in config order; upper row left to right, then lower row
+evidence = "user decision 2026-11-09: camera on unlabelled keys; no readable label in the photos"  # [S]
 
 [[button]]
 id = "c_mains_only"                 # [E] cluster C upper row
@@ -457,8 +442,9 @@ centre_m = [2.3486, 0.0775, 0.2420]   # [E] discovery10 x 810 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "none"                   # [E] three-line label unreadable
-evidence = "discovery10 label unreadable"  # [E]
+function = "camera"                 # [S] user decision 2026-11-09: camera on unlabelled keys (blank key faces under / next to the left screen)
+camera_slot = 3                    # [D] 1..5 = catalog camera in config order; upper row left to right, then lower row
+evidence = "user decision 2026-11-09: camera on unlabelled keys; no readable label in the photos"  # [S]
 
 [[button]]
 id = "c_lower_2"                    # [E] cluster C lower row
@@ -468,8 +454,9 @@ centre_m = [2.3486, 0.0775, 0.2180]   # [E] discovery10 x 855 px
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "none"                   # [E] label unreadable
-evidence = "discovery10 label unreadable"  # [E]
+function = "camera"                 # [S] user decision 2026-11-09: camera on unlabelled keys (blank key faces under / next to the left screen)
+camera_slot = 4                    # [D] 1..5 = catalog camera in config order; upper row left to right, then lower row
+evidence = "user decision 2026-11-09: camera on unlabelled keys; no readable label in the photos"  # [S]
 
 [[button]]
 id = "c_lower_round"                # [E] cluster C lower row, round, at the cluster's right end
@@ -479,8 +466,9 @@ centre_m = [2.3486, 0.0775, 0.1430]   # [E] discovery10 x 995 px
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
-function = "none"                   # [E] candidate fire suppression (forum report of a SUPPRESS FIRE label), not confirmed
-evidence = "discovery10 short label unreadable; CosmoQuest forum 2020 mentions SUPPRESS FIRE (not authoritative)"  # [E]
+function = "camera"                 # [S] user decision 2026-11-09: camera on unlabelled keys (blank key faces under / next to the left screen)
+camera_slot = 5                    # [D] 1..5 = catalog camera in config order; upper row left to right, then lower row
+evidence = "user decision 2026-11-09: camera on unlabelled keys; no readable label in the photos"  # [S]
 
 [[button]]
 id = "handle"                       # [S] the centre handle, Engadget 2018: eject control in the centre of the panel

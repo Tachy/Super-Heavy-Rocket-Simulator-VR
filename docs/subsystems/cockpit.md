@@ -13,8 +13,9 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   +X), (Y, Z) = r (cos az, sin az), az 0 = side hatch. The crew face the hatch side and the console: Y toward the hatch,
   **Z = az +90 = the crew's left**. Seats s1..s4 from the crew's left (s1 at +Z), s2 = commander (player), s3 = pilot.
 - Buttons: `panel` = the screen above (its normal / up apply), `row` 1 upper / 2 lower, `shape` round / rect,
-  `kind` push / covered / handle, `function` only with evidence, else `"none"`; the 18 keys under the left screen
-  (clusters A, B) are `camera` with `camera_slot` 1..18 (upper row left to right, then lower row; user decision).
+  `kind` push / covered / handle, `function` only with evidence, else `"none"`; the five BLANK-faced keys at the left
+  screen's right edge (`c_upper_1`, `c_upper_2`, `c_lower_1`, `c_lower_2`, `c_lower_round`) are `camera` with `camera_slot` 1..5 (user decision
+  2026-11-09: camera selection on unlabelled keys; the 18 labelled keys cam1..cam18 keep their ids and are `none`).
   Known functions: `abort` (centre handle), `chute_mains_only`, `chute_drogues_and_mains`, `backup_g_meter`; nothing is
   wired in Task 1.
 - `[hotas]`: deliberate deviation (real Dragon has none): T.16000M stick on the commander's right armrest, TWCS throttle
@@ -234,7 +235,7 @@ State after plan Task 7 (code: `game/cockpit/camera_catalog.gd`, `screen_camera.
   `Camera3D` in the same World3D, own empty `Compositor` (none of the main view's cloud / meter / display-tone passes) and `CameraAttributesPractical`. The camera
   sits at mount pose - main camera (floating origin) in double. It renders only while the cockpit is the active view (`render_always` for shots).
   `select(id)`, `next()` (config order over the offered ids), `current_id`; the current camera falling out switches to `chase`. The stick button `camera_next`
-  (`HotasButtons`, only in the cockpit) calls `next()`. The console camera keys (cam1-18) are not wired (pending user decision).
+  (`HotasButtons`, only in the cockpit) calls `next()`. The console camera keys are wired by `ConsolePointer` (Console pointer, Task 8).
 - Screen material: `screen_feed.gdshader` on `screen_left` (`material_override`), the display-referred path (`vision_display_referred`) as the placeholder
   before it. The feed is 1.6:1, the screen 16:9: the screen shows the feed's middle 90 % of the height (`crop_y`), nothing stretched.
 - Exposure [call] (user decision, fix round 1): the feed has its OWN simple auto-exposure, independent of the pilot eye's adaptation: the feed camera's
@@ -291,6 +292,31 @@ State after plan Task 7 (code: `game/cockpit/camera_catalog.gd`, `screen_camera.
   Whites no longer clip at the frame edges; instead they read grey where the frame is dark-dominated or wide (hatch_crew1_1 wall ~0.46 sRGB, p90 0.59; pilot_eye wall
   0.73, p90 0.77) against the near-white walls of crew1_1 (appearance model, not changed here). Shelf modules 0.20 sRGB against the housing 0.10: lighter than the
   housing as in discovery2, a little lighter than conv_42860a.
+
+## Console pointer, hand and touch (Task 8)
+State after plan Task 8 (code: `game/cockpit/console_strip.gd`, `console_pointer.gd`, `hand_motion.gd`, `arm_ik.gd`, `CockpitView.pose_arms`, `ScreenCamera.CAMERA_BUTTON_UV`).
+- Standing decision (user 2026-11-09): camera selection is on keys WITHOUT a label; labelled keys (DEORBIT NOW, SUPPRESS FIRE, ...) are `function = "none"` (the tap animates, nothing
+  happens) until their real function is implemented. Ids stay stable. Camera keys: `c_upper_1`, `c_upper_2`, `c_lower_1`, `c_lower_2` (blank, under the left screen's right end)
+  and `c_lower_round` (blank, 0.14 m left of the centre line, under the centre screen) = slots 1..5 in catalog order. Plus the on-screen camera button on `screen_left`
+  (`ScreenCamera.CAMERA_BUTTON_UV`, bottom right, ~3.8 x 4.3 cm, drawn into the feed, flashes on use): tap = `ScreenCamera.next()`.
+- `ConsoleStrip`: the console as a 2D strip (u to the crew's right, v up, from the centre screen centre); surfaces = 3 screens + 39 keys, each a rectangle with its 3D face. `clamp`
+  moves any point to the nearest surface (gaps, module faces, strip edges), `to_surface` gives {surface_id, point_m, normal, uv}, `pick` casts a ray on the console plane.
+- `ConsolePointer` (child of `World`, `console_pointer`): desktop = mouse ray onto the strip (a click farther than 3 cm from every surface hits nothing); VR (`vr_mode`, XR active) =
+  `move_by(mouse counts)` moves a strip pointer (0.6 mm/count [E]) that always lies on a surface. Hand side: left screen and keys left of the left/centre gap = left hand,
+  else right (1.5 cm hysteresis); the other hand rests. `pressed(surface_id, uv)`; `activate()` dispatches (camera button, `camera` keys, else "none").
+- `HandMotion`: critically damped spring (exact solution, frame-rate independent, no overshoot; half life 0.08 s [E]: 50 % of a step after 0.08 s); tap = smootherstep press 0.12 s,
+  release 0.15 s, depth = `HOVER_M` 25 mm [E], so the fingertip ends on the face plane (test: within 1 mm). The hover target is the surface point + 25 mm along the normal.
+- `ArmIk`: two-bone IK on the figure skeleton rest pose (`for_skeleton`), end effector = index tip with straight finger; wrist bend <= 20 deg, upper arm <= 100 deg from rest, elbow
+  towards the rest elbow's side, tip clamped to the reach (`reached` false), no NaN. Bones are set as rest-pose-derived global transforms (upper arm, forearm, hand, three index bones; thumb and
+  fingers follow the hand). `extend` 0 = relaxed grip curl (28 deg per joint), 1 = index straight, smoothed like the hand.
+- `CockpitView.pose_arms({l|r: {tip, extend}})`, `idle_tip(side)` (the rest hand), `posed_tip`, `arm_result`: the torso leans about the waist (spine bone, <= 22 deg [E], 4 passes) when the
+  target is beyond 97 % of the straight reach. Measured (centre screen at 0.69 m from the eye): centre and left screen and all left keys need no lean and are touched to < 1 mm; the right
+  screen centre needs 14.5 deg, `r_upper_3` 21 deg; `r_upper_5` (outermost right key) stays 34 mm short at the lean limit (tip clamped).
+- Idle hands rest in the figure's rest pose (hands on the armrests); they are not yet moved to the HOTAS grip points (Task 9 calibrates them with the props).
+- Open: VR input path untested (VrPanelMouse captures the mouse when its panel shows; the VR run of Task 9 decides who owns the mouse in the cockpit); tablets and the handle are not touch
+  targets beyond the generic key rectangle; the desktop smoothness check is by the user.
+- Tests: `game/tests/console_pointer_test.gd` (config key table, strip, HandMotion, ArmIk numbers, dispatch, figure arms with models). Shots: `cockpit_shots.gd --hand --cabin_keys`
+  (`screenshots/m7-cockpit/hand/`: `hand_eye_NN_*` sequences from the eye, `hand_hatch_*`, contact sheets `sheet_*.png`).
 
 ## Validation
 - Wall check (scratch script, Task 1): inner profile >= 0.094 m from the exterior meridian and the neck well everywhere.

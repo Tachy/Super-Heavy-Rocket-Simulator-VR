@@ -53,6 +53,11 @@ const HANDLE_MARK_HEIGHT_SHARE := 0.40
 const HANDLE_MARK_ALBEDO := Color(0.55, 0.03, 0.03)
 ## [E] Key labels: printed light grey letters on the dark keys (conv_42860a), sRGB.
 const LABEL_ALBEDO := Color(0.80, 0.80, 0.80)
+## [E] Task 8: the torso leans (about the waist) when the pointer is farther than this share of the straight arm's reach, by at most
+## MAX_LEAN_DEG (a seated, harnessed crew member's lean towards the console).
+const LEAN_REACH_SHARE := 0.97
+const MAX_LEAN_DEG := 22.0
+const LEAN_PASSES := 4
 
 var config: CockpitConfig
 var eye_node := Node3D.new()
@@ -66,6 +71,10 @@ var _materials := {}
 var _strip_materials: Array[ShaderMaterial] = []
 var _cockpit_manifest := {}
 var _label_atlas: ImageTexture = null
+var _figure_bones := {}  # manifest crew_figure.bones (the arm chains' finger lengths)
+var _arm_iks := {}  # side "l" / "r" -> ArmIk of the player's figure
+var _arm_results := {}  # side -> the last solved pose (ArmIk.solve)
+var _lean := Quaternion.IDENTITY  # the torso's lean towards the pointer (skeleton frame)
 
 
 ## Builds the cabin from the model set's `models` (VehicleModels.load_for("crew_dragon")) and the cockpit definition.
@@ -135,6 +144,104 @@ func visible_figures() -> int:
 ## The figure's skeleton of a seat ("s1".."s4"; null without the model): the arm poses of the pointer (later task) set its bones.
 func figure_skeleton(seat_id: String) -> Skeleton3D:
 	return _skeletons.get(seat_id)
+
+
+## The player's arm chain of a side ("l" crew's left, "r"), null without the figure.
+func player_arm(side: String) -> ArmIk:
+	if not _arm_iks.has(side):
+		var skeleton: Skeleton3D = _skeletons.get(CREW_ORDER[0])
+		_arm_iks[side] = ArmIk.for_skeleton(skeleton, side, _figure_bones) if skeleton != null else null
+	return _arm_iks[side]
+
+
+## The resting fingertip of a side in the cabin frame (the hand on its armrest / HOTAS grip; Zero without the figure).
+func idle_tip(side: String) -> Vector3:
+	var arm := player_arm(side)
+	return _skeleton_to_cabin() * arm.rest_tip() if arm != null else Vector3.ZERO
+
+
+## The last solved pose of a side (ArmIk.solve result with the tip in the SKELETON frame), {} before the first pose_arms.
+func arm_result(side: String) -> Dictionary:
+	return _arm_results.get(side, {})
+
+
+## The fingertip of a side as posed, in the cabin frame (Zero before the first pose_arms).
+func posed_tip(side: String) -> Vector3:
+	var result: Dictionary = _arm_results.get(side, {})
+	return _skeleton_to_cabin() * (result["tip"] as Vector3) if not result.is_empty() else Vector3.ZERO
+
+
+## Poses the player's arms: `pose[side] = {tip: Vector3 (cabin frame), extend: float (0 relaxed hand .. 1 index straight)}`. The torso leans
+## (a rotation about the waist, at most MAX_LEAN_DEG) when the target is beyond the straight arm's reach (the outer screen); beyond
+## that the tip is clamped to the reach.
+func pose_arms(pose: Dictionary) -> void:
+	var skeleton: Skeleton3D = _skeletons.get(CREW_ORDER[0])
+	if skeleton == null:
+		return
+	var to_skeleton := _skeleton_to_cabin().affine_inverse()
+	var targets := {}
+	var arms := {}
+	for side: String in ["l", "r"]:
+		arms[side] = player_arm(side)
+		if arms[side] == null or not pose.has(side):
+			return
+		targets[side] = to_skeleton * (pose[side]["tip"] as Vector3)
+	_apply_lean(skeleton, arms, targets)
+	for side: String in ["l", "r"]:
+		var arm: ArmIk = arms[side]
+		var shoulder: Vector3 = _waist() + _lean * (arm.shoulder_rest - _waist())
+		var result := arm.solve(shoulder, targets[side])
+		arm.apply(skeleton, result, float(pose[side].get("extend", 0.0)))
+		_arm_results[side] = result
+
+
+func _waist() -> Vector3:
+	var bone := (_skeletons[CREW_ORDER[0]] as Skeleton3D).find_bone("spine")
+	return (_skeletons[CREW_ORDER[0]] as Skeleton3D).get_bone_global_rest(bone).origin
+
+
+## The torso's lean: the rotation about the waist that brings the farther shoulder towards its target, limited and smooth in the target.
+func _apply_lean(skeleton: Skeleton3D, arms: Dictionary, targets: Dictionary) -> void:
+	var waist := _waist()
+	var lean := Quaternion.IDENTITY
+	var limit := deg_to_rad(MAX_LEAN_DEG)
+	# the farther shoulder swings towards its target about the waist; a few passes since the swing is an arc, not a line
+	var side := "l"
+	var worst := -INF
+	for s: String in ["l", "r"]:
+		var e := (targets[s] as Vector3).distance_to((arms[s] as ArmIk).shoulder_rest) - LEAN_REACH_SHARE * (arms[s] as ArmIk).reach_m()
+		if e > worst:
+			worst = e
+			side = s
+	var arm: ArmIk = arms[side]
+	for pass_index in LEAN_PASSES:
+		var shoulder := waist + lean * (arm.shoulder_rest - waist)
+		var excess := (targets[side] as Vector3).distance_to(shoulder) - LEAN_REACH_SHARE * arm.reach_m()
+		if excess <= 0.0:
+			break
+		var v := shoulder - waist
+		var moved := v + ((targets[side] as Vector3) - shoulder).normalized() * excess
+		lean = ArmIk._arc(v.normalized(), moved.normalized()) * lean
+		var angle := lean.get_angle()
+		if angle > limit:
+			lean = Quaternion.IDENTITY.slerp(lean, limit / angle)
+	_lean = lean
+	var bone := skeleton.find_bone("spine")
+	var parent_basis := skeleton.get_bone_global_rest(skeleton.get_bone_parent(bone)).basis.orthonormalized()
+	var rest_local := skeleton.get_bone_rest(bone)
+	skeleton.set_bone_pose_rotation(bone, (parent_basis.inverse() * Basis(lean) * parent_basis * rest_local.basis.orthonormalized()).get_rotation_quaternion())
+
+
+## The player skeleton's frame in the cabin frame.
+func _skeleton_to_cabin() -> Transform3D:
+	var skeleton: Skeleton3D = _skeletons.get(CREW_ORDER[0])
+	var t := Transform3D.IDENTITY
+	var node: Node = skeleton
+	while node != null and node != self:
+		if node is Node3D:
+			t = (node as Node3D).transform * t
+		node = node.get_parent()
+	return t
 
 
 ## Hides (collapses) the head, helmet and visor of the player's body (the commander's figure): the camera sits inside that
@@ -237,6 +344,7 @@ func _add_omni(light_name: String, at: Vector3, lumens: float) -> OmniLight3D:
 func _build_figures(models: Dictionary) -> void:
 	var manifest: Dictionary = (models.get("manifest", {}) as Dictionary).get("crew_figure", {})
 	var look: Dictionary = manifest.get("materials", {})
+	_figure_bones = manifest.get("bones", {})
 	var template := VehicleModels.scene_for(VEHICLE_ID, FIGURE_FILE)  # parsed once, duplicated per seat
 	if template == null:
 		return

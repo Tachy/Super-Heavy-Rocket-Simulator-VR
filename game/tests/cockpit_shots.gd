@@ -14,6 +14,9 @@
 #   --fixed_exposure (eye adaptation off; default: on as in the game, snapped to each shot)
 #   --screen: instead of the cabin shots, one shot per external camera offered on the left screen (Task 7): screen_<id> = the pilot's
 #   view of the screen (field of view --fov, default 40), screen_feed_<id> = the SubViewport's image itself
+#   --hand: instead of the cabin shots, the console pointer sequences (Task 8): hand_eye_NN (frames of the hand following the pointer to the
+#   left screen, the camera button, the centre screen, a key and the right screen, with taps; from the pilot's eye) and hand_hatch_<place> (the same
+#   places from the hatch camera, the whole arm); the pointer is driven by this script (World.console_pointer.driven_externally)
 #   --tone=agx (Godot's AgX alone, no display tone step), --hunt=day (the Hunt factor against L_day, as before look fixes T5)
 extends SceneTree
 
@@ -57,6 +60,7 @@ var _wait := 0
 var _cockpit: CockpitView
 var _out_dir := ""
 var _refs_dir := ""
+var _pointer: ConsolePointer
 
 
 func _initialize() -> void:
@@ -133,11 +137,13 @@ func _shoot() -> bool:
 		_define_shots()
 	if _index >= _shots.size():
 		_set_exterior_visible(true)
-		if not _args.has("only") and not _args.has("screen"):
+		if not _args.has("only") and not _args.has("screen") and not _args.has("hand"):
 			_compose()
 		quit(0)
 		return true
 	var shot: Dictionary = _shots[_index]
+	if shot.has("pointer_ops") and _wait == 0:
+		_run_pointer_ops(shot["pointer_ops"])
 	if shot.has("screen_id"):
 		_world.screen_camera.render_always = true  # the free camera is no cockpit view: the feed renders anyway
 		_world.screen_camera.select(String(shot["screen_id"]))
@@ -173,7 +179,7 @@ func _shoot() -> bool:
 		var key := float(shot.get("field_key", CABIN_FIELD_KEY)) if _args.has("cabin_keys") else EyeAdaptation.FIELD_MID_GREY
 		_world.atmosphere.field_key = float(_args["field_key"]) if _args.has("field_key") else key
 		_world.atmosphere.snap_adaptation()
-	if _wait < SHOT_SETTLE_FRAMES:
+	if _wait < int(shot.get("settle", SHOT_SETTLE_FRAMES)):
 		return false
 	var path := _out_dir.path_join(String(shot["name"]) + ".png")
 	var image := root.get_viewport().get_texture().get_image()
@@ -236,6 +242,9 @@ func _define_shots() -> void:
 		for id in CameraCatalog.available(_world.flight.sim):
 			_shots.append({"name": "screen_" + id, "local": eye_left, "fov": float(_args.get("fov", 40.0)), "screen_id": id})
 		return
+	if _args.has("hand"):
+		_define_hand_shots(eye, pilot, hatch_basis)
+		return
 	var rest: Array = [
 		{"name": "helmet_closeup", "local": Transform3D(Basis.looking_at(helmet_c - helmet_cam, up_back), helmet_cam), "fov": 48.0, "hide_exterior": false, "isolate": true},
 		{"name": "pilot_eye", "local": pilot, "fov": PILOT_FOV, "field_key": PILOT_FIELD_KEY},
@@ -266,6 +275,62 @@ func _define_shots() -> void:
 				_world.sun_light.visible = false
 			for light in _cockpit.find_children(pattern, "Light3D", false, false):
 				(light as Light3D).visible = false
+
+
+## Task 8: the pointer sequences. Ops per shot: ["goto", strip place id or "idle", frames], ["click"], ["wait", frames]; each frame is a 1/30 s step.
+func _define_hand_shots(eye: Transform3D, pilot: Transform3D, hatch_basis: Basis) -> void:
+	_pointer = ConsolePointer.new()
+	_world.add_child(_pointer)
+	_pointer.setup(_cockpit.config, _cockpit, _world.screen_camera)
+	_pointer.active = false  # idle until the first "goto"
+	_pointer.vr_mode = true
+	_world.console_pointer.driven_externally = true
+	_world.screen_camera.render_always = true  # the free camera is no cockpit view: the feed renders anyway
+	var hatch := Transform3D(hatch_basis, HATCH_POS)
+	var places := [["left", "left"], ["camera_button", "camera_button"], ["centre", "centre"], ["key_cam3", "button:cam3"], ["right", "right"], ["key_far_right", "button:r_upper_5"]]
+	_shots.clear()
+	_shots.append({"name": "hand_eye_00_idle", "local": pilot, "fov": PILOT_FOV, "field_key": PILOT_FIELD_KEY, "pointer_ops": [["wait", 20]], "settle": 8})
+	var n := 1
+	for place: Array in places:
+		var ops_move: Array = [["goto", place[1], 0]]
+		# the sequence towards the place: a frame every 3 steps (0.1 s), then the tap with frames every 2 steps (0.067 s)
+		for k in 8:
+			_shots.append({"name": "hand_eye_%02d_%s_move" % [n, place[0]], "local": pilot, "fov": PILOT_FOV, "field_key": PILOT_FIELD_KEY,
+					"pointer_ops": (ops_move if k == 0 else []) + [["wait", 3]], "settle": 4})
+			n += 1
+		_shots.append({"name": "hand_eye_%02d_%s_click" % [n, place[0]], "local": pilot, "fov": PILOT_FOV, "field_key": PILOT_FIELD_KEY, "pointer_ops": [["click"], ["wait", 2]], "settle": 4})
+		n += 1
+		for k in 5:
+			_shots.append({"name": "hand_eye_%02d_%s_tap" % [n, place[0]], "local": pilot, "fov": PILOT_FOV, "field_key": PILOT_FIELD_KEY, "pointer_ops": [["wait", 2]], "settle": 4})
+			n += 1
+		_shots.append({"name": "hand_hatch_%s" % place[0], "local": hatch, "fov": HATCH_VFOV, "keep_height": true, "crop_aspect": 1.5, "hide_exterior": false,
+				"hide_head": false, "pointer_ops": [["wait", 20]], "settle": 8})
+
+
+func _run_pointer_ops(ops: Array) -> void:
+	for op: Array in ops:
+		match String(op[0]):
+			"goto":
+				_pointer.active = String(op[1]) != "idle"
+				if _pointer.active:
+					var surface := _pointer.strip.surface(String(op[1]))
+					if String(op[1]) == "camera_button":
+						var left: Dictionary = _pointer.strip.surface("left")
+						var rect: Rect2 = left["rect"]
+						var uv := ScreenCamera.CAMERA_BUTTON_UV.get_center()
+						_pointer.strip_position = Vector2(rect.position.x + uv.x * rect.size.x, rect.end.y - uv.y * rect.size.y)
+					else:
+						_pointer.strip_position = (surface["rect"] as Rect2).get_center()
+			"click":
+				_pointer.click()
+			"wait":
+				pass
+	var frames := 1
+	for op: Array in ops:
+		if String(op[0]) == "wait":
+			frames = int(op[1])
+	for i in frames:
+		_pointer.update(1.0 / 30.0, null)
 
 
 ## The hatch frame and the exterior hull (every stage node child but the cockpit) are hidden for the shot from outside the inner wall.

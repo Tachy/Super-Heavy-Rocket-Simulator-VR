@@ -23,6 +23,10 @@ const AUTO_SPEED := 1.4  ## Godot steps its meter by speed x frame time per feed
 const AUTO_MIN_SENSITIVITY := 1.0
 const AUTO_MAX_SENSITIVITY := 1.0e9
 const LABEL_MARGIN_PX := 56  ## the label sits inside the part of the feed the screen shows (crop_y 0.9 cuts 32 px at the top)
+## The on-screen camera button (Task 8): a region of the left screen in screen UV ((0, 0) top left), bottom right corner, ~3.8 x 4.3 cm
+## on the 0.382 x 0.215 m screen [E]; a tap on it is next(). Drawn into the feed (the SubViewport) so it is part of the screen image.
+const CAMERA_BUTTON_UV := Rect2(0.88, 0.76, 0.10, 0.20)
+const BUTTON_FLASH_S := 0.25
 
 var size_px := Vector2i(1024, 640)  ## feed resolution [E] (plan Task 7); lowered when the VR budget needs it
 var update_hz := 30.0  ## feed rate [E]; measured in VR (Task 9)
@@ -42,6 +46,9 @@ var _camera_fov_set := -1.0
 var _label: Label
 var _label_id := ""
 var _label_language := ""
+var _button: ColorRect  ## the on-screen camera button (CAMERA_BUTTON_UV)
+var _button_flash_s := 0.0
+var next_count := 0  ## next() calls (tests: the on-screen button and the keys)
 
 
 func _init() -> void:
@@ -78,6 +85,7 @@ func _init() -> void:
 	_label.add_theme_color_override("font_outline_color", Color(0, 0, 0))
 	_label.add_theme_constant_override("outline_size", 6)
 	viewport.add_child(_label)
+	_build_button()
 	_material = ShaderMaterial.new()
 	_material.shader = SHADER
 	_material.set_shader_parameter("feed", viewport.get_texture())
@@ -93,6 +101,8 @@ func select(id: String) -> void:
 
 ## The next offered camera in config order after the current one (the first one when the current one is not offered).
 func next() -> void:
+	next_count += 1
+	_button_flash_s = BUTTON_FLASH_S
 	if _available.is_empty():
 		return
 	var at := _available.find(current_id)
@@ -146,6 +156,9 @@ func update(sim: Object, config: CockpitConfig, cockpit: CockpitView, camera_gcr
 ## The camera's name (name_key through I18n) in the feed's top left corner; follows the language.
 func _update_label(entry: Dictionary) -> void:
 	_label.show()  # a Control under a SubViewport came up hidden: shown every frame
+	_button.show()
+	_button_flash_s = maxf(_button_flash_s - get_process_delta_time(), 0.0)
+	_button.color = Color(0.35, 0.55, 0.9, 0.85) if _button_flash_s > 0.0 else Color(0.08, 0.1, 0.16, 0.7)
 	var language := I18n.language()
 	if _label_id == current_id and _label_language == language:
 		return
@@ -164,4 +177,36 @@ func _update_crop(config: CockpitConfig) -> void:
 	var screen: Dictionary = config.screens.get("left", {})
 	var size: Vector2 = screen.get("size", Vector2(16.0, 9.0))
 	var feed_aspect := float(size_px.x) / float(size_px.y)
-	_material.set_shader_parameter("crop_y", minf(1.0, feed_aspect / (size.x / size.y)))
+	var crop := minf(1.0, feed_aspect / (size.x / size.y))
+	_material.set_shader_parameter("crop_y", crop)
+	_layout_button(crop)
+
+
+## The camera button: a rounded plate with a "next" glyph (two triangles), placed from CAMERA_BUTTON_UV through the crop.
+func _build_button() -> void:
+	_button = ColorRect.new()
+	_button.name = "CameraButton"
+	_button.color = Color(0.08, 0.1, 0.16, 0.7)
+	_button.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var glyph := Polygon2D.new()
+	glyph.name = "Glyph"
+	glyph.color = Color(0.92, 0.95, 1.0)
+	glyph.polygon = PackedVector2Array([Vector2(0.2, 0.25), Vector2(0.55, 0.5), Vector2(0.2, 0.75)])
+	_button.add_child(glyph)
+	var bar := Polygon2D.new()
+	bar.name = "Bar"
+	bar.color = Color(0.92, 0.95, 1.0)
+	bar.polygon = PackedVector2Array([Vector2(0.62, 0.25), Vector2(0.72, 0.25), Vector2(0.72, 0.75), Vector2(0.62, 0.75)])
+	_button.add_child(bar)
+	viewport.add_child(_button)
+	_layout_button(1.0)
+
+
+func _layout_button(crop: float) -> void:
+	var w := float(size_px.x)
+	var h := float(size_px.y)
+	var top := 0.5 - 0.5 * crop
+	_button.position = Vector2(CAMERA_BUTTON_UV.position.x * w, (top + CAMERA_BUTTON_UV.position.y * crop) * h)
+	_button.size = Vector2(CAMERA_BUTTON_UV.size.x * w, CAMERA_BUTTON_UV.size.y * crop * h)
+	for glyph: Polygon2D in _button.get_children():
+		glyph.scale = _button.size
