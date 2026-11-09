@@ -14,6 +14,10 @@ const GROUND_EYE_HEIGHT_M := 2.0
 ## [E] Lag of the sim snapshot behind the instant it was asked for in the previous frame tolerated before the clock is
 ## held back (the sim thread answers last frame's request; a genuinely lagging sim falls further behind).
 const CLOCK_HOLD_SLACK_S := 0.05
+## [E] Time constant of the camera's sinking back as the loading terrain's surface under it comes down (bug 2026-11-09;
+## rising is immediate): a smooth glide instead of drops of tens of metres when a finer node replaces a coarse one.
+const DRAWN_LIFT_SETTLE_S := 0.5
+const DRAWN_LIFT_MIN_M := 1.0e-3  ## [E] a smaller remaining lift is dropped
 ## [E] The pad disc's top sits this far above the site height: the terrain's plateau lies exactly at the site height,
 ## and coplanar surfaces z-fight. Far below anything a vehicle's contact could show.
 const PAD_TOP_LIFT_M := 0.03
@@ -233,6 +237,7 @@ var _mission_press_tdb_s := 0.0  ## clock instant of the pending mission start (
 var _camera_serial := 0  ## serial the camera distance was last fitted to
 var _last_world_tdb_s := NAN  ## the instant of the previous update_world (eye adaptation's time step)
 var _sim_target_tdb_s := NAN  ## the instant the flight sim was asked for last frame (clock_held_back)
+var _drawn_lift_m := 0.0  ## the shown camera's rise above the drawn terrain (_keep_camera_above_surface)
 var _environment: Environment  ## the WorldEnvironment's (ambient energy under the clouds, Task 9)
 ## The display tone step after the eye's post step (look fixes T5: chroma-preserving tone curve, daylight Hunt factor).
 var display_tone := DisplayToneEffect.new()
@@ -622,12 +627,22 @@ func _keep_camera_above_surface() -> void:
 	var rotation := moon.fixed_to_gcrf if on_moon else earth.fixed_to_gcrf
 	var center := moon_gcrf_m if on_moon else Vector3.ZERO
 	var fixed := rotation.transposed() * (p - center)
-	var kept := SurfaceClearance.clamp_fixed(fixed, _moon_heights if on_moon else _earth_heights)
-	if kept == fixed:
-		return
-	camera.position_gcrf_m = center + rotation * kept
-	if camera.mode == OrbitCamera.Mode.FREE:
-		free_pose.reset_to(camera.position_gcrf_m, camera.free_basis, earth.fixed_to_gcrf, moon.fixed_to_gcrf, moon_gcrf_m)
+	var heights := _moon_heights if on_moon else _earth_heights
+	var kept := SurfaceClearance.clamp_fixed(fixed, heights)
+	if kept != fixed:
+		camera.position_gcrf_m = center + rotation * kept
+		if camera.mode == OrbitCamera.Mode.FREE:
+			free_pose.reset_to(camera.position_gcrf_m, camera.free_basis, earth.fixed_to_gcrf, moon.fixed_to_gcrf, moon_gcrf_m)
+	# Bug 2026-11-09: while the terrain under the eye still loads, its coarse surface can lie above the true ground -
+	# the eye inside the drawn ground saw the nodes' skirts and inner sides. The shown camera rises above the drawn
+	# surface (at once) and sinks back with DRAWN_LIFT_SETTLE_S as the finer nodes arrive; its own pose stays (the free
+	# camera does not keep the lift once the terrain is loaded).
+	var target := SurfaceClearance.drawn_lift_m(kept, heights, moon_terrain if on_moon else earth_terrain)
+	_drawn_lift_m = target if target >= _drawn_lift_m else target + (_drawn_lift_m - target) * exp(-_delta / DRAWN_LIFT_SETTLE_S)
+	if _drawn_lift_m < DRAWN_LIFT_MIN_M:
+		_drawn_lift_m = 0.0
+	if _drawn_lift_m > 0.0:
+		camera.position_gcrf_m += (camera.position_gcrf_m - center).normalized() * _drawn_lift_m
 
 
 ## Orbit camera on the viewed object's CG, with the local vertical of the body it is flying around.

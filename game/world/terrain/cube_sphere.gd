@@ -93,6 +93,14 @@ static func parent(key: Vector4i) -> Vector4i:
 
 ## The node at `level` that contains the (not necessarily unit) direction.
 static func key_at(dir: Vector3, level: int) -> Vector4i:
+	var c := face_coordinates(dir)
+	var count := 1 << level
+	return Vector4i(int(c.x), level, clampi(int(floor((c.y + 1.0) * 0.5 * count)), 0, count - 1),
+			clampi(int(floor((c.z + 1.0) * 0.5 * count)), 0, count - 1))
+
+
+## (face, s, t) of the (not necessarily unit) direction: the inverse of direction().
+static func face_coordinates(dir: Vector3) -> Vector3:
 	var m := dir.abs()
 	var face := 0
 	if m.y >= m.x and m.y >= m.z:
@@ -103,11 +111,7 @@ static func key_at(dir: Vector3, level: int) -> Vector4i:
 	if major < 0.0:
 		face += 1
 		major = -major
-	var count := 1 << level
-	var s := atan(dir.dot(FACE_U[face]) / major) * 4.0 / PI
-	var t := atan(dir.dot(FACE_V[face]) / major) * 4.0 / PI
-	return Vector4i(face, level, clampi(int(floor((s + 1.0) * 0.5 * count)), 0, count - 1),
-			clampi(int(floor((t + 1.0) * 0.5 * count)), 0, count - 1))
+	return Vector3(face, atan(dir.dot(FACE_U[face]) / major) * 4.0 / PI, atan(dir.dot(FACE_V[face]) / major) * 4.0 / PI)
 
 
 ## Geodetic latitude and longitude (deg) of a unit direction: Vector2(lat, lon); a pole has longitude 0.

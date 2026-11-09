@@ -282,9 +282,17 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 		for c in 3:
 			custom3[3 * v + c] = custom3[3 * e + c]
 
+	# The drawn grid's heights (ROW x ROW, float32: mm at the Moon's +-10 km): TerrainQuadtree.drawn_height_m.
+	var grid_height_m := PackedFloat32Array()
+	grid_height_m.resize(GRID_VERTICES)
+	for b in ROW:
+		for a in ROW:
+			grid_height_m[b * ROW + a] = height_m[(b + 1) * LATTICE + a + 1]
+
 	return {
 		"key": key,
 		"center_fixed": center_fixed,
+		"grid_height_m": grid_height_m,
 		"vertices": vertices,
 		"normals": normals,
 		"indices": INDICES,

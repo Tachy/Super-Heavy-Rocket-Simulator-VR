@@ -26,6 +26,16 @@ const float DETAIL_PI = 3.14159265358979;
 const float DETAIL_LN2 = 0.693147180559945;
 // [D] Hex lattice period in cells (the hash repeats after DETAIL_HEX_PERIOD cells; per scale 256 x tile / 2).
 const int DETAIL_HEX_PERIOD = 256;
+// [D] TerrainNodeBuilder.CELLS: the texture coordinate spans up to this many cells of a node.
+const int DETAIL_NODE_CELLS = 64;
+// [D] Relative step of a float32 coordinate, doubled (the grid varying's interpolation and the sum with the origin
+// round once each): 2 x 2^-23.
+const float DETAIL_FLOAT32_EPSILON = 2.4e-7;
+// [E] A band is drawn only while its coordinate resolves its shortest wavelength in at least this many steps, the
+// texture relief only while a pixel's footprint spans at least DETAIL_COORD_STEPS_PER_FOOTPRINT steps (its derivatives
+// within ~1/8 of their value).
+const float DETAIL_COORD_STEPS_PER_WAVELENGTH = 16.0;
+const float DETAIL_COORD_STEPS_PER_FOOTPRINT = 8.0;
 // [D] The core's tables (unresolved_shading.hpp): drawn_table_samples, lit_gain_samples.
 const int DETAIL_DRAWN_SAMPLES = 97;
 const int DETAIL_GAIN_SAMPLES = 46;
@@ -453,6 +463,15 @@ vec3 detail_texture_gradient(vec2 grid, vec3 position, vec3 n, float spacing_m) 
 	if (abs(det) < 1.0e-20) {
 		return vec3(0.0);
 	}
+	// Bug 2026-11-09: on a coarse node near the eye (the terrain under it still loading) the float32 coordinate `local`
+	// (m from the node corner, up to 64 cells of km) changes from pixel to pixel by less than a few of its own rounding
+	// steps: its screen derivatives - the cotangent frame below and the mip footprint - are rounding noise and the
+	// slopes speckled. No texture relief there until the finer nodes arrive (in steady state the footprint is > 600 x
+	// this bound: a node is drawn from ~2.5 x its size away).
+	float local_step = DETAIL_FLOAT32_EPSILON * float(DETAIL_NODE_CELLS) * detail_cell_m;
+	if (min(length(dl_dx), length(dl_dy)) < DETAIL_COORD_STEPS_PER_FOOTPRINT * local_step) {
+		return vec3(0.0);
+	}
 	vec3 grad_u = (p2 * dl_dx.x + p1 * dl_dy.x) / det;
 	vec3 grad_v = (p2 * dl_dx.y + p1 * dl_dy.y) / det;
 	vec2 slope = vec2(0.0);
@@ -468,6 +487,16 @@ vec3 detail_texture_gradient(vec2 grid, vec3 position, vec3 n, float spacing_m) 
 		// mip has averaged the band's slopes away (< 1 % of its variance left): skip it.
 		float footprint = min(length(dl_dx), length(dl_dy));
 		if (footprint > detail_scale[i].w) {
+			continue;
+		}
+		// Bug 2026-11-09: on a coarse node near the eye (the terrain under it still loading) the float32 texture
+		// coordinate (m from the node corner, up to 64 cells of km) and its derivatives step by more than
+		// DETAIL_COORD_STEPS_PER_WAVELENGTH-th of the band's shortest wavelength: slope and mip jumped from pixel to pixel
+		// (speckle). Such a band is left out until the finer nodes arrive (in steady state the footprint test above
+		// always skips it first: the node's distance makes its footprint > 40 x the band's longest wavelength there).
+		float coord_step = DETAIL_FLOAT32_EPSILON * (float(DETAIL_NODE_CELLS) * detail_cell_m
+				+ max(abs(detail_origin[i].x), abs(detail_origin[i].y)));
+		if (coord_step * DETAIL_COORD_STEPS_PER_WAVELENGTH > detail_scale[i].z) {
 			continue;
 		}
 		vec2 uv = detail_origin[i].xy + local;

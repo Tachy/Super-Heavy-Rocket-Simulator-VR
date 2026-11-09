@@ -40,7 +40,8 @@ on top; it replaced the interim `GroundPatch`.
   fully morphed at that moment (start = 1.15 K s + 2 r, end = 0.97 K x parent size; start < end for every level >= 2
   on both bodies; at K 2.5 the band is ~0.55 node sizes, smallest margin of start below end 0.05 of the end; quadtree
   test). The level-1 roots never morph. A node drawn for the first time also starts fully morphed (`morph_floor` 1 ->
-  0 over `MORPH_IN_S` 0.5 s [E]): children whose upload came late slide in instead of popping; a parent shown again
+  0 over `MORPH_IN_S` 0.5 s [E], the fade's first step from the frame after its appearance: its first frame is exactly
+  its parent's surface): children whose upload came late slide in instead of popping; a parent shown again
   after a merge gets no floor. With the Moon's procedural detail the even vertices morph too, to the parent band's
   height at the same point (the parent's own vertex there), and the parent-level normals of the even vertices are the
   parent's central differences over that lattice: fully morphed a node is its parent's mesh (within float32 rounding),
@@ -73,6 +74,18 @@ on top; it replaced the interim `GroundPatch`.
   parallel in the core (`DetailedLunarTerrain::heights_limited_m`: the threads of all running batches share
   hardware threads - 2, so a lone batch spreads over ~17 threads and many concurrent ones stay near one each; bit for
   bit the serial loop). Without detail the order and the cap are as before (level first, 8 low-priority tasks).
+- **Drawn surface under the eye** (bug 2026-11-09). Each node keeps its grid heights (`grid_height_m`, 65 x 65
+  float32 from the build, 17 KB); `TerrainQuadtree.drawn_height_m(dir)` walks the drawn tree to the leaf under a
+  geodetic direction and intersects the vertical with its mesh triangle (`TerrainNodeBuilder.INDICES` split; a leaf
+  in its fade at own + floor x (parent - own)); `envelope` = the higher of the leaf's and its parent's surface while it
+  fades. While the terrain loads (a 2 m arrival on the Moon refines from the level-1 roots for tens of seconds:
+  level 3 after ~10 s, level 10 after ~50 s at the check's ~8 fps) the leaf under the eye is coarse and its surface
+  lay hundreds of metres above the eye, which then saw the skirts and inner sides of the nodes from below (the user's
+  dark streaked walls). `World._keep_camera_above_surface` therefore raises the SHOWN camera to
+  `SurfaceClearance.MIN_CLEARANCE_M` above the envelope (`SurfaceClearance.drawn_lift_m`) at once and lets it sink back
+  with `DRAWN_LIFT_SETTLE_S` 0.5 s [E] as finer nodes come down; the free camera's own pose keeps the true-ground clamp
+  only (no lift kept once loaded). All camera modes, both bodies; converged, the lift is the mesh's few cm over the
+  data between vertices. Tests: `drawn_height_test.gd` (headless), `moon_start_check.gd` (GPU, below).
 - **Imagery** (pipeline `tools/data_pipeline/imagery.py`, `config/imagery.toml`; tiles EPSG:4326 TMS, 256 px JPEG):
   NAIP 0.6 m (Planetary Computer; z14-17, `fade_m` 500 m) - Starbase 2022 (4 scenes), Cape 2021 (7 scenes), shifted
   NAD83 -> ITRF; own Sentinel-2 L2A 2025 clear-pixel median composite 10 m (z8-13, `fade_m` 5 km) - 72 scenes per
@@ -429,6 +442,11 @@ on top; it replaced the interim `GroundPatch`.
 
 - `res://tests/terrain_perf.gd` (per-second console output stalled the main thread by up to ~22 ms per print burst;
   lines are now printed at the end of the run). Sporadic 60-120 ms process spikes seen earlier were traced to that.
+- `res://tests/moon_start_check.gd` (GPU, bug 2026-11-09): boots the game scene, puts the free camera 2 m over the
+  sunlit lunar ground at once and judges every frame of the loading (`--frames` 240, `--yaws=0,180`, a fresh arrival
+  per yaw, `--stereo=<projections>` for the VR path, `--near_shadow=off`, `--rocks=off`, `--terrain_off=<bool
+  uniforms>` to bisect): the eye >= 1 m over the drawn surface (`drawn_height_m`), black share of the lower 30 % rows
+  <= 0.15, speckle share <= 0.018 (pixels standing out from both horizontal neighbours by 0.18 in sRGB luminance).
 - A fresh checkout needs one `godot --headless --path game --import` before `--script` runs (tests) resolve the
   `class_name` terrain scripts.
 

@@ -124,6 +124,8 @@ class _Node:
 	## The node whose horizon map it draws with (itself, or below the measured data's level an ancestor:
 	## TerrainNodeBuilder.build) and that map (null: none).
 	var horizon_owner: Vector4i
+	## The drawn grid's heights above the body's reference surface (ROW x ROW; drawn_height_m).
+	var grid_height_m := PackedFloat32Array()
 	var horizon_map: Texture2DArray
 	var horizon_max_rad := 0.0
 	## Its children own horizon maps: it owns one and would split on the measured data alone (the tree before the
@@ -309,6 +311,69 @@ func node_info(key: Vector4i) -> Dictionary:
 			"horizon_map": node.horizon_map, "children_bake": node.children_bake, "material": node.material}
 
 
+## The drawn surface under the body-fixed geodetic direction `dir_fixed` (m above the body's reference surface, as the
+## HeightSource's heights): where the vertical there meets the drawn leaf's mesh triangle; a leaf still fading in from
+## its parent's surface (morph floor f) is drawn at own + f (parent - own). While the terrain loads, the leaf under a
+## camera near the ground is coarse and its surface can lie hundreds of metres above or below the true ground (bug
+## 2026-11-09: an eye under the coarse surface saw the skirts and the inner sides of the nodes). `envelope`: the higher
+## of the leaf's own and (while it fades) its parent's surface instead - everything the drawn surface there passes
+## through until the fade ends (a camera kept above it never meets the fading surface). NAN when the body is not drawn.
+func drawn_height_m(dir_fixed: Vector3, envelope := false) -> float:
+	if not active:
+		return NAN
+	var node: _Node = _nodes.get(CubeSphere.key_at(dir_fixed, ROOT_LEVEL))
+	if node == null:
+		return NAN
+	while node.split:
+		var child: _Node = _nodes.get(CubeSphere.key_at(dir_fixed, node.key.y + 1))
+		if child == null:
+			break
+		node = child
+	var height := _mesh_height_m(node, dir_fixed)
+	if node.morph_floor > 0.0 and node.key.y > ROOT_LEVEL:
+		var parent: _Node = _nodes.get(CubeSphere.parent(node.key))
+		if parent != null:
+			var parent_height := _mesh_height_m(parent, dir_fixed)
+			height = maxf(height, parent_height) if envelope else lerpf(height, parent_height, node.morph_floor)
+	return height
+
+
+## The height where the vertical along the geodetic direction `up` meets node's mesh (TerrainNodeBuilder.INDICES: cell
+## (a, b) splits into (a, b) (a, b+1) (a+1, b) and (a+1, b) (a, b+1) (a+1, b+1)); the higher of the cell's two
+## triangles if neither contains the point (rounding on the diagonal). NAN without the node's heights.
+func _mesh_height_m(node: _Node, up: Vector3) -> float:
+	if node.grid_height_m.size() != TerrainNodeBuilder.GRID_VERTICES:
+		return NAN
+	var cells := TerrainNodeBuilder.CELLS
+	var row := TerrainNodeBuilder.ROW
+	var c := CubeSphere.face_coordinates(up)
+	var span := float(cells << node.key.y)
+	var a := mini(int(clampf((c.y + 1.0) * 0.5 * span - node.key.z * cells, 0.0, cells)), cells - 1)
+	var b := mini(int(clampf((c.z + 1.0) * 0.5 * span - node.key.w * cells, 0.0, cells)), cells - 1)
+	var dirs := PackedVector3Array()
+	var heights := PackedFloat64Array()
+	for corner: Vector2i in [Vector2i(0, 0), Vector2i(1, 0), Vector2i(0, 1), Vector2i(1, 1)]:
+		var k := (b + corner.y) * row + a + corner.x
+		dirs.append(CubeSphere.direction(node.key.x, CubeSphere.lattice_coordinate(node.key.z, node.key.y, a + corner.x,
+				cells), CubeSphere.lattice_coordinate(node.key.w, node.key.y, b + corner.y, cells)))
+		heights.append(node.grid_height_m[k])
+	dirs.append(up)
+	heights.append(0.0)
+	var p := height_source.positions_fixed(dirs, heights)  # corners (0,0) (1,0) (0,1) (1,1), the vertical's foot
+	var best := -INF
+	for tri: Array in [[0, 2, 1], [1, 2, 3]]:
+		var p0: Vector3 = p[tri[0]]
+		var n := (p[tri[1]] - p0).cross(p[tri[2]] - p0)
+		var h := n.dot(p0 - p[4]) / n.dot(up)
+		var q := p[4] + up * h
+		var w1 := (q - p0).cross(p[tri[2]] - p0).dot(n) / n.length_squared()
+		var w2 := (p[tri[1]] - p0).cross(q - p0).dot(n) / n.length_squared()
+		if w1 >= -1.0e-9 and w2 >= -1.0e-9 and w1 + w2 <= 1.0 + 1.0e-9:
+			return h
+		best = maxf(best, h)
+	return best
+
+
 ## Sets a shader parameter on the template and every uploaded node's material (diagnostics).
 func set_material_parameter(param: StringName, value: Variant) -> void:
 	_template.set_shader_parameter(param, value)
@@ -413,19 +478,20 @@ func _request(key: Vector4i, horizon_owner: Vector4i, parent_band: PackedFloat64
 ## Visibility from the drawn sets (only changes touch instances); a node drawn for the first time starts its morph
 ## fade-in (not the roots: they never morph).
 func _update_visibility(delta_s: float) -> void:
+	if not _fading.is_empty() and delta_s > 0.0:
+		var still: Array[_Node] = []
+		for node in _fading:
+			if node.instance == null:
+				continue
+			node.morph_floor = maxf(node.morph_floor - delta_s / MORPH_IN_S, 0.0)
+			node.instance.set_instance_shader_parameter(&"morph_floor", node.morph_floor)
+			if node.morph_floor > 0.0:
+				still.append(node)
+		_fading = still
+	# After the fade step: a node appearing now is drawn at its parent's surface in its first frame (morph floor 1, the
+	# surface the eye was kept above: bug 2026-11-09), fading from the next frame on.
 	if _selection_changed:
 		_show_drawn()
-	if _fading.is_empty() or delta_s <= 0.0:
-		return
-	var still: Array[_Node] = []
-	for node in _fading:
-		if node.instance == null:
-			continue
-		node.morph_floor = maxf(node.morph_floor - delta_s / MORPH_IN_S, 0.0)
-		node.instance.set_instance_shader_parameter(&"morph_floor", node.morph_floor)
-		if node.morph_floor > 0.0:
-			still.append(node)
-	_fading = still
 
 
 ## Shows the drawn leaves that were hidden and hides last frame's leaves that are no longer drawn.
@@ -675,6 +741,7 @@ func _upload(result: Dictionary) -> void:
 	node.can_split = key.y < MAX_LEVEL \
 			and node.size_m / TerrainNodeBuilder.CELLS > minf(node.max_resolution_m, curvature_spacing_m)
 	node.horizon_owner = horizon_owner
+	node.grid_height_m = result.get("grid_height_m", PackedFloat32Array())
 	node.horizon_map = horizon_map
 	node.horizon_max_rad = horizon_max_rad
 	node.children_bake = horizon_owner == key and key.y < MAX_LEVEL \

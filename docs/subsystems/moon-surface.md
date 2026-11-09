@@ -536,7 +536,16 @@ on top of that relief.
   short at L20-L19: replaced. A scale is skipped when both weights are below 0.1 ([E], < 0.016 rms slope) and once the
   footprint's short axis exceeds its lambda_max (the mip has averaged its slopes away; s3 therefore costs nothing near
   the ground and carries the 2.5-20 m craters a level-13 leaf (5.2 m spacing, 1.2 km up) does not draw). The height gradient is mapped onto the surface through the screen-space cotangent
-  frame.
+  frame. Float32 guard (bug 2026-11-09): the texture coordinate is metres from the node corner (up to 64 cells), so on
+  a coarse node right at the eye (the terrain still loading) its rounding step 2.4e-7 x 64 x cell (8 cm at level 3)
+  exceeded a pixel's change and its screen derivatives (cotangent frame, mip) became rounding noise: per-pixel speckle.
+  The texture relief is left out where a pixel's footprint spans fewer than 8 rounding steps
+  (`DETAIL_COORD_STEPS_PER_FOOTPRINT` [E]) and a band where its lambda_min holds fewer than 16
+  (`DETAIL_COORD_STEPS_PER_WAVELENGTH` [E]); in steady state a node is drawn from ~2.5 x its size away, where the
+  footprint is > 600 x the bound (no change). Loading transients lose the texture relief near the eye for seconds: at
+  a 2 m eye (footprint ~2-3 mm) it returns once the leaf under it reaches level ~11 (cell ~20 m); the A/B renders
+  (`moon_start_check.gd`) showed the speckle at level 3 (rounding step 8 cm) and none from level 4 on, so the bound
+  keeps a factor > 8 of margin [E].
 - Why baked craters, not shader craters (the review's preferred route, built and measured in the fix round): a
   deterministic field evaluated per fragment (half-octave bins of the core's law, 2 x 2 hashed cells per bin, 32-bit
   integer hash, exact shader-vs-core parity) closed the roughness gate as well but cost +5.4 ms of GPU time in the stereo

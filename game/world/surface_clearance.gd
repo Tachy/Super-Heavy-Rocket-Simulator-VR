@@ -21,6 +21,20 @@ static func clamp_fixed(p_fixed_m: Vector3, heights: HeightSource) -> Vector3:
 	return heights.position_fixed(geo.x, geo.y, floor_m)
 
 
+## How far (m, >= 0) the body-fixed position must rise along the local vertical to be MIN_CLEARANCE_M above the
+## terrain as `terrain` draws it now and while its newest node under the point fades in (TerrainQuadtree.drawn_height_m
+## envelope: while it loads, a coarse leaf's surface can lie far above the true ground the clamp above keeps the camera
+## over). 0 without a drawn terrain.
+static func drawn_lift_m(p_fixed_m: Vector3, heights: HeightSource, terrain: TerrainQuadtree) -> float:
+	if heights == null or terrain == null or p_fixed_m.length() < 1.0:
+		return 0.0
+	var geo := geodetic(p_fixed_m, heights.body == "earth")
+	var drawn := terrain.drawn_height_m(CubeSphere.geodetic_direction(geo.x, geo.y), true)
+	if is_nan(drawn):
+		return 0.0
+	return maxf(drawn + MIN_CLEARANCE_M - geo.z, 0.0)
+
+
 ## Distance (m) of the body-fixed position above `heights`' surface; without a source above the reference surface
 ## (WGS84 ellipsoid, the Moon's mean sphere). Never negative.
 static func surface_distance_m(p_fixed_m: Vector3, heights: HeightSource) -> float:
