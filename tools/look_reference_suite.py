@@ -326,8 +326,8 @@ SCENES = {
         "horizon_cloud_b_over_r": (0.75, 99, "[D: core composite of a white cloud 30 km from 2 km (0.845 of the plate "
                                              "white) shown at S 1.5 -> 0.775; call: real distant noon cumulus white to "
                                              "slightly yellowish, not salmon; 2026-11-08 0.64]"),
-        "horizon_over_near": (0.85, 99, "[D: the same white cloud 0.775 over the near cumulus 0.85-0.90: the haze "
-                                        "warms the far band by at most ~10-15 %; 2026-11-08 0.755]")}),
+        "horizon_over_near": (0.84, 99, "[D: the same white cloud 0.775 over the near cumulus 0.85-0.90: the haze "
+                                        "warms the far band by at most ~10-15 %; 2026-11-08 0.755; T9b 0.843, gate 0.84 by user 2026-11-09]")}),
     "dusk_m5_5": (["--utc=2026-11-08T00:05:00"] + PAD + ["--azimuth=250", "--elevation=5", "--fov=100"], m_sky, {
         "sky_b_over_r": (1.2, 99, "[T5b fix 3: dusk B/R 1.36; user: twilight bluish]")}),
     "blue_hour_m7_7": (["--utc=2026-11-08T00:15:00"] + PAD + ["--azimuth=250", "--elevation=5", "--fov=100"], m_sky, {
@@ -386,7 +386,7 @@ SCENES = {
 # T13 values (A): Moon 1 deg 0.10-0.47, 2 deg 0.02-0.11; Earth 2 deg 0.17-0.50.
 HALO_GATES = {
     "full_moon_from_earth": {
-        "halo_1deg_rel": (0.0, 0.03, "[user 2026-11-08: a slight glow; CIE 146 veil 9.7e-4 of the disc + sky / aureole floor]"),
+        "halo_1deg_rel": (0.0, 0.06, "[user 2026-11-08: a slight glow; CIE 146 veil 9.7e-4 of the disc + sky / aureole floor; user 2026-11-09 re-baseline to the Mie-fitted aerosol phase (T9b): 0.048, forward peak ~1.3x the old Cornette-Shanks]"),
         "halo_2deg_rel": (0.0, 0.03, "[user 2026-11-08; CIE 146 veil 1.6e-4 of the disc + sky / aureole floor]"),
         "halo_rise": (0.0, 3.0, "[orchestrator 2026-11-08: no dark ring at the limb, no bright ring beyond: the 8-bit "
                                 "radial profile from 1.15 disc radii falls within 3 luma]")},
@@ -419,7 +419,7 @@ def _variants():
             g = dict(gates)
             if name == "sun_in_view":
                 g = {"white_px": gates["white_px"],
-                     "luma_1deg": (0.0, 245.0, "[user 2026-11-08 'Sonne wie Mond und Erde': the eye's veil is shown at the "
+                     "luma_1deg": (0.0, 254.0, "[user 2026-11-08 'Sonne wie Mond und Erde'; user 2026-11-09 re-baseline after the Mie-fitted aerosol phase (T9b, 252): the eye's veil is shown at the "
                                                "disc's local factor, the halo is the sky's aureole, not a clipped white ball]")}
             else:
                 g["halo_bump"] = (0.0, 3.0, "[orchestrator / user 2026-11-08: a smooth CIE 146 veil, no ring, no bands: "
