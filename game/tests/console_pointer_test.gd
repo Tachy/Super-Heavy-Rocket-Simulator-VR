@@ -355,6 +355,16 @@ func _check_dispatch(config: CockpitConfig) -> void:
 	screen.free()
 
 
+## Records the keys that reach it (stands in for the TimePanel in the overlay viewport).
+class KeySink:
+	extends Node
+	var keys: Array[int] = []
+
+	func _input(event: InputEvent) -> void:
+		if event is InputEventKey and (event as InputEventKey).pressed:
+			keys.append((event as InputEventKey).keycode)
+
+
 # ---- VR fix A (user 2026-11-11): no 2D overlay in the cockpit, plain mouse motion moves the pointer, LMB clicks ----
 
 func _check_mouse_without_overlay(config: CockpitConfig) -> void:
@@ -379,6 +389,14 @@ func _check_mouse_without_overlay(config: CockpitConfig) -> void:
 	motion.relative = Vector2(30.0, 10.0)
 	mouse._input(motion)
 	_check(mouse.cursor == before_cursor, "a suspended VR panel mouse does not move its overlay cursor")
+	var key_sink := KeySink.new()
+	viewport.add_child(key_sink)
+	root.add_child(viewport)
+	var space := InputEventKey.new()
+	space.keycode = KEY_SPACE
+	space.pressed = true
+	mouse._input(space)
+	_check(key_sink.keys == [KEY_SPACE], "a suspended VR panel mouse still pushes keys to the overlay viewport (pause, time warp)")
 	gate.apply(false)
 	_check(shown.visible and panel.visible and not hidden_before.visible and not mouse.suspended, "leaving the cockpit restores what showed (and keeps what was hidden)")
 	for node in [gate, shown, hidden_before, panel, mouse, viewport, menu]:
@@ -431,7 +449,14 @@ func _check_figure_arms(config: CockpitConfig) -> void:
 	marked.strip_position = strip.to_strip((strip.surface("centre"))["centre"])
 	marked.update(0.016, null)
 	_check(marked.marker != null and marked.marker.visible and marked.marker.get_parent() == view, "the pointer's marker shows on the surface under it")
-	_check(marked.marker.position.distance_to(marked.hover["point_m"]) < ConsolePointer.MARKER_LIFT_M + 1e-6, "the marker lies %.1f mm above the face" % (ConsolePointer.MARKER_LIFT_M * 1000.0))
+	var face_point: Vector3 = marked.hover["point_m"]
+	_check(absf((marked.marker.position - face_point).dot(strip.normal) - ConsolePointer.MARKER_LIFT_M) < 1e-6 and (marked.marker.position - face_point).cross(strip.normal).length() < 1e-6, "the marker lies %.1f mm above the face point under the pointer" % (ConsolePointer.MARKER_LIFT_M * 1000.0))
+	var far := Vector2(0.0, 0.5)  # bare strip, far from every surface
+	_check(float(strip.to_surface(far)["distance_m"]) > ConsolePointer.PICK_MARGIN_M, "the test position is off every surface")
+	marked.strip_position = far
+	marked.update(0.016, null)
+	var expected := strip.origin + strip.right * far.x + strip.up * far.y + strip.normal * ConsolePointer.MARKER_LIFT_M
+	_check(marked.marker.visible and marked.marker.position.distance_to(expected) < 1e-6, "the marker follows the pointer over bare strip")
 	marked.active = false
 	marked.update(0.016, null)
 	_check(not marked.marker.visible, "the marker is hidden outside the cockpit")

@@ -52,7 +52,11 @@ func _exit_tree() -> void:
 
 func _input(event: InputEvent) -> void:
 	if suspended:
-		return  # cockpit view: the panel is hidden and the mouse belongs to the ConsolePointer (the mode stays captured: relative motion)
+		# cockpit view: the panel is hidden and the mouse belongs to the ConsolePointer (the mode stays captured: relative motion);
+		# keys still reach the overlay viewport (TimePanel: Space pause, +/- time warp)
+		if event is InputEventKey:
+			_push_key(event as InputEventKey)
+		return
 	if event is InputEventMouseMotion:
 		if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 			return  # camera orbit: the pointer stays put
@@ -68,11 +72,15 @@ func _input(event: InputEvent) -> void:
 			return  # camera zoom
 		_push_at_cursor(button)
 	elif event is InputEventKey:
-		if (event as InputEventKey).keycode in PASS_KEYS:
-			return
-		viewport.push_input(event)
-		if viewport.is_input_handled():
-			get_viewport().set_input_as_handled()
+		_push_key(event as InputEventKey)
+
+
+func _push_key(key: InputEventKey) -> void:
+	if key.keycode in PASS_KEYS:
+		return
+	viewport.push_input(key)
+	if viewport.is_input_handled():
+		get_viewport().set_input_as_handled()
 
 
 ## The pointer's own position: over the menu panel or an open (embedded) popup.

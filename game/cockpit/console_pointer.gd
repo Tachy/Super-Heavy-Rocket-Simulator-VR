@@ -191,11 +191,18 @@ func _build_marker() -> MeshInstance3D:
 func _update_marker(normal: Vector3) -> void:
 	if marker == null or not is_instance_valid(marker):
 		return
-	marker.visible = active and not hover.is_empty()
+	marker.visible = active and strip != null
 	if marker.visible:
 		var up := normal.normalized()
 		var side := up.cross(Vector3.RIGHT if absf(up.dot(Vector3.RIGHT)) < 0.9 else Vector3.UP).normalized()
-		marker.transform = Transform3D(Basis(side, up, side.cross(up)), (hover["point_m"] as Vector3) + up * MARKER_LIFT_M)
+		marker.transform = Transform3D(Basis(side, up, side.cross(up)), _marker_point() + up * MARKER_LIFT_M)
+
+
+## Where the marker sits: on the face under the pointer, else (bare strip, gaps) at the pointer's own strip position on the console plane.
+func _marker_point() -> Vector3:
+	if not hover.is_empty() and float(hover["distance_m"]) <= PICK_MARGIN_M:
+		return hover["point_m"]
+	return strip.origin + strip.right * strip_position.x + strip.up * strip_position.y
 
 
 ## The fingertip (cabin frame) of a side as last posed.
