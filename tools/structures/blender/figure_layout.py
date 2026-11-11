@@ -147,6 +147,59 @@ def visor_el_range(h):
     return rows[0][0], rows[-1][0]
 
 
+# ---------- the commander's open helmet (Task 9 VR fix B: the visor raised into the shell) ----------
+HELMET_NODE = "crew_figure_helmet"  # the closed helmet (shell, visor down, frame bead, seal, pivots): every figure but the player's
+HELMET_OPEN_NODE = "crew_figure_helmet_open"  # the open helmet (face opening cut, dark interior, visor stowed in the shell): the player's figure
+
+
+def visor_opening_span(h, az_deg):
+    """(lowest, highest) elevation in degrees of the face opening on the meridian at this azimuth, None outside it (|az| >= the widest row).
+    The outline's half width rises from the chin row to the widest row and falls to the brow row (both branches monotonic): each branch inverted."""
+    rows = h["visor_outline"]
+    a = abs(az_deg)
+    k = max(range(len(rows)), key=lambda i: rows[i][1])
+    if a >= rows[k][1]:
+        return None
+
+    def branch(seq):  # seq from the branch's narrow end to the widest row
+        if a <= seq[0][1]:
+            return seq[0][0]
+        for r0, r1 in zip(seq, seq[1:]):
+            if a <= r1[1]:
+                return r0[0] + (r1[0] - r0[0]) * (a - r0[1]) / (r1[1] - r0[1])
+        return seq[-1][0]
+    return branch(rows[:k + 1]), branch(rows[k:][::-1])
+
+
+def visor_widest(h):
+    """(elevation, half azimuth) of the face opening's widest row (the temple tip)."""
+    row = max(h["visor_outline"], key=lambda r: r[1])
+    return row[0], row[1]
+
+
+def visor_stow_deg(h):
+    """Rotation of the raised visor about the helmet's lateral axis: the opening's height plus visor_stow_margin_deg, so its lower (chin) edge
+    sits just above the brow, inside the shell."""
+    e0, e1 = visor_el_range(h)
+    return (e1 - e0) + h["visor_stow_margin_deg"]
+
+
+def visor_stow_direction(h, el_deg, az_deg):
+    """The unit direction (helmet-centre frame) of the opening node (el, az) with the visor raised: turned up and back (forward -> up) by
+    visor_stow_deg about the lateral (z) axis through the centre. The stowed visor is conformed to the shell's inside along this direction."""
+    x, y, z = helmet_direction(el_deg, az_deg)
+    t = math.radians(visor_stow_deg(h))
+    return (x * math.cos(t) + y * math.sin(t), -x * math.sin(t) + y * math.cos(t), z)
+
+
+def in_face_opening(h, d):
+    """Whether the unit direction d (helmet-centre frame) passes through the face opening."""
+    el = math.degrees(math.asin(max(-1.0, min(1.0, d[0]))))
+    az = math.degrees(math.atan2(d[2], d[1]))
+    span = visor_opening_span(h, az)
+    return span is not None and span[0] <= el <= span[1]
+
+
 def helmet_groove_block(cfg):
     """The manifest's helmet panel lines (surface detail, drawn by cabin.gdshader on the helmet surface): plane rows in the FIGURE frame."""
     h, pose = cfg["helmet"], cfg["pose"]
@@ -442,6 +495,7 @@ def figure_manifest(cfg):
                        "roughness_low": cfg["helmet"]["visor_low_roughness"], "metallic_low": cfg["helmet"]["visor_low_metallic"]},
         "helmet_material": "helmet",
         "helmet_grooves": helmet_groove_block(cfg),
+        "helmet_nodes": {"closed": HELMET_NODE, "open": HELMET_OPEN_NODE},
         "suit_material": "suit",
         "suit_maps": {"albedo": SUIT_ALBEDO_FILE, "wrinkle": SUIT_WRINKLE_FILE, "atlas_m": list(look["atlas_m"]),
                       "fold_depth_m": cfg["joints"]["fold_depth_m"], "slope_range": WRINKLE_SLOPE_RANGE},

@@ -94,18 +94,24 @@ def _node_world(doc):
     return {i: world(i) for i in range(len(doc["nodes"]))}
 
 
+def _prims(doc, bufs, names):
+    """[(material name, positions, triangle index list)] of the primitives of the named mesh nodes."""
+    prims = []
+    for name in names:
+        n = next(n for n in doc["nodes"] if n.get("name") == name)
+        for p in doc["meshes"][n["mesh"]]["primitives"]:
+            pos = _read(doc, bufs, p["attributes"]["POSITION"], 3)
+            idx = _read(doc, bufs, p["indices"], 1)
+            prims.append((doc["materials"][p["material"]]["name"], pos, idx))
+    return prims
+
+
 def _mesh():
-    """(doc, suit node, [(material name, positions, triangle index list)]) of the skinned mesh nodes `crew_figure` (the suit) and
-    `crew_figure_parts` (the rigid parts)."""
+    """(doc, suit node, [(material name, positions, triangle index list)]) of the figure as the other crew show it: the skinned mesh nodes
+    `crew_figure` (the suit), `crew_figure_parts` (the rigid parts) and `crew_figure_helmet` (the closed helmet)."""
     doc, bufs = _doc()
     node = next(n for n in doc["nodes"] if n.get("name") == "crew_figure")
-    parts = next(n for n in doc["nodes"] if n.get("name") == "crew_figure_parts")
-    prims = []
-    for p in doc["meshes"][node["mesh"]]["primitives"] + doc["meshes"][parts["mesh"]]["primitives"]:
-        pos = _read(doc, bufs, p["attributes"]["POSITION"], 3)
-        idx = _read(doc, bufs, p["indices"], 1)
-        prims.append((doc["materials"][p["material"]]["name"], pos, idx))
-    return doc, node, prims
+    return doc, node, _prims(doc, bufs, ["crew_figure", "crew_figure_parts", fl.HELMET_NODE])
 
 
 def test_figure_tables_are_tagged_and_load_into_the_spec(spec, cfg):
@@ -192,7 +198,8 @@ def mesh():
 def test_gltf_has_the_suit_and_the_parts_mesh_on_one_skeleton(cfg, mesh):
     doc, node, prims = mesh
     meshed = [n for n in doc["nodes"] if "mesh" in n]
-    assert sorted(n["name"] for n in meshed) == ["crew_figure", "crew_figure_parts"] and all("skin" in n for n in meshed)
+    assert sorted(n["name"] for n in meshed) == sorted(["crew_figure", "crew_figure_parts", fl.HELMET_NODE, fl.HELMET_OPEN_NODE])
+    assert all("skin" in n for n in meshed)
     joints = {doc["nodes"][j]["name"] for j in doc["skins"][node["skin"]]["joints"]}
     assert joints == set(BRIEF_BONES)
     for n in meshed:
@@ -202,8 +209,9 @@ def test_gltf_has_the_suit_and_the_parts_mesh_on_one_skeleton(cfg, mesh):
 def test_morph_targets_only_on_the_suit(mesh):
     """Fix round 1: the 16 corrective shapes move only the suit; the rigid parts' mesh carries none (asset size, GPU morph work)."""
     doc, node, _ = mesh
-    parts = next(n for n in doc["nodes"] if n.get("name") == "crew_figure_parts")
-    assert all("targets" not in p for p in doc["meshes"][parts["mesh"]]["primitives"])
+    for name in ("crew_figure_parts", fl.HELMET_NODE, fl.HELMET_OPEN_NODE):
+        parts = next(n for n in doc["nodes"] if n.get("name") == name)
+        assert all("targets" not in p for p in doc["meshes"][parts["mesh"]]["primitives"]), name
     suit_prims = doc["meshes"][node["mesh"]]["primitives"]
     assert [doc["materials"][p["material"]]["name"] for p in suit_prims] == ["suit"]
     assert (MODELS / "crew_figure.bin").stat().st_size < 6_000_000
@@ -222,7 +230,7 @@ def test_gltf_skeleton_equals_the_layout(cfg, mesh):
 def test_materials_and_visor_is_its_own_closed_surface(mesh):
     _, _, prims = mesh
     names = [p[0] for p in prims]
-    assert sorted(names) == sorted(fl.MATERIALS) and names.count("visor") == 1
+    assert set(names) == set(fl.MATERIALS) and names.count("visor") == 1
     _, pos, idx = next(p for p in prims if p[0] == "visor")
     weld = {}
     tris = [[weld.setdefault(tuple(round(c * 1e4) for c in pos[i]), len(weld)) for i in idx[k:k + 3]] for k in range(0, len(idx), 3)]
@@ -323,8 +331,92 @@ def test_visor_sits_in_a_face_opening_with_a_white_shell_around_it(cfg, mesh):
 def test_visor_is_its_own_surface_and_the_helmet_is_neutral_white(cfg, mesh):
     _, _, prims = mesh
     names = [p[0] for p in prims]
-    assert names.count("visor") == 1 and names.count("helmet") == 1
+    assert names.count("visor") == 1 and names.count("helmet") == 2  # the closed helmet's shell + bead, the parts' glove lock rings
     assert max(cfg["material"]["helmet"]["albedo"]) - min(cfg["material"]["helmet"]["albedo"]) < 0.02  # no blue tint
+
+
+# ---------- Task 9 VR fix B: the player's open helmet (visor raised) ----------
+
+def _helmet_dir(cfg, p):
+    """(unit direction, distance) of a figure-frame point from the helmet centre."""
+    c = (cfg["pose"]["head_centre_up_m"], cfg["pose"]["head_centre_forward_m"], 0.0)
+    v = fl.sub(tuple(p), c)
+    r = fl.length(v)
+    return fl.mul(v, 1.0 / r), r
+
+
+@pytest.fixture(scope="module")
+def open_helmet():
+    if not GENERATED:
+        pytest.skip("no generated Dragon models")
+    doc, bufs = _doc()
+    return _prims(doc, bufs, [fl.HELMET_OPEN_NODE])
+
+
+def test_opening_span_inverts_the_outline(cfg):
+    """visor_opening_span(az) is the elevation band where |az| < visor_half_az(el): the open shell's cut follows the closed visor's outline."""
+    h = cfg["helmet"]
+    e0, e1 = fl.visor_el_range(h)
+    for az in range(-95, 96, 5):
+        span = fl.visor_opening_span(h, az)
+        for el in [e0 + (e1 - e0) * k / 200.0 for k in range(201)]:
+            inside = abs(az) < fl.visor_half_az(h, el)
+            in_span = span is not None and span[0] - 1e-6 <= el <= span[1] + 1e-6
+            assert inside == in_span or abs(abs(az) - fl.visor_half_az(h, el)) < 1.0, (az, el, span)
+
+
+def test_open_helmet_has_the_face_opening_and_a_dark_lining(cfg, open_helmet):
+    """The open shell has no triangle in the face opening; the lining (boots black) lies helmet_liner_depth_m inside the shell; the frame bead
+    stays white (helmet), the visor is its own surface."""
+    h = cfg["helmet"]
+    names = [p[0] for p in open_helmet]
+    assert names.count("visor") == 1 and "boots" in names and "helmet" in names
+    _, pos, idx = next(p for p in open_helmet if p[0] == "helmet")
+    shell_tris = 0
+    for k in range(0, len(idx), 3):
+        tri = [pos[i] for i in idx[k:k + 3]]
+        d, r = _helmet_dir(cfg, [sum(t[a] for t in tri) / 3.0 for a in range(3)])
+        if abs(r - fl.helmet_rho(h, d)) < 0.002:  # a shell triangle (the bead stands proud of the shell)
+            shell_tris += 1
+            el = math.degrees(math.asin(d[0]))
+            az = math.degrees(math.atan2(d[2], d[1]))
+            span = fl.visor_opening_span(h, az)
+            deep = span is not None and span[0] + 5.0 < el < span[1] - 5.0 and abs(az) < fl.visor_half_az(h, el) - 8.0
+            assert not deep, (el, az, span)  # the frame bead (r 9 mm) reaches ~4 deg into the opening (more in az along the slanted side edges)
+    assert shell_tris > 1000
+    _, pos, _ = next(p for p in open_helmet if p[0] == "boots")
+    depths = []
+    hood = 0
+    for p in pos:
+        d, r = _helmet_dir(cfg, p)
+        el, az = math.degrees(math.asin(d[0])), math.degrees(math.atan2(d[2], d[1]))
+        if el < fl.helmet_bottom_el(h, az) + 1.0:
+            hood += 1  # the hood lining below the shell's lower edge (what the opening shows under the interior)
+            continue
+        depths.append(fl.helmet_rho(h, d) - r)
+    assert hood > 50
+    # the black seal bead (same material) stands on the shell (depth < 0.004); the lining and its lip lie between the shell and the lining depth
+    # (radially up to ~1.4x the depth along the normal where the facets meet the curved shell at an angle)
+    lining = [x for x in depths if x >= 0.004]
+    assert len(lining) > 1000 and max(lining) < 1.5 * h["helmet_liner_depth_m"]
+
+
+def test_raised_visor_rides_over_the_crown_and_clears_the_view(cfg, open_helmet):
+    """The raised visor stays outside the shell (visor_stow_gap_m), above its lower edge, its lower edge above the brow, and nothing of it
+    lies in the face opening's middle (|az| < 60 deg: the view ahead from the eye); jsc2024e066389 / conv_2ks5k."""
+    h = cfg["helmet"]
+    _, pos, _ = next(p for p in open_helmet if p[0] == "visor")
+    e0, e1 = fl.visor_el_range(h)
+    for p in pos:
+        d, r = _helmet_dir(cfg, p)
+        el = math.degrees(math.asin(d[0]))
+        az = math.degrees(math.atan2(d[2], d[1]))
+        assert r > fl.helmet_rho(h, d) + 0.5 * h["visor_stow_gap_m"], (el, az)  # outside the shell, not through it
+        assert el > fl.helmet_bottom_el(h, az), (el, az)
+        if abs(az) < 60.0:
+            assert not fl.in_face_opening(h, d), (el, az)
+        if abs(az) < 10.0 and d[1] > 0.0:
+            assert el > e1, (el, az)  # ahead: only above the brow
 
 
 # ---------- Task 8b: anatomical body (ANSUR II), suit hull, joint folds ----------

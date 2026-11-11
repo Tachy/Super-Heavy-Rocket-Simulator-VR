@@ -1,5 +1,8 @@
 shader_type spatial;
-render_mode ambient_light_disabled;
+render_mode ambient_light_disabled, cull_disabled;
+// cull_disabled (Task 9 VR fix B, "the shoulder has a hole"): where linear skinning folds the suit through itself (the thin port transition
+// under the acromion at a forward / backward arm swing, docs/subsystems/cockpit.md) the folded triangles face away from the viewer; culled,
+// they left a see-through hole into the hollow hull. Drawn from both sides (Godot flips NORMAL on back faces) the fold reads as a crease.
 // The crew suit (Task 8b, docs/subsystems/cockpit.md "Crew body and suit"): the cabin look of cabin.gdshader (Godot PBR under the cabin lamps
 // and the Sun, aerial perspective as FOG, no sky ambient; the walls' bounced light as the emission term `fill` and their reflection
 // `fill_surround` through the split-sum BRDF, both set by CockpitView each frame) with the suit's baked maps (tools/structures/suit_textures.py):

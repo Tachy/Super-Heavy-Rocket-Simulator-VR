@@ -388,7 +388,7 @@ FIGURE_KEYS = {
                "rear_facet_normal", "rear_facet_offset_m", "cut_rear_m", "cut_slope_deg", "visor_outline", "visor_proud_m", "visor_edge_m", "visor_thickness_m",
                "rim_radius_m", "collar_radius_m", "collar_height_m", "liner_radius_m", "liner_inset_deg", "egg_taper", "grooves", "groove_width_m", "groove_radius_m",
                "groove_albedo", "visor_tint_split", "visor_low_albedo", "visor_low_roughness", "visor_low_metallic", "pivot_button_radius_m", "pivot_button_height_m",
-               "pivot_el_deg", "pivot_az_offset_deg"),
+               "pivot_el_deg", "pivot_az_offset_deg", "helmet_liner_depth_m", "visor_stow_margin_deg", "visor_stow_gap_m", "visor_stow_lift_deg"),
 }
 FIGURE_MATERIALS = ("suit", "boots", "gloves", "helmet", "collar", "visor")
 

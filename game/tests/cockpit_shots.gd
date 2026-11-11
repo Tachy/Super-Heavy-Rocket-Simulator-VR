@@ -22,6 +22,8 @@
 #   screen), body_elbow_bent / body_elbow_straight (the commander's right elbow at the HOTAS grip and reaching); + *_vs_<photo> sheets
 #   --hotas: instead of the cabin shots, the commander with the HOTAS props (Task 9): hotas_eye_down / hotas_eye_forward (pilot eye), hotas_hatch /
 #   hotas_hatch_deflected (hatch camera, stick and lever deflected)
+#   --shoulder: the commander's shoulders at six arm poses (Task 9 VR fix B; shoulder_<pose>_eye/out/top_<side>)
+#   --visor: the commander's open helmet (helmet_open_*) and the pilot's own view turned up / left / right / down (pilot_eye_*), Task 9 VR fix B
 #   --tone=agx (Godot's AgX alone, no display tone step), --hunt=day (the Hunt factor against L_day, as before look fixes T5)
 extends SceneTree
 
@@ -144,7 +146,7 @@ func _shoot() -> bool:
 		_set_exterior_visible(true)
 		if _args.has("body"):
 			_compose_body()
-		elif not _args.has("only") and not _args.has("screen") and not _args.has("hand") and not _args.has("hotas"):
+		elif not _args.has("only") and not _args.has("screen") and not _args.has("hand") and not _args.has("hotas") and not _args.has("shoulder") and not _args.has("visor"):
 			_compose()
 		quit(0)
 		return true
@@ -179,7 +181,7 @@ func _shoot() -> bool:
 	if shot.has("aim_bone") and _wait >= 1:  # Task 8b: aim at a bone of the posed commander (after the pointer ops have posed it)
 		var skeleton := _cockpit.figure_skeleton("s2")
 		var bone_at: Vector3 = _cockpit._skeleton_to_cabin() * skeleton.get_bone_global_pose(skeleton.find_bone(String(shot["aim_bone"]))).origin
-		var cam_at: Vector3 = bone_at + (shot["aim_offset"] as Vector3)
+		var cam_at: Vector3 = (shot["eye_at"] as Vector3) if shot.has("eye_at") else bone_at + (shot["aim_offset"] as Vector3)
 		shot["local"] = Transform3D(Basis.looking_at(bone_at - cam_at, Vector3(1.0, 0.0, 0.0)), cam_at)
 	# the pose in the capsule frame -> render axes of this frame; converge: the view is placed relative to the camera
 	var stage := _cockpit.get_parent() as Node3D
@@ -266,6 +268,31 @@ func _define_shots() -> void:
 		return
 	if _args.has("hotas"):
 		_define_hotas_shots(eye, hatch_basis)
+		return
+	if _args.has("shoulder"):
+		_define_shoulder_shots()
+		return
+	if _args.has("visor"):  # Task 9 VR fix B: the commander's open helmet from outside, the pilot's own view in several head turns
+		var s2: Dictionary = {}
+		for seat: Dictionary in _cockpit.config.seats:
+			if seat["id"] == "s2":
+				s2 = seat
+		var back2 := deg_to_rad(float(s2["back_angle_deg"]))
+		var up2 := Vector3(cos(back2), -sin(back2), 0.0)
+		var chest2 := Vector3(sin(back2), cos(back2), 0.0)
+		var c2: Vector3 = s2["hip"] + up2 * 0.80 + chest2 * 0.17
+		_shots.clear()
+		for view: Array in [["helmet_open_34", -38.0, 0.75, 48.0], ["helmet_open_front", 0.0, 0.8, 45.0], ["helmet_open_profile", -90.0, 1.1, 40.0], ["helmet_open_rear34", -140.0, 0.9, 45.0]]:
+			var az := deg_to_rad(float(view[1]))
+			var cam := c2 + (chest2 * cos(az) + Vector3(0.0, 0.0, 1.0) * sin(az)) * float(view[2]) + up2 * 0.1
+			_shots.append({"name": view[0], "local": Transform3D(Basis.looking_at(c2 - cam, up2), cam), "fov": float(view[3]), "hide_exterior": false,
+					"isolate": true, "isolate_seat": "s2", "hide_head": false})
+		_shots.append({"name": "helmet_open_hatch", "local": Transform3D(hatch_basis, HATCH_POS), "fov": HATCH_VFOV, "keep_height": true, "crop_aspect": 1.5,
+				"hide_exterior": false, "hide_head": false})
+		for turn: Array in [["pilot_eye", 0.0, 0.0], ["pilot_eye_up", 0.0, 35.0], ["pilot_eye_left", 70.0, 0.0], ["pilot_eye_right", -70.0, 0.0], ["pilot_eye_down", 0.0, -45.0]]:
+			var b := pilot.basis.rotated(eye.basis.y.normalized(), deg_to_rad(float(turn[1])))
+			b = b.rotated(b.x.normalized(), deg_to_rad(float(turn[2])))
+			_shots.append({"name": turn[0], "local": Transform3D(b, eye.origin), "fov": PILOT_FOV, "field_key": PILOT_FIELD_KEY})
 		return
 	var rest: Array = [
 		{"name": "helmet_closeup", "local": Transform3D(Basis.looking_at(helmet_c - helmet_cam, up_back), helmet_cam), "fov": 48.0, "hide_exterior": false, "isolate": true},
@@ -399,6 +426,42 @@ func _define_body_shots(s3: Dictionary) -> void:
 			"pointer_ops": [["wait", 10]]}))
 
 
+## Task 9 VR fix B: the commander's shoulders at several arm poses (idle on the HOTAS, pointing left / centre / right, the far key r_upper_5,
+## a backward swing of the right hand beside the hip): from the pilot's eye at each shoulder (with the own head as the game shows it) and
+## from outside (front-right / front-left of the commander), the figure isolated.
+func _define_shoulder_shots() -> void:
+	_pointer = ConsolePointer.new()
+	_world.add_child(_pointer)
+	_pointer.setup(_cockpit.config, _cockpit, _world.screen_camera)
+	_pointer.active = false
+	_pointer.vr_mode = true
+	_world.console_pointer.driven_externally = true
+	var s2: Dictionary = {}
+	for seat: Dictionary in _cockpit.config.seats:
+		if seat["id"] == "s2":
+			s2 = seat
+	var back2 := deg_to_rad(float(s2["back_angle_deg"]))
+	var up2 := Vector3(cos(back2), -sin(back2), 0.0)
+	var chest2 := Vector3(sin(back2), cos(back2), 0.0)
+	var poses := [["idle", [["goto", "idle", 0], ["wait", 40]]], ["left", [["goto", "left", 0], ["wait", 40]]], ["centre", [["goto", "centre", 0], ["wait", 40]]],
+			["right", [["goto", "right", 0], ["wait", 40]]], ["r_upper_5", [["goto", "button:r_upper_5", 0], ["wait", 40]]], ["back", [["pose_back"]]]]
+	_shots.clear()
+	for pose: Array in poses:
+		var ops: Array = pose[1]
+		var again: Array = ops if pose[0] == "back" else []
+		for side: String in ["r", "l"]:
+			_shots.append({"name": "shoulder_%s_eye_%s" % [pose[0], side], "local": Transform3D(Basis.IDENTITY, _cockpit.config.eye.origin + up2 * 0.001),
+					"fov": 90.0, "eye_at": _cockpit.config.eye.origin + up2 * 0.001, "aim_bone": "upper_arm_" + side, "hide_exterior": true,
+					"pointer_ops": ops if side == "r" else again, "settle": 12})
+			var lateral := Vector3(0.0, 0.0, -0.45 if side == "r" else 0.45)
+			_shots.append({"name": "shoulder_%s_out_%s" % [pose[0], side], "local": Transform3D.IDENTITY, "fov": 45.0, "aim_bone": "upper_arm_" + side,
+					"aim_offset": chest2 * 0.45 + lateral + up2 * 0.30, "hide_exterior": true, "isolate": true, "isolate_seat": "s2", "hide_head": false,
+					"pointer_ops": again, "settle": 12, "keep_height": true, "crop_aspect": 1.2})
+			_shots.append({"name": "shoulder_%s_top_%s" % [pose[0], side], "local": Transform3D.IDENTITY, "fov": 45.0, "aim_bone": "upper_arm_" + side,
+					"aim_offset": up2 * 0.55 + chest2 * 0.15 + lateral * 0.5, "hide_exterior": true, "isolate": true, "isolate_seat": "s2", "hide_head": true,
+					"pointer_ops": again, "settle": 12, "keep_height": true, "crop_aspect": 1.2})
+
+
 func _compose_body() -> void:
 	_side_by_side("body_side", "../nasa/KSC-20190731-PH_SPX01_0002", "body_side_vs_ksc0002", false)
 	_side_by_side("body_34", "../eva_suit_newatlas", "body_34_vs_newatlas", false)
@@ -426,6 +489,13 @@ func _run_pointer_ops(ops: Array) -> void:
 				_pointer.click()
 			"wait":
 				pass
+			"pose_back":  # the right hand swung back beside the hip (elbow behind the torso), the left on its idle grip
+				var skeleton := _cockpit.figure_skeleton("s2")
+				var shoulder: Vector3 = _cockpit._skeleton_to_cabin() * skeleton.get_bone_global_rest(skeleton.find_bone("upper_arm_r")).origin
+				var up_back := _cockpit._skeleton_to_cabin().basis.x.normalized()
+				var chest := _cockpit._skeleton_to_cabin().basis.y.normalized()
+				_cockpit.pose_arms({"l": {"tip": _cockpit.idle_tip("l")}, "r": {"tip": shoulder - up_back * 0.45 - chest * 0.02 + Vector3(0.0, 0.0, -0.14)}})
+				return
 	var frames := 1
 	for op: Array in ops:
 		if String(op[0]) == "wait":

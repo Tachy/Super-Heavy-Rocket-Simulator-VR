@@ -47,9 +47,10 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   (bones, seat basis, joints, manifest block), `figure_body.py` (the body / suit hull), `figure_measure.py` (tape measures) and the baker
   `tools/structures/suit_textures.py`; writes `crew_figure.gltf`, `suit_albedo.png`, `suit_wrinkle.png` into the Crew Dragon set. `vehicle_spec.load_dragon`
   loads the TOML into `spec["crew_figure"]`; `VehicleModels` returns the meshes under `"crew_figure"` and counts the TOML for staleness; manifest block
-  `crew_figure` (`bones`, `eye_m`, `materials`, `frame`, `joints`, `joint_order`, `suit_material`, `suit_maps`, helmet / visor entries). Two skinned mesh
-  nodes on one armature (fix round 1): `crew_figure` = the suit (the only mesh with morph targets) and `crew_figure_parts` = the rigid parts (helmet, visor,
-  hood, glove lock rings, gloves, boots).
+  `crew_figure` (`bones`, `eye_m`, `materials`, `frame`, `joints`, `joint_order`, `suit_material`, `suit_maps`, helmet / visor entries). Skinned mesh
+  nodes on one armature (fix round 1): `crew_figure` = the suit (the only mesh with morph targets) and `crew_figure_parts` = the rigid parts (
+  hood, glove lock rings, gloves, boots) plus the two helmets on the head bone (Task 9 VR fix B, manifest `crew_figure.helmet_nodes`): `crew_figure_helmet` (visor closed:
+  every figure but the player's) and `crew_figure_helmet_open` (the player's commander s2: see "Player's open helmet" below).
 - Frame convention: glTF origin = the seat's hip reference point (`[[seat]] hip_m` = seat-back plane meets the pan surface); **x = up the seat back, y = the
   seat's chest normal, z = the crew's left**. The game places it at a seat with the basis columns `((cos a, -sin a, 0), (sin a, cos a, 0), (0, 0, 1))` in
   the capsule frame (a = `back_angle_deg`; `figure_layout.to_capsule` / `seat_basis`). The hip joint sits 0.10 above and 0.12 ahead of the origin.
@@ -61,6 +62,27 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   62.3 deg below the hatch axis (photo bands 10-20 / 60-65.5, >= 2 deg margin; before: exactly on the 10 deg edge). The upper arms hang (12 deg from the torso
   axis), the elbows beside the torso, the hands palm down on the thighs (`[pose] wrist_m` on the sagittal thigh, riding along with the knee swing; `elbow_pole`,
   KSC-20190731-PH_SPX01_0002 / crew1_1). The seats' `foot_rest_m` / `foot_rest_normal` follow the ankle (hip + (-0.152, 0.754)).
+
+### Player's open helmet and own head (Task 9 VR fix B)
+- User VR run 2026-11-11: "the commander shall have his visor open so he can see out of the helmet". The game never hid the player's head, so the VR camera sat inside
+  the closed visor (its inner surface tinted the whole view). Now: the commander (s2, the player body) wears `crew_figure_helmet_open`; s3 / s1 / s4 keep the closed copper
+  visor (user decision 2026-11-07 unchanged). `CockpitView.figure_helmet_open(seat)`.
+- Open helmet (`gen_crew_figure.build_open_shell`, `figure_layout.visor_opening_span` / `visor_stow_*`): the shell with the face opening cut out along `visor_outline`
+  (per column the lower run ends and the upper run starts on the outline; extra columns at every outline row's half width, so the cut follows its corners), a dark
+  lining (`boots` black) `helmet_liner_depth_m` 10 mm inside with a lip along the opening (under the white frame bead), and a dark hood lining (4 mm inside the hood, a floor
+  facing up), so the opening shows a dark empty interior (no face is modelled). Frame bead, seal and pivot buttons as on the closed helmet.
+- Raised visor: the visor grid turned up and back over the crown by the opening's height + `visor_stow_margin_deg` 5 (100.5 deg about the helmet centre's lateral axis),
+  `visor_stow_gap_m` 10 mm off the shell, kept `visor_stow_lift_deg` 3 above the lower edge and out of the opening (its side parts ride along the opening's upper edge);
+  jsc2024e066389 / conv_2ks5k (DM-2, visor up: the raised visor rides over the crown, its lower edge at the brow). A rotation about the real pivot buttons does not fit our
+  shell (the chin edge is 4 cm from that axis), hence the centre axis. Drawn as see-through coated glass (`cabin_glass.gdshader` `tint` = the visor albedo,
+  `RAISED_VISOR_OPACITY` 0.15): 066389 shows the white shell through it.
+- Own head: `CockpitView._process` hides the player's head (helmet, visor, hood lining: all on the head bone, collapsed) while the active camera is within
+  `HEAD_HIDE_RADIUS_M` 0.30 m of the eye point, whatever the view (VR, desktop pilot eye); `set_player_head_hidden(true)` still hides it from anywhere (shots). The figure's
+  head does not follow the headset, so a helmet drawn around the camera would stay put while the view turns; nothing of the own helmet shows. Eye position unchanged
+  (delta 0: the eye contract helmet centre + 0.03 up / 0.06 ahead still holds; with the head hidden no rim can cut into the view).
+- Shots: `cockpit_shots.gd --visor` (`helmet_open_34 / _front / _profile / _rear34 / _hatch`, `pilot_eye`, `_up`, `_left`, `_right`, `_down`), `screenshots/m7-cockpit-vrfix/after/`.
+- Tests: `test_crew_figure.py` (`test_opening_span_inverts_the_outline`, `test_open_helmet_has_the_face_opening_and_a_dark_lining`,
+  `test_raised_visor_rides_over_the_crown_and_clears_the_view`; the figure tests read suit + parts + the closed helmet), `cockpit_view_test.gd` `_check_helmets`.
 
 ### Crew body and suit (Task 8b)
 - Measures: ANSUR II (2012 U.S. Army survey, male public database, 4082 subjects, public domain; `sources.toml` `ansur2_male`, CSV in
@@ -119,6 +141,13 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   targets only on the suit, .bin < 6 MB), `test_dragon_cabin.py` (knee / shin in the photo bands with margin, knees apart, foot plate), `console_pointer_test.gd`
   (`_check_figure_deform`), `cockpit_view_test.gd` (35 bones). Shots: `cockpit_shots.gd --body` (`screenshots/m7-cockpit/body/`: `body_side`, `body_34`,
   `body_arm_bent`, `body_arm_raised`, `body_elbow_bent`, `body_elbow_straight`, `*_vs_<photo>`).
+- Shoulder hole (user VR run 2026-11-11, Task 9 VR fix B): the arm port's transition rings (port loop on the torso -> first arm ring 0.10 m below the acromion, three
+  rings chest -> upper arm) form a thin band almost in the pivot's lateral plane; a forward or backward swing turns its thin triangles over (inverted triangles, measured
+  with the blended skinning matrices: 0 at rest, 19 / 35 at a 30 / 45 deg backward swing, 49-90 at a 60-120 deg forward raise, in DQS as well as LBS; also at the HOTAS idle
+  pose). With back-face culling the inverted triangles were a see-through hole into the hollow hull. `crew_suit.gdshader` is now `cull_disabled` (Godot flips NORMAL on back
+  faces), so a fold reads as a crease, no hole (`screenshots/m7-cockpit-vrfix/after/ba_idle_top_r.png`). Remapping the transition weights (linear, power curves,
+  spreading arm weight into the torso) does not remove the inversions (measured, same or more); the fold itself (ruling O crumple) stays until the port transition is
+  redesigned (longer transition / pivot nearer the glenohumeral centre). Diagnosis shots: `cockpit_shots.gd --shoulder` (six arm poses x eye / out / top x side).
 - Open: a backward / sideways shoulder swing gets plain skinning (no corrective baked for it; a soft front-shoulder fold remains at the HOTAS grip); the reach
   to the centre screen needs a near-straight arm (round-4 fit, 0.69 of 0.80 m); the knee bellows are shading only; no face inside the helmet; the gloves'
   fingers are separate rigid capsules per phalanx; the non-player figures' hands rest on the thighs (no armrest grips modelled).
@@ -168,8 +197,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 ### Cabin in the game (Task 5)
 - `game/cockpit/cockpit_view.gd` (`CockpitView`): child of the capsule stage node (`VehicleView._build_cockpit`, rebuilt with the stage nodes, `VehicleView.cockpit`;
   exists in every view). Cabin meshes by node name from `VehicleModels.load_for("crew_dragon")["cabin"]`; `eye_node` at `CockpitConfig.eye`; `screen_surface(id)`,
-  `button_node(id)`, `set_crew(n)` (seats s2, s3, s1, s4; s2 = player body), `set_hotas_props(b)`, `set_player_head_hidden(b)` (collapses the head bone: the camera sits in
-  that helmet), `figure_skeleton(seat)` (Task 8 poses the arm bones). Figures load through `VehicleModels.scene_for` (keeps Skeleton3D / skin; `_meshes_of` does not).
+  `button_node(id)`, `set_crew(n)` (seats s2, s3, s1, s4; s2 = player body), `set_hotas_props(b)`, `set_player_head_hidden(b)` (collapses the head bone on request, shots), `figure_skeleton(seat)` (Task 8 poses the arm bones). Figures load through `VehicleModels.scene_for` (keeps Skeleton3D / skin; `_meshes_of` does not).
   Default crew = seat count; `World._update_cabin_occupancy` sets `MissionCatalogue.crew_count(FlightController.active_mission_id)` (free launches keep the seat count).
 - Exterior hull parts of the capsule stage cast shadows double-sided (sun enters only through the windows).
 - Look: `shaders/cabin.gdshader` (lit_aerial look; closed cabin: `ambient_light_disabled`, no sky ambient or sky radiance, glossy parts reflect the walls
@@ -412,6 +440,7 @@ State after plan Task 8 (code: `game/cockpit/console_strip.gd`, `console_pointer
 | 2026-11-09 | user | Camera selection on UNLABELLED keys (+ on-screen button); labelled keys have `function = "none"` until their real function exists; second decision: FOUR keys (`c_upper_1/2`, `c_lower_1/2`, left hand), `c_lower_round` is `none`. |
 | 2026-11-09 | user | Anatomical crew body from ANSUR II measures, suit hull with texture detail, folds by wrinkle maps + corrective shapes (no cloth simulation). |
 | 2026-11-09 | ruling O | Shoulder / upper-chest crumple on a backward arm swing (plain skinning) is a documented known limit, judged by the user in the VR run; the raised arm is near-straight (photo-fitted reach, jsc066391). |
+| 2026-11-11 | user | The player's figure (commander) has the visor open (raised over the crown); the other crew keep the closed copper visor. A visible hole in the suit is not acceptable (supersedes ruling O for holes only; the crumple stays a known limit). |
 | 2026-11-09 | ruling D | Default button indices `cockpit_toggle = 2`, `camera_next = 3` [E], verified in the VR run. |
 
 ## Validation
@@ -427,7 +456,7 @@ State after plan Task 8 (code: `game/cockpit/console_strip.gd`, `console_pointer
 
 ## Diagnostics
 - Cockpit shots: `game/tests/cockpit_shots.gd` (GPU, no `--headless`) with `--mission= --t_plus= --out_dir=` writing to `screenshots/m7-cockpit/<topic>/`; default = look shots
-  (pilot_eye, gopro_discovery2, hatch_crew1_1, helmet_* with reference comparison sheets via `--refs=`), `--screen`, `--hand`, `--body`, `--hotas` (see the script header).
+  (pilot_eye, gopro_discovery2, hatch_crew1_1, helmet_* with reference comparison sheets via `--refs=`), `--screen`, `--hand`, `--body`, `--hotas`, `--shoulder`, `--visor` (see the script header).
 - `Start-VR.cmd --hotas-nudge`: move the HOTAS props with Alt keys, each press prints the new `[hotas] *_grip_m` lines.
 - `godot --path game --script res://tests/joy_probe.gd -- --buttons --seconds=30`: prints the 0-based stick button indices for `config/input_hotas.toml [buttons]`.
 - VR run checklist (German): `.superpowers/sdd/2026-11-07-m7-cockpit-crew-dragon/vr-run-checklist.md`; frame times from `data/perf/perf_*.csv`.

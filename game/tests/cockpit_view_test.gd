@@ -273,4 +273,34 @@ func _check_figures(config: CockpitConfig) -> void:
 		var back := deg_to_rad(float(config.seats[1]["back_angle_deg"]))
 		var figure_eye := head + Vector3(cos(back), -sin(back), 0.0) * (float(eye_m[0]) - float(head_m[0])) + Vector3(sin(back), cos(back), 0.0) * (float(eye_m[1]) - float(head_m[1]))
 		_check(figure_eye.distance_to(config.eye.origin) < 0.02, "s2 figure's eye %.3f m from the eye point" % figure_eye.distance_to(config.eye.origin))
+	_check_helmets(cockpit, config)
 	cockpit.free()
+
+
+## Task 9 VR fix B: the player's figure (s2) wears the open helmet (visor raised), the others the closed one; the player's head is hidden while
+## the active camera sits at the eye point and shown from elsewhere.
+func _check_helmets(cockpit: CockpitView, config: CockpitConfig) -> void:
+	_check(cockpit.figure_helmet_open("s2"), "the commander (player) wears the open helmet")
+	_check(not cockpit.figure_helmet_open("s3") and not cockpit.figure_helmet_open("s1") and not cockpit.figure_helmet_open("s4"),
+			"the other crew keep the closed (copper) visor")
+	var skeleton := cockpit.figure_skeleton("s2")
+	# the suit is drawn from both sides: plain skinning folds the arm port's transition through itself at arm swings (docs/subsystems/cockpit.md);
+	# culled, the folded triangles were a see-through hole in the shoulder (user VR run 2026-11-11)
+	var suit := skeleton.get_parent().find_child("crew_figure", true, false) as MeshInstance3D if skeleton != null else null
+	var suit_material := suit.get_surface_override_material(0) as ShaderMaterial if suit != null else null
+	_check(suit_material != null and suit_material.shader.code.contains("cull_disabled"), "the suit material is double-sided (no see-through hole at a fold)")
+	var camera := Camera3D.new()
+	root.add_child(camera)
+	camera.make_current()
+	camera.global_position = cockpit.to_global(config.eye.origin + Vector3(0.05, 0.0, 0.05))
+	cockpit._update_player_head()
+	var scale_at_eye := skeleton.get_bone_pose_scale(skeleton.find_bone("head")).x if skeleton != null else 1.0
+	_check(cockpit.player_head_hidden() and scale_at_eye < 0.01, "camera at the eye point: the player's head (helmet, visor) is hidden (scale %.3f)" % scale_at_eye)
+	camera.global_position = cockpit.to_global(config.eye.origin + Vector3(0.0, 1.0, 0.0))
+	cockpit._update_player_head()
+	var scale_away := skeleton.get_bone_pose_scale(skeleton.find_bone("head")).x if skeleton != null else 0.0
+	_check(not cockpit.player_head_hidden() and scale_away > 0.99, "camera 1 m from the eye: the player's head is shown (scale %.3f)" % scale_away)
+	cockpit.set_player_head_hidden(true)
+	_check(cockpit.player_head_hidden(), "set_player_head_hidden(true) hides the head from anywhere (shots)")
+	cockpit.set_player_head_hidden(false)
+	camera.free()

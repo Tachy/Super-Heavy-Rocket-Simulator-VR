@@ -75,6 +75,12 @@ const STICK_TWIST_MAX_DEG := 10.0  # [E] the stick's twist (yaw axis)
 const THROTTLE_TRAVEL_DEG := 50.0  # [E] TWCS lever travel from idle to full
 const NUDGE_STEP_M := 0.01  # dev aid (--hotas-nudge): one key press moves a prop this far (Shift: NUDGE_FINE_M)
 const NUDGE_FINE_M := 0.002
+## [E] Task 9 VR fix B: the player's own head (helmet, visor) is hidden while the active camera is this close to the eye point: the helmet
+## reaches 0.07-0.19 m from the eye, and a seated VR player leans or turns the head by up to ~0.2 m; the figure's head does not follow the
+## headset, so a helmet drawn around the camera would stay put while the view turns (shell walls across the view).
+const HEAD_HIDE_RADIUS_M := 0.30
+## [E] The raised visor's opacity (coated polycarbonate seen against the white shell: 066389 shows the shell clearly through it, a faint tint).
+const RAISED_VISOR_OPACITY := 0.15
 
 var config: CockpitConfig
 var eye_node := Node3D.new()
@@ -100,6 +106,9 @@ var _hotas_throttle := 0.0
 var _hotas_nudge := {"stick": Vector3.ZERO, "throttle": Vector3.ZERO}  # dev aid: prop offsets in the capsule frame (m)
 var _nudge_enabled := false
 var _nudge_part := "stick"
+var _helmet_nodes := {}  # seat id -> {"closed": MeshInstance3D, "open": MeshInstance3D} (manifest crew_figure.helmet_nodes)
+var _head_hidden_request := false  # set_player_head_hidden
+var _camera_at_eye := false  # the active camera within HEAD_HIDE_RADIUS_M of the eye point
 
 
 ## Builds the cabin from the model set's `models` (VehicleModels.load_for("crew_dragon")) and the cockpit definition.
@@ -287,15 +296,40 @@ func _skeleton_to_cabin() -> Transform3D:
 	return t
 
 
-## Hides (collapses) the head, helmet and visor of the player's body (the commander's figure): the camera sits inside that
-## helmet. The pilot camera switches it on; the external views show the whole figure.
+## Hides (collapses) the head, helmet and visor of the player's body (the commander's figure) on request (shots); independent of it
+## the head is hidden while the active camera is within HEAD_HIDE_RADIUS_M of the eye point (_process): the camera then sits in that
+## helmet, and the figure's head does not follow the headset, so nothing of the own helmet may show in the view.
 func set_player_head_hidden(hidden: bool) -> void:
+	_head_hidden_request = hidden
+	_apply_player_head()
+
+
+## Whether the player's head is collapsed now (request or camera at the eye).
+func player_head_hidden() -> bool:
+	return _head_hidden_request or _camera_at_eye
+
+
+func _apply_player_head() -> void:
 	var skeleton: Skeleton3D = _skeletons.get(CREW_ORDER[0])
 	if skeleton == null:
 		return
 	var bone := skeleton.find_bone("head")
 	if bone >= 0:
-		skeleton.set_bone_pose_scale(bone, Vector3.ONE * (0.001 if hidden else 1.0))
+		skeleton.set_bone_pose_scale(bone, Vector3.ONE * (0.001 if player_head_hidden() else 1.0))
+
+
+## Task 9 VR fix B: whether a seat's figure wears the open helmet (visor raised; the player's figure) - false: the closed one.
+func figure_helmet_open(seat_id: String) -> bool:
+	var nodes: Dictionary = _helmet_nodes.get(seat_id, {})
+	return nodes.has("open") and (nodes["open"] as Node3D).visible
+
+
+func _update_player_head() -> void:
+	var camera := get_viewport().get_camera_3d() if is_inside_tree() else null
+	var at_eye := camera != null and config != null and to_local(camera.global_position).distance_to(config.eye.origin) < HEAD_HIDE_RADIUS_M
+	if at_eye != _camera_at_eye:
+		_camera_at_eye = at_eye
+		_apply_player_head()
 
 
 ## Whether the idle hand of a side holds its HOTAS grip (the props shown and the grip point configured).
@@ -431,6 +465,7 @@ func light_colour() -> Vector3:
 
 
 func _process(_delta: float) -> void:
+	_update_player_head()
 	var scene_per_cd: float = ShaderGlobals.value(&"atmosphere_scene_per_cd_m2")
 	for i in _lights.size():
 		_lights[i].light_energy = TowerLights.energy_of(_light_cd[i], scene_per_cd)
@@ -504,6 +539,16 @@ func _build_figures(models: Dictionary) -> void:
 		var skeletons := scene.find_children("*", "Skeleton3D", true, false)
 		if not skeletons.is_empty():
 			_skeletons[seat_id] = skeletons[0]
+		# Task 9 VR fix B: the player's figure (the commander) wears the open helmet (visor raised), the others the closed one
+		var helmets: Dictionary = manifest.get("helmet_nodes", {})
+		var open := seat_id == CREW_ORDER[0]
+		var found := {}
+		for kind: String in helmets:
+			var node := scene.find_child(String(helmets[kind]), true, false) as MeshInstance3D
+			if node != null:
+				node.visible = (kind == "open") == open
+				found[kind] = node
+		_helmet_nodes[seat_id] = found
 		for node in scene.find_children("*", "MeshInstance3D", true, false):
 			var mesh_node := node as MeshInstance3D
 			for s in mesh_node.mesh.get_surface_count():
@@ -515,6 +560,8 @@ func _build_figures(models: Dictionary) -> void:
 					var material := _cabin_material(Color(c[0], c[1], c[2]).linear_to_srgb(), float(entry["roughness"]), float(entry["metallic"]), 0.0)
 					if key == String(manifest.get("suit_material", "")) and manifest.has("suit_maps"):
 						material = _suit_material(entry, manifest["suit_maps"])
+					elif key == String(manifest.get("visor_material", "")) and mesh_node.name == String((manifest.get("helmet_nodes", {}) as Dictionary).get("open", "")):
+						material = _raised_visor_material(entry)
 					elif key == String(manifest.get("visor_material", "")) and manifest.has("visor_tint"):
 						material = _visor_material(material, manifest["visor_tint"])
 					elif key == String(manifest.get("helmet_material", "")) and manifest.has("helmet_grooves"):
@@ -720,6 +767,19 @@ func _helmet_material(base: ShaderMaterial, grooves: Dictionary) -> ShaderMateri
 		m.set_shader_parameter("groove_albedo", Color(a[0], a[1], a[2]).linear_to_srgb())
 		_materials["helmet_grooves"] = m
 	return _materials["helmet_grooves"]
+
+
+## Task 9 VR fix B: the player's raised visor is see-through coated glass over the white crown (jsc2024e066389, conv_2ks5k: the shell reads
+## white through it), tinted by the visor's copper albedo; the transparent pass like the windows (no depth writes, no shadow).
+func _raised_visor_material(entry: Dictionary) -> ShaderMaterial:
+	if not _materials.has("visor_raised"):
+		var m := ShaderMaterial.new()
+		m.shader = GLASS_SHADER
+		var c: Array = entry["albedo"]
+		m.set_shader_parameter("tint", Vector3(float(c[0]), float(c[1]), float(c[2])))
+		m.set_shader_parameter("opacity", RAISED_VISOR_OPACITY)
+		_materials["visor_raised"] = m
+	return _materials["visor_raised"]
 
 
 ## The visor: copper tint on the upper part, dark clear glass below (manifest crew_figure.visor_tint, crew_figure.toml [helmet]).

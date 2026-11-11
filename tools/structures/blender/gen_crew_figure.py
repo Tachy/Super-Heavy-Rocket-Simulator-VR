@@ -4,8 +4,9 @@ Own rebuild from config/cockpits/crew_figure.toml (spec["crew_figure"]); no thir
 X = up the seat back, Y = the seat's chest normal (forward), Z = the crew's left (figure_layout.py, crew_figure.toml header). Rest pose = seated,
 hands on the thighs. Two skinned mesh nodes under the armature `crew_figure_rig`: `crew_figure` = the suit hull of figure_body.py
 (anatomical ANSUR II body plus the suit ease; smooth weights across the joints, corrective shape keys per joint, the atlas UV and the
-wrinkle-mask UV; the only mesh with morph targets) and `crew_figure_parts` = the rigid parts (helmet, visor, hood, glove lock rings,
-gloves with five fingers, boots: one bone each). Surfaces (glTF primitives) = the materials suit | boots, gloves, helmet, collar, visor. Suit detail (stripes, seams, folds) comes from suit_textures.py.
+wrinkle-mask UV; the only mesh with morph targets), `crew_figure_parts` = the rigid parts (hood, glove lock rings, gloves with five
+fingers, boots: one bone each) and the two helmets on the head bone: `crew_figure_helmet` (visor closed: every figure but the player's) and
+`crew_figure_helmet_open` (Task 9 VR fix B, the player's figure: face opening cut, dark interior, visor raised over the crown). Surfaces (glTF primitives) = the materials suit | boots, gloves, helmet, collar, visor. Suit detail (stripes, seams, folds) comes from suit_textures.py.
 """
 import math
 import sys
@@ -26,10 +27,12 @@ CAP_STEPS = 3  # [E] rings of a rounded end
 HELMET_RINGS = 30  # [E] rows of the helmet shell from the sloped bottom cut to the crown
 HELMET_TOP_EL = 89.0  # [E] the columns stop here; a fan closes the crown
 VISOR_COLS, VISOR_ROWS = 24, 16
+HOOD_LINING_M = 0.004  # [E] the open helmet's hood lining sits this far inside the hood
+OPEN_LO_ROWS, OPEN_HI_ROWS = 14, 16  # [E] rows of the open shell below and above the face opening (the closed shell's 30)
 RIM_SIDES = 14  # [E] sides of the rim bead's cross section
 PIVOT_SIDES = 20  # [E] sides of the round visor-pivot button
 FINGER_SIDES = 8  # [E] sides of a glove finger
-PARTS_NODE = "crew_figure_parts"  # the rigid parts' mesh node (no shape keys)
+PARTS_NODE = "crew_figure_parts"  # the rigid parts' mesh node (no shape keys): hood, cuffs, gloves, boots
 
 
 def vec(t):
@@ -118,12 +121,17 @@ def blend(rows, s):
 
 # ---------- the parts ----------
 
-def build_helmet(cfg, parts):
+def build_helmet(cfg, parts, closed, opened):
+    """The neck hood (rigid parts) and both helmets: `closed` (visor down: every figure but the player's) and `opened` (Task 9 VR fix B: the
+    player's figure, the face opening cut into the shell, the dark interior, the visor raised over the crown)."""
     h, pose = cfg["helmet"], cfg["pose"]
     c = V((pose["head_centre_up_m"], pose["head_centre_forward_m"], 0.0))
-    rim = build_shell(h, parts.mesh("head", "helmet"), c)
+    rim = build_shell(h, closed.mesh("head", "helmet"), c)
     build_hood(cfg, parts.mesh("neck", "collar"), c, rim)
-    build_visor(cfg, parts, c)
+    build_visor(cfg, closed, c)
+    build_open_shell(h, opened, c)
+    build_hood(cfg, opened.mesh("head", "boots"), c, rim, lining=True)  # on the head bone: hidden with the player's head (camera at the eye)
+    build_visor(cfg, opened, c, raised=True)
 
 
 def shell_at(h, c, el, az):
@@ -156,9 +164,9 @@ def build_shell(h, mesh, c):
     return [col[0] for col in cols]
 
 
-def build_hood(cfg, mesh, c, rim):
-    """The grey knit neck hood (spacex-anzug): from an elliptical base ring on the shoulders (collar_height_m below the helmet centre,
-    neck_lean_m behind it, half depth collar_radius_m, half width 0.9 of it) up to the shell's sloped lower edge (3 mm inside it)."""
+def hood_rings(cfg, c, rim):
+    """(base centre, rings, axis top) of the neck hood: from an elliptical base ring on the shoulders (collar_height_m below the helmet
+    centre, neck_lean_m behind it, half depth collar_radius_m, half width 0.9 of it) up to the shell's sloped lower edge (3 mm inside it)."""
     h, pose = cfg["helmet"], cfg["pose"]
     base = V((c.x - h["collar_height_m"], c.y - pose["neck_lean_m"], 0.0))
     ry, rz = h["collar_radius_m"], 0.9 * h["collar_radius_m"]
@@ -169,20 +177,30 @@ def build_hood(cfg, mesh, c, rim):
         for k, (p_top, n_top) in enumerate(rim):
             az = 2.0 * math.pi * k / n
             p_base = base + V((0.0, ry * math.cos(az), rz * math.sin(az)))
-            p = p_base.lerp(p_top - n_top * 0.003, t)
-            ring.append(p)
+            ring.append(p_base.lerp(p_top - n_top * 0.003, t))
         rings.append(ring)
-    axis_top = sum((p for p, _ in rim), V((0, 0, 0))) / n
+    return base, rings, sum((p for p, _ in rim), V((0, 0, 0))) / n
+
+
+def build_hood(cfg, mesh, c, rim, lining=False):
+    """The grey knit neck hood (spacex-anzug), hood_rings. lining (the player's open helmet, Task 9 VR fix B): its inside instead, HOOD_LINING_M
+    inside the hood and facing its axis, closed by a disc facing up at the base: what the face opening shows below the dark helmet interior
+    (the hood is open at the top: without it the opening looked through the hood into the cabin)."""
+    base, rings, axis_top = hood_rings(cfg, c, rim)
+    n = len(rim)
+    if lining:
+        rings = [[p + ((base.lerp(axis_top, i / (len(rings) - 1))) - p).normalized() * HOOD_LINING_M for p in ring] for i, ring in enumerate(rings)]
     for i in range(len(rings) - 1):
         for k in range(n):
             k1 = (k + 1) % n
             quad = [rings[i][k], rings[i][k1], rings[i + 1][k1], rings[i + 1][k]]
             mid = sum(quad, V((0, 0, 0))) / 4.0
             axis = base.lerp(axis_top, (i + 0.5) / (len(rings) - 1))
-            mesh.face(quad, [(k / n, i / 3.0), (k1 / n, i / 3.0), (k1 / n, (i + 1) / 3.0), (k / n, (i + 1) / 3.0)], mid - axis, "hood")
-    for k in range(n):  # flat bottom on the shoulders (hidden in the suit)
+            mesh.face(quad, [(k / n, i / 3.0), (k1 / n, i / 3.0), (k1 / n, (i + 1) / 3.0), (k / n, (i + 1) / 3.0)], (axis - mid) if lining else (mid - axis),
+                      "hood_lining" if lining else "hood")
+    for k in range(n):  # flat bottom on the shoulders (closed hood: hidden in the suit, facing down; lining: the floor, facing up)
         k1 = (k + 1) % n
-        mesh.face([base, rings[0][k1], rings[0][k]], [(0.5, 0.5), (1.0, 0.0), (0.0, 0.0)], V((-1.0, 0.0, 0.0)), "hood_base")
+        mesh.face([base, rings[0][k1], rings[0][k]], [(0.5, 0.5), (1.0, 0.0), (0.0, 0.0)], V((1.0 if lining else -1.0, 0.0, 0.0)), "hood_floor" if lining else "hood_base")
 
 
 def opening_node(h, i, j, inset=0.0):
@@ -202,14 +220,36 @@ def visor_bulge(h, i, j):
     return h["visor_edge_m"] + (h["visor_proud_m"] - h["visor_edge_m"]) * w
 
 
-def build_visor(cfg, parts, c):
-    """The closed visor: a forward-domed outer and an inner patch over the shell and a rim, one solid (own surface), plus the white frame bead
-    (helmet surface), the black seal inside it and the pivot buttons."""
+def raised_visor_at(h, c, i, j):
+    """(outer, inner) point of the raised visor at grid node (i, j): the node's direction turned up and back over the crown
+    (figure_layout.visor_stow_direction; kept visor_stow_lift_deg above the shell's lower edge and out of the face opening) on the shell plus
+    visor_stow_gap_m plus the dome."""
+    el, az = opening_node(h, i, j)
+    d = fl.visor_stow_direction(h, el, az)
+    e = math.degrees(math.asin(max(-1.0, min(1.0, d[0]))))
+    a = math.degrees(math.atan2(d[2], d[1]))
+    e = max(e, fl.helmet_bottom_el(h, a) + h["visor_stow_lift_deg"])
+    span = fl.visor_opening_span(h, a)
+    if span is not None and span[0] - h["visor_stow_lift_deg"] <= e <= span[1] + h["visor_stow_lift_deg"]:
+        e = span[1] + h["visor_stow_lift_deg"]  # the side parts that would hang in the opening's upper corners ride along its upper edge
+    p, n = shell_at(h, c, e, a)
+    lift = h["visor_stow_gap_m"] + visor_bulge(h, i, j)
+    return p + n * lift, p + n * (lift - h["visor_thickness_m"])
+
+
+def build_visor(cfg, parts, c, raised=False):
+    """The visor: a domed outer and an inner patch over the shell and a rim, one solid (own surface), plus the white frame bead
+    (helmet surface), the black seal inside it and the pivot buttons. Closed: seated in the face opening. Raised (the player's open helmet):
+    the same grid turned up and back over the crown, visor_stow_gap_m off the shell (jsc2024e066389, conv_2ks5k: the raised visor rides over
+    the shell's top, its lower edge at the brow)."""
     h = cfg["helmet"]
     mesh = parts.mesh("head", "visor")
     outer, inner = {}, {}
     for i in range(VISOR_ROWS + 1):
         for j in range(VISOR_COLS + 1):
+            if raised:
+                outer[i, j], inner[i, j] = raised_visor_at(h, c, i, j)
+                continue
             p, n = shell_at(h, c, *opening_node(h, i, j))
             bulge = visor_bulge(h, i, j)
             outer[i, j] = p + n * bulge
@@ -246,6 +286,75 @@ def build_visor(cfg, parts, c):
     for side in (-1.0, 1.0):
         p, n = shell_at(h, c, h["pivot_el_deg"], side * az_b)
         vc.tube(button, p - n * (0.5 * r_b), p + n * h_b, r_b, PIVOT_SIDES, ("pivot", side), cap0=False, radius1=0.85 * r_b)
+
+
+def open_shell_columns(h):
+    """Azimuths (degrees, 0..360) of the open shell's columns: the closed shell's HELMET_SIDES plus one at every visor_outline row's half width
+    (both sides; the temple tip included), so the cut follows the outline's corners."""
+    azs = {round(360.0 * k / HELMET_SIDES, 6) for k in range(HELMET_SIDES)}
+    for _, half in h["visor_outline"]:
+        for a in (half, 360.0 - half):
+            if all(abs(a - b) > 1.0 for b in azs):
+                azs.add(round(a, 6))
+    return sorted(azs)
+
+
+def open_shell_grid(h, c):
+    """[(az, [(point, normal) per row], crosses the opening)] of the open shell: per column OPEN_LO_ROWS rows from the bottom cut to the opening's lower edge and
+    OPEN_HI_ROWS from its upper edge to the crown (figure_layout.visor_opening_span); a column outside the opening gets an empty gap at the
+    temple tip's elevation. The quad between the two runs (row OPEN_LO_ROWS - 1) is the hole."""
+    tip_el, _ = fl.visor_widest(h)
+    cols = []
+    for az in open_shell_columns(h):
+        span = fl.visor_opening_span(h, az if az <= 180.0 else az - 360.0)
+        lo, hi = span if span is not None else (tip_el, tip_el)
+        e0 = fl.helmet_bottom_el(h, az)
+        els = ([e0 + (lo - e0) * i / (OPEN_LO_ROWS - 1) for i in range(OPEN_LO_ROWS)]
+               + [hi + (HELMET_TOP_EL - hi) * i / (OPEN_HI_ROWS - 1) for i in range(OPEN_HI_ROWS)])
+        cols.append((az, [shell_at(h, c, e, az) for e in els], span is not None))
+    return cols
+
+
+def _distinct(quad):
+    return len({(round(p.x, 7), round(p.y, 7), round(p.z, 7)) for p in quad}) >= 3
+
+
+def build_open_shell(h, parts, c):
+    """The player's helmet shell with the face opening cut out (Task 9 VR fix B), its dark interior lining (`boots` black, helmet_liner_depth_m
+    inside the shell, facing the centre: what shows through the opening; no face is modelled) and the lip that closes shell and lining along
+    the opening's edge (under the white frame bead)."""
+    shell, lining = parts.mesh("head", "helmet"), parts.mesh("head", "boots")
+    cols = open_shell_grid(h, c)
+    depth = h["helmet_liner_depth_m"]
+    gap = OPEN_LO_ROWS - 1
+    n_rows = OPEN_LO_ROWS + OPEN_HI_ROWS
+    n_cols = len(cols)
+    for k in range(n_cols):
+        a, b = cols[k][1], cols[(k + 1) % n_cols][1]
+        u0, u1 = k / n_cols, (k + 1) / n_cols
+        for i in range(n_rows - 1):
+            if i == gap:
+                continue
+            quad = [a[i][0], b[i][0], b[i + 1][0], a[i + 1][0]]
+            if not _distinct(quad):
+                continue
+            uv = [(u0, i / n_rows), (u1, i / n_rows), (u1, (i + 1) / n_rows), (u0, (i + 1) / n_rows)]
+            shell.face(quad, uv, sum(quad, V((0, 0, 0))) / 4.0 - c, "shell")
+            inner = [q[0] - q[1] * depth for q in (a[i], b[i], b[i + 1], a[i + 1])]
+            lining.face(inner, uv, c - sum(inner, V((0, 0, 0))) / 4.0, "lining")
+        # the lip along the opening's lower and upper edge: shell edge to lining edge, facing into the opening
+        hole_mid = (a[gap][0] + a[gap + 1][0] + b[gap][0] + b[gap + 1][0]) / 4.0
+        for i in (gap, gap + 1):
+            quad = [a[i][0], b[i][0], b[i][0] - b[i][1] * depth, a[i][0] - a[i][1] * depth]
+            if not (cols[k][2] or cols[(k + 1) % n_cols][2]) or not _distinct(quad):
+                continue
+            lining.face(quad, [(0, 0), (1, 0), (1, 1), (0, 1)], hole_mid - sum(quad, V((0, 0, 0))) / 4.0, None)
+    for mesh, d, group, sign in ((shell, 0.0, "shell", 1.0), (lining, depth, "lining", -1.0)):  # close the crown
+        top = c + V((fl.helmet_rho(h, (1.0, 0.0, 0.0)) - d, 0.0, 0.0))
+        for k in range(n_cols):
+            p0, n0 = cols[k][1][-1]
+            p1, n1 = cols[(k + 1) % n_cols][1][-1]
+            mesh.face([p0 - n0 * d, p1 - n1 * d, top], [(0.0, 0.0), (1.0, 0.0), (0.5, 1.0)], V((sign, 0.0, 0.0)), group)
 
 
 def sweep_bead(mesh, loop, pts, radius, group):
@@ -342,13 +451,14 @@ def build_leg(cfg, parts, bones, side):
 
 
 def build_figure(cfg):
+    """(bones, {node name: Parts}): the rigid parts and the two helmets (fl.HELMET_NODE closed, fl.HELMET_OPEN_NODE open)."""
     bones = fl.bones(cfg)
-    parts = Parts()
-    build_helmet(cfg, parts)
+    parts, closed, opened = Parts(), Parts(), Parts()
+    build_helmet(cfg, parts, closed, opened)
     for side in fl.SIDES:
         build_arm(cfg, parts, bones, side)
         build_leg(cfg, parts, bones, side)
-    return bones, parts
+    return bones, {PARTS_NODE: parts, fl.HELMET_NODE: closed, fl.HELMET_OPEN_NODE: opened}
 
 
 # ---------- Blender objects ----------
@@ -424,30 +534,34 @@ def suit_object(cfg, mats):
 
 def assemble(cfg):
     """(rig object, mesh object, triangles): the skinned figure in the current scene."""
-    bones, parts = build_figure(cfg)
+    bones, nodes = build_figure(cfg)
     mats = make_materials(cfg)
     rig = make_armature(bones)
     suit, tris, _ = suit_object(cfg, mats)
-    objs = []
-    for (bone, material), mesh in sorted(parts.meshes.items()):
-        ob, n = mesh.to_object(f"part_{bone}_{material}")
-        tris += n
-        ob.data.materials.append(mats[material])
-        ob.vertex_groups.new(name=bone).add(list(range(len(ob.data.vertices))), 1.0, "REPLACE")
-        objs.append(ob)
-    # fix round 1: the rigid parts (helmet, visor, collar, gloves, boots) are their own mesh WITHOUT shape keys; only the suit carries the 16
-    # corrective morph targets (a joined mesh exported them on every primitive: 10.5 MB .bin and morph work on the rigid vertices)
-    bpy.ops.object.select_all(action="DESELECT")
-    for ob in objs:
-        ob.select_set(True)
-    bpy.context.view_layer.objects.active = objs[0]
-    bpy.ops.object.join()
-    rigid_parts = bpy.context.view_layer.objects.active
-    rigid_parts.name = PARTS_NODE
-    rigid_parts.data.name = PARTS_NODE
+    rigid = []
+    # fix round 1: the rigid parts (hood, cuffs, gloves, boots) are their own mesh WITHOUT shape keys; only the suit carries the 16 corrective
+    # morph targets (a joined mesh exported them on every primitive: 10.5 MB .bin and morph work on the rigid vertices). VR fix B: the two
+    # helmets are their own nodes too, so the game shows the open one on the player's figure and the closed one on the others.
+    for node_name, parts in nodes.items():
+        objs = []
+        for (bone, material), mesh in sorted(parts.meshes.items()):
+            ob, n = mesh.to_object(f"part_{node_name}_{bone}_{material}")
+            tris += n if node_name != fl.HELMET_OPEN_NODE else 0  # one helmet is shown per figure
+            ob.data.materials.append(mats[material])
+            ob.vertex_groups.new(name=bone).add(list(range(len(ob.data.vertices))), 1.0, "REPLACE")
+            objs.append(ob)
+        bpy.ops.object.select_all(action="DESELECT")
+        for ob in objs:
+            ob.select_set(True)
+        bpy.context.view_layer.objects.active = objs[0]
+        bpy.ops.object.join()
+        joined = bpy.context.view_layer.objects.active
+        joined.name = node_name
+        joined.data.name = node_name
+        rigid.append(joined)
     suit.name = "crew_figure"
     suit.data.name = "crew_figure"
-    for ob in (suit, rigid_parts):
+    for ob in [suit] + rigid:
         ob.parent = rig
         mod = ob.modifiers.new("Armature", "ARMATURE")
         mod.object = rig

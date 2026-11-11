@@ -236,6 +236,13 @@ pivot_button_radius_m = 0.0095  # [E] round grey visor-pivot button on each shel
 pivot_button_height_m = 0.004    # [E] the button stands this far proud of the shell (066389 / 066390: a low disc with a bevelled edge, no block)
 pivot_az_offset_deg = 9.0        # [E] button centre this far (azimuth) behind the opening's side edge at its elevation: 066389, ~25 mm behind the black seal (thin frame 18 mm + the radius, on r ~0.13 m)
 pivot_el_deg = -30.0             # [E] button elevation: 066389, ~0.09 m below eye level (255 px) on the lower half shell = -32 deg; at jaw height, not at eye height; +-5
+# The player's (commander's) open helmet (Task 9 VR fix B, user VR run 2026-11-11: "visor open so he can see out of the helmet"); the others keep the
+# closed copper visor. jsc2024e066389 / conv_2ks5k (DM-2, visor up): the raised visor rides over the shell's top, its lower edge at the brow; the face
+# opening shows the dark helmet interior (no face is modelled).
+helmet_liner_depth_m = 0.010     # [E] the open helmet's dark interior lining sits this far inside the shell (shell + padding seen at the opening's lip; under the 9 mm frame bead)
+visor_stow_margin_deg = 5.0      # [E] the raised visor turns by the opening's height (95.5 deg) plus this, so its lower edge clears the brow (066389: the edge just above the brow)
+visor_stow_gap_m = 0.010         # [E] the raised visor rides this far off the shell (066389: a clear gap between the visor and the white crown, ~1-2 cm)
+visor_stow_lift_deg = 3.0        # [E] the raised visor's rear corners stay this far (elevation) above the shell's lower edge
 collar_radius_m = 0.105          # [E] neck hood half depth at its base (the half width is 0.9 of it): spacex-anzug / spacex.jpg, the grey knit hood is nearly as wide as the helmet's lower edge
 collar_height_m = 0.18           # [E] the hood's base ring lies this far below the helmet centre (on the shoulders: the old collar base 0.1775); the hood rises from it to the shell's lower edge
 
