@@ -167,6 +167,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25 (the per-session context is kept s
   chosen by `gauge_rules.gd` per situation, engine gauge, UTC + T-/T+ clock; the old HUD stays behind F1). Camera:
   `world/orbit_camera.gd` + `camera_math.gd` (right mouse button orbits around the local vertical, wheel zoom is
   logarithmic), `view_target.gd` + Tab / Shift+Tab switch the followed body. Spec `docs/superpowers/archive/specs/2026-10-22-external-view-design.md`.
+- Cockpit (M7, Crew Dragon cabin; VR acceptance pending): `game/cockpit/` - `cockpit_config.gd` (cabin tables from `config/cockpits/*.toml`), `cockpit_view.gd` (cabin model, crew figures, HOTAS props, arm poses), `cockpit_camera.gd` (head pose from the snapshot), `camera_catalog.gd` + `screen_camera.gd` (external cameras on the left screen), `console_strip.gd` / `console_pointer.gd` / `hand_motion.gd` / `arm_ik.gd` (pointer, smoothed hand, touch), `figure_deform.gd`, `hotas_buttons.gd`. State: `docs/subsystems/cockpit.md`.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 

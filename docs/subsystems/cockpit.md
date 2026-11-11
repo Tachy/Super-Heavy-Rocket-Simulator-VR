@@ -1,7 +1,7 @@
 # Cockpit (M7): Crew Dragon cabin
 
 Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
-`docs/superpowers/plans/2026-11-07-m7-cockpit-crew-dragon.md`. State after plan Task 5b (helmet shell, key labels; Task 5: cabin in the game): typed tables (Task 1), config loader (Task 2), Blender cabin and console generator (Task 3), crew figure (Task 4).
+`docs/superpowers/plans/2026-11-07-m7-cockpit-crew-dragon.md`. State after plan Tasks 1-9 (commits db33f654..15a1fc24; VR acceptance pending): typed tables, config loader, Blender cabin and console generator, crew body and suit, cabin in the game, camera mode, external cameras, console pointer and hand, HOTAS props. Superseded numbers: `docs/history/cockpit.md`.
 
 ## Model
 - `config/cockpits/crew_dragon.toml`: `[cabin]` (inner wall of revolution, floor, ceiling, forward tunnel, windows /
@@ -395,19 +395,51 @@ State after plan Task 8 (code: `game/cockpit/console_strip.gd`, `console_pointer
 - Tests: `cockpit_view_test.gd` (props on / off, crew 1..4 order s2, s3, s1, s4, tilt angles, hand follows the stick); shots `cockpit_shots.gd --hotas`
   (`screenshots/m7-cockpit/hotas/`). The VR calibration of the grip offsets is the user's run (`.superpowers/sdd/.../vr-run-checklist.md`); results go here.
 
+## Standing decisions
+| Date | Who | Decision |
+|---|---|---|
+| 2026-11-07 | user | Cabin "as 1:1 as possible" to the real Crew Dragon; commander (player) in seat s2, left of centre; stick + throttle on the armrests are a deliberate, switchable deviation (`[hotas] props`). |
+| 2026-11-07 | user | Console straight, the three screens coplanar (`fold_deg 0`), after the photo check (discovery10, crew2_1, inspiration4_1). |
+| 2026-11-07 | user | Closed visor stays copper (confirmed after the smoked-visor photos); only its shape follows the photos. |
+| 2026-11-07 | user | Eye adaptation: no cabin special rule; the cabin light is the illumination (rule D, game default since b2a7fe16). |
+| 2026-11-07 | ruling I / K | Corrections of our own measured cockpit tables (console width, legs, console, ceiling) are not vehicle physics config: fixed without a user decision, reported. |
+| 2026-11-07 | ruling G | 9.3 m3 published = habitable volume; the 15.2 m3 shell volume stays as measured. |
+| 2026-11-09 | user | Camera selection on UNLABELLED keys (+ on-screen button); labelled keys have `function = "none"` until their real function exists; second decision: FOUR keys (`c_upper_1/2`, `c_lower_1/2`, left hand), `c_lower_round` is `none`. |
+| 2026-11-09 | user | Anatomical crew body from ANSUR II measures, suit hull with texture detail, folds by wrinkle maps + corrective shapes (no cloth simulation). |
+| 2026-11-09 | ruling O | Shoulder / upper-chest crumple on a backward arm swing (plain skinning) is a documented known limit, judged by the user in the VR run; the raised arm is near-straight (photo-fitted reach, jsc066391). |
+| 2026-11-09 | ruling D | Default button indices `cockpit_toggle = 2`, `camera_next = 3` [E], verified in the VR run. |
+
 ## Validation
 - Wall check (scratch script, Task 1): inner profile >= 0.094 m from the exterior meridian and the neck well everywhere.
-- Tag check: `detail_file.value_lines_without_tag("config/cockpits/crew_dragon.toml")` empty; unit vectors normalised.
+- Tag check: `detail_file.value_lines_without_tag("config/cockpits/crew_dragon.toml")` empty; unit vectors normalised
+  (`tools/structures/tests/test_dragon_cabin.py` `test_cockpit_tables_are_tagged`; windows against the exterior table 2.5 cm / 0.55 deg;
+  buttons >= 5 mm proud, screens coplanar within 1 mm / 0.1 deg). `python -m pytest tools/structures/tests -q`.
+- `cockpit_config_test` (loader, validation, crew counts), `cockpit_view_test` (cabin in the scene, eye, figures, props, crew order, tilt), `cockpit_camera_test`
+  (head pose in float64, toggle, floating origin within 1 mm through staging at warp x100), `camera_catalog_test`, `console_pointer_test` (73 checks: key table, strip,
+  HandMotion, ArmIk numbers, reach gap, dispatch), `mission_catalogue_test`, `i18n_test`. Run: `tools/run_godot_tests.ps1 -Only <list> -Gpu`.
+- Tests state: green on 2026-11-09/10 (pytest 372). **VR acceptance (Task 9 Step 3) pending**: seat height, HOTAS prop positions, toggle, F12, pointer in VR, hand look,
+  shoulder, frame times are not yet measured; no VR result is recorded here.
+
+## Diagnostics
+- Cockpit shots: `game/tests/cockpit_shots.gd` (GPU, no `--headless`) with `--mission= --t_plus= --out_dir=` writing to `screenshots/m7-cockpit/<topic>/`; default = look shots
+  (pilot_eye, gopro_discovery2, hatch_crew1_1, helmet_* with reference comparison sheets via `--refs=`), `--screen`, `--hand`, `--body`, `--hotas` (see the script header).
+- `Start-VR.cmd --hotas-nudge`: move the HOTAS props with Alt keys, each press prints the new `[hotas] *_grip_m` lines.
+- `godot --path game --script res://tests/joy_probe.gd -- --buttons --seconds=30`: prints the 0-based stick button indices for `config/input_hotas.toml [buttons]`.
+- VR run checklist (German): `.superpowers/sdd/2026-11-07-m7-cockpit-crew-dragon/vr-run-checklist.md`; frame times from `data/perf/perf_*.csv`.
 
 ## Open points
+- **VR acceptance (Task 9 Step 3) pending.** KNOWN GAPS for it: `r_upper_5` out of reach by 30.7 mm at the 22 deg lean limit (re-measure after seat / eye calibration);
+  shoulder backward crumple (ruling O); HOTAS grip points [E]; stick / camera button indices [E]; stick axis signs (pitch > 0 forward, roll > 0 right) to confirm;
+  VR pointer input path (who owns the mouse in the cockpit); frame budget of the screen feed (`update_hz` / `size_px`) and of the morphs (untimed).
+- Hand tracking: the Pimax OpenXR runtime sends no hand data, so operation stays on the mouse pointer; real touch comes with a runtime that delivers it.
+- Far cameras: terrain / clouds / atmosphere are centred on the main camera, so the external feed on the left screen is coarse at distance (accepted).
+- Sun-patch colour: the sunlit patch in the cabin reads cream (B/R 0.60 linear) against the illuminant (0.72-0.80); to be measured pre-tonemap (colour of the material vs the pipeline).
+- Deferred minors: `task-*-review.md` in `.superpowers/sdd/2026-11-07-m7-cockpit-crew-dragon/` (e.g. feed flash on pilot-eye gain jumps, `capsule_body` not tied to the controlled body,
+  no VR recentre on toggle-out, panel contrast under sun + AgX, thigh 12.3 vs 12.0 bound, 61.6k cabin triangles reducible).
 - Cabin volume: our trim surface above the floor encloses 15.2 m3, SpaceX gives 9.3 m3 pressurized [S:
-  spacex.com/vehicles/dragon]. The photo-measured width (four seats, windows at r ~1.43) does not leave room for a
-  9.3 m3 vessel of this height; either the published figure is a free / habitable volume or the floor / ceiling sit
-  higher or lower than read. Re-check against a dimensioned source if one appears.
+  spacex.com/vehicles/dragon] (read as habitable volume, ruling G). Re-check against a dimensioned source if one appears.
 - Screen size has no published value; 0.382 x 0.215 m rests on one finger scale (+-15 %).
 - Labels exist only for the 21 keys conv_42860a / training2 show legibly (Task 5b); functions beyond the four named stay `none`.
-  Candidates from reports (fire suppression, cabin pressure, trunk jettison, deorbit) are not tied to a button.
-- Seat poses: one launch / entry recline (35 deg) for all seats; the real seats reportedly tilt between phases (not
-  measured). Outer seats may be toed in (crew1_1); not modelled.
-- Console struts, lockers in the lower corners (Wikimedia "17", "18"), the small display left of the handle and the
-  hatch's inner mechanism are not in the tables (surface detail or later).
+- Seat poses: one launch / entry recline (35 deg) for all seats; the real seats reportedly tilt between phases (not measured). Outer seats may be toed in (crew1_1); not modelled.
+- Console struts, lockers in the lower corners (Wikimedia "17", "18"), the small display left of the handle and the hatch's inner mechanism are not in the tables.
+- Starship and HLS cockpits follow after the Crew Dragon (spec).

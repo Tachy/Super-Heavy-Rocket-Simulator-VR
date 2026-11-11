@@ -88,6 +88,7 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
   Taste am Desktop schaltet zwischen Cockpit und Außenansicht (3D, auch in VR).
 - **Stick und Schubhebel an den Armlehnen**, genau wo das echte HOTAS steht (bewusste Abweichung, die echte Dragon
   hat keine; abschaltbar).
+- **Stand 2026-11-11 (Crew-Dragon-Kabine umgesetzt, VR-Abnahme (Aufgabe 9, Schritt 3) steht aus):** Kabine mit vier Sitzen, Konsole mit drei Bildschirmen, Tablets, Tastenleisten und Griff; Kommandant links der Mitte; Besatzung mit Anzug nach Missionsvorgabe; Start im Cockpit mit einer Dragon-Mission; Umschalten Cockpit/Außenansicht (Taste C, Joystick-Knopf); Stick und Schubhebel an den Armlehnen folgen den Eingaben; Mauszeiger mit geglätteter Anzughand; linker Bildschirm mit fünf Außenkameras (vier unbeschriftete Tasten links unter dem Bildschirm plus Bildschirm-Button). Beschriftete Tasten ohne bekannte Funktion tun nichts. Noch nicht umgesetzt: Handtracking (die Pimax-OpenXR-Laufzeit liefert keine Daten), Starship- und HLS-Cockpit, Inhalte der Bildschirme Mitte und rechts.
 - Bedienung bis zum Handtracking mit der **Maus**: am Desktop der Mauszeiger, in VR ein Zeiger direkt auf den
   Flächen von Bildschirmen und Tastenleisten. Die Anzughand folgt mit dem Zeigefinger geglättet dem Zeiger und tippt
   beim Klick wirklich auf die Fläche.
