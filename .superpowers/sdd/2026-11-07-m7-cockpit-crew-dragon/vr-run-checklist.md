@@ -14,7 +14,7 @@
 - **Props folgen den Achsen:** Stick bewegen (Nicken, Rollen, Drehen), Gashebel vor/zurueck: Prop und Hand bewegen sich mit, Richtungen stimmen? Stick zur Seite kippt den Prop zur Seite, Drehen des Sticks dreht den Prop; der Gashebel zeigt die echte TWCS-Stellung (ohne TWCS die Tastatur-Schubstellung).
 - **Umschalten Cockpit <-> Aussen:** Taste `C` und Stick-Knopf (derzeit Knopf 3), mehrfach hin und her; Zustand sauber, kein Haengen?
 - **F12:** zentriert die Blickrichtung wieder auf die Sitz-Vorwaerts-Richtung (Kopf in VR gerade halten, F12, Bild muss mittig stehen).
-- **Zeiger und Hand:** Maus-/Zeigerbewegung ueber die Konsole: bewegt sich die Hand weich (kein Ruckeln, keine eckigen Gelenke)?
+- **Zeiger und Hand:** im Cockpit ist das Desktop-Overlay (Panel/Menue) komplett weg; reine Mausbewegung (ohne rechte Taste) bewegt den orangen Zeigerpunkt auf den Screens/Tasten, linke Taste klickt; beim Verlassen (C) kommt das Overlay zurueck. Bewegt sich die Hand weich (kein Ruckeln, keine eckigen Gelenke)?
 - **Linker Bildschirm:** die vier Kamera-Tasten und das Antippen am Bildschirm: wechselt das Bild, reagiert die Hand/Taste?
 - **Reichweite:** die ganz rechte Taste `r_upper_5` ansteuern: erreicht die Hand sie, beugt sich der Oberkoerper plausibel vor?
 - **Schulter:** den Arm weit nach hinten schwingen lassen (Zeiger zur Seite, dann zurueck zum Gashebel/Stick): sieht die Schulter dabei zerknittert oder eingefallen aus?

@@ -16,6 +16,10 @@ const PICK_MARGIN_M := 0.03
 const VR_M_PER_COUNT := 0.0006
 ## [E] The pointer must be this far (strip metres) past the left/centre boundary to change the hand (no flapping).
 const SIDE_HYSTERESIS_M := 0.015
+## [E] The marker disc: radius, height above the face (clear of the face, no z-fight), colour.
+const MARKER_RADIUS_M := 0.004
+const MARKER_LIFT_M := 0.0015
+const MARKER_COLOUR := Color(1.0, 0.35, 0.05)
 
 var strip: ConsoleStrip
 var config: CockpitConfig
@@ -30,6 +34,7 @@ var fingers := {"l": HandMotion.new(), "r": HandMotion.new()}  ## index finger e
 var active_side := "r"
 var driven_externally := false  ## a script (shots, tests) calls setup / update itself: World leaves the pointer alone
 var last_action := ""  ## what the last click did ("camera_next", "camera:<id>", "none"); tests and logs
+var marker: MeshInstance3D  ## the pointer on the strip: a small unshaded disc on the surface under it (child of the cabin; hidden without a hover)
 var _mouse_px := Vector2(-1.0, -1.0)
 var _have_mouse := false
 var _initialised := false
@@ -42,6 +47,12 @@ func setup(cabin_config: CockpitConfig, cabin_view: CockpitView, screen: ScreenC
 	screen_camera = screen
 	strip = ConsoleStrip.from_config(cabin_config) if cabin_config != null else null
 	_initialised = false
+	if marker != null and is_instance_valid(marker):
+		marker.queue_free()
+	marker = null
+	if cabin_view != null and strip != null:
+		marker = _build_marker()
+		cabin_view.add_child(marker)
 	hover = {}
 
 
@@ -139,6 +150,7 @@ func update(delta: float, camera: Camera3D) -> void:
 	if not hover.is_empty():
 		active_side = _side_of(hover, active_side)
 	var normal: Vector3 = strip.normal
+	_update_marker(normal)
 	for side: String in hands:
 		var hand := hands[side] as HandMotion
 		var target := cabin.idle_tip(side)
@@ -153,6 +165,37 @@ func update(delta: float, camera: Camera3D) -> void:
 		var hand := hands[side] as HandMotion
 		pose[side] = {"tip": hand.position - normal * hand.tap_depth(), "extend": clampf((fingers[side] as HandMotion).position.x, 0.0, 1.0)}
 	cabin.pose_arms(pose)
+
+
+func _build_marker() -> MeshInstance3D:
+	var disc := CylinderMesh.new()
+	disc.top_radius = MARKER_RADIUS_M
+	disc.bottom_radius = MARKER_RADIUS_M
+	disc.height = 0.0005
+	disc.radial_segments = 24
+	disc.rings = 1
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = MARKER_COLOUR
+	material.no_depth_test = false
+	disc.material = material
+	var node := MeshInstance3D.new()
+	node.name = "PointerMarker"
+	node.mesh = disc
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.layers = CockpitView.CONSOLE_LAYER  # not in the screen camera's image
+	node.visible = false
+	return node
+
+
+func _update_marker(normal: Vector3) -> void:
+	if marker == null or not is_instance_valid(marker):
+		return
+	marker.visible = active and not hover.is_empty()
+	if marker.visible:
+		var up := normal.normalized()
+		var side := up.cross(Vector3.RIGHT if absf(up.dot(Vector3.RIGHT)) < 0.9 else Vector3.UP).normalized()
+		marker.transform = Transform3D(Basis(side, up, side.cross(up)), (hover["point_m"] as Vector3) + up * MARKER_LIFT_M)
 
 
 ## The fingertip (cabin frame) of a side as last posed.

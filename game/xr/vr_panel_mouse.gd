@@ -18,6 +18,7 @@ const POINTER_SIZE := Vector2i(32, 32)  ## covers the arrow shape (Pointer.SHAPE
 var viewport: SubViewport
 var menu: Control  ## the wheel stays with the camera outside of it
 var cursor := Vector2.ZERO
+var suspended := false  ## no event is taken or pushed (CockpitUiGate)
 var pointer_viewport := SubViewport.new()  ## the arrow alone, transparent; its texture goes to the panel shader
 
 
@@ -50,6 +51,8 @@ func _exit_tree() -> void:
 
 
 func _input(event: InputEvent) -> void:
+	if suspended:
+		return  # cockpit view: the panel is hidden and the mouse belongs to the ConsolePointer (the mode stays captured: relative motion)
 	if event is InputEventMouseMotion:
 		if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 			return  # camera orbit: the pointer stays put

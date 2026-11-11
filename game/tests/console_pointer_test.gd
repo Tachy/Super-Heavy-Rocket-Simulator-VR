@@ -52,6 +52,7 @@ func _initialize() -> void:
 	_check_hand_motion()
 	_check_arm_ik_numbers()
 	_check_dispatch(config)
+	_check_mouse_without_overlay(config)
 	_check_figure_arms(config)
 	print("CONSOLE POINTER TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
@@ -354,6 +355,63 @@ func _check_dispatch(config: CockpitConfig) -> void:
 	screen.free()
 
 
+# ---- VR fix A (user 2026-11-11): no 2D overlay in the cockpit, plain mouse motion moves the pointer, LMB clicks ----
+
+func _check_mouse_without_overlay(config: CockpitConfig) -> void:
+	# the gate: hidden in the cockpit, restored (also a part that was hidden before) on leaving; the VR mouse is suspended meanwhile
+	var gate := CockpitUiGate.new()
+	var shown := CanvasLayer.new()
+	var hidden_before := CanvasLayer.new()
+	hidden_before.visible = false
+	var panel := Node3D.new()
+	var viewport := SubViewport.new()
+	var menu := Control.new()
+	var mouse := VrPanelMouse.new(viewport, menu)
+	gate.hidden_nodes = [shown, hidden_before, panel]
+	gate.vr_mouse = mouse
+	gate.apply(false)
+	_check(shown.visible and panel.visible and not mouse.suspended, "outside the cockpit the UI shows and the VR mouse is active")
+	gate.apply(true)
+	_check(not shown.visible and not hidden_before.visible and not panel.visible, "in the cockpit every 2D UI part is hidden")
+	_check(mouse.suspended, "in the cockpit the VR panel mouse is suspended")
+	var before_cursor := mouse.cursor
+	var motion := InputEventMouseMotion.new()
+	motion.relative = Vector2(30.0, 10.0)
+	mouse._input(motion)
+	_check(mouse.cursor == before_cursor, "a suspended VR panel mouse does not move its overlay cursor")
+	gate.apply(false)
+	_check(shown.visible and panel.visible and not hidden_before.visible and not mouse.suspended, "leaving the cockpit restores what showed (and keeps what was hidden)")
+	for node in [gate, shown, hidden_before, panel, mouse, viewport, menu]:
+		node.free()
+	# the pointer: motion without any button moves it, LMB clicks, nothing else is needed
+	var screen := ScreenCamera.new()
+	screen.update(StubSim.new(), config, null, Vector3.ZERO, 0.0, false)
+	var pointer := ConsolePointer.new()
+	root.add_child(pointer)
+	pointer.setup(config, null, screen)
+	pointer.vr_mode = true
+	pointer.active = true
+	_check(not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT), "no right mouse button is held")
+	var start := pointer.strip_position
+	var move := InputEventMouseMotion.new()
+	move.relative = Vector2(100.0, 0.0)
+	pointer._unhandled_input(move)
+	_check(pointer.strip_position != start, "plain mouse motion moves the strip pointer (%s -> %s)" % [start, pointer.strip_position])
+	var left: Dictionary = pointer.strip.surface("left")
+	pointer.point_at((left["rect"] as Rect2).get_center())
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	pointer._unhandled_input(click)
+	_check(pointer.last_action == "none" and (pointer.hands[pointer.active_side] as HandMotion).is_tapping(), "the left button taps the surface under the pointer")
+	var inactive_start := pointer.strip_position
+	pointer.active = false
+	pointer._unhandled_input(move)
+	_check(pointer.strip_position == inactive_start, "outside the cockpit the pointer ignores the mouse")
+	pointer.free()
+	screen.free()
+
+
 # ---- the arm on the figure skeleton (needs the generated Dragon models) ----
 
 func _check_figure_arms(config: CockpitConfig) -> void:
@@ -365,6 +423,19 @@ func _check_figure_arms(config: CockpitConfig) -> void:
 	root.add_child(view)
 	view.build(models, config)
 	var strip := ConsoleStrip.from_config(config)
+	var marked := ConsolePointer.new()
+	root.add_child(marked)
+	marked.setup(config, view, null)
+	marked.vr_mode = true
+	marked.active = true
+	marked.strip_position = strip.to_strip((strip.surface("centre"))["centre"])
+	marked.update(0.016, null)
+	_check(marked.marker != null and marked.marker.visible and marked.marker.get_parent() == view, "the pointer's marker shows on the surface under it")
+	_check(marked.marker.position.distance_to(marked.hover["point_m"]) < ConsolePointer.MARKER_LIFT_M + 1e-6, "the marker lies %.1f mm above the face" % (ConsolePointer.MARKER_LIFT_M * 1000.0))
+	marked.active = false
+	marked.update(0.016, null)
+	_check(not marked.marker.visible, "the marker is hidden outside the cockpit")
+	marked.free()
 	_check(view.player_arm("l") != null and view.player_arm("r") != null, "the player's figure has both arm chains")
 	var arm_r := view.player_arm("r")
 	_check(absf(arm_r.reach_m() - 0.778) < 0.05, "the straight reach from shoulder to index tip is %.3f m (0.44 x stature = 0.783)" % arm_r.reach_m())

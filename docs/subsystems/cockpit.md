@@ -379,8 +379,13 @@ State after plan Task 8 (code: `game/cockpit/console_strip.gd`, `console_pointer
   screen centre needs 14.5 deg, `r_upper_3` 21 deg; `r_upper_5` (outermost right key) is a KNOWN GAP: 30.7 mm short at the lean limit (tip clamped, the click still fires), stated in
   `console_pointer_test.gd` `KNOWN_REACH_GAP_M` (the test fails when the shortfall moves by more than 2 mm); Task 9 re-measures after the seat / eye calibration. `r_lower_3` is reached.
 - Idle hands: Task 8b, see "Crew body and suit" (HOTAS grips while the props are shown, else the hands on the thighs).
-- Open: VR input path untested (VrPanelMouse captures the mouse when its panel shows; the VR run of Task 9 decides who owns the mouse in the cockpit); tablets and the handle are not touch
-  targets beyond the generic key rectangle; the desktop smoothness check is by the user.
+- Mouse ownership in the cockpit (user VR run 2026-11-11, `CockpitUiGate`, `game/cockpit/cockpit_ui_gate.gd`, driven from `main.gd` each frame by `World.cockpit_active`): in the cockpit
+  NO 2D UI shows - VR: the curved overlay/menu panel (`VrOverlayPanel`) is hidden and `VrPanelMouse.suspended` (it takes and pushes no event); desktop: the webcast layer, the menu layer and the
+  legacy HUD are hidden (F1 does nothing there). Leaving restores what each part showed before. The VR mouse mode stays CAPTURED (relative motion), so plain mouse motion (no right button) reaches
+  `ConsolePointer` (`_unhandled_input` -> `move_by`) and the left button `click()`s the surface under the pointer. Desktop (not VR): the visible cursor's ray (`pick`), the same left click; relative
+  motion on the strip was not chosen there because the cursor already shows where the ray lands. The pointer is visible on the strip as `ConsolePointer.marker` (orange disc 4 mm radius, 1.5 mm above
+  the face, layer `CONSOLE_LAYER` so the screen feed does not see it) besides the hand's index finger.
+- Open: the VR run decides the feel (0.6 mm/count); tablets and the handle are not touch targets beyond the generic key rectangle; the desktop smoothness check is by the user.
 - Tests: `game/tests/console_pointer_test.gd` (config key table, strip, HandMotion, ArmIk numbers, dispatch, figure arms with models). Shots: `cockpit_shots.gd --hand --cabin_keys`
   (`screenshots/m7-cockpit/hand/`: `hand_eye_NN_*` sequences from the eye, `hand_hatch_*`, contact sheets `sheet_*.png`).
 

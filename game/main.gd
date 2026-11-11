@@ -14,10 +14,13 @@ const SELF_CHECK_ARG := "--self-check"
 var world := World.new()
 var overlay_host := OverlayHost.new()
 var legacy_hud := CanvasLayer.new()  ## FlightOverlay, NavBall, FlightHud (F1)
+var ui_gate := CockpitUiGate.new()  ## hides every 2D UI part in the cockpit view and gives the mouse to the console pointer
 
 
 func _ready() -> void:
 	var loading := LoadingScreen.start(self)  # null in tests, headless and the self-check
+	ui_gate.name = "CockpitUiGate"
+	add_child(ui_gate)
 	world.name = "World"
 	add_child(world)
 	if not world.booted and LoadingScreen.yielding():
@@ -43,6 +46,8 @@ func _ready() -> void:
 		vr_panel.set_pointer(mouse.pointer_viewport.get_texture(), Vector2(VrPanelMouse.POINTER_SIZE))
 		mouse.pointer_moved.connect(vr_panel.move_pointer)
 		add_child(mouse)
+		ui_gate.vr_mouse = mouse
+		ui_gate.hidden_nodes.append(vr_panel)
 		vr_panel.place(xr.recenter_pose())
 		xr.recentered.connect(func() -> void: vr_panel.place(xr.recenter_pose()))
 	else:
@@ -51,6 +56,9 @@ func _ready() -> void:
 		ui.layer = PANEL_LAYER
 		add_child(ui)
 		ui.add_child(panel)
+		ui_gate.hidden_nodes.append(ui)
+		ui_gate.hidden_nodes.append(overlay_host.get_node("WebcastLayer"))
+	ui_gate.hidden_nodes.append(legacy_hud)
 	legacy_hud.name = "LegacyHud"
 	legacy_hud.layer = LEGACY_HUD_LAYER
 	legacy_hud.visible = false
@@ -97,12 +105,18 @@ func _self_check() -> void:
 	get_tree().quit(0)
 
 
-## F1 shows / hides the old flight HUD; C toggles the camera between the cockpit and the external view.
+func _process(_delta: float) -> void:
+	ui_gate.apply(world.cockpit_active)
+
+
+## F1 shows / hides the old flight HUD (not in the cockpit, where no 2D UI shows); C toggles the camera between the cockpit and the external view.
 func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.echo:
 		return
 	if key.keycode == KEY_F1:
+		if world.cockpit_active:
+			return
 		legacy_hud.visible = not legacy_hud.visible
 		get_viewport().set_input_as_handled()
 	elif key.keycode == KEY_C and not key.ctrl_pressed and not key.alt_pressed and not key.meta_pressed:
