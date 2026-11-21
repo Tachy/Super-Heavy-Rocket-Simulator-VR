@@ -135,6 +135,14 @@ armrests, palms down (it read as a shrug in the hatch shots); hands were boxes o
   230-260, +-0.015 / 0.025 / 0.057, rms 1.6 mm. Values unchanged by the refit (now [E], an upper bound).
 - `RECESS_TINT_FROM` 0.15 (the colour line 2-8 px inside the photo's panel edge). The cabin glTF loaded with Godot's default mesh compression (seam sparkle).
 
+## Seat leg support and armrests before Task 8 fix round 1 (2026-11-21)
+- Leg support: two straight carbon rails (0.027 x 0.045) from under the pan front to the foot plate's heel end (0.34 m), plus the flat foot plate between them:
+  read as a stool; the photos (crew1_1, KSC-20211110-0003) show one closed U-frame reaching past the soles. Replaced by the swept U-frame (`frame_end_m`,
+  `frame_corner_radius_m`).
+- Armrests: `seat_shape.ARMREST_M` rounded bars 0.40 x 0.05 x 0.06 m along the chest normal at the round-3 placement (never measured), on the carbon `rest`
+  node; replaced by measured 0.11 x 0.045 x 0.070 black padded blocks on the `pad` node (`armrest_centre_m`, `armrest_size_m`, `armrest_radius_m`).
+- Smooth groups of the back / pan lofts and the plate were keyed by `id()` of temporary lists (CPython reuses ids); now by name.
+
 ## Seats before fidelity Task 8 (2026-11-21)
 - Boxes (`gen_dragon_cabin.build_seat`): back shell box 0.075 x 0.80 x width (SEAT_BACK_HALF_M (0.05, 0.40)) with two side bolster boxes, a pad box on its
   front (0.78 of the width), headrest shell / pad boxes (0.30 / 0.26 wide), pan shell / pad boxes (SEAT_THIGH_M 0.44), armrest boxes; leg rest = two round

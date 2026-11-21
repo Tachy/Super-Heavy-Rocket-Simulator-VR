@@ -66,6 +66,11 @@ def test_seat_shape_table_is_the_measurement(spec):
         v, s = table[f"frame_{end}_m"]
         assert shape["frame_width_m"][k] == pytest.approx(v, abs=0.002) and s < 0.05
     assert shape["rail_section_m"][0] == pytest.approx(table["frame_rail_m"][0], abs=0.002)
+    v, s = table["frame_end_m"]
+    assert shape["frame_end_m"] == pytest.approx(v, abs=0.002) and s < 0.02
+    for key, val in (("wide", shape["armrest_size_m"][2]), ("length", shape["armrest_size_m"][0]), ("out", shape["armrest_centre_m"][2])):
+        v, s = table[f"armrest_{key}_m"]
+        assert val == pytest.approx(v, abs=0.002) and s < 0.03, key
     seat_pitch = sorted(s["hip_m"][2] for s in spec["cockpit"]["seat"])
     assert seat_pitch[2] - seat_pitch[1] == pytest.approx(seats_fit.PITCH_M)  # the ratios are scaled by the table's pitch
 
@@ -99,6 +104,44 @@ def test_figure_inside_seat_shell(spec):
         for k, bar in enumerate(bars):
             assert max(ss.bar_inside_depth(bar, p) for p in pts) <= FIGURE_TOL_M, (seat["id"], "bar", k)
         assert max(ss.slab_inside_depth(slab, p) for p in pts) <= FIGURE_TOL_M, (seat["id"], "foot plate")
+
+
+def test_leg_support_is_one_closed_rounded_frame(spec):
+    """The leg support is one carbon U-frame (crew1_1 / KSC): from the knee end along the shins to a closing bar frame_end_m below the plate's
+    top face, over rounded corners (no kink > the bend step), outer widths frame_width_m at both ends; the armrests are short black blocks."""
+    ck = spec["cockpit"]
+    shape = ck["seat_shape"]
+    raise_deg = spec["crew_figure"]["figure"]["thigh_raise_deg"]
+    w, _ = shape["rail_section_m"]
+    for seat in ck["seat"]:
+        to_seat = _seat_frame(seat)
+        plate_c, plate_n, _ = ss._plate_frame(seat, to_seat)
+        knee = ss._knee_end(shape, raise_deg)
+        path, sides, _ = ss.leg_support_path(shape, knee, plate_c, plate_n, 0.0)
+        assert path[0][:2] == pytest.approx(knee[:2]) and path[-1][:2] == pytest.approx(knee[:2])
+        assert abs(path[0][2] - path[-1][2]) + w == pytest.approx(shape["frame_width_m"][0])  # knee end outer width
+        below = [-float(np.dot(np.subtract(p, plate_c), plate_n)) for p in path]
+        assert max(below) + 0.5 * w == pytest.approx(shape["frame_end_m"], abs=1e-6)  # the closing bar's outer edge
+        assert max(abs(p[2]) for p in path) + 0.5 * w == pytest.approx(0.5 * shape["frame_width_m"][1], abs=0.003)  # less the corner fillet
+        for a, b, c in zip(path, path[1:], path[2:]):  # rounded: no kink sharper than one bend step
+            u, v = np.subtract(b, a), np.subtract(c, b)
+            ang = math.degrees(math.acos(max(-1.0, min(1.0, float(np.dot(u, v) / np.linalg.norm(u) / np.linalg.norm(v))))))
+            assert ang <= 90.0 / ss.FRAME_BEND_STEPS + 1e-6
+        faces = ss.seat_faces(shape, seat, raise_deg, to_seat)
+        assert sum(1 for f in faces if f["group"] == ("frame",)) > 0
+        arm = [f for f in faces if f["group"] in (("armrest0",), ("armrest1",))]
+        assert arm and all(f["part"] == "pad" for f in arm)  # black padded blocks (the photos), not carbon
+        span = max(p[1] for f in arm for p in f["pts"]) - min(p[1] for f in arm for p in f["pts"])
+        assert span == pytest.approx(shape["armrest_size_m"][0], abs=1e-6)
+
+
+def test_smooth_groups_are_named(spec):
+    """Smooth groups are keyed by explicit names (no id() of temporaries, which CPython reuses)."""
+    ck = spec["cockpit"]
+    seat = ck["seat"][1]
+    groups = {f["group"] for f in ss.seat_faces(ck["seat_shape"], seat, spec["crew_figure"]["figure"]["thigh_raise_deg"], _seat_frame(seat))}
+    groups.discard(None)
+    assert groups == {("back", "pad"), ("back", "shell"), ("pan", "pad"), ("pan", "shell"), ("frame",), ("plate",), ("armrest0",), ("armrest1",)}
 
 
 def test_seat_faces_lie_on_their_atlas_regions(spec):

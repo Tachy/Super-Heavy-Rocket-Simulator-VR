@@ -32,7 +32,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 | Seat pitch | 0.70 m (Z +-0.35, +-1.05) | E | Wikimedia: pitch / seat-back width 1.2, back 0.58 m | +-0.05 |
 | Seat hip (s2 / s1) | [1.474, -0.307, 0.35] / [1.444, 0.132, 1.05] | D / E | s2: the eye minus the figure's own eye point (0.812, -0.288); outer seats 0.439 toward the hatch and 0.03 lower (crew1_1 fit: head spacings and helmet widths; floor clearance of the foot trays) | +-0.1 |
 | Back angle | 35 deg from +X toward -Y | E | crew1_1 torso foreshortening from the hatch, knees above the hips | +-10 deg |
-| Seat shape | moulded back: shoulders 0.667 m wide (half 0.3335), headrest wings 0.61 wide, 0.15 proud, flat 0.30 between them, top 0.88 up the back; pan 0.44 x 0.58, side panels 0.14 deep; carbon leg support 0.40 / 0.49 m outer width (knee / foot), rails 0.027 x 0.045 | D (ratios) / E | Task 8 (`cabin_fit/parts/seats.py`): widths as ratios to the seat pitch in the same image row (KSC-20211110-0003 + crew1_1, the seats there in the ingress position): shell / pitch 0.953 +-0.002, gap / pitch 0.047 +-0.006 (two views agree); frame / pitch 0.571 / 0.701 (crew1_1 only, [E]); heights, wing depths [E] (side photos without fitted cameras) | widths +-0.048 (the pitch's 7 %), frame +-0.038, heights / wings +-0.05 |
+| Seat shape | moulded back: shoulders 0.667 m wide (half 0.3335), headrest wings 0.61 wide, 0.15 proud, flat 0.30 between them, top 0.88 up the back; pan 0.44 x 0.58, side panels 0.14 deep; carbon leg support: one closed U-frame 0.40 / 0.49 m outer width (knee / foot), tube 0.027 x 0.045, closing bar 0.062 below the plate top, corners r 0.03; armrests 0.11 x 0.045 x 0.070 black blocks | D (ratios) / E | Task 8 (`cabin_fit/parts/seats.py`): widths as ratios to the seat pitch in the same image row (KSC-20211110-0003 + crew1_1, the seats there in the ingress position): shell / pitch 0.953 +-0.002, gap / pitch 0.047 +-0.006 (two views agree); frame / pitch 0.571 / 0.701 (crew1_1 only, [E]); frame end and armrests (fix round 1): vertical px through the camera's px per m along the built direction at the 0.3 m ingress shift, x read / projected pitch; heights, wing depths [E] (side photos without fitted cameras) | widths +-0.048 (the pitch's 7 %), frame +-0.038, heights / wings +-0.05 |
 | Eye (s2) | [2.2857, -0.5945, 0.35] | D | centre screen centre + 0.55 along its normal + 0.23 along its up (discovery2 GoPro geometry, reach photos): 0.69 m to the centre screen centre | +-0.08 per axis |
 | Eye forward | (0.380, 0.925, 0): 22 deg above horizontal, 22.7 deg off the screen normal | D | straight ahead in the seat plane toward the screen plane | +-10 deg |
 | Screens | 0.382 x 0.215 m (16:9) | E | training2 finger scale (index finger ~0.072 m on the glass) 0.35-0.40 wide; aspect 1.76-1.88 measured | +-15 % |
@@ -226,7 +226,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   dark upper panel (`upper_top_x_m` 3.30, `upper_depth_m` 0.04) up to the ceiling, `[[locker]]` 5 / 6 (0.15 x 0.165, outboard of the tablets), the lamp panels moved to the
   upper panel's top corners, light grey `console_back` (back, underside, two posts). Nodes added: `console_back`, `console_shelf`, `console_lockers`, `ceiling_ring_light` (emissive annulus r 0.50-0.85,
   `[cabin] ring_light_radii_m`; the game's ring omnis sit on its mid radius). Buttons of the left / right panels moved 0.025 m toward the centre with their screens.
-- Seats: `seat_shell_<id>` (white), `seat_pad_<id>` and `seat_rest_<id>` (black pads / carbon rails + foot frame); shapes and materials since fidelity Task 8: "Seats (fidelity Task 8)". `[[seat]]` carries `foot_rest_m` / `foot_rest_normal` ([D], from the figure bones; tested under the ankles).
+- Seats: `seat_shell_<id>` (white), `seat_pad_<id>` and `seat_rest_<id>` (black pads and armrest blocks / carbon U-frame + foot plate); shapes and materials since fidelity Task 8: "Seats (fidelity Task 8)". `[[seat]]` carries `foot_rest_m` / `foot_rest_normal` ([D], from the figure bones; tested under the ankles).
 - Shots: `helmet_closeup` (pilot, other figures / seats / console hidden) and `helmet_vs_detail2` in `screenshots/m7-cockpit/look/`.
 - Open: boots read grey (exposure of the high-key cabin), screens are still empty blue, visor shows the lamp blobs, the real visor opening above a dark face aperture is not modelled (closed by decision).
 
@@ -504,10 +504,13 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
   low lumbar bolsters, shoulder wings, the big headrest wings beside the helmet (flat 0.15 = helmet half width 0.135 + 0.015); the wing edge rolls over
   `rim_radius_m` into the white outer shell (side faces, rounded back corners, slightly curved back, `back_depth_m` behind the cushion); the top is rounded.
   The PAN is the same loft along the thighs (`pan_raise_deg` = crew_figure `thigh_raise_deg`): black cushion with low side bolsters, white side panels
-  `pan_depth_m` deep, a rounded front edge. The LEG SUPPORT: two carbon rails of rounded-rectangle section from the pan's front end (mid-way down its side
-  panels) to the foot plate's heel end, outer edges `frame_width_m` apart, and the foot plate (the frame's bottom bar, rounded corners) under the soles at
-  `foot_rest_m` (top face in that plane). The ARMRESTS: rounded bars at the round-3 placement ([E] `seat_shape.ARMREST_M`). Nodes unchanged
-  (`seat_shell|pad|rest_<id>`; caps of the lofts are black). Cabin 82,908 -> 107,740 triangles (6.2k per seat).
+  `pan_depth_m` deep, a rounded front edge. The LEG SUPPORT (fix round 1): one closed carbon U-frame (`leg_support_path` + `swept_tube`: a tube of
+  rounded-rectangle section `rail_section_m` swept along one path) from the pan's front end (mid-way down its side panels) along the shins, past the soles to
+  a closing bar under the foot plate (outer edge `frame_end_m` 0.062 below the plate's top face along -foot_rest_normal, at the plate centre along the foot),
+  rounded corners `frame_corner_radius_m`, outer widths `frame_width_m` (knee / foot); the foot plate (rounded corners) under the soles at `foot_rest_m`
+  between the rails. The ARMRESTS: short black padded blocks (`armrest_centre_m`, `armrest_size_m` 0.11 along the chest normal x 0.045 x 0.070, radius
+  0.015) on the `pad` node (black fabric, not carbon). Smooth groups by name (back / pan / frame / plate / armrest0|1). Nodes unchanged
+  (`seat_shell|pad|rest_<id>`; caps of the lofts are black). Cabin 82,908 -> 110,060 triangles.
 - Measurement (`cabin_fit/parts/seats.py`, `python -m cabin_fit.parts.seats`): KSC-20211110-PH-SPX02_0003 (NASA, public domain) got its own camera
   (`photo_cameras.toml` `ksc_crew3`, Ruling A): fitted on the console as built (both posts: tops, bases, rod axes; the back face's top edge = the fillet's
   tangent line, edge_radius_m below the body's top), 3.98 px rms of 3603 (post tops <= 2 px, bases 8 / 15 px: the funnel-foot read), pose +-0.03 / 0.04 /
@@ -517,6 +520,12 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
   -> 0.667 +-0.048 m (the pitch's [E] +-0.05 dominates); head width 0.61 (KSC row 850, [E]); leg-support frame outer width / pitch 0.571 (knee end) / 0.701
   (foot bar), rail 0.039 (crew1_1 2x crop, both inner seats; KSC agrees within ~10 %, outer rails cut) -> 0.400 / 0.491 / 0.027 m [E]. Heights (top 0.88),
   wing depths (head 0.15, shoulders 0.055-0.06), shell depth, radii: [E] from jsc2022e068619 / jsc2026e404725 / KSC (no fitted camera on a side view).
+  Fix round 1: both hatch cameras see the seats' X-Y plane edge-on (every direction in it projects to the image vertical), so a vertical image extent is
+  converted with the camera's px per m along the direction the part is built on, at the seat moved 0.3 m up (+X, ingress; +-0.1 taken into the sigma), x
+  read / projected pitch. Frame end (`frame_end`): crew1_1 six columns over the s2 / s3 foot ends, soles' lower edge -> closing bar's outer edge 31.8 +-1.0 px
+  (bar 15 px = the rail width) -> 0.062 +-0.006 m [E] (one view; its position along the foot is not seen). Corner radius ~0.03 (s2 outer corner, [E]).
+  Armrests (`armrest`, KSC s2 blocks; at +0.3 the projected blocks land on them, rows 1223 / 1225): width 82 px -> 0.070 +-0.006, height 125 px less the
+  [E] 0.045 thickness -> length 0.109 +-0.02, half separation -> centre 0.016 +-0.006 outside the seat half width.
   Placement (`[[seat]]` hip_m, back_angle_deg) unchanged: no photo shows the launch posture.
 - Colours (photos): black padded cushion with its wings (KSC, jsc2022e068619), the outer shell white with a grey rim at the cushion's edge (jsc2024e026550,
   jsc2026e404725), white pan side panels, black armrests, clear-coated carbon frames. The spec's "moulded black shells" = the black moulded cushion body; its
@@ -533,11 +542,14 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
 - Figure fit: `test_figure_inside_seat_shell` (crew_figure.gltf against `seat_shape.inside_depth` / `bar_inside_depth` / `slab_inside_depth` of every seat):
   0 mm interpenetration (tolerance 1 cm). Knee / shin / foot photo bands unchanged (green).
 - Figure mesh crack check: `closeup_figure` (pilot's helmet edge / neck ring / shoulder at 0.6 m) with `crew_figure` in `UNCOMPRESSED_FILES` vs default:
-  pixel-identical (max difference 0), no crack -> not added; `scene_for` now honours `UNCOMPRESSED_FILES` like `_meshes_of`.
+  pixel-identical (max difference 0), no crack -> not added; `scene_for` now honours `UNCOMPRESSED_FILES` like `_meshes_of`. Identical is expected: the glTF
+  import leaves all 13 crew_figure surfaces uncompressed even without the flag (all skinned; probe of `surface_get_format & ARRAY_FLAG_COMPRESS_ATTRIBUTES`:
+  0 of 13 with flags 0 and with FORCE_DISABLE_MESH_COMPRESSION), so the flag cannot change this file.
 - `RECESS_TINT_FROM` 0.05 -> 0.09 (T7 minor: the grey edge followed the seam-cell staircase in close-up; at 0.09 `closeup_recess` is smooth); crew1_1
   colour line v 120-210: left +0.5..+4.5 (mean 2.0), right +2.5..+5.5 (mean 3.7) px inward of the reads (at 0.05: 0.1 / 1.9).
-- Shots: `--console_closeup` adds `closeup_seat` / `closeup_seat_legs` (the empty s1 from in front, crew hidden) and `closeup_figure`; `--fidelity` adds
-  `fid_ksc_crew3`. GPU (stereo Pimax, cockpit, 120 frames): 23.12-23.15 ms median (same-session pre-change run 28.4 ms, machine state; T7 23.1-24.9): no increase.
+- Shots: `--console_closeup` adds `closeup_seat` / `closeup_seat_legs` (the empty s1 from in front, crew hidden), `closeup_seat_frame` (s1's U-frame foot
+  end from low on the hatch side) and `closeup_figure`; `--fidelity` adds `fid_ksc_crew3`. GPU (stereo Pimax, cockpit, 120 frames): 23.12-23.15 ms median
+  (same-session pre-change run 28.4 ms, machine state; T7 23.1-24.9); fix round 1 (U-frame, blocks) 23.74 / 24.16 ms.
 - Tests: `tools/structures/tests/test_seat_shape.py` (section closed / symmetric / outward, `[seat_shape]` = the measurement, the `ksc_crew3` row = its fit,
   `test_figure_inside_seat_shell`, faces on their atlas regions, generated seats follow the shape), `cockpit_view_test` (seat atlas swapped in compressed,
   detail tiles on pad / rest; six prepared maps).

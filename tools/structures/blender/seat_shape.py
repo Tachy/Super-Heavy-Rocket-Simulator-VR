@@ -9,9 +9,11 @@ Parts (config/cockpits/crew_dragon.toml [seat_shape], measured in cabin_fit/part
   big headrest wings beside the helmet. The top edge is rounded over top_radius_m.
 - the PAN: the same loft along the pan axis (the pan follows the thighs: pan_raise_deg), black cushion on top with low side bolsters, white side
   panels down to pan_depth_m, the front edge rounded over pan_front_radius_m.
-- the LEG SUPPORT (`rest`, carbon): two rails of rounded-rectangle section (rail_section_m) from the pan's front end to the foot plate, their outer
-  edges frame_width_m apart (knee end, foot end), and the foot plate under the soles between them (the frame's bottom bar).
-- the ARMRESTS (`rest`): rounded bars beside the pan.
+- the LEG SUPPORT (`rest`, carbon): one closed U-frame, a tube of rounded-rectangle section (rail_section_m) swept from the pan's front end (knee
+  end, under the pan's side panels) along the shins to its foot end frame_end_m below the soles and back: two rails whose outer edges lie
+  frame_width_m apart (knee end, foot end), joined under the foot plate by the closing bar over rounded corners (frame_corner_radius_m); the foot
+  plate under the soles between the rails.
+- the ARMRESTS (`pad`, black padded blocks): short rounded blocks beside the pan (armrest_centre_m, armrest_size_m).
 
 Faces: dicts {"pts": [(x, y, z)...] seat frame, "uv": [(u, v)...] atlas metres (u right, v down the image), "part": "pad" | "shell" | "rest",
 "group": smooth group (hashable) or None, "out": outward hint (x, y, z)}. Atlas layout: SEAT_CHARTS (metres on a SEAT_ATLAS_M square).
@@ -35,7 +37,9 @@ LOOP_FRONT, LOOP_RIM, LOOP_SIDE, LOOP_CORNER, LOOP_BACK = 24, 4, 2, 3, 12  # [E]
 ROW_STEP_M = 0.03  # [E] loft rows along the back / pan (3 cm: the wing rise reads smooth at 0.5 m)
 END_STEPS = 3  # [E] rows of a rounded end (top of the back, front of the pan)
 RAIL_CORNER_STEPS = 2  # [E] steps per 90 deg corner of the rail section
-ARMREST_M = ((0.20, 0.20), (0.40, 0.05, 0.06), 0.012)  # [E] armrest centre (along the chest normal, up the back), size (along, thick, wide), edge radius; was the round-3 box (0.2 forward, 0.2 up, 0.4 x 0.05 x 0.06)
+FRAME_BEND_STEPS = 6  # [E] path steps per 90 deg bend of the leg-support frame (its foot-end corners)
+FRAME_SEGMENT_M = 0.1  # [E] the frame's straight rails are split into segments of at most this length (keeps each quad's UV inside the rest band)
+TUBE_V_FOLD_M = 0.3  # [E] a swept tube's along-path UV restarts every 0.3 m (15 carbon detail tiles of 0.02 m: seamless) to stay on the rest band
 
 
 def smooth(t):
@@ -146,8 +150,9 @@ def _rounded_rows(sections, xs, radius, steps, mid_of):
     return rows
 
 
-def loft(xs, sections, to_seat, chart_pad, chart_shell, end_radius, cap_start=True):
-    """Faces of a lofted body: `sections[i]` at axial coordinate xs[i] (each the same sample count), to_seat(x, y, z) -> seat frame point.
+def loft(xs, sections, to_seat, chart_pad, chart_shell, end_radius, name, cap_start=True):
+    """Faces of a lofted body `name` (its smooth groups: (name, "pad") / (name, "shell")): `sections[i]` at axial coordinate xs[i] (each the
+    same sample count), to_seat(x, y, z) -> seat frame point.
     Quads between rows take the tag of their segment's first sample ("pad" / "shell"); UV s = arc length from the pad's middle (pad faces)
     or from the back's middle (shell faces), t = -x (chart v = v0 - x). The far end is rounded over end_radius and capped; the start is capped (both caps
     black, on the rest chart)."""
@@ -196,7 +201,7 @@ def loft(xs, sections, to_seat, chart_pad, chart_shell, end_radius, cap_start=Tr
             sx = 0.5 * (s0[i][1] + s0[j][1])
             sy = 0.5 * (s0[i][0] + s0[j][0])
             out_local = _section_normal(s0, i, j)
-            faces.append({"pts": pts, "uv": uv, "part": tag, "group": (id(sections), tag), "out": _out(to_seat, x0, out_local, sy, sx)})
+            faces.append({"pts": pts, "uv": uv, "part": tag, "group": (name, tag), "out": _out(to_seat, x0, out_local, sy, sx)})
     # caps: the rounded end's last row and the start row (fans to the centroid), on the rest chart (uniform black)
     for (xc, sec), sign in ((rows[-1], 1.0), (rows[0], -1.0)):
         if sign < 0 and not cap_start:
@@ -255,7 +260,7 @@ def back_faces(shape):
     k = max(2, int(math.ceil((x1 - x0) / ROW_STEP_M)))
     xs = [x0 + (x1 - x0) * i / k for i in range(k + 1)]
     secs = [back_section(shape, x) for x in xs]
-    return loft(xs, secs, lambda x, y, z: (x, y, z), SEAT_CHARTS["back_pad"], SEAT_CHARTS["back_shell"], shape["top_radius_m"])
+    return loft(xs, secs, lambda x, y, z: (x, y, z), SEAT_CHARTS["back_pad"], SEAT_CHARTS["back_shell"], shape["top_radius_m"], "back")
 
 
 def pan_axes(pan_raise_deg):
@@ -273,14 +278,11 @@ def pan_faces(shape, half_width, pan_raise_deg):
 
     def to_seat(a, u, z):
         return (pa[0] * a + pu[0] * u, pa[1] * a + pu[1] * u, z)
-    return loft(xs, secs, to_seat, SEAT_CHARTS["pan_pad"], SEAT_CHARTS["pan_shell"], shape["pan_front_radius_m"])
+    return loft(xs, secs, to_seat, SEAT_CHARTS["pan_pad"], SEAT_CHARTS["pan_shell"], shape["pan_front_radius_m"], "pan")
 
 
-def rounded_rect_bar(p0, p1, lateral, w, d, r, steps=RAIL_CORNER_STEPS):
-    """Faces of a straight bar of rounded-rectangle section (w along `lateral`, d across) from p0 to p1, capped; rest chart, metric UVs."""
-    t = _norm(_sub(p1, p0))
-    side = _norm(_sub(lateral, tuple(c * _dot(lateral, t) for c in t)))
-    up = _cross(t, side)
+def _ring(w, d, r, steps):
+    """Rounded-rectangle section samples (s, u): w along s, d along u, corner radius r."""
     r = min(r, 0.49 * min(w, d))
     ring = []
     for cs, cu in ((1, 1), (-1, 1), (-1, -1), (1, -1)):
@@ -288,29 +290,53 @@ def rounded_rect_bar(p0, p1, lateral, w, d, r, steps=RAIL_CORNER_STEPS):
         for k in range(steps + 1):
             a = math.radians(a0 + 90.0 * k / steps)
             ring.append((cs * (w / 2 - r) + r * math.cos(a), cu * (d / 2 - r) + r * math.sin(a)))
-    length = math.sqrt(sum(c * c for c in _sub(p1, p0)))
+    return ring
+
+
+def swept_tube(path, sides, w, d, r, name, part="rest", steps=RAIL_CORNER_STEPS):
+    """Faces of a tube of rounded-rectangle section (w along sides[i], d along tangent x side) swept along the polyline `path` (the section at
+    each path point is perpendicular to the mean of its neighbouring segments), both ends capped; smooth group (name,), chart `rest` (metric UVs:
+    u = arc around the section, v = arc along the path)."""
+    ring = _ring(w, d, r, steps)
+    n = len(path)
+    frames = []
+    for i in range(n):
+        a, b = path[max(0, i - 1)], path[min(n - 1, i + 1)]
+        t = _norm(_sub(b, a))
+        side = _norm(_sub(sides[i], tuple(c * _dot(sides[i], t) for c in t)))
+        frames.append((t, side, _cross(t, side)))
+    loops = [[_add(_add(path[i], frames[i][1], s), frames[i][2], u) for s, u in ring] for i in range(n)]
     r0 = SEAT_CHARTS["rest"]
-    faces, s = [], [0.0]
+    s_ring = [0.0]
     for a, b in zip(ring, ring[1:] + ring[:1]):
-        s.append(s[-1] + math.hypot(a[0] - b[0], a[1] - b[1]))
-    group = ("bar", round(p0[0], 5), round(p0[1], 5), round(p0[2], 5))
-    for i in range(len(ring)):
-        a, b = ring[i], ring[(i + 1) % len(ring)]
-        pa_ = _add(_add(p0, side, a[0]), up, a[1])
-        pb_ = _add(_add(p0, side, b[0]), up, b[1])
-        qa, qb = _add(pa_, t, length), _add(pb_, t, length)
-        mid = _norm(_add(_add((0.0, 0.0, 0.0), side, a[0] + b[0]), up, a[1] + b[1]))
-        faces.append({"pts": [pa_, pb_, qb, qa], "uv": [(r0[0] + s[i], r0[1]), (r0[0] + s[i + 1], r0[1]), (r0[0] + s[i + 1], r0[1] + length),
-                                                       (r0[0] + s[i], r0[1] + length)], "part": "rest", "group": group, "out": mid})
-    for end, sign in ((p0, -1.0), (p1, 1.0)):
-        base = end
-        pts = [_add(_add(base, side, a[0]), up, a[1]) for a in ring]
-        uv = [(r0[0] + a[0], r0[1] + a[1]) for a in ring]
-        faces.append({"pts": pts, "uv": uv, "part": "rest", "group": None, "out": tuple(c * sign for c in t)})
+        s_ring.append(s_ring[-1] + math.hypot(a[0] - b[0], a[1] - b[1]))
+    v_path = [0.0]
+    for a, b in zip(path, path[1:]):
+        v_path.append(v_path[-1] + math.sqrt(sum(c * c for c in _sub(b, a))))
+    faces = []
+    m = len(ring)
+    for i in range(n - 1):
+        v0 = math.fmod(v_path[i], TUBE_V_FOLD_M)  # folded per segment (each quad keeps its own continuous v)
+        v1 = v0 + v_path[i + 1] - v_path[i]
+        for k in range(m):
+            j = (k + 1) % m
+            mid = _norm(_add(_add((0.0, 0.0, 0.0), frames[i][1], ring[k][0] + ring[j][0]), frames[i][2], ring[k][1] + ring[j][1]))
+            faces.append({"pts": [loops[i][k], loops[i][j], loops[i + 1][j], loops[i + 1][k]],
+                          "uv": [(r0[0] + s_ring[k], r0[1] + v0), (r0[0] + s_ring[k + 1], r0[1] + v0),
+                                 (r0[0] + s_ring[k + 1], r0[1] + v1), (r0[0] + s_ring[k], r0[1] + v1)],
+                          "part": part, "group": (name,), "out": mid})
+    for i, sign in ((0, -1.0), (n - 1, 1.0)):
+        faces.append({"pts": list(loops[i]), "uv": [(r0[0] + s, r0[1] + u) for s, u in ring], "part": part, "group": None,
+                      "out": tuple(c * sign for c in frames[i][0])})
     return faces
 
 
-def rounded_slab(centre, ex, ey, ez, half, r, steps=RAIL_CORNER_STEPS):
+def rounded_rect_bar(p0, p1, lateral, w, d, r, name, part="rest", steps=RAIL_CORNER_STEPS):
+    """Faces of a straight bar of rounded-rectangle section (w along `lateral`, d across) from p0 to p1, capped (swept_tube)."""
+    return swept_tube([p0, p1], [lateral, lateral], w, d, r, name, part, steps)
+
+
+def rounded_slab(centre, ex, ey, ez, half, r, name, steps=RAIL_CORNER_STEPS):
     """A slab (half sizes along ex, ey (thickness), ez) whose four edges around ey are rounded (radius r in the ex-ez plane), the faces along
     ey flat: the foot plate. Rest chart."""
     hx, hy, hz = half
@@ -335,57 +361,110 @@ def rounded_slab(centre, ex, ey, ez, half, r, steps=RAIL_CORNER_STEPS):
         j = (i + 1) % len(ring)
         mid = _norm(_add(_add((0.0, 0.0, 0.0), ex, ring[i][0] + ring[j][0]), ez, ring[i][1] + ring[j][1]))
         faces.append({"pts": [bot[i], bot[j], top[j], top[i]], "uv": [(r0[0] + s[i], r0[1]), (r0[0] + s[i + 1], r0[1]), (r0[0] + s[i + 1], r0[1] + 2 * hy),
-                                                                   (r0[0] + s[i], r0[1] + 2 * hy)], "part": "rest", "group": ("slab", id(ring)), "out": mid})
+                                                                   (r0[0] + s[i], r0[1] + 2 * hy)], "part": "rest", "group": (name,), "out": mid})
     return faces
 
 
-def leg_support_parts(shape, knee_end, plate_centre, plate_normal, plate_along, rail_z_centre):
-    """The carbon leg support in the seat frame: ([bars (p0, p1, lateral, w, d)], slab (centre, ex, ey, ez, half)). Two rails (rail_section_m)
-    from the knee end (the pan's front end, mid-way down its side panels) to the foot plate's heel end, outer edges frame_width_m apart (knee
-    end, foot end) about rail_z_centre; the foot plate (plate_m: length along the foot, thickness) between them, its top face in the plane through
-    plate_centre (normal plate_normal = up the shin)."""
-    w, d = shape["rail_section_m"]
+def _fillet(p_in, corner, p_out, radius, steps):
+    """Points of a circular arc rounding the polyline corner p_in -> corner -> p_out over `radius` (both legs straight up to the arc)."""
+    d1 = _norm(_sub(corner, p_in))
+    d2 = _norm(_sub(p_out, corner))
+    cos_t = max(-1.0, min(1.0, -_dot(d1, d2)))
+    theta = math.acos(cos_t)  # interior angle between the legs
+    tdist = radius / math.tan(0.5 * theta)
+    a = _add(corner, d1, -tdist)
+    b = _add(corner, d2, tdist)
+    bis = _norm(_add(tuple(-c for c in d1), d2))
+    centre = _add(corner, bis, radius / math.sin(0.5 * theta))
+    va, vb = _sub(a, centre), _sub(b, centre)
+    sweep = math.pi - theta
+    k = max(2, int(math.ceil(steps * sweep / (0.5 * math.pi))))
+    pts = []
+    for i in range(k + 1):  # slerp va -> vb
+        f = i / k
+        w0 = math.sin((1.0 - f) * sweep) / math.sin(sweep)
+        w1 = math.sin(f * sweep) / math.sin(sweep)
+        pts.append(_add(centre, _add(tuple(c * w0 for c in va), vb, w1)))
+    return pts
+
+
+def _subdivide(path, step):
+    """The polyline with every segment longer than `step` split evenly."""
+    out = [path[0]]
+    for a, b in zip(path, path[1:]):
+        k = max(1, int(math.ceil(math.sqrt(sum(c * c for c in _sub(b, a))) / step)))
+        out += [_add(a, _sub(b, a), i / k) for i in range(1, k + 1)]
+    return out
+
+
+def leg_support_path(shape, knee_end, plate_centre, plate_normal, rail_z_centre):
+    """The leg-support frame's centre line in the seat frame: [points], [in-plane lateral per point], the frame plane's normal. A closed U:
+    the -z rail from the knee end (knee_end = the pan's front end, mid-way down its side panels; rail outer edges frame_width_m[0] apart) along
+    the shin to the foot end, the closing bar under the foot plate (its outer edge frame_end_m below the plate's top face along -plate_normal,
+    at the plate centre along the foot; rail outer edges frame_width_m[1] apart), the +z rail back to the knee end; the two foot-end corners
+    rounded over frame_corner_radius_m (outer edge)."""
+    w, _ = shape["rail_section_m"]
     knee_w, foot_w = shape["frame_width_m"]
+    foot = _add(plate_centre, plate_normal, -(shape["frame_end_m"] - 0.5 * w))
+    kl = (knee_end[0], knee_end[1], rail_z_centre - (0.5 * knee_w - 0.5 * w))
+    kr = (knee_end[0], knee_end[1], rail_z_centre + (0.5 * knee_w - 0.5 * w))
+    cl_ = (foot[0], foot[1], rail_z_centre - (0.5 * foot_w - 0.5 * w))
+    cr_ = (foot[0], foot[1], rail_z_centre + (0.5 * foot_w - 0.5 * w))
+    rc = max(0.5 * w + 1e-3, shape["frame_corner_radius_m"] - 0.5 * w)  # the centre line's radius
+    path = _subdivide([kl] + _fillet(kl, cl_, cr_, rc, FRAME_BEND_STEPS) + _fillet(cl_, cr_, kr, rc, FRAME_BEND_STEPS) + [kr], FRAME_SEGMENT_M)
+    plane_n = _norm(_cross(_sub(cr_, cl_), _sub(kl, cl_)))
+    sides = []
+    for i in range(len(path)):
+        a, b = path[max(0, i - 1)], path[min(len(path) - 1, i + 1)]
+        sides.append(_norm(_cross(plane_n, _norm(_sub(b, a)))))
+    return path, sides, plane_n
+
+
+def leg_support_parts(shape, knee_end, plate_centre, plate_normal, plate_along, rail_z_centre):
+    """The carbon leg support in the seat frame: ([segments of the frame as bars (p0, p1, lateral, w, d)], slab (centre, ex, ey, ez, half)).
+    The frame (leg_support_path) and the foot plate (plate_m: length along the foot, thickness) between the rails at the foot end, its top face in
+    the plane through plate_centre (normal plate_normal = up the shin)."""
+    w, d = shape["rail_section_m"]
+    _, foot_w = shape["frame_width_m"]
     plate_len, plate_t = shape["plate_m"]
-    heel = _add(_add(plate_centre, plate_along, -(0.5 * plate_len - 0.5 * w)), plate_normal, -0.5 * d)
-    bars = []
-    for side in (-1.0, 1.0):
-        a = (knee_end[0], knee_end[1], rail_z_centre + side * (0.5 * knee_w - 0.5 * w))
-        b = (heel[0], heel[1], rail_z_centre + side * (0.5 * foot_w - 0.5 * w))
-        bars.append((a, b, (0.0, 0.0, 1.0), w, d))
+    path, sides, _ = leg_support_path(shape, knee_end, plate_centre, plate_normal, rail_z_centre)
+    bars = [(a, b, sides[i], w, d) for i, (a, b) in enumerate(zip(path, path[1:]))]
     pc = _add(plate_centre, plate_normal, -0.5 * plate_t)
-    slab = ((pc[0], pc[1], rail_z_centre), plate_along, plate_normal, (0.0, 0.0, 1.0), (0.5 * plate_len, 0.5 * plate_t, 0.5 * foot_w - 0.002))
+    slab = ((pc[0], pc[1], rail_z_centre), plate_along, plate_normal, (0.0, 0.0, 1.0), (0.5 * plate_len, 0.5 * plate_t, 0.5 * foot_w - w - 0.002))
     return bars, slab
 
 
-def leg_support_faces(shape, knee_end, plate_centre, plate_normal, plate_along, rail_z_centre):
-    bars, slab = leg_support_parts(shape, knee_end, plate_centre, plate_normal, plate_along, rail_z_centre)
-    faces = []
-    for p0, p1, lateral, w, d in bars:
-        faces += rounded_rect_bar(p0, p1, lateral, w, d, shape["rail_radius_m"])
-    return faces + rounded_slab(*slab, shape["plate_radius_m"])
-
-
-def armrest_bars(half_width):
-    """The two armrests beside the pan (ARMREST_M): [(p0, p1, lateral, wide, thick)] bars along the chest normal."""
-    (along, up), (length, thick, wide), r = ARMREST_M
+def armrest_bars(shape, half_width):
+    """The two armrests beside the pan: [(p0, p1, lateral, wide, thick)] short blocks along the chest normal (armrest_centre_m: up the back,
+    along the chest normal, lateral centre beyond the seat's half width; armrest_size_m: length along the chest normal, thickness up the back,
+    width)."""
+    up, along, out = shape["armrest_centre_m"]
+    length, thick, wide = shape["armrest_size_m"]
     bars = []
     for side in (-1.0, 1.0):
-        c = (up, along, side * (half_width + 0.5 * wide))
+        c = (up, along, side * (half_width + out))
         bars.append(((c[0], c[1] - 0.5 * length, c[2]), (c[0], c[1] + 0.5 * length, c[2]), (0.0, 0.0, 1.0), wide, thick))
     return bars
 
 
-def seat_parts(shape, seat, pan_raise_deg, to_seat_frame):
-    """(bars, slab) of a seat's rigid parts (leg-support rails, armrests; the foot plate) in the seat frame."""
+def _knee_end(shape, pan_raise_deg):
     pa, pu = pan_axes(pan_raise_deg)
-    knee = (pa[0] * shape["pan_length_m"] - pu[0] * shape["pan_depth_m"] * 0.5, pa[1] * shape["pan_length_m"] - pu[1] * shape["pan_depth_m"] * 0.5)
+    return (pa[0] * shape["pan_length_m"] - pu[0] * shape["pan_depth_m"] * 0.5, pa[1] * shape["pan_length_m"] - pu[1] * shape["pan_depth_m"] * 0.5, 0.0)
+
+
+def _plate_frame(seat, to_seat_frame):
     plate_c = to_seat_frame(seat["foot_rest_m"])
     o = to_seat_frame((0.0, 0.0, 0.0))
     plate_n = _norm(_sub(to_seat_frame(seat["foot_rest_normal"]), o))
     plate_f = _norm(_cross((0.0, 0.0, 1.0), plate_n))  # along the foot (toward the toes)
-    bars, slab = leg_support_parts(shape, (knee[0], knee[1], 0.0), plate_c, plate_n, plate_f, 0.0)
-    return bars + armrest_bars(0.5 * seat["width_m"]), slab
+    return plate_c, plate_n, plate_f
+
+
+def seat_parts(shape, seat, pan_raise_deg, to_seat_frame):
+    """(bars, slab) of a seat's rigid parts in the seat frame: the leg-support frame's segments and the two armrests (last), the foot plate."""
+    plate_c, plate_n, plate_f = _plate_frame(seat, to_seat_frame)
+    bars, slab = leg_support_parts(shape, _knee_end(shape, pan_raise_deg), plate_c, plate_n, plate_f, 0.0)
+    return bars + armrest_bars(shape, 0.5 * seat["width_m"]), slab
 
 
 def bar_inside_depth(bar, p):
@@ -412,10 +491,15 @@ def seat_faces(shape, seat, pan_raise_deg, to_seat_frame):
     """All faces of one seat in the seat frame. `seat` = the [[seat]] row; to_seat_frame(cabin point) -> seat frame (for the foot plate)."""
     hw = 0.5 * seat["width_m"]
     faces = back_faces(shape) + pan_faces(shape, hw, pan_raise_deg)
-    bars, slab = seat_parts(shape, seat, pan_raise_deg, to_seat_frame)
-    for k, (p0, p1, lateral, w, d) in enumerate(bars):
-        faces += rounded_rect_bar(p0, p1, lateral, w, d, shape["rail_radius_m"] if k < 2 else ARMREST_M[2])
-    return faces + rounded_slab(*slab, shape["plate_radius_m"])
+    plate_c, plate_n, plate_f = _plate_frame(seat, to_seat_frame)
+    w, d = shape["rail_section_m"]
+    path, sides, _ = leg_support_path(shape, _knee_end(shape, pan_raise_deg), plate_c, plate_n, 0.0)
+    faces += swept_tube(path, sides, w, d, shape["rail_radius_m"], "frame")
+    _, slab = leg_support_parts(shape, _knee_end(shape, pan_raise_deg), plate_c, plate_n, plate_f, 0.0)
+    faces += rounded_slab(*slab, shape["plate_radius_m"], "plate")
+    for k, (p0, p1, lateral, wide, thick) in enumerate(armrest_bars(shape, hw)):
+        faces += rounded_rect_bar(p0, p1, lateral, wide, thick, shape["armrest_radius_m"], f"armrest{k}", part="pad")
+    return faces
 
 
 def inside_depth(shape, seat_width_m, pan_raise_deg, p):
@@ -433,7 +517,8 @@ def inside_depth(shape, seat_width_m, pan_raise_deg, p):
     u = p[0] * pu[0] + p[1] * pu[1]
     hw = 0.5 * seat_width_m
     if shape["pan_start_m"] <= a <= shape["pan_length_m"] and abs(z) <= hw:
-        top = PAN_SURFACE_U + shape["pan_wing_m"] * smooth((abs(z) - shape["pan_flat_half_m"]) / max(1e-6, hw - shape["rim_radius_m"] - shape["pan_flat_half_m"]))
+        rim = max(1e-4, min(shape["rim_radius_m"], shape["pan_wing_m"], hw - shape["pan_flat_half_m"] - 1e-4))  # as `section` clamps it
+        top = PAN_SURFACE_U + shape["pan_wing_m"] * smooth((abs(z) - shape["pan_flat_half_m"]) / max(1e-6, hw - rim - shape["pan_flat_half_m"]))
         if PAN_SURFACE_U - shape["pan_depth_m"] <= u < top:
             depth = max(depth, top - u)
     return depth

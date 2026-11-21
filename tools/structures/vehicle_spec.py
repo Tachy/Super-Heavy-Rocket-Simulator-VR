@@ -297,7 +297,7 @@ COCKPIT_KEYS = {
     "hotas": ("props", "stick_grip_m", "throttle_grip_m"),
     "seat_shape": ("back_rows", "back_depth_m", "back_bulge_m", "rim_radius_m", "corner_radius_m", "top_radius_m", "pan_start_m", "pan_length_m",
                    "pan_flat_half_m", "pan_wing_m", "pan_depth_m", "pan_front_radius_m", "frame_width_m", "rail_section_m", "rail_radius_m", "plate_m",
-                   "plate_radius_m"),
+                   "plate_radius_m", "frame_end_m", "frame_corner_radius_m", "armrest_centre_m", "armrest_size_m", "armrest_radius_m"),
 }
 COCKPIT_GUARD_EDGES = ("top", "bottom", "left", "right")
 COCKPIT_SCREENS = ("left", "centre", "right")

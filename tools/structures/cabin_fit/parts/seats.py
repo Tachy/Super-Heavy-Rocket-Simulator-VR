@@ -43,6 +43,23 @@ READ_SIGMA_PX = 2.0  # [E] one edge read (KSC, 7-row profile); crew1_1 1.5 px ed
 FRAME_ROWS = {"foot": (305.0, 542.0, 645.0, 892.0), "knee": (350.0, 520.0, 655.0, 845.0)}
 FRAME_READ_SIGMA_PX = 5.0  # [E] the rails' outer edge on the 1200 px JPEG (dark carbon against the boots / floor)
 RAIL_WIDTH_PX = (12.0, 15.0)  # crew1_1: the rail band at the foot end (px), at the foot-bar pitch
+# Fix round 1 (closed frame, armrests). Both hatch views look along the seats' symmetry plane: every direction in the X-Y plane (up the back,
+# chest normal, along the shin / foot) projects to the image vertical, so a vertical image extent is converted with the camera's px per metre
+# along the direction the part is built on, and lateral extents with the px per metre along Z; both scaled to the photo by the ratio of the
+# read seat pitch to the projected one (the seats' depth in the photo is not the table's). The seats sit INGRESS_SHIFT_M higher (+X) in both
+# photos (cockpit.md "Discrepancy with crew1_1": heads 0.33, foot rests 0.26); at that shift the projected armrests of s2 land on the KSC blocks
+# (centre rows 1223 vs read 1225).
+INGRESS_SHIFT_M = 0.30  # [E] +-0.10 (the sigma of the projection ratios is taken from 0.20 / 0.40)
+# crew1_1 px columns over the foot ends of s3 (380, 420, 460) and s2 (720, 760, 800): (the soles' lower edge = the plate's top face, seen nearly
+# edge-on: the first row of the dark sole band; the frame's closing bar's outer edge: its last dark row before the bright floor), luminance
+# column profiles (3 columns); the bar between them is 15 px (= the rail width: a round tube section)
+FRAME_END_COLS = {380: (677.5, 709.5), 420: (681.5, 710.5), 460: (679.5, 711.0), 720: (681.5, 714.5), 760: (686.0, 715.0), 800: (679.5, 715.5)}
+# KSC px, s2 (the image-right inner seat): its armrest blocks (short black padded blocks beside the pan under the forearms): the -Z block's outer
+# edges at row 1180 (the +Z block 2605 / 2685 at row 1200 is widened by its own depth along the chest normal, which projects sideways there),
+# top / bottom edge at column 1912 (the highlight on its rounded top, the dark contact line above the white pan side)
+ARMREST_KSC = {"left": 1885.0, "right": 1967.0, "top": 1165.0, "bottom": 1290.0, "plus_left": 2605.0, "plus_right": 2685.0}
+ARMREST_READ_SIGMA_PX = 4.0  # [E] soft dark-on-dark edges on the 3603 px photo
+ARMREST_THICK_M = 0.045  # [E] the block's thickness up the back (not seen apart from its length: both cameras see the X-Y plane edge-on); +-0.015
 
 
 def cockpit():
@@ -117,6 +134,82 @@ def frame_widths():
     return out
 
 
+def _photo_camera(photo_id):
+    from ..camera import Camera
+    rows = tomllib.loads((ROOT / "config" / "cockpits" / "photo_cameras.toml").read_text(encoding="utf-8"))["photo"]
+    return Camera.from_row(next(r for r in rows if r["id"] == photo_id))
+
+
+def _seat(ck, sid):
+    s = next(s for s in ck["seat"] if s["id"] == sid)
+    a = math.radians(s["back_angle_deg"])
+    axes = {"b": np.array([math.cos(a), -math.sin(a), 0.0]), "n": np.array([math.sin(a), math.cos(a), 0.0]), "z": np.array([0.0, 0.0, 1.0])}
+    return s, np.asarray(s["hip_m"], float), axes
+
+
+def _jac(cam, p, d):
+    """Pixel motion per metre along d at p (2-vector)."""
+    from ..camera import project
+    return (project((p + 1e-3 * d)[None], cam)[0] - project(p[None], cam)[0]) / 1e-3
+
+
+def _proj_x(cam, p):
+    from ..camera import project
+    return float(project(p[None], cam)[0][0])
+
+
+def frame_end(shift=INGRESS_SHIFT_M, ck=None):
+    """The leg-support frame's foot end below the plate's top face along -foot_rest_normal (outer edge of its closing bar), from crew1_1:
+    (metres, sigma of the read). The image-vertical px are converted with the camera's vertical px per metre along -normal at s2's plate, scaled
+    by the read foot-bar pitch / the projected s3-s2 plate pitch."""
+    ck = ck or cockpit()
+    cam = _photo_camera("crew1_1")
+    up = np.array([shift, 0.0, 0.0])
+    s2, _, _ = _seat(ck, "s2")
+    s3, _, _ = _seat(ck, "s3")
+    p2, p3 = np.asarray(s2["foot_rest_m"], float) + up, np.asarray(s3["foot_rest_m"], float) + up
+    read_pitch = 0.5 * (FRAME_ROWS["foot"][2] + FRAME_ROWS["foot"][3]) - 0.5 * (FRAME_ROWS["foot"][0] + FRAME_ROWS["foot"][1])
+    corr = read_pitch / abs(_proj_x(cam, p2) - _proj_x(cam, p3))
+    jv = abs(_jac(cam, p2, -np.asarray(s2["foot_rest_normal"], float))[1]) * corr
+    ext = [b - a for a, b in FRAME_END_COLS.values()]
+    return float(np.mean(ext) / jv), float(np.std(ext) / math.sqrt(len(ext)) / jv)
+
+
+def armrest(shift=INGRESS_SHIFT_M, ck=None):
+    """s2's armrest blocks in KSC: {"wide", "length", "out"} metres (width along Z; length along the chest normal with ARMREST_THICK_M up the
+    back taken out of the vertical extent; lateral centre beyond the seat's half width), each (value, read sigma). Scale: camera px per metre at
+    the block, x the read pitch (SHELL_GAP_KSC) / the projected s3-s2 pitch at the chest row."""
+    ck = ck or cockpit()
+    cam = _photo_camera(PHOTO)
+    up = np.array([shift, 0.0, 0.0])
+    s2, h2, ax = _seat(ck, "s2")
+    _, h3, _ = _seat(ck, "s3")
+    chest = ax["b"] * 0.40  # the shell rows 1000 / 1050 lie at the crew's chest
+    corr = SHELL_GAP_KSC[1] / abs(_proj_x(cam, h2 + chest + up) - _proj_x(cam, h3 + chest + up))
+    c_up, c_along, c_out = ck["seat_shape"]["armrest_centre_m"]
+    hw = 0.5 * s2["width_m"]
+    p = h2 + up + ax["b"] * c_up + ax["n"] * c_along - ax["z"] * (hw + c_out)  # the -Z block (image left)
+    jz = abs(_jac(cam, p, ax["z"])[0]) * corr
+    jn = abs(_jac(cam, p, ax["n"])[1]) * corr
+    jb = abs(_jac(cam, p, ax["b"])[1]) * corr
+    k = ARMREST_KSC
+    sig = ARMREST_READ_SIGMA_PX * math.sqrt(2)
+    wide = (k["right"] - k["left"]) / jz
+    length = ((k["bottom"] - k["top"]) - ARMREST_THICK_M * jb) / jn
+    half_sep = 0.25 * ((k["plus_left"] + k["plus_right"]) - (k["left"] + k["right"])) / jz
+    return {"wide": (float(wide), sig / jz), "length": (float(length), float(math.hypot(sig, 0.015 * jb) / jn)),
+            "out": (float(half_sep - hw), sig / jz)}
+
+
+def _with_shift(fn, key=None):
+    """(value at INGRESS_SHIFT_M, sigma: read sigma, the shift's +-0.1 spread, the pitch's relative tolerance) of a shift-dependent read."""
+    def pick(r):
+        return r if key is None else r[key]
+    v, s = pick(fn(INGRESS_SHIFT_M))
+    lo, hi = pick(fn(INGRESS_SHIFT_M - 0.1))[0], pick(fn(INGRESS_SHIFT_M + 0.1))[0]
+    return v, math.sqrt(s * s + (0.5 * abs(hi - lo)) ** 2 + (v * PITCH_SIGMA_M / PITCH_M) ** 2)
+
+
 def table():
     """The [seat_shape] values in metres with sigma (ratio sigma and the pitch's own tolerance combined)."""
     out = {}
@@ -127,6 +220,9 @@ def table():
     out["seat_gap_m"] = (g * PITCH_M, math.hypot(sg * PITCH_M, g * PITCH_SIGMA_M))
     for end, (r, s) in frame_widths().items():
         out[f"frame_{end}_m"] = (r * PITCH_M, math.hypot(s * PITCH_M, r * PITCH_SIGMA_M))
+    out["frame_end_m"] = _with_shift(lambda s: frame_end(s))
+    for key in ("wide", "length", "out"):
+        out[f"armrest_{key}_m"] = _with_shift(lambda s: armrest(s), key)
     return out
 
 

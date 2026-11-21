@@ -536,13 +536,16 @@ func _define_fidelity_shots() -> void:
 ## composed side by side (left | right eye) into closeup_eye_stereo / closeup_back_stereo.
 const STEREO_IPD_M := 0.064
 const CLOSEUP_SHOTS := ["closeup_eye", "closeup_back", "closeup_tray", "closeup_tray_r", "closeup_tablet", "closeup_recess", "closeup_seat",
-		"closeup_seat_legs", "closeup_figure"]
+		"closeup_seat_legs", "closeup_seat_frame", "closeup_figure"]
 ## fidelity Task 8: the empty outer seat s1 seen from in front (camera SEAT_CLOSEUP_FROM in its seat frame: up the back, chest normal, lateral), its
 ## back / headrest wings and its leg support; the pilot figure's (s3) helmet / neck ring and shoulder at SEAT_FIGURE_CLOSEUP_M from the commander's
 ## eye side (the crack check of the figure meshes)
 const SEAT_CLOSEUP_FROM := Vector3(0.45, 0.85, -0.15)
 const SEAT_CLOSEUP_TARGET := Vector3(0.45, 0.05, 0.0)
 const SEAT_LEGS_TARGET := Vector3(-0.35, 0.42, 0.0)
+## fix round 1: the leg-support U-frame's foot end (closing bar under the plate) from low on the hatch side of s1, crew hidden
+const SEAT_FRAME_FROM := Vector3(-0.95, 1.05, -0.35)
+const SEAT_FRAME_TARGET := Vector3(-0.55, 0.45, 0.0)
 const SEAT_FIGURE_CLOSEUP_M := 0.6
 const TABLET_CLOSEUP_M := 0.5  ## fidelity Task 7: the left iPad from this far, on the line to the commander's eye
 ## fidelity Task 7: the left recess bevel (the crew's right, -Z) beside the console end, seen from the hatch side of the cabin
@@ -575,6 +578,7 @@ func _define_console_closeup_shots(eye: Transform3D) -> void:
 	var at1 := func(q: Vector3) -> Vector3: return Vector3(f1[0]) + Vector3(f1[1]) * q.x + Vector3(f1[2]) * q.y + Vector3(0.0, 0.0, 1.0) * q.z
 	views.append(["closeup_seat", at1.call(SEAT_CLOSEUP_FROM), at1.call(SEAT_CLOSEUP_TARGET), 70.0, Vector3(f1[1]), true])
 	views.append(["closeup_seat_legs", at1.call(SEAT_CLOSEUP_FROM), at1.call(SEAT_LEGS_TARGET), 70.0, Vector3(f1[1]), true])
+	views.append(["closeup_seat_frame", at1.call(SEAT_FRAME_FROM), at1.call(SEAT_FRAME_TARGET), 70.0, Vector3(f1[1]), true])
 	var f3: Array = seat_frames["s3"]
 	var neck := Vector3(f3[0]) + Vector3(f3[1]) * 0.66 + Vector3(f3[2]) * 0.14 + Vector3(0.0, 0.0, 0.08)  # helmet's lower edge, neck ring, left shoulder
 	views.append(["closeup_figure", neck + (eye.origin - neck).normalized() * SEAT_FIGURE_CLOSEUP_M, neck, 45.0, Vector3(f3[1])])

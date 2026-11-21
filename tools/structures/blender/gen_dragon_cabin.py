@@ -309,8 +309,9 @@ class Panel:
 
 def build_seat(seat, shape, pan_raise_deg=0.0):
     """(shell, pad, rest) of one seat (fidelity Task 8, seat_shape): the moulded black cushion body with its shoulder and headrest wings (`pad`),
-    the white outer shell and pan side panels (`shell`), the carbon leg support (two rails and the foot plate under the soles at the seat's
-    foot_rest_m) and the armrests (`rest`), all on the seat atlas (cabin_textures.bake_seat; seat_shape.SEAT_CHARTS)."""
+    the black padded armrest blocks (`pad`), the white outer shell and pan side panels (`shell`), the carbon leg support (one closed U-frame
+    from the knee end around under the soles, and the foot plate at the seat's foot_rest_m; `rest`), all on the seat atlas
+    (cabin_textures.bake_seat; seat_shape.SEAT_CHARTS)."""
     n, b, z = seat_axes(seat["back_angle_deg"])
     hip = V(seat["hip_m"])
 
