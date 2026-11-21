@@ -32,15 +32,7 @@ extends SceneTree
 const FRAMES_TO_SETTLE := 10
 const SHOT_SETTLE_FRAMES := 40
 const NEAR_M := 0.04
-## GoPro fit (docs/subsystems/cockpit.md "Shot cameras"): position, forward and right (capsule frame), equidistant fisheye focal
-## length in px / rad on the 4128 x 2322 photo (the output scales it by 1600 / 4128).
-## Round 4: the fit is relative to the screens (0.61 m along their normal, 0.23 m along their up from the centre screen centre), so it moved
-## rigidly with the console block (rotated 10 deg about Z, centre screen centre (2.671, 0.050) -> (2.512, -0.043)).
-const GOPRO_POS := Vector3(2.2437, -0.6322, -0.0251)
-const GOPRO_FORWARD := Vector3(0.32649, 0.94528, 0.00729)
-const GOPRO_RIGHT := Vector3(-0.02409, 0.01602, -0.99958)
-const GOPRO_F_PX := 2085.47
-const GOPRO_PHOTO_SIZE := Vector2(4128.0, 2322.0)
+## GoPro and hatch cameras: config/cockpits/photo_cameras.toml (rows discovery2 and crew1_1, fits in docs/subsystems/cockpit.md "Shot cameras"); the output is 1600 px wide.
 const GOPRO_OUT_SIZE := Vector2i(1600, 900)
 const GOPRO_RENDER_FOV := 140.0  # rectilinear, covers the fisheye frame's corners (65 deg off axis)
 ## [call] Field key of the white cabin (Atmosphere.field_key; 0.18 = the default grey world): the wall reads ~0.85-0.9 sRGB as in the photos.
@@ -48,11 +40,6 @@ const CABIN_FIELD_KEY := 1.2
 const RENDER_SIZE := Vector2i(2560, 1440)
 ## Edge overlay of the fidelity sheets: our shot's luminance gradient (|dx| + |dy| over 2 px, 0..1) above this is drawn red.
 const EDGE_THRESHOLD := 0.12
-## crew1_1 camera, round 4 joint fit (docs/subsystems/cockpit.md "Fix round 4"): position, pitch above level, vertical fov of the 1200 x 800 photo
-## (f 536 px: 96.4 x 73.4 deg); residual 1-8 px on windows, helmets, console back and ceiling.
-const HATCH_POS := Vector3(1.839, 1.454, 0.013)
-const HATCH_PITCH_DEG := 8.2
-const HATCH_VFOV := 73.4
 ## pilot_eye: looks from the eye toward the middle of the screen row as the commander sees it (0.15 m to the commander's side of the centre screen centre).
 const PILOT_AIM_LATERAL_M := 0.15
 const PILOT_FOV := 105.0
@@ -71,6 +58,7 @@ var _wait := 0
 var _cockpit: CockpitView
 var _out_dir := ""
 var _refs_dir := ""
+var _hatch_vfov := 0.0  # crew1_1 row: vertical field of the hatch shots
 var _pointer: ConsolePointer
 
 
@@ -213,7 +201,7 @@ func _shoot() -> bool:
 	var image := root.get_viewport().get_texture().get_image()
 	image.convert(Image.FORMAT_RGB8)
 	if shot.has("fisheye"):
-		image = _fisheye(image, shot.get("fisheye_f_px", GOPRO_F_PX), shot.get("fisheye_photo_size", GOPRO_PHOTO_SIZE), shot.get("fisheye_out_size", GOPRO_OUT_SIZE))
+		image = _fisheye(image, shot["fisheye_f_px"], shot["fisheye_photo_size"], shot["fisheye_out_size"])
 	elif shot.has("crop_aspect"):
 		var width := roundi(image.get_height() * float(shot["crop_aspect"]))
 		image = image.get_region(Rect2i((image.get_width() - width) / 2, 0, width, image.get_height()))
@@ -239,11 +227,9 @@ func _shoot() -> bool:
 
 func _define_shots() -> void:
 	var eye := _cockpit.config.eye
-	var gopro_up := (-GOPRO_FORWARD).cross(GOPRO_RIGHT).normalized()
-	var gopro_basis := Basis(GOPRO_RIGHT, gopro_up, -GOPRO_FORWARD)
-	# hatch: looks along -Y (toward the seat row), image up = +X (toward the forward tunnel), image right = +Z
-	var pitch := deg_to_rad(HATCH_PITCH_DEG)
-	var hatch_basis := Basis(Vector3(0.0, 0.0, 1.0), Vector3(cos(pitch), sin(pitch), 0.0), Vector3(-sin(pitch), cos(pitch), 0.0))
+	# the hatch (crew1_1) and GoPro (discovery2) cameras come from config/cockpits/photo_cameras.toml (single source of the fitted poses)
+	var hatch := _row_pose(_photo_row("crew1_1"))
+	_hatch_vfov = _row_vfov_deg(_photo_row("crew1_1"))
 	var centre_screen: Dictionary = _cockpit.config.screens["centre"]
 	var aim: Vector3 = centre_screen["centre"] + Vector3(0.0, 0.0, PILOT_AIM_LATERAL_M)
 	var pilot := Transform3D(Basis.looking_at(aim - eye.origin, eye.basis.y), eye.origin)
@@ -276,13 +262,13 @@ func _define_shots() -> void:
 		_define_fidelity_shots()
 		return
 	if _args.has("hand"):
-		_define_hand_shots(eye, pilot, hatch_basis)
+		_define_hand_shots(eye, pilot, hatch)
 		return
 	if _args.has("body"):
 		_define_body_shots(s3)
 		return
 	if _args.has("hotas"):
-		_define_hotas_shots(eye, hatch_basis)
+		_define_hotas_shots(eye, hatch)
 		return
 	if _args.has("shoulder"):
 		_define_shoulder_shots()
@@ -302,7 +288,7 @@ func _define_shots() -> void:
 			var cam := c2 + (chest2 * cos(az) + Vector3(0.0, 0.0, 1.0) * sin(az)) * float(view[2]) + up2 * 0.1
 			_shots.append({"name": view[0], "local": Transform3D(Basis.looking_at(c2 - cam, up2), cam), "fov": float(view[3]), "hide_exterior": false,
 					"isolate": true, "isolate_seat": "s2", "hide_head": false})
-		_shots.append({"name": "helmet_open_hatch", "local": Transform3D(hatch_basis, HATCH_POS), "fov": HATCH_VFOV, "keep_height": true, "crop_aspect": 1.5,
+		_shots.append({"name": "helmet_open_hatch", "local": hatch, "fov": _hatch_vfov, "keep_height": true, "crop_aspect": 1.5,
 				"hide_exterior": false, "hide_head": false})
 		for turn: Array in [["pilot_eye", 0.0, 0.0], ["pilot_eye_up", 0.0, 35.0], ["pilot_eye_left", 70.0, 0.0], ["pilot_eye_right", -70.0, 0.0], ["pilot_eye_down", 0.0, -45.0]]:
 			var b := pilot.basis.rotated(eye.basis.y.normalized(), deg_to_rad(float(turn[1])))
@@ -312,9 +298,9 @@ func _define_shots() -> void:
 	var rest: Array = [
 		{"name": "helmet_closeup", "local": Transform3D(Basis.looking_at(helmet_c - helmet_cam, up_back), helmet_cam), "fov": 48.0, "hide_exterior": false, "isolate": true},
 		{"name": "pilot_eye", "local": pilot, "fov": PILOT_FOV, "field_key": PILOT_FIELD_KEY},
-		{"name": "gopro_discovery2", "local": Transform3D(gopro_basis, GOPRO_POS), "fov": GOPRO_RENDER_FOV, "fisheye": true},
+		_fisheye_shot("gopro_discovery2", _photo_row("discovery2")),
 		# [E] crew1_1 (docs/subsystems/cockpit.md "Fix round 4"): the fitted camera, 3:2
-		{"name": "hatch_crew1_1", "local": Transform3D(hatch_basis, HATCH_POS), "fov": HATCH_VFOV, "keep_height": true,
+		{"name": "hatch_crew1_1", "local": hatch, "fov": _hatch_vfov, "keep_height": true,
 				"crop_aspect": 1.5, "hide_exterior": false, "hide_head": false},
 	]
 	_shots.assign(helmet_views + rest)
@@ -342,7 +328,7 @@ func _define_shots() -> void:
 
 
 ## Task 8: the pointer sequences. Ops per shot: ["goto", strip place id or "idle", frames], ["click"], ["wait", frames]; each frame is a 1/30 s step.
-func _define_hand_shots(eye: Transform3D, pilot: Transform3D, hatch_basis: Basis) -> void:
+func _define_hand_shots(eye: Transform3D, pilot: Transform3D, hatch: Transform3D) -> void:
 	_pointer = ConsolePointer.new()
 	_world.add_child(_pointer)
 	_pointer.setup(_cockpit.config, _cockpit, _world.screen_camera)
@@ -350,7 +336,6 @@ func _define_hand_shots(eye: Transform3D, pilot: Transform3D, hatch_basis: Basis
 	_pointer.vr_mode = true
 	_world.console_pointer.driven_externally = true
 	_world.screen_camera.render_always = true  # the free camera is no cockpit view: the feed renders anyway
-	var hatch := Transform3D(hatch_basis, HATCH_POS)
 	var places := [["left", "left"], ["camera_button", "camera_button"], ["centre", "centre"], ["key_cam3", "button:cam3"], ["right", "right"], ["key_far_right", "button:r_upper_5"]]
 	_shots.clear()
 	_shots.append({"name": "hand_eye_00_idle", "local": pilot, "fov": PILOT_FOV, "field_key": PILOT_FIELD_KEY, "pointer_ops": [["wait", 20]], "settle": 8})
@@ -367,13 +352,13 @@ func _define_hand_shots(eye: Transform3D, pilot: Transform3D, hatch_basis: Basis
 		for k in 5:
 			_shots.append({"name": "hand_eye_%02d_%s_tap" % [n, place[0]], "local": pilot, "fov": PILOT_FOV, "field_key": PILOT_FIELD_KEY, "pointer_ops": [["wait", 2]], "settle": 4})
 			n += 1
-		_shots.append({"name": "hand_hatch_%s" % place[0], "local": hatch, "fov": HATCH_VFOV, "keep_height": true, "crop_aspect": 1.5, "hide_exterior": false,
+		_shots.append({"name": "hand_hatch_%s" % place[0], "local": hatch, "fov": _hatch_vfov, "keep_height": true, "crop_aspect": 1.5, "hide_exterior": false,
 				"hide_head": false, "pointer_ops": [["wait", 20]], "settle": 8})
 
 
 ## Task 9: the commander with the HOTAS props: from the pilot's eye (looking down at the hands), from the hatch, and the stick / lever deflected
 ## (hotas_axes = [pitch, roll, yaw, throttle]); the hands ride the props (pointer "goto idle").
-func _define_hotas_shots(eye: Transform3D, hatch_basis: Basis) -> void:
+func _define_hotas_shots(eye: Transform3D, hatch: Transform3D) -> void:
 	_pointer = ConsolePointer.new()
 	_world.add_child(_pointer)
 	_pointer.setup(_cockpit.config, _cockpit, _world.screen_camera)
@@ -382,15 +367,14 @@ func _define_hotas_shots(eye: Transform3D, hatch_basis: Basis) -> void:
 	_world.console_pointer.driven_externally = true
 	var grip: Vector3 = eye.origin + CockpitConfig._vec(_cockpit.config.hotas["stick_grip_m"])
 	var down_aim := Transform3D(Basis.looking_at(grip - eye.origin, eye.basis.y), eye.origin)
-	var hatch := Transform3D(hatch_basis, HATCH_POS)
 	var idle := [["goto", "idle", 0], ["wait", 40]]
 	_shots.clear()
 	_shots.append({"name": "hotas_eye_down", "local": down_aim, "fov": 100.0, "hide_exterior": true, "pointer_ops": idle, "hotas_axes": [0.0, 0.0, 0.0, 0.5], "settle": 50})
 	_shots.append({"name": "hotas_eye_forward", "local": Transform3D(Basis.looking_at(_cockpit.config.screens["centre"]["centre"] - eye.origin, eye.basis.y), eye.origin),
 			"fov": 100.0, "hide_exterior": true, "pointer_ops": idle, "hotas_axes": [0.0, 0.0, 0.0, 0.5], "settle": 50})
-	_shots.append({"name": "hotas_hatch", "local": hatch, "fov": HATCH_VFOV, "keep_height": true, "crop_aspect": 1.5, "hide_exterior": false, "hide_head": false,
+	_shots.append({"name": "hotas_hatch", "local": hatch, "fov": _hatch_vfov, "keep_height": true, "crop_aspect": 1.5, "hide_exterior": false, "hide_head": false,
 			"pointer_ops": idle, "hotas_axes": [0.0, 0.0, 0.0, 0.5], "settle": 50})
-	_shots.append({"name": "hotas_hatch_deflected", "local": hatch, "fov": HATCH_VFOV, "keep_height": true, "crop_aspect": 1.5, "hide_exterior": false, "hide_head": false,
+	_shots.append({"name": "hotas_hatch_deflected", "local": hatch, "fov": _hatch_vfov, "keep_height": true, "crop_aspect": 1.5, "hide_exterior": false, "hide_head": false,
 			"pointer_ops": idle, "hotas_axes": [0.8, -0.6, 0.0, 1.0], "settle": 50})
 
 
@@ -477,6 +461,31 @@ func _define_shoulder_shots() -> void:
 					"pointer_ops": again, "settle": 12, "keep_height": true, "crop_aspect": 1.2})
 
 
+func _photo_row(id: String) -> Dictionary:
+	var rows: Array = TomlLite.load_file(Paths.config_dir().path_join("cockpits/photo_cameras.toml")).get("photo", [])
+	for row: Dictionary in rows:
+		if String(row["id"]) == id:
+			return row
+	push_error("cockpit_shots: no row '%s' in config/cockpits/photo_cameras.toml" % id)
+	quit(1)
+	return {"id": id, "position_m": [0.0, 0.0, 0.0], "forward": [0.0, 0.0, -1.0], "up": [0.0, 1.0, 0.0], "size_px": [1.0, 1.0], "fov_h_deg": 90.0}
+
+
+## Camera transform of a photo row (capsule frame): looks along forward, image up = up, image right = forward x up.
+func _row_pose(row: Dictionary) -> Transform3D:
+	var position := Vector3(row["position_m"][0], row["position_m"][1], row["position_m"][2])
+	var forward := Vector3(row["forward"][0], row["forward"][1], row["forward"][2]).normalized()
+	var up := Vector3(row["up"][0], row["up"][1], row["up"][2]).normalized()
+	var right := forward.cross(up).normalized()
+	return Transform3D(Basis(right, right.cross(forward).normalized(), -forward), position)
+
+
+## Vertical field (deg) of a pinhole row from its horizontal field and the photo's aspect.
+func _row_vfov_deg(row: Dictionary) -> float:
+	var fov_h := deg_to_rad(float(row["fov_h_deg"]))
+	return rad_to_deg(2.0 * atan(tan(fov_h * 0.5) * float(row["size_px"][1]) / float(row["size_px"][0])))
+
+
 ## --fidelity: one shot fid_<id> per row of config/cockpits/photo_cameras.toml, rendered from the row's camera at the photo's framing
 ## (pinhole: the photo's aspect, keep height; fisheye_equidistant: rectilinear 140 deg remapped to the fisheye at width 1600).
 func _fidelity_rows() -> Array:
@@ -487,21 +496,28 @@ func _fidelity_rows() -> Array:
 	return rows
 
 
+## Shot of a fisheye_equidistant row: rectilinear GOPRO_RENDER_FOV remapped (r = f theta) to the photo's framing at the output width 1600.
+## A row whose corner lies beyond the render field cannot be filled: it prints a warning and the edges render black.
+func _fisheye_shot(shot_name: String, row: Dictionary) -> Dictionary:
+	var size := Vector2(float(row["size_px"][0]), float(row["size_px"][1]))
+	var fov_h := deg_to_rad(float(row["fov_h_deg"]))
+	var f_px := size.x * 0.5 / (fov_h * 0.5)
+	var corner_deg := rad_to_deg(size.length() * 0.5 / f_px)
+	if corner_deg > GOPRO_RENDER_FOV * 0.5:
+		push_warning("cockpit_shots: photo '%s' fisheye corner %.1f deg off axis exceeds the %.0f deg render field: the edges render black"
+				% [row["id"], corner_deg, GOPRO_RENDER_FOV * 0.5])
+	return {"name": shot_name, "local": _row_pose(row), "fov": GOPRO_RENDER_FOV, "fisheye": true, "fisheye_f_px": f_px, "fisheye_photo_size": size,
+			"fisheye_out_size": Vector2i(GOPRO_OUT_SIZE.x, roundi(GOPRO_OUT_SIZE.x * size.y / size.x))}
+
+
 func _define_fidelity_shots() -> void:
 	_shots.clear()
 	for row: Dictionary in _fidelity_rows():
-		var position := Vector3(row["position_m"][0], row["position_m"][1], row["position_m"][2])
-		var forward := Vector3(row["forward"][0], row["forward"][1], row["forward"][2]).normalized()
-		var up := Vector3(row["up"][0], row["up"][1], row["up"][2]).normalized()
-		var right := forward.cross(up).normalized()
-		var basis := Basis(right, right.cross(forward).normalized(), -forward)
 		var size := Vector2(float(row["size_px"][0]), float(row["size_px"][1]))
 		var fov_h := deg_to_rad(float(row["fov_h_deg"]))
-		var shot := {"name": "fid_" + String(row["id"]), "local": Transform3D(basis, position), "hide_exterior": false, "hide_head": false}
+		var shot := {"name": "fid_" + String(row["id"]), "local": _row_pose(row), "hide_exterior": false, "hide_head": false}
 		if String(row["model"]) == "fisheye_equidistant":
-			var f_px := size.x * 0.5 / (fov_h * 0.5)  # r = f theta
-			shot.merge({"fov": GOPRO_RENDER_FOV, "fisheye": true, "fisheye_f_px": f_px, "fisheye_photo_size": size,
-					"fisheye_out_size": Vector2i(GOPRO_OUT_SIZE.x, roundi(GOPRO_OUT_SIZE.x * size.y / size.x))})
+			shot.merge(_fisheye_shot(shot["name"], row))
 		else:
 			var fov_v := 2.0 * atan(tan(fov_h * 0.5) * size.y / size.x)
 			shot.merge({"fov": rad_to_deg(fov_v), "keep_height": true, "crop_aspect": size.x / size.y})
