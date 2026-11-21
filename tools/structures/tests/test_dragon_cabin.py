@@ -514,3 +514,47 @@ def test_generated_posts_reach_the_ceiling(spec, nodes):
     c = spec["cockpit"]
     top_x = max(p[0] for p in nodes["console_back"]["pos"])
     assert abs(top_x - c["cabin"]["ceiling_x_m"]) <= POST_END_TOL_M
+
+
+def _ring_outer(cab):
+    return cab["profile_m"][next(i for i, (x, r) in enumerate(cab["profile_m"]) if x == cab["ceiling_x_m"])][1]
+
+
+def test_post_collars_stay_inside_the_ceiling_ring(spec, nodes):
+    """The joint heads (collars) where the posts enter the ceiling stay on the flat ring: their outer radius, not just the post's centre,
+    lies inside the ring's outer radius (fix round 1: at post top r 0.981 + head 0.039 the collar poked ~2 cm through the wall)."""
+    c = spec["cockpit"]
+    cab, con = c["cabin"], c["console"]
+    ring_outer = _ring_outer(cab)
+    for _, top in cl.console_posts(c):
+        assert math.hypot(top[1], top[2]) + con["post_head_radius_m"] <= ring_outer
+    head = [p for p in nodes["console_back"]["pos"] if p[0] >= cab["ceiling_x_m"] - 2.0 * con["post_head_length_m"]]
+    assert head, "the collars are in console_back"
+    assert max(math.hypot(p[1], p[2]) for p in head) <= ring_outer + 1e-4  # float32 file
+
+
+def test_console_frame_follows_tilt_deg(spec):
+    """The generator's console axes come from tilt_deg; a tilt_deg that disagrees with the centre screen is refused."""
+    c = spec["cockpit"]
+    t = math.radians(c["console"]["tilt_deg"])
+    frame = cl.console_frame(c)
+    assert frame["up"] == pytest.approx([math.cos(t), -math.sin(t), 0.0], abs=1e-12)
+    assert frame["normal"] == pytest.approx([-math.sin(t), -math.cos(t), 0.0], abs=1e-12)
+    broken = json.loads(json.dumps(c))
+    broken["console"]["tilt_deg"] += 2.0 * TILT_TOL_DEG
+    with pytest.raises(ValueError):
+        cl.console_frame(broken)
+
+
+def test_generated_console_front_is_square_to_tilt_deg(spec, nodes):
+    """The built housing's front face is one plane square to the tilt_deg normal: its vertices within 1 mm of the front plane span the
+    body's width and more than 0.3 m up the console (a body tilted 1 deg off would fan 5 mm over that height)."""
+    c = spec["cockpit"]
+    frame = cl.console_frame(c)
+    n, up, right = frame["normal"], frame["up"], frame["right"]
+    pts = nodes["console_housing"]["pos"]
+    on = [p for p in pts if sum(a * b for a, b in zip(p, n)) >= max(sum(a * b for a, b in zip(q, n)) for q in pts) - 1e-3]
+    span_up = [sum(a * b for a, b in zip(p, up)) for p in on]
+    span_lat = [sum(a * b for a, b in zip(p, right)) for p in on]
+    assert max(span_up) - min(span_up) > 0.3
+    assert max(span_lat) - min(span_lat) > c["console"]["width_m"] - 2.0 * c["console"]["edge_radius_m"] - 1e-3

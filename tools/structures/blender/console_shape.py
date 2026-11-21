@@ -11,7 +11,7 @@ import math
 WELD_DIGITS = 9  # vertices closer than 1e-9 m are one vertex
 
 
-def _weld(points, quads):
+def _weld(quads):
     index, verts, faces = {}, [], []
     for q in quads:
         f = []
@@ -63,7 +63,7 @@ def rounded_box(w, h, d, r, segments):
                 for j in range(len(l2) - 1):
                     q = [grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]]  # normal +e_k (t1 x t2 = k)
                     quads.append(q if s > 0 else q[::-1])
-    return _weld([], quads)
+    return _weld(quads)
 
 
 def interp(table, x):
@@ -143,4 +143,4 @@ def post(base, top, r, head_r, head_len, sides, foot=None, top_plane_normal=None
         j = (i + 1) % sides
         quads.append([c0, rings[0][j], rings[0][i]])
         quads.append([c1, rings[-1][i], rings[-1][j]])
-    return _weld([], quads)
+    return _weld(quads)

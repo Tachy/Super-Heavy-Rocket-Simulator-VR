@@ -1,0 +1,43 @@
+# discovery10 (4128 x 2322, GoPro fisheye between the heads toward the screens; fidelity Task 4 fix round 1): screen glass corners and the
+# console's front bottom edge. A frame from the same fixed GoPro mount as discovery2: the corners agree with discovery2 within 2-12 px and the
+# front bottom edge's column profiles within 2-4 px, so this is not an independent view. New against discovery2: the right screen's bottom right
+# corner (the visor hides it there). Hidden here: the left screen's top left (helmet), the right screen's top right (at the visor's edge).
+# Read on 1.4-1.5x zoom tiles with a 25 px grid (the screens' bottom toolbar row belongs to the active area: the glass edge is below it) and
+# column intensity profiles (front bottom edge: the step from the dark housing to the light wall, mid-ramp).
+# Labels: model points of cabin_fit/parts/console.py (tl = the crew's left, top).
+sigma_px = 6.0
+
+[[point]]
+label = "scr_left_tr"
+px = [1219.0, 675.0]
+[[point]]
+label = "scr_left_br"
+px = [1327.0, 1297.0]
+[[point]]
+label = "scr_left_bl"
+px = [531.0, 1296.0]
+[[point]]
+label = "scr_centre_tl"
+px = [1358.0, 656.0]
+[[point]]
+label = "scr_centre_tr"
+px = [2612.0, 611.0]
+[[point]]
+label = "scr_centre_br"
+px = [2570.0, 1253.0]
+[[point]]
+label = "scr_centre_bl"
+px = [1452.0, 1288.0]
+[[point]]
+label = "scr_right_tl"
+px = [2760.0, 619.0]
+[[point]]
+label = "scr_right_bl"
+px = [2706.0, 1250.0]
+[[point]]
+label = "scr_right_br"
+px = [3532.0, 1205.0]
+
+[[edge]]
+label = "front_bottom"    # mid-ramp of the dark -> light step under the button modules (column profiles at u 700 / 1100 / 1700 / 2300 / 3000)
+px = [[700.0, 1615.0], [1100.0, 1642.0], [1700.0, 1642.0], [2300.0, 1628.0], [3000.0, 1593.0]]

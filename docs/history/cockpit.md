@@ -87,3 +87,13 @@ armrests, palms down (it read as a shrug in the hatch shots); hands were boxes o
   Lamp strips 12 mm inside the back edge. Task 4 showed the posts lean back toward the crew to the ring's rim and the body is 0.205 deep and 1.40 wide.
 - `photo_cameras.toml` round-4 rows: crew1_1 (1.839, 1.454, 0.013), forward (0.14263, -0.98978, 0), fov_h 96.449 [E]; discovery2 (2.2437, -0.6322, -0.0251),
   forward (0.32649, 0.94528, 0.00729), up (0.94491, -0.32614, -0.02800), fov_h 113.412 [E] (rms 20 px).
+
+## Console values of fidelity Task 4 before its fix round 1 (2026-11-21)
+- `[console]` as Task 4 built it: centre_m (2.5083, -0.0393, 0) [D], width_m 1.40 [D] (crew1_1 back_end points, which lie on the recess contour), height_m 0.540
+  [D] (u_top 0.265 prior + u_bot -0.2754), hood_depth_m 0.205 +-0.021, underside_profile [[0, 0], [0.205, 0.022]] [D], strut_z_m +-0.549, post_top_m (-0.632, 0.751)
+  (r 0.981, prior-dominated: the collar poked ~2 cm through the wall at the ring's rim), post_foot_m (0.022, 0.069, 0.050, 0.319) [D]. Fix round 1 tags every
+  value by `constrained_by_data` ([E] where prior-held or unseen), adds discovery10, holds the top radius at 0.945 (collar inside the ring) and refits.
+- Lamp strips: in front of the back lip's fillet at lateral (0.10, 0.36), (0.42, 0.56) m: 15-18 px of 800 under and the outer ones ~60 px outside the photo's.
+- `photo_cameras.toml` Task 4 rows: crew1_1 (1.8568, 1.4261, 0.0047), forward (0.17176, -0.98513, 0.00301), fov_h 96.615; discovery2 (2.2102, -0.6497, -0.0327),
+  forward (0.35901, 0.93322, 0.01485), fov_h 114.972.
+- Docs claim then: "render from the fitted camera lies on the photo" with 1.33 / 5.60 px rms; those were fit-model residuals, the body outline was not compared.

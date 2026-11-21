@@ -23,8 +23,9 @@ from ..fit import PartModel
 
 CEILING_X_M = 3.48  # [E] = crew_dragon.toml [cabin] ceiling_x_m (round 4): the posts end on this plane
 SCREEN_HALF_M = (0.198, 0.1145)  # [D] active area 0.382 x 0.215 (crew_dragon.toml [[screen]]) + 0.007 bezel: the glass outline the photos show
-PHOTOS = ("crew1_1", "discovery2")
-CAMERA_SIGMA = {"crew1_1": (0.05, 0.02, 0.02), "discovery2": (0.05, 0.035, 0.03)}  # [E] round 4 pose uncertainty (photo_cameras.toml rows)
+PHOTOS = ("crew1_1", "discovery2", "discovery10")
+# [E] round 4 pose uncertainty (photo_cameras.toml rows); discovery10 = another frame of discovery2's fixed GoPro mount, same prior
+CAMERA_SIGMA = {"crew1_1": (0.05, 0.02, 0.02), "discovery2": (0.05, 0.035, 0.03), "discovery10": (0.05, 0.035, 0.03)}
 
 
 class Console(PartModel):
@@ -116,7 +117,9 @@ def post_sizes(res):
 # As built (crew_dragon.toml [console]): parameters the data do not dominate keep the table's value (round 4 block placement and width,
 # the top edge; [E] call for the draft: the free fit reads -6 +- 10 deg); the "as built" fit holds them there (FIXED_SIGMA) so the
 # cameras written back to photo_cameras.toml and the residuals belong to the geometry the generator builds.
-AS_BUILT = {"cx": 2.512, "cy": -0.043, "tilt_deg": 45.0, "width_m": 1.40, "u_top": 0.265, "side_draft_deg": 0.0}
+# post_top_r_m (prior-dominated, crew1_1 sees the top along its ray): 0.945 keeps the collar's flush cut (an ellipse on the ceiling plane, its
+# outer point ~0.049 m past the top) inside the ring's outer radius 0.997 (fix round 1, review: the collar poked ~2 cm through the wall at 0.981).
+AS_BUILT = {"cx": 2.512, "cy": -0.043, "tilt_deg": 45.0, "width_m": 1.40, "u_top": 0.265, "side_draft_deg": 0.0, "post_top_r_m": 0.945}
 FIXED_SIGMA = 1e-6
 
 

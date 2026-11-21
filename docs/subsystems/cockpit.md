@@ -35,11 +35,11 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 | Eye (s2) | [2.2857, -0.5945, 0.35] | D | centre screen centre + 0.55 along its normal + 0.23 along its up (discovery2 GoPro geometry, reach photos): 0.69 m to the centre screen centre | +-0.08 per axis |
 | Eye forward | (0.380, 0.925, 0): 22 deg above horizontal, 22.7 deg off the screen normal | D | straight ahead in the seat plane toward the screen plane | +-10 deg |
 | Screens | 0.382 x 0.215 m (16:9) | E | training2 finger scale (index finger ~0.072 m on the glass) 0.35-0.40 wide; aspect 1.76-1.88 measured | +-15 % |
-| Console placement | centre screen centre (2.512, -0.043, 0), normal (-0.707, -0.707, 0) (console up 45 deg from +X) | E | round 4 joint fit on crew1_1 (back lip (2.450, 0.229) and post bases, residual 2-7 px of 1200); every console item moved rigidly with it | +-0.06 m, +-4 deg |
+| Console placement | centre screen centre (2.512, -0.043, 0); `[console] centre_m` = that - 0.0062 along up (2.5076, -0.0386, 0) | E (block) / D (shift) | round 4 joint fit on crew1_1; the Task 4 free fit (crew1_1 + discovery2 + discovery10) reads (2.537, -0.032) +-0.029, within 1 sigma, block not moved; the 6.2 mm shift along up is the fitted u_bot (see Console body); every console item moved rigidly with round 4 | +-0.06 m, +-4 deg |
 | Screen layout | centre on the centre line, gap 0.020 (fix round 2, was 0.045), the three screens coplanar (console straight, fold_deg 0, user decision 2026-11-07) | S / D | user decision 2026-11-07 after photo check (discovery10 top-down, crew2_1, inspiration4_1: one straight front); gap discovery10 (90 / 780 px) | +-0.1 m, +-5 deg |
-| Console tilt | `tilt_deg` 45.0: up axis from +X toward -Y | D | = screens; Task 4 free fit 45.13 +-1.73 deg confirms round 4 (block not moved) | +-1.7 deg |
-| Console body | 1.40 x 0.540 m, back face 0.205 behind the screen plane, all edges filleted r 0.04, square sides, underside falls 0.022 to the back lip | D / E | Task 4 multi-view fit (crew1_1 + discovery2, "Console (fidelity Task 4)"): width +-0.04, height (u_bot) +-0.003, depth +-0.021, drop +-0.035 [D]; fillet r and draft [E] | see section |
-| Ceiling posts | bases Z +-0.549 on the body top, tops on the ceiling ring at (Y -0.632, Z +-0.751); rod r 0.017, collar r 0.039 x 0.04, sleeve r 0.022 x 0.069, funnel foot r 0.050 x 0.319 | D / E | Task 4 fit on crew1_1 (the only photo showing them): base Z +-0.008, top angle 50.0 +-1.6 deg [D], top radius 0.981 prior-dominated [E]; radii from px widths at the fitted distance | radii +-0.003-0.004, lengths +-50 % |
+| Console tilt | `tilt_deg` 45.0: up axis from +X toward -Y; the generator builds the body on it (`cabin_layout.console_frame`, refused if the centre screen differs > 0.5 deg) | D | Task 4 free fit 46.3 +-1.2 deg (data-constrained), built 45 within 1.1 sigma | +-1.2 deg |
+| Console body | 1.40 x 0.542 m, back face 0.221 behind the screen plane, all edges filleted r 0.04, square sides, underside falls 0.059 to the back lip | E / D | Task 4 fit ("Console (fidelity Task 4)"), tags by `constrained_by_data`: hood depth 0.221 +-0.011 and u_bot -0.2772 +-0.0021 [D]; width (lower bound, the crew1_1 ends lie on the recess contour), u_top 0.265, underside drop (0.059 +-0.036, crew1_1 lip only), fillet r, draft [E] | width +-0.06, u_top +-0.05, drop +-0.04, r +-0.02 |
+| Ceiling posts | bases Z +-0.555 on the body top, tops on the ceiling ring at (Y -0.579, Z +-0.747); rod r 0.017, collar r 0.039 x 0.04, sleeve r 0.022 x 0.066, funnel foot r 0.051 x 0.306 | D / E | Task 4 fit on crew1_1 (the only photo showing them): base Z +-0.008, top angle 52.2 +-0.7 deg, radii from px widths [D]; top radius 0.945 [E] (along crew1_1's ray; set so the collar stays inside the ring's outer radius 0.997), collar / sleeve / funnel lengths [E] | radii +-0.003-0.004, top radius +-0.03, lengths +-50 % |
 | Tablets | 0.1348 x 0.2032 m | S / E | Apple iPad mini spec; model assumed from the shape | - |
 | Button positions | rows 0.17 / 0.20 m below the screen centres | E | discovery10 x along the screens' lower edges (fisheye: fractions per screen) | +-0.02 along, +-0.03 across |
 | HOTAS grips | hip + 0.32 forward + 0.28 up the back = 0.09 m forward, 0.55 m below the eye (seat axes), +-0.25 / 0.27 lateral | E | armrest, forearm reach | calibrated in Task 9 |
@@ -303,28 +303,67 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
 
 ### Console (fidelity Task 4: suspension and body)
 - Fit: `tools/structures/cabin_fit/parts/console.py` (`Console` PartModel; `python -m cabin_fit.parts.console [--as-built]` from `tools/structures`), annotations
-  `cabin_fit/annotations/crew1_1.toml` (4 post points, 2 back-face ends, 4 edges: both rod axes, back top edge, silver lip edge; sigma 2 px) and
-  `discovery2.toml` (10 screen glass corners, the front bottom edge under the modules; sigma 6 px). Cameras with the round-4 pose as prior (0.05 m, 0.02 / 0.035 rad).
-  Free fit (block free): tilt 45.13 +-1.73 deg, hood 0.164 +-0.035, u_bot -0.2753 +-0.003, post Z 0.546 +-0.024, post top angle 50.5 +-1.9 deg [data]; block centre
-  (2.551, -0.003), width 1.354, draft -6 +-10 deg, u_top 0.255, post base depth 0.158, top radius 0.969 [prior-dominated]. As built (block, front width 1.32 -> body
-  1.40 square, u_top 0.265 held): hood 0.205 +-0.021, u_bot -0.2754 +-0.003, back drop 0.022 +-0.035, post Z 0.549 +-0.008, top angle 49.9 +-1.6 deg, top radius 0.981
-  +-0.026 [prior]; residuals crew1_1 1.33 px rms of 1200, discovery2 5.60 px rms of 4128 (round 4: 20 px). Both fitted cameras are written to `photo_cameras.toml` [D].
-- Findings: the posts are short (0.86 m) and lean from the body's back top edge up and back toward the crew's heads to the ceiling ring's rim (r ~0.98, collars at
-  the dish's lower edge in crew1_1), not vertical struts; a funnel foot (outboard flare in the photo, built round) and a sleeve sit on the body, a collar (joint
-  head) at the ceiling. discovery2 wants a screen pitch 0.456 m (gap ~0.048) and glass half width 0.204 (nuisance parameters of this fit, the screens are the
-  next task's; the table keeps 0.402 / 0.020).
+  `cabin_fit/annotations/crew1_1.toml` (4 post points, 2 back-face ends, 4 edges: both rod axes, back top edge, silver lip edge; sigma 2 px), `discovery2.toml`
+  (10 screen glass corners, the front bottom edge under the modules; sigma 6 px) and `discovery10.toml` (10 corners incl. the right screen's bottom right, the
+  front bottom edge; another frame of discovery2's fixed GoPro mount: corners within 2-12 px, edge profiles within 2-4 px, so not an independent view).
+  Cameras with the photo_cameras.toml rows as prior (0.05 m, 0.02 / 0.035 rad).
+  Free fit (block free): cx 2.537 +-0.029, cy -0.032 +-0.029, tilt 46.3 +-1.2 deg, hood 0.181 +-0.030, u_bot -0.2779 +-0.0022, back drop 0.091 +-0.068, post Z
+  0.547 +-0.022, top angle 50.2 +-1.8 deg [data-constrained]; width 1.344 +-0.046, draft -2 +-10 deg, u_top 0.270 +-0.046, post base depth 0.175, top radius
+  0.966 +-0.027 [not data-constrained]. As built (block, width 1.40, u_top 0.265, draft 0 and post top radius 0.945 held): hood 0.221 +-0.011, u_bot -0.2774
+  +-0.0021, back drop 0.059 +-0.036, post Z 0.555 +-0.008, post base depth 0.216 +-0.011 (built 0.199), top angle 52.2 +-0.7 deg; screen pitch 0.4547 +-0.0027,
+  glass half width 0.2025 +-0.0013 (nuisance parameters). The three fitted cameras are written to `photo_cameras.toml` [D] (Ruling A).
+- Fit-model residuals (the sharp-edged model on its own points, not the render): crew1_1 1.25 px rms of 1200 (post points <= 1.2 px, rod axes 0.2-0.5 px rms,
+  back top 0.7, lip 0.5, back_end points 3.7-4.3 px in v), discovery2 5.9 px rms of 4128 (corners <= 9 px, front bottom edge 11 px rms), discovery10 4.4 px
+  rms (corners <= 4.4 px, front bottom edge 8.6 px rms).
+- Render vs photo per feature (fid_* at the written cameras, render scaled to photo px; fix round 1):
+
+  | Feature | crew1_1 (px of 1200) | discovery2 / 10 (px of 4128) |
+  |---|---|---|
+  | Post rod axes (v 120-140) | 0-1 px (half-depth centres), widths 9 vs 8-10 px; sleeve at v 145: 1.5-2.5 px | not visible |
+  | Back top edge | render 172.2-173.1 vs photo 171 (annotated; column steps 171-175): +1..+2 px | not visible |
+  | Silver lip | no material step in the render (back face and fillet one grey): the built flat back face ends at v 221 (5.5 px above the photo lip 226.5), the 4 cm fillet runs down to v 244; the fit's sharp lip lies on it within 0.5 px | not visible |
+  | Lamp strips | v 226-231 vs 228-232 (<= 2 px); u 400-445 / 460-545 / 640-725 / 745-780 vs 406-434 / 466-546 / 642-734 / 742-786 (<= 6 px) | not visible |
+  | Body ends (outline) | v 176: -47 / -43 (render inside); v 190: -18 / -16; v 226: +30 / +31; v 240: +45 / +42; v 260: +49 / +48 (render outside; left / right, render 374-303 / 819-896 vs photo 327-352 / 862-838) | hidden by helmets |
+  | Underside | its lower edge is hidden by the helmets from v ~300 (render and photo both dark down to there) | back-facing from the crew side |
+  | Front bottom edge | not visible | render silhouette 28-49 px above the photo edge (u 700-3000) |
+  | Screens | not visible | the table row (pitch 0.402, half width 0.198) puts the outer screens' corners 87-143 px off, the centre screen 9-21 px |
+
+  So the posts, the back top edge and the lamps lie on the photo; the body outline does not. Open, carried to Task 7 (recess): the crew1_1 outline narrowing
+  downward is the contour of the white wall's trapezoid recess around the console; the recess panels must hide the render's lower body ends (+30..+49 px). Near
+  the top (v 176-190) the render is 16-47 px narrower than that contour, which an occluder cannot fix: the recess side walls must fill it, or the body is wider
+  at the top. Task 7's ledger check: re-run the crew1_1 overlay with the recess, confirm the ends are occluded, else refit the width and the end shape.
+  Open (edge radius, [E]): the photos' back lip and front bottom edge look sharper than the 4 cm fillet (lip: face end 5.5 px above, fillet to 18 px below;
+  front bottom: the fillet's silhouette 1-2 cm higher = 28-49 px); a per-edge radius (bottom edges <= 1 cm) would close both. Open (screens task): pitch
+  0.455 / half width 0.203 (discovery2 and discovery10 agree).
+- Underside photos, checked one by one (fix round 1); none constrains `underside_profile`, the width or the post foot:
+  - jsc2026e404725 (16 mm, f 1707 px known from EXIF): the console is 0.3-0.6 m from the lens and out of focus (edges 30-60 px wide); two screens are
+    visible, the near one with only its bottom right corner, the far one nearly edge-on (bl, tl, tr): 3-5 corners, which could place a camera, but no console
+    end, no post and no back edge is in the frame; the underside is seen only edge-on below the lower tray.
+  - jsc2025e064539 (24 mm, cropped: f unknown): same view, Crew-11 trainer state with a protruding grey module tray and a grab bar that the flight console
+    (crew1_1, discovery2/10) does not show; the underside's back edge is behind the tray, dark on dark.
+  - jsc2022e068643 / 068646 (no EXIF): the same pilot-side view up past the screens, defocused near screen, the far screen edge-on; the underside again only
+    beyond the tray. 068660 (50 mm): the console is a blurred band at the frame's top edge, no edge to read.
+  - nasatour_0242-0330 (video frames, unknown wide lens with distortion, motion blur): the module tray from below and the screens; no cabin-fixed point
+    for the lens, nothing behind the tray.
+  - Geometry: the underside's normal points toward -X +Y (the hatch side); from the crew side (eye about (2.45, -0.35)) it faces away, so only the hatch
+    view (crew1_1) sees it, and there its lower edge is behind the helmets. The underside shape stays [E]; a hatch-side photo below the helmets is needed.
+- Findings: the posts are short (0.83 m) and lean from the body's back top edge up and back toward the crew's heads to the ceiling ring's rim (collars at the
+  dish's lower edge in crew1_1), not vertical struts; a funnel foot (outboard flare in the photo, built round) and a sleeve sit on the body, a collar (joint
+  head) at the ceiling.
 - Generator: `blender/console_shape.py` (pure: `rounded_box(w, h, d, r, segments)` cube-sphere fillets, closed; `drop_underside`, `draft_sides`; `post(base, top, r,
-  head_r, head_len, sides, foot, top_plane_normal)` lathe, head cut flush on the ceiling plane), `cabin_layout.console_frame` / `console_posts`. Body faces are split
-  by direction into `console_housing` / `console_back` / `console_under` (same materials as before); lamp strips sit right in front of the back lip's fillet.
+  head_r, head_len, sides, foot, top_plane_normal)` lathe, head cut flush on the ceiling plane), `cabin_layout.console_frame` (axes from `tilt_deg`, checked against
+  the centre screen +-0.5 deg) / `console_posts`. Body faces are split by direction into `console_housing` / `console_back` / `console_under` (same materials as
+  before); the lamp strips lie on the back-bottom fillet 45 deg round from the underside (`UNDER_LAMP_FILLET_DEG`, on the fillet's chord, 1 mm sunk).
   FILLET_SEGMENTS 4, POST_SIDES 20; cabin 63,750 triangles. Tests: `test_console_shape.py` (closed, extents, volume, every vertex r from the inner box, post
-  radii / flush head), `test_dragon_cabin.py` (tilt = screens +-0.5 deg, posts end on the ceiling ring within 5 mm, generated posts reach the ceiling).
+  radii / flush head), `test_dragon_cabin.py` (tilt = screens +-0.5 deg, console_frame follows tilt_deg and refuses a mismatch, the built front face is one
+  plane square to it, posts end on the ceiling ring within 5 mm, the collars' outer radius inside the ring (config and mesh: max 0.9926 of 0.997), generated
+  posts reach the ceiling).
 - Not measurable from the photos ([E], listed for the user): the body's rear mount and a straight-below view (no photo), the front width (helmets / visors hide
-  the ends in discovery2), the fillet radius and the side draft, the post top's radius along crew1_1's ray, the collar length (seen end-on), the funnel / sleeve
-  lengths (foreshortened). jsc2026e404725 / jsc2025e064539 (side profile: dark housing on dark ground, no cabin-fixed points), discovery10, jsc2022e068643 /
-  646 / 660 and the T2 stills were checked but not fitted (no fixed cabin points to place a free camera; console shapes only qualitatively: rounded end caps in
-  nasatour_0320). The Hawthorne trainer was not used for the suspension.
-- Shots: `cockpit_shots.gd --console_closeup` (stereo pairs `closeup_eye_*`, `closeup_back_*` + `_stereo` sheets, IPD 64 mm).
-- GPU (stereo pimax, cockpit view): median 24.08 / 23.58 ms (two runs; baseline 24.43 / 23.41): no change.
+  the ends in discovery2/10), the fillet radius and the side draft, the post top's radius along crew1_1's ray, the collar length (seen end-on), the funnel /
+  sleeve lengths (foreshortened), the underside shape (above). The Hawthorne trainer was not used for the suspension.
+- Shots: `cockpit_shots.gd --console_closeup` (stereo pairs `closeup_eye_*`, `closeup_back_*` + `_stereo` sheets, IPD 64 mm); `--fidelity` now also renders
+  `fid_discovery10`.
+- GPU (stereo pimax, cockpit view, 120 frames): median 23.36 ms, p99 29.9 ms (fix round 1; Task 4: 24.08 / 23.58; baseline 24.43 / 23.41): no change.
 
 ## Camera mode and toggle
 State after plan Task 6 (code: `game/cockpit/cockpit_camera.gd`, `hotas_buttons.gd`, `World.toggle_cockpit`).
@@ -490,7 +529,7 @@ State after plan Task 8 (code: `game/cockpit/console_strip.gd`, `console_pointer
 ## Diagnostics
 - Cockpit shots: `game/tests/cockpit_shots.gd` (GPU, no `--headless`) with `--mission= --t_plus= --out_dir=` writing to `screenshots/m7-cockpit/<topic>/`; default = look shots
   (pilot_eye, gopro_discovery2, hatch_crew1_1, helmet_* with reference comparison sheets via `--refs=`), `--screen`, `--hand`, `--body`, `--hotas`, `--shoulder`, `--visor` (see the script header).
-- Fidelity shots (Task 1): `cockpit_shots.gd --fidelity [--photo=<ids>]` renders one shot `fid_<id>` per row of `config/cockpits/photo_cameras.toml` (the round 4 poses of crew1_1 and discovery2, tagged; fits write back here) at the photo framing, with `fid_<id>_vs` and `fid_<id>_overlay` (50 % blend + our Sobel edges in red) to `screenshots/m7-cockpit/fidelity/<task>/`. Every shot now shows the left screen feed (`render_always` and `UPDATE_ONCE` on the two frames before the capture; `cockpit_shots_feed_test.gd` measures the screen region, mean 0.64 against black). `render_check --webcast --mission=falcon9_crew_dragon --t_plus=-60 --cockpit` shows the cabin view.
+- Fidelity shots (Task 1): `cockpit_shots.gd --fidelity [--photo=<ids>]` renders one shot `fid_<id>` per row of `config/cockpits/photo_cameras.toml` (crew1_1, discovery2, discovery10: the Task 4 console fit poses, tagged; fits write back here) at the photo framing, with `fid_<id>_vs` and `fid_<id>_overlay` (50 % blend + our Sobel edges in red) to `screenshots/m7-cockpit/fidelity/<task>/`. Every shot now shows the left screen feed (`render_always` and `UPDATE_ONCE` on the two frames before the capture; `cockpit_shots_feed_test.gd` measures the screen region, mean 0.64 against black). `render_check --webcast --mission=falcon9_crew_dragon --t_plus=-60 --cockpit` shows the cabin view.
 - GPU baseline before the geometry tasks (2026-11-21, RTX 4090, cockpit view with the feed, `render_check ... --cockpit --stereo=res://tests/data/pimax_dream_air_projections.json --gpu_time=120`, 3534 x 2838 per eye): median 23.4 - 24.4 ms (two runs), p99 29.7 ms. Budget for the fidelity plan: > +2 ms vs this baseline is reported.
 - `Start-VR.cmd --hotas-nudge`: move the HOTAS props with Alt keys, each press prints the new `[hotas] *_grip_m` lines.
 - `godot --path game --script res://tests/joy_probe.gd -- --buttons --seconds=30`: prints the 0-based stick button indices for `config/input_hotas.toml [buttons]`.

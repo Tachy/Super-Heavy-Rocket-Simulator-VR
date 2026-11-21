@@ -54,8 +54,12 @@ RING_STEP_DEG = 3.0  # [E] segments of the ring light
 # [E] crew1_1 (round 4): two groups of light rectangles on the console's underside along its back lip, at u 400-500 and 640-790 px of the 350-855 px back
 # (1.32 m): lateral ranges from the centre (mirrored), and one strip's (width along the console normal, height under the underside, inset from the start of
 # the back lip's fillet: Task 4 crew1_1 shows the strips right under the lip, v 228-232 against the lip edge at 226.5 px)
-UNDER_LAMPS_LAT_M = ((0.10, 0.36), (0.42, 0.56))
-UNDER_LAMP_M = (0.015, 0.003, 0.0)
+# Fix round 1: re-read on the as-built crew1_1 camera (photo light segments at v 228-232: u 406-434 / 466-546 | 642-734 / 742-786 -> 0.35-0.41 /
+# 0.11-0.28 | 0.10-0.30 / 0.32-0.41 m, mean of both sides); round 4's (0.10, 0.36), (0.42, 0.56) rendered the outer strips ~60 px too far out
+UNDER_LAMPS_LAT_M = ((0.10, 0.29), (0.335, 0.41))
+UNDER_LAMP_M = (0.015, 0.003)  # [E] strip width across the lip, height over the surface
+UNDER_LAMP_FILLET_DEG = 45.0  # [E] the strips sit on the back-bottom fillet this far round from the underside (Task 4 fix round 1: in front of the
+# fillet they rendered 15-18 px of 800 under the photo's strips; on the fillet they lie right under the lip)
 
 V = Vector
 
@@ -338,8 +342,8 @@ def build_console(cockpit):
     con = cockpit["console"]
     if con["fold_deg"] != 0.0:
         raise ValueError("console: only the straight console (fold_deg 0) is built")
-    cen = Panel(screens_by_id(cockpit)["centre"])
-    frame = cl.console_frame(cockpit)
+    frame = cl.console_frame(cockpit)  # axes from [console] tilt_deg (checked against the centre screen)
+    cen = Panel({**screens_by_id(cockpit)["centre"], "normal": frame["normal"], "up": frame["up"]})
     u0, u1 = frame["u_bot"], frame["u_top"]
     half_w, depth, r = con["width_m"] / 2.0, con["hood_depth_m"] - SCREEN_PROUD_M, con["edge_radius_m"]
     u_panel = (con["upper_top_x_m"] - cen.o.x) / cen.up.x  # the dark upper panel's front top edge reaches this station
@@ -365,13 +369,26 @@ def build_console(cockpit):
     pv, pf = cs.rounded_box(2.0 * half_w, u_panel - (u1 - pr), t, pr, FILLET_SEGMENTS)
     pc = 0.5 * (u_panel + u1 - pr)
     add_shape(housing, pv, pf, lambda p: cen.at(p[0], pc + p[1], -SCREEN_PROUD_M - 0.5 * t + p[2]), None, flat_or_fillet("console_panel"))
-    # lamp strips on the underside, just in front of the back lip's fillet (crew1_1)
-    lamp_depth = con["hood_depth_m"] - r - UNDER_LAMP_M[2]
-    u_under = u0 - cs.interp(con["underside_profile"], lamp_depth)
+    # lamp strips on the back lip's fillet, centred UNDER_LAMP_FILLET_DEG round from the underside (crew1_1: right under the lip, v 228-232 px
+    # against the lip edge at 226.5): the strip lies on the chord of the (lowered) fillet it covers, sunk 1 mm into it
+    def fillet_point(ang):  # local body point on the back-bottom fillet, then lowered like the body (cs.drop_underside)
+        y = -0.5 * h + r - r * math.cos(ang)
+        z = -0.5 * depth + r - r * math.sin(ang)
+        y -= cs.interp(con["underside_profile"], 0.5 * depth - z) * (-y) / (0.5 * h)
+        return cen.at(0.0, uc + y, oc + z)
+
+    a, da = math.radians(UNDER_LAMP_FILLET_DEG), 0.5 * UNDER_LAMP_M[0] / r
+    p0, p1 = fillet_point(a - da), fillet_point(a + da)
+    tangent = (p1 - p0).normalized()
+    out_n = tangent.cross(cen.right)
+    if out_n.dot(cen.up + cen.n) > 0.0:  # outward = away from the body (down and back)
+        out_n = -out_n
+    mid = 0.5 * (p0 + p1)
     for lat0, lat1 in UNDER_LAMPS_LAT_M:
         for sign in (-1.0, 1.0):
-            a, b = sorted((sign * lat0, sign * lat1))
-            cen.box(lamps, a, b, u_under - UNDER_LAMP_M[1], u_under + 0.001, -lamp_depth, -lamp_depth + UNDER_LAMP_M[0])
+            lo, hi = sorted((sign * lat0, sign * lat1))
+            centre = mid + cen.right * (0.5 * (lo + hi)) + out_n * (0.5 * UNDER_LAMP_M[1] - 0.001)
+            vc.box(lamps, centre, out_n, tangent, cen.right, (0.5 * UNDER_LAMP_M[1], 0.5 * (p1 - p0).length, 0.5 * (hi - lo)))
     # the two ceiling posts: rod, joint head (collar) at the ceiling, sleeve and funnel foot on the body (crew1_1, Task 4 fit)
     for k, (base, top) in enumerate(cl.console_posts(cockpit)):
         verts, faces = cs.post(base, top, con["post_radius_m"], con["post_head_radius_m"], con["post_head_length_m"], POST_SIDES,

@@ -9,18 +9,28 @@
 id = "crew1_1"                                   # [D] photo id = shot name suffix (fid_crew1_1)
 file = "screenshots/m7-cockpit-refs/mielke/crew1_1.jpg"   # [D] reference photo, hatch view of the four seats
 size_px = [1200, 800]                            # [S] file size
-position_m = [1.8568, 1.4261, 0.0047]           # [D] fidelity Task 4 console fit (cabin_fit/parts/console.py --as-built, prior = round 4 pose +-0.05 m / 0.02 rad), console residual 1.33 px rms of 1200; 3.4 cm from round 4 (windows / seats not in this fit)
-forward = [0.17176, -0.98513, 0.00301]           # [D] same fit: 9.9 deg up toward +X (round 4: 8.2), +-1 deg
-up = [0.98513, 0.17177, 0.00392]                 # [D] same fit
-fov_h_deg = 96.615                               # [D] same fit: f 534 px on 1200 px, +-1 deg
+position_m = [1.8362, 1.4265, 0.0035]           # [D] fidelity Task 4 fix round 1 console fit (cabin_fit/parts/console.py --as-built, crew1_1 + discovery2 + discovery10, prior = round 4 pose +-0.05 m / 0.02 rad): console fit residual 1.25 px rms of 1200; y +-0.024, z +-0.012 data-constrained, x +-0.034 prior-dominated; 2.8 cm from round 4 (windows / seats not in this fit)
+forward = [0.18702, -0.98235, 0.00350]           # [D] same fit: 10.8 deg up toward +X (round 4: 8.2), pitch +-0.7 deg prior-dominated, yaw +-0.3 deg
+up = [0.98234, 0.18704, 0.00418]                 # [D] same fit
+fov_h_deg = 97.054                               # [D] same fit: f 530 px on 1200 px (prior-dominated, +-1.8 %)
 model = "pinhole"                                # [D] rectilinear photo
 
 [[photo]]
 id = "discovery2"                                # [D] photo id = shot name suffix (fid_discovery2)
 file = "screenshots/m7-cockpit-refs/mielke/discovery2.jpg"   # [D] reference photo, GoPro between the heads toward the screens
 size_px = [4128, 2322]                           # [S] file size
-position_m = [2.2102, -0.6497, -0.0327]          # [D] fidelity Task 4 console fit (10 screen glass corners + front bottom edge, prior = round 4 pose +-0.05 m / 0.035 rad), rms 5.6 px of 4128 (round 4: 20 px); +-0.04 m
-forward = [0.35901, 0.93322, 0.01485]            # [D] same fit, +-2 deg
-up = [0.93306, -0.35847, -0.02988]               # [D] same fit, +-2 deg
-fov_h_deg = 114.972                              # [D] same fit: equidistant f 2057 px/rad (k1 fit: -0.013, not used: the shots render k = 0), +-2 deg
+position_m = [2.2152, -0.6499, -0.0313]          # [D] fidelity Task 4 fix round 1 console fit (screen glass corners + front bottom edge, prior = round 4 pose +-0.05 m / 0.035 rad), rms 5.9 px of 4128 (round 4: 20 px); +-0.012 m, data-constrained
+forward = [0.35256, 0.93570, 0.01293]            # [D] same fit, +-0.7 deg
+up = [0.93549, -0.35207, -0.02993]               # [D] same fit, +-0.7 deg
+fov_h_deg = 115.094                              # [D] same fit: equidistant f 2055 px/rad (prior-dominated, +-1.5 %; k1 fit: -0.013, not used: the shots render k = 0)
+model = "fisheye_equidistant"                    # [D] GoPro wide lens
+
+[[photo]]
+id = "discovery10"                               # [D] photo id = shot name suffix (fid_discovery10)
+file = "screenshots/m7-cockpit-refs/mielke/discovery10.jpg"  # [D] reference photo, another frame of discovery2's fixed GoPro mount
+size_px = [4128, 2322]                           # [S] file size
+position_m = [2.2147, -0.6291, -0.0190]          # [D] fidelity Task 4 fix round 1 console fit (10 screen glass corners + front bottom edge, prior = discovery2 pose +-0.05 m / 0.035 rad), rms 4.4 px of 4128; +-0.009 m, data-constrained (2.3 cm from discovery2: the same mount, the two fits agree within 2 sigma)
+forward = [0.36172, 0.93228, -0.00287]           # [D] same fit, +-0.7 deg
+up = [0.93178, -0.36162, -0.03197]               # [D] same fit, +-0.7 deg
+fov_h_deg = 118.399                              # [D] same fit: equidistant f 1998 px/rad, +-1.1 % (data-constrained; 2.8 % shorter than discovery2: another video setting or crop)
 model = "fisheye_equidistant"                    # [D] GoPro wide lens

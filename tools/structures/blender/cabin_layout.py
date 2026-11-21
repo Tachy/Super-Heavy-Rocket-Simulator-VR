@@ -12,6 +12,7 @@ SEAT_PARTS = ("shell", "pad", "rest")  # white shell, black pads, black carbon l
 HATCH_POWER = 4.0  # [E] the hatch outline's super-ellipse exponent, same as gen_dragon.py (ellipse(..., power=4.0))
 GLASS_DEPTH_M = 0.02  # [E] window glass sits this far under the exterior surface (the exterior window is lifted 8 mm on it, gen_dragon.py lift_detail)
 LIFT_M = 0.006  # [E] trim, bezel and frame stand this far proud of the inner wall
+TILT_MATCH_DEG = 0.5  # [S] fidelity plan Task 4: the console's axes (from [console] tilt_deg) match the centre screen's within 0.5 deg
 HATCH_RECESS_M = 0.03  # [E] the hatch's inner face lies this much behind the inner wall (the door is thick): discovery views of the recess under the console
 
 
@@ -97,8 +98,13 @@ def console_frame(cockpit):
     top and front bottom edge along up from the origin ([console] centre_m and height_m)."""
     con = cockpit["console"]
     cen = next(s for s in cockpit["screen"] if s["id"] == "centre")
-    shift = dot3([a - b for a, b in zip(cen["centre_m"], con["centre_m"])], cen["up"])
-    return {"origin": list(cen["centre_m"]), "normal": list(cen["normal"]), "up": list(cen["up"]), "right": list(screen_right(cen)),
+    t = math.radians(con["tilt_deg"])  # the axes follow tilt_deg: up from +X toward -Y, normal toward the crew
+    up, normal = (math.cos(t), -math.sin(t), 0.0), (-math.sin(t), -math.cos(t), 0.0)
+    if dot3(up, cen["up"]) < math.cos(math.radians(TILT_MATCH_DEG)) or dot3(normal, cen["normal"]) < math.cos(math.radians(TILT_MATCH_DEG)):
+        raise ValueError(f"console: tilt_deg {con['tilt_deg']} does not match the centre screen's up / normal (the screens sit in the housing)")
+    shift = dot3([a - b for a, b in zip(cen["centre_m"], con["centre_m"])], up)
+    frame = {"origin": list(cen["centre_m"]), "normal": list(normal), "up": list(up)}
+    return {**frame, "right": list(screen_right({"normal": normal, "up": up})),
             "u_top": -shift + con["height_m"] / 2.0, "u_bot": -shift - con["height_m"] / 2.0}
 
 
