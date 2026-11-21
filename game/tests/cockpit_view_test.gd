@@ -88,7 +88,12 @@ func _check_launch() -> void:
 	var sim := _session("falcon9_crew_dragon")
 	var zero := _zero(sim)
 	_advance(sim, zero + SIM_TICK_S)
+	VehicleModels.clear_cache()
+	var t0 := Time.get_ticks_msec()
 	var views := _views(sim)
+	var first_ms := Time.get_ticks_msec() - t0
+	var compressed := VehicleModels.console_compress_count
+	print("  first cabin build %d ms, %d console maps compressed" % [first_ms, compressed])
 	var cockpits := _cockpits(views)
 	_check(cockpits.size() == 1, "T+0: exactly one CockpitView (%d)" % cockpits.size())
 	if cockpits.size() == 1:
@@ -98,7 +103,11 @@ func _check_launch() -> void:
 	for view in views:
 		view.free()
 	_advance(sim, zero + 170.0)
+	t0 = Time.get_ticks_msec()
 	views = _views(sim)
+	var rebuild_ms := Time.get_ticks_msec() - t0
+	print("  cabin rebuild after staging %d ms" % rebuild_ms)
+	_check(VehicleModels.console_compress_count == compressed, "stage rebuild: the console maps are not compressed again (%d -> %d)" % [compressed, VehicleModels.console_compress_count])
 	cockpits = _cockpits(views)
 	_check(cockpits.size() == 1, "after staging (T+170 s, %d bodies): still exactly one CockpitView (%d)" % [sim.body_count(), cockpits.size()])
 	for view in views:

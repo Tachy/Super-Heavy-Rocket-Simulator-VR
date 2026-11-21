@@ -102,6 +102,11 @@ static var _load_error := ""
 static var root_override := ""
 ## Number of log lines this class printed (tests assert "exactly one line" per fallback).
 static var log_count := 0
+## Compressed console maps of the cabin (file -> ImageTexture), shared by every CockpitView: VehicleView rebuilds the cabin at each stage change, the ~3 s
+## BPTC compression must not run again mid-flight. clear_cache drops them.
+static var console_textures: Dictionary = {}
+## Number of console map compressions done (tests assert a second CockpitView does not compress again).
+static var console_compress_count := 0
 
 
 ## {} or {"manifest": Dictionary, "hulls": {stage_id: {node: Mesh}}, "flap": {"fwd"|"aft": {node: Mesh}},
@@ -125,6 +130,7 @@ static func clear_cache() -> void:
 	_cache.clear()
 	_logged.clear()
 	_reasons.clear()
+	console_textures.clear()
 	root_override = ""
 
 

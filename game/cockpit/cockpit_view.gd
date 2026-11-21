@@ -96,7 +96,6 @@ var _skeletons := {}  # seat id -> Skeleton3D
 var _crew := 0
 var _materials := {}
 var _led_materials: Array[ShaderMaterial] = []
-var _console_textures := {}  # manifest cockpit.console_maps role -> ImageTexture
 var _cockpit_manifest := {}
 var _label_atlas: ImageTexture = null
 var _figure_bones := {}  # manifest crew_figure.bones (the arm chains' finger lengths)
@@ -726,19 +725,20 @@ func _console_atlas_material() -> ShaderMaterial:
 func _console_texture(file: String, role: String) -> ImageTexture:
 	if file.is_empty():
 		return null
-	if not _console_textures.has(file):
+	if not VehicleModels.console_textures.has(file):
 		var image := Image.load_from_file(VehicleModels.repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file))
 		if image == null or image.is_empty():
 			return null
 		# VR: the 0.5 mm atlas is seen at 0.5-2 m, so every level is used. The maps are loaded at run time (no .import), so the import settings
 		# "VRAM compressed + mipmaps (normal map as normal)" are applied here: BPTC (BC7) 4096 x 2048 = 10.7 MB with mips per map instead of 37-57 MB
-		# raw (~136 MB -> 32 MB total, measured); costs ~3 s once at cabin build. Fallback: the uncompressed mipmapped image.
+		# raw (~136 MB -> 32 MB total, measured); costs ~3 s once per process (cache VehicleModels.console_textures, shared by the CockpitViews of every stage rebuild). Fallback: the uncompressed mipmapped image.
 		image.generate_mipmaps(role == "normal")
 		var source := Image.COMPRESS_SOURCE_SRGB if role == "albedo" else (Image.COMPRESS_SOURCE_NORMAL if role == "normal" else Image.COMPRESS_SOURCE_GENERIC)
 		if image.compress(Image.COMPRESS_BPTC, source) != OK:
 			push_warning("CockpitView: BPTC compression of console map '%s' failed, using the uncompressed image" % role)
-		_console_textures[file] = ImageTexture.create_from_image(image)
-	return _console_textures[file]
+		VehicleModels.console_compress_count += 1
+		VehicleModels.console_textures[file] = ImageTexture.create_from_image(image)
+	return VehicleModels.console_textures[file]
 
 
 ## An r_led key: the blank key face with its blue LED (a lit mark, emission set every frame).
