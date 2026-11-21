@@ -342,6 +342,8 @@ def validate_cockpit(cockpit: dict) -> None:
         for k in ("centre_m", "size_m", "bezel_m", "corner_radius_m", "recess_m"):
             if k not in s:
                 raise VehicleSpecError(f"cockpit screen {sid}: missing key '{k}'")
+    if len({s["recess_m"] for s in screens.values()}) > 1:  # the face frame is one plate in front of all three glasses
+        raise VehicleSpecError("cockpit screens: recess_m must be equal on all three screens (one face-frame plate)")
     for t in cockpit["tablet"]:
         unit(f"tablet {t['id']} normal", t["normal"])
     ids = set()

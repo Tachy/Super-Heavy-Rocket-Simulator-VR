@@ -115,7 +115,7 @@ locker_proud_m = 0.012              # [E] the lockers 5 / 6 stand this far proud
 # frame (u up, o toward the crew): the deck runs from the housing face at u_top = -(active height / 2) - shelf_top_gap_m down and out to the key face; the
 # key face slopes out toward its bottom (its normal turned up by slope_deg, toward the crew's eyes, which sit 0.23 m up the console); the lip stands
 # proud at the bottom edge (u_top - shelf_height_m). cabin_layout.tray_face_o / tray_profile; the key faces stand KEY_HEIGHT_M proud of it.
-depth_m = 0.024                     # [D] key face 2.4 cm in front of the screen plane at the face's mid height: the key-face plane of the round-4 buttons (0.029-0.030) less their 6 mm height; discovery10 back-projection at o 0.024 puts the face top at u -0.168, bottom -0.235; +-0.006
+depth_m = 0.024                     # [E] (a single view cannot fix depth along the ray) key face 2.4 cm in front of the screen plane at the face's mid height: the key-face plane of the round-4 buttons (0.029-0.030) less their 6 mm height; discovery10 back-projection at o 0.024 puts the face top at u -0.168, bottom -0.235; +-0.006. The u heights read on this assumed plane (deck_drop_m, shelf_height_m, lip_width_m) are only weakly sensitive to it from the near-normal GoPro, so they stay [D]
 slope_deg = 15.0                    # [E] the key face leans out toward its bottom (a tray): jsc2022e068617 shows the deck and the key faces at different angles to the screens; single views only (no camera for 068617), +-10
 deck_drop_m = 0.019                 # [D] the deck falls from u -0.149 at the housing to the key face's top at u -0.168 (discovery10 v 1375 -> 1452 back-projected); +-0.005
 lip_width_m = 0.010                 # [D] the lip's height along the face at the bottom: discovery10 v 1600 -> 1630 (u -0.235 -> -0.245); +-0.004
@@ -172,14 +172,14 @@ recess_m = 0.005                    # [E] the glass lies this far behind the hou
 
 [[tablet]]
 id = "l"                            # [E] procedure tablets on mounts above the outer screens, discovery1..15
-centre_m = [2.6514, -0.2251, 0.3209]  # [D] fidelity Task 5 fit of the iPad mini body corners in discovery10 (cabin_fit/parts/console.py, body size [S] as the scale anchor): lat -0.321 +- 0.005, u 0.227 +- 0.007 [D]; o 0.030 +- 0.017 [E] (prior-dominated); roll 1.4 +- 0.7 deg not built; was +-0.367 / 0.228 / 0.060 (round 4)
+centre_m = [2.6514, -0.2251, 0.3209]  # [E] (o prior-dominated; lat, u are [D]) fidelity Task 5 fit of the iPad mini body corners in discovery10 (cabin_fit/parts/console.py, body size [S] as the scale anchor): lat -0.321 +- 0.005, u 0.227 +- 0.007 [D]; o 0.030 +- 0.017 [E] (prior-dominated); roll 1.4 +- 0.7 deg not built; was +-0.367 / 0.228 / 0.060 (round 4)
 normal = [-0.70711, -0.70711, 0.0]   # [D] = left screen normal = centre normal (fold 0)
 up = [0.70711, -0.70711, 0.0]        # [D] portrait, = eye up
 size_m = [0.1348, 0.2032]           # [S] Apple iPad mini (5th gen) 134.8 x 203.2 mm; model assumed from the shape in discovery1..15 [E]
 
 [[tablet]]
 id = "r"                            # [E] see l
-centre_m = [2.6396, -0.2413, -0.3342] # [D] fidelity Task 5 fit of the iPad mini body corners in discovery10 (cabin_fit/parts/console.py, body size [S] as the scale anchor): lat 0.334 +- 0.010, u 0.230 +- 0.008 [D]; o 0.050 +- 0.019 [E] (prior-dominated); roll 2.0 +- 1.4 deg not built; was +-0.367 / 0.228 / 0.060 (round 4)
+centre_m = [2.6396, -0.2413, -0.3342] # [E] (o prior-dominated; lat, u are [D]) fidelity Task 5 fit of the iPad mini body corners in discovery10 (cabin_fit/parts/console.py, body size [S] as the scale anchor): lat 0.334 +- 0.010, u 0.230 +- 0.008 [D]; o 0.050 +- 0.019 [E] (prior-dominated); roll 2.0 +- 1.4 deg not built; was +-0.367 / 0.228 / 0.060 (round 4)
 normal = [-0.70711, -0.70711, 0.0]   # [D] = right screen normal = centre normal (fold 0)
 up = [0.70711, -0.70711, 0.0]        # [D] = eye up
 size_m = [0.1348, 0.2032]           # [S] see l

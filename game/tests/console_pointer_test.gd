@@ -118,7 +118,7 @@ func _check_strip(config: CockpitConfig) -> void:
 		var s := strip.surface(String(hit["surface_id"]))
 		var rect: Rect2 = s["rect"]
 		worst_off = maxf(worst_off, maxf(maxf(rect.position.x - q.x, q.x - rect.end.x), maxf(rect.position.y - q.y, q.y - rect.end.y)))
-		worst_plane = maxf(worst_plane, absf(((hit["point_m"] as Vector3) - (s["centre"] as Vector3)).dot(strip.normal)))
+		worst_plane = maxf(worst_plane, absf(((hit["point_m"] as Vector3) - (s["centre"] as Vector3)).dot(s["normal"] as Vector3)))
 		var uv: Vector2 = hit["uv"]
 		uv_ok = uv_ok and uv.x >= -1e-9 and uv.x <= 1.0 + 1e-9 and uv.y >= -1e-9 and uv.y <= 1.0 + 1e-9
 		nan_free = nan_free and (hit["point_m"] as Vector3).is_finite()
@@ -126,6 +126,7 @@ func _check_strip(config: CockpitConfig) -> void:
 	_check(worst_off <= 1e-9, "every clamped point lies on its surface rectangle (worst %s m outside)" % worst_off)
 	_check(worst_plane <= 1e-9, "every mapped 3D point lies on its surface's face plane (worst %s m)" % worst_plane)
 	_check(uv_ok and nan_free, "uv within 0..1 and no NaN")
+	_check_tap_points_on_hit_faces(config, strip)
 	# the gap between the left and the centre screen: a point in the middle clamps to an edge, never stays in the gap
 	var left: Dictionary = strip.surface("left")
 	var centre: Dictionary = strip.surface("centre")
@@ -142,6 +143,34 @@ func _check_strip(config: CockpitConfig) -> void:
 	var picked := strip.to_surface(ray["strip"])
 	_check(ray["hit"] and picked["surface_id"] == "centre" and float(picked["distance_m"]) < 1e-6, "the ray from the eye through the centre screen centre picks the centre screen")
 	_check(not strip.pick(eye, -(centre3 - eye).normalized())["hit"], "a ray away from the console picks nothing")
+
+
+## Every key's pointer tap points (centre and the four corners of its face) lie on the console_hit face of that key within 0.5 mm: the manifest's
+## button frame is the frame hit_faces builds the quads in (pytest checks that), so the pointer's ConsoleStrip faces and the hit faces agree.
+func _check_tap_points_on_hit_faces(config: CockpitConfig, strip: ConsoleStrip) -> void:
+	var manifest_buttons: Dictionary = ((VehicleModels.load_for("crew_dragon").get("manifest", {}) as Dictionary).get("cockpit", {}) as Dictionary).get("buttons", {})
+	var worst := 0.0
+	var count := 0
+	var normals_ok := true
+	for b: Dictionary in config.buttons:
+		var m: Dictionary = manifest_buttons.get(b["id"], {})
+		if m.is_empty():
+			continue
+		var c := CockpitConfig._vec(m["centre"])
+		var n := CockpitConfig._vec(m["normal"]).normalized()
+		var up := CockpitConfig._vec(m["up"]).normalized()
+		var right := CockpitConfig._vec(m["right"]).normalized()
+		var size := CockpitConfig._vec2(m["size"])
+		for sa: float in [0.0, -1.0, 1.0]:
+			for sb: float in [0.0, -1.0, 1.0]:
+				var corner := c + right * sa * size.x * 0.45 + up * sb * size.y * 0.45  # inside the face, so no neighbouring key claims it
+				var hit := strip.to_surface(strip.to_strip(corner))
+				worst = maxf(worst, (hit["point_m"] as Vector3).distance_to(corner))
+				normals_ok = normals_ok and (hit["normal"] as Vector3).dot(n) > 1.0 - 1e-6 and String(hit["button_id"]) == String(b["id"])
+				count += 1
+	_check(count == 9 * config.buttons.size(), "every key id (%d) has a manifest face to compare" % config.buttons.size())
+	_check(worst <= 0.0005, "the pointer's tap points of every key lie on its hit face (worst %.3f mm)" % (worst * 1000.0))
+	_check(normals_ok, "the tap normal of every key is its hit face normal")
 
 
 func _check_clamp_idempotent(strip: ConsoleStrip, p: Vector2) -> void:

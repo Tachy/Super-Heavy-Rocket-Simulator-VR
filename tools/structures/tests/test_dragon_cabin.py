@@ -408,6 +408,21 @@ def test_every_button_has_a_hit_face_on_the_tray(spec, nodes):
         assert min(hits) - 0.5 == pytest.approx(cl.key_height(b), abs=1e-3), f"{b['id']}: the tray lies {(min(hits) - 0.5) * 1000:.1f} mm behind the face"
 
 
+def test_manifest_button_frames_are_the_hit_face_frames(spec):
+    """One key frame: for every key the manifest's button_frame (the pointer's face frame) equals the frame hit_faces builds console_hit in."""
+    c = spec["cockpit"]
+    faces = cl.hit_faces(c)
+    for b in c["button"]:
+        f = cl.button_frame(c, b)
+        q = faces[b["id"]]
+        e1, e2 = [q[1][i] - q[0][i] for i in range(3)], [q[3][i] - q[0][i] for i in range(3)]
+        right = [x / math.hypot(*e1) for x in e1]
+        up = [x / math.hypot(*e2) for x in e2]
+        assert all(abs(right[i] - f["right"][i]) < 1e-5 and abs(up[i] - f["up"][i]) < 1e-5 for i in range(3)), b["id"]
+        nrm = [right[1] * up[2] - right[2] * up[1], right[2] * up[0] - right[0] * up[2], right[0] * up[1] - right[1] * up[0]]
+        assert all(abs(nrm[i] - f["normal"][i]) < 1e-5 for i in range(3)), b["id"]
+
+
 def test_guarded_block_lies_under_its_cover(spec, nodes):
     """Each [[guard]]'s clear cover spans its 2 x 3 keys (and only those) and stands over their faces; its red rim follows it."""
     c = spec["cockpit"]
@@ -435,6 +450,10 @@ def test_guarded_block_lies_under_its_cover(spec, nodes):
                 k = math.sqrt(sum(x * x for x in nrm))
                 hits = [t for j in range(0, len(cidx), 3) if (t := _ray_triangle(b["centre_m"], [x / k for x in nrm], cpos[cidx[j]], cpos[cidx[j + 1]], cpos[cidx[j + 2]])) is not None]
                 assert hits and max(hits) > 0.002, f"cover not over {b['id']}"
+    # the cover stands on the key face above the red lip: its lowest point (along the console up) is not below the face bottom
+    rows = cl.tray_rows(c)
+    for g in c["guard"]:
+        assert min(rel(p)[1] for p in nodes[f"guard_{g['id']}"]["pos"]) >= rows["face_bot"] - 1e-4, g["id"]
 
 
 def test_shelf_is_proud_of_the_screens_and_the_dark_panel_runs_up_to_the_ceiling(spec, nodes):
@@ -657,7 +676,7 @@ def test_generated_console_front_is_square_to_tilt_deg(spec, nodes):
     n, up, right = frame["normal"], frame["up"], frame["right"]
     pts = nodes["console_housing"]["pos"]
     # the body's front face lies SCREEN_PROUD (2 mm) behind the screen plane (Task 5: the screens' face frame stands recess_m in front of it)
-    front = sum(a * b for a, b in zip(frame["origin"], n)) - 0.002
+    front = sum(a * b for a, b in zip(frame["origin"], n)) - cl.SCREEN_PROUD_M
     on = [p for p in pts if abs(sum(a * b for a, b in zip(p, n)) - front) < 1e-3]
     span_up = [sum(a * b for a, b in zip(p, up)) for p in on]
     span_lat = [sum(a * b for a, b in zip(p, right)) for p in on]

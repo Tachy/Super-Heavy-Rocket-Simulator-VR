@@ -25,6 +25,11 @@ static func from_config(config: CockpitConfig) -> ConsoleStrip:
 	strip.normal = (centre["normal"] as Vector3).normalized()
 	strip.up = (centre["up"] as Vector3).normalized()
 	strip.right = (-strip.normal).cross(strip.up).normalized()
+	# The keys lean: their face normal is the screen normal turned up by [tray] slope_deg (cabin_layout.tray_axes, the same frame as the
+	# manifest button frames and the console_hit faces); the handle keeps its panel's frame.
+	var slope := deg_to_rad(float((config.raw.get("tray", {}) as Dictionary).get("slope_deg", 0.0)))
+	var key_normal := (strip.up * sin(slope) + strip.normal * cos(slope)).normalized()
+	var key_up := (strip.up * cos(slope) - strip.normal * sin(slope)).normalized()
 	for id in SCREEN_IDS:
 		var screen: Dictionary = config.screens.get(id, {})
 		if not screen.is_empty():
@@ -32,14 +37,21 @@ static func from_config(config: CockpitConfig) -> ConsoleStrip:
 	for button: Dictionary in config.buttons:
 		# The screens are coplanar (one frame for the whole console): the key face is the button's centre, its rectangle the size_m.
 		var k_id := String(button.get("id", ""))
-		strip._add("key", "button:" + k_id, button["centre"], button["size"], k_id, String(button.get("panel", "")))
+		var leaning: bool = button.get("kind", "") != "handle"
+		strip._add("key", "button:" + k_id, button["centre"], button["size"], k_id, String(button.get("panel", "")),
+				key_normal if leaning else strip.normal, key_up if leaning else strip.up)
 	return strip
 
 
-func _add(kind: String, id: String, centre: Vector3, size: Vector2, button_id: String, panel: String) -> void:
+func _add(kind: String, id: String, centre: Vector3, size: Vector2, button_id: String, panel: String, face_normal := Vector3.ZERO, face_up := Vector3.ZERO) -> void:
 	var p := to_strip(centre)
-	var rect := Rect2(p - size * 0.5, size)
-	surfaces.append({"id": id, "kind": kind, "rect": rect, "centre": centre, "size": size, "button_id": button_id, "panel": panel})
+	var n := face_normal if face_normal != Vector3.ZERO else normal
+	var fu := face_up if face_up != Vector3.ZERO else up
+	var v_scale := fu.dot(up)  # the face's height seen along the console normal (cos of the lean)
+	var strip_size := Vector2(size.x, size.y * v_scale)
+	var rect := Rect2(p - strip_size * 0.5, strip_size)
+	surfaces.append({"id": id, "kind": kind, "rect": rect, "centre": centre, "size": size, "button_id": button_id, "panel": panel,
+			"normal": n, "face_up": fu, "v_scale": v_scale})
 	bounds = rect if surfaces.size() == 1 else bounds.merge(rect)
 
 
@@ -66,9 +78,10 @@ func to_surface(p: Vector2) -> Dictionary:
 	var rect: Rect2 = s["rect"]
 	var centre_strip := rect.position + rect.size * 0.5
 	var size: Vector2 = s["size"]
-	var point: Vector3 = (s["centre"] as Vector3) + right * (q.x - centre_strip.x) + up * (q.y - centre_strip.y)
-	return {"surface_id": s["id"], "button_id": s["button_id"], "point_m": point, "normal": normal,
-			"uv": Vector2((q.x - centre_strip.x) / size.x + 0.5, 0.5 - (q.y - centre_strip.y) / size.y),
+	var along_up: float = (q.y - centre_strip.y) / float(s["v_scale"])  # metres along the face's own up
+	var point: Vector3 = (s["centre"] as Vector3) + right * (q.x - centre_strip.x) + (s["face_up"] as Vector3) * along_up
+	return {"surface_id": s["id"], "button_id": s["button_id"], "point_m": point, "normal": s["normal"],
+			"uv": Vector2((q.x - centre_strip.x) / size.x + 0.5, 0.5 - along_up / size.y),
 			"strip": q, "distance_m": hit["distance"]}
 
 

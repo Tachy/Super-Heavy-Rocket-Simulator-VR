@@ -37,7 +37,7 @@ CUT_MARGIN_M = 0.012  # [E] cells whose centre lies within the aperture + this a
 RING_POINTS = 32  # [E] points around a window ring
 HATCH_POINTS = 64  # [E] points around the hatch outline
 HATCH_RINGS = 6  # [E] rings of the hatch's inner face (it follows the wall's curvature)
-SCREEN_PROUD_M = 0.002  # [E] the housing's front lies this far behind the screens (the screen quads sit exactly on the TOML plane)
+SCREEN_PROUD_M = cl.SCREEN_PROUD_M  # [E] the housing's front lies this far behind the screens (the screen quads sit exactly on the TOML plane)
 KEY_EMBED_M = 0.001  # [E] key bodies (and the handle pad, the guard) reach this far into the tray: no gap at their foot
 TRAY_FILLET_SEGMENTS = 3  # [E] steps per 90 deg of the tray's 4 mm fillets
 CORNER_SEGMENTS = 4  # [E] steps per screen-glass corner arc (6 mm: 2.4 mm facets)
@@ -409,7 +409,7 @@ def build_console(cockpit):
     # the screens' face frame: a plate recess_m in front of the glass with rounded holes (the glass outlines = active area + bezel), its walls
     # down to the glass and back to the housing front; the bezel (dark glass border) around each active area at the screen plane
     screens = cockpit["screen"]
-    rec = max(s["recess_m"] for s in screens)
+    rec = screens[0]["recess_m"]  # vehicle_spec requires one recess_m for the three screens (one face-frame plate)
     holes = []
     for s in screens:
         lat = (V(s["centre_m"]) - cen.o).dot(cen.right)

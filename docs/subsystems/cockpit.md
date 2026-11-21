@@ -510,8 +510,12 @@ State after plan Task 8 (code: `game/cockpit/console_strip.gd`, `console_pointer
   fingers follow the hand). `extend` 0 = relaxed grip curl (28 deg per joint), 1 = index straight, smoothed like the hand.
 - `CockpitView.pose_arms({l|r: {tip, extend}})`, `idle_tip(side)` (the rest hand), `posed_tip`, `arm_result`: the torso leans about the waist (spine bone, <= 22 deg [E], 4 passes) when the
   target is beyond 97 % of the straight reach. Measured (centre screen at 0.69 m from the eye): centre and left screen and all left keys need no lean and are touched to < 1 mm; the right
-  screen centre needs 14.5 deg, `r_upper_3` 21 deg; `r_upper_5` (outermost right key) is a KNOWN GAP: 30.7 mm short at the lean limit (tip clamped, the click still fires), stated in
-  `console_pointer_test.gd` `KNOWN_REACH_GAP_M` (the test fails when the shortfall moves by more than 2 mm); Task 9 re-measures after the seat / eye calibration. `r_lower_3` is reached.
+  screen centre needs 14.5 deg; with the Task 5 key positions the pilot's module (outboard of ~0.5 m) is out of the commander's reach at the lean limit: KNOWN GAPS `r_upper_3` 31.8 mm,
+  `r_lower_3` 45.7 mm, `r_upper_5` 61.5 mm (tip clamped, the click still fires; sampled keys only, the other pilot-module keys are short too), stated in `console_pointer_test.gd`
+  `KNOWN_REACH_GAP_M` (the test fails when a shortfall moves by more than 2 mm); Task 9 re-measures after the seat / eye calibration.
+- Tap plane (Task 5 fix): the keys lean (`[tray] slope_deg`), so `ConsoleStrip` gives every key its own face frame (normal / up from `tray_axes`, the manifest `button_frame` and `hit_faces` use the
+  same), its strip rectangle is the face seen along the console normal, and the pointer's hover / tap move along that face normal. `console_hit` stays hidden geometry; the pointer test checks
+  every key's tap points against the manifest face frame within 0.5 mm.
 - Idle hands: Task 8b, see "Crew body and suit" (HOTAS grips while the props are shown, else the hands on the thighs).
 - Mouse ownership in the cockpit (user VR run 2026-11-11, `CockpitUiGate`, `game/cockpit/cockpit_ui_gate.gd`, driven from `main.gd` each frame by `World.cockpit_active`): in the cockpit
   NO 2D UI shows - VR: the curved overlay/menu panel (`VrOverlayPanel`) is hidden and `VrPanelMouse.suspended` (it takes and pushes no event); desktop: the webcast layer, the menu layer and the

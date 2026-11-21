@@ -9,9 +9,9 @@
 id = "crew1_1"                                   # [D] photo id = shot name suffix (fid_crew1_1)
 file = "screenshots/m7-cockpit-refs/mielke/crew1_1.jpg"   # [D] reference photo, hatch view of the four seats
 size_px = [1200, 800]                            # [S] file size
-position_m = [1.8093, 1.4174, 0.0033]            # [D] fidelity Task 5 as-built console fit (cabin_fit/parts/console.py --as-built, crew1_1 + discovery2 + discovery10 incl. the iPad corners and the free screen height, prior = round 4 pose +-0.05 m / 0.02 rad): 1.18 px rms of 1200; y +-0.029, z +-0.015 data-constrained [D], x +-0.035 prior-dominated [E]; 2.7 cm from the Task 4 row
-forward = [0.19650, -0.98050, 0.00362]           # [D] same fit: 11.3 deg up toward +X; yaw / roll data-constrained [D], pitch +-0.7 deg prior-dominated [E]
-up = [0.98049, 0.19651, 0.00425]                 # [D] same fit
+position_m = [1.8093, 1.4174, 0.0033]            # [E] (y, z are [D]; x prior-dominated) fidelity Task 5 as-built console fit (cabin_fit/parts/console.py --as-built, crew1_1 + discovery2 + discovery10 incl. the iPad corners and the free screen height, prior = round 4 pose +-0.05 m / 0.02 rad): 1.18 px rms of 1200; y +-0.029, z +-0.015 data-constrained [D], x +-0.035 prior-dominated [E]; 2.7 cm from the Task 4 row
+forward = [0.19650, -0.98050, 0.00362]           # [E] (yaw, roll are [D]; pitch prior-dominated) same fit: 11.3 deg up toward +X; yaw / roll data-constrained [D], pitch +-0.7 deg prior-dominated [E]
+up = [0.98049, 0.19651, 0.00425]                 # [E] (follows forward, pitch prior-dominated) same fit
 fov_h_deg = 97.341                               # [E] same fit: f 527 px on 1200 px, prior-dominated (+-1.8 %)
 model = "pinhole"                                # [D] rectilinear photo
 

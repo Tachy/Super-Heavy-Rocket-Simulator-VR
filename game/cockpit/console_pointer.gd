@@ -38,6 +38,7 @@ var marker: MeshInstance3D  ## the pointer on the strip: a small unshaded disc o
 var _mouse_px := Vector2(-1.0, -1.0)
 var _have_mouse := false
 var _initialised := false
+var _face_normal := Vector3.ZERO  ## the normal of the face under the pointer (the keys lean), the strip normal without a hover
 
 
 ## The cabin of the controlled vehicle (null: none). `screen` is the left screen's camera feed.
@@ -149,7 +150,8 @@ func update(delta: float, camera: Camera3D) -> void:
 		hover = {}
 	if not hover.is_empty():
 		active_side = _side_of(hover, active_side)
-	var normal: Vector3 = strip.normal
+	var normal: Vector3 = hover["normal"] if not hover.is_empty() else strip.normal
+	_face_normal = normal
 	_update_marker(normal)
 	for side: String in hands:
 		var hand := hands[side] as HandMotion
@@ -208,7 +210,7 @@ func _marker_point() -> Vector3:
 ## The fingertip (cabin frame) of a side as last posed.
 func tip_of(side: String) -> Vector3:
 	var hand := hands[side] as HandMotion
-	return hand.position - (strip.normal if strip != null else Vector3.ZERO) * hand.tap_depth()
+	return hand.position - (_face_normal if _face_normal != Vector3.ZERO else (strip.normal if strip != null else Vector3.ZERO)) * hand.tap_depth()
 
 
 func _pick_from_mouse(camera: Camera3D = null) -> void:

@@ -708,7 +708,7 @@ func _shelf_material() -> ShaderMaterial:
 	if not centre.is_empty():
 		var n: Vector3 = (centre["normal"] as Vector3).normalized()
 		var up: Vector3 = (centre["up"] as Vector3).normalized()
-		var bottom := -0.5 * (centre["size"] as Vector2).y - float(config.console.get("shelf_top_gap_m", 0.0175)) - float(config.console.get("shelf_height_m", 0.10))
+		var bottom := -0.5 * (centre["size"] as Vector2).y - float(config.console["shelf_top_gap_m"]) - float(config.console["shelf_height_m"])
 		_set_mark(m, centre["centre"], (-n).cross(up).normalized(), up, n, Vector2(-1.0, 1.0), Vector2(bottom - 0.01, bottom + SHELF_STRIP_HEIGHT_M), Color(0.35, 0.02, 0.02))
 		_strip_materials.append(m)
 	_materials["console_shelf"] = m
