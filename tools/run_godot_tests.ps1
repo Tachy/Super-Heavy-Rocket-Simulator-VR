@@ -2,6 +2,8 @@
 # script to build/godot_tests.log. Exit code 1 when any script fails, 0 otherwise. A script fails on a non-zero exit code,
 # a timeout, or when its output holds a GDScript error ($scriptErrorPattern): a runtime error aborts the running function,
 # its remaining checks never run and the script can still exit 0. A failed script's captured output is kept (path logged).
+# A PASS-line rule (fail when a script prints no PASS) is deliberately NOT used: 19 of 52 scripts print none, so a script that exits 0 without
+# running its checks still passes; the error pattern catches the observed failure mode (decision 2026-11-21, final review of the cabin plan).
 #   -Gpu     also run the scripts in $needsGpuOrModels (they need a GPU window or the generated models in data/models)
 #   -Only    run only these scripts (names with or without .gd, e.g. -Only clock_hold_test,ui_rate_test)
 #   -TimeoutSec  per-script time limit (default 300)

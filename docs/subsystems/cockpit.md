@@ -206,7 +206,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   housing near black; walls white matte.
 - Lighting (fix round 1): the cabin has no GI, so each cabin surface gets a flat bounced-light term in the shader (`fill` = `FILL_LUX` 450 lx / pi x
   `scene_per_cd_m2`, emission albedo x fill, set every frame; scene-referred like the lamps) on top of the lamps and the sky-AO remainder; the two ceiling lamps cast
-  shadows; a ring of 16 omnis (6000 lm) stands in for the cove light (Task 9 fix 1: 0.30 below the middle of `cove_light_x_m` and 0.25 in from the wall, `CockpitView.cove_ring` clamps to the wall run like `photo_delight.cove_ring`; at 0.10 / 0.10 and 8 lamps they left bright spots on the ceiling panels; its
+  shadows; a ring of 8 omnis (6000 lm; 16 before the final fix, see Performance) stands in for the cove light (Task 9 fix 1: 0.30 below the middle of `cove_light_x_m` and 0.25 in from the wall, `CockpitView.cove_ring` clamps to the wall run like `photo_delight.cove_ring`; at 0.10 / 0.10 and 8 lamps they left bright spots on the ceiling panels; its
   emissive band `ceiling_ring_light` comes with the generator). The scene-referred eye adaptation meters the cabin to 18 % grey whatever the light level, so flux alone cannot make it white: `Atmosphere.field_key`
   (default `EyeAdaptation.FIELD_MID_GREY` 0.18) is the field's grey; the shots set 1.2 ([call], `--field_key`) and measure white wall p90 0.82-0.83 sRGB
   (pilot_eye 0.83, gopro 0.82, hatch 0.83 after the Task 9 fix 1 cove ring, before it 0.87 / 0.82 / 0.86; at key 0.18 they were 0.56-0.62, at 0.40: 0.67-0.74). Whoever puts the player camera in the cabin (Task 8/9) must set `field_key`.
@@ -229,7 +229,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 - GoPro (discovery2 = discovery1 framing): the fix-round-1 least-squares fit (equidistant fisheye on the 12 screen corners, rms 20 px of 4128, f = 2085 px/rad,
   113 x 64 deg) is relative to the screens: 0.61 m along their normal, 0.23 m along their up from the centre screen centre, between the heads. It moves rigidly
   with the console block: position (2.2437, -0.6322, -0.0251), forward (0.3265, 0.9453, 0.0073), right (-0.0241, 0.0160, -0.9996).
-- Hatch (crew1_1): joint fit (below): (1.839, 1.454, 0.013), pitched 8.2 deg up, f 536 px on 1200 x 800 = 96.4 x 73.4 deg (3:2). The camera sits 0.15 m inside
+- Hatch (crew1_1): round 4 joint fit (superseded by the Task 5 fit in the Cameras row: (1.809, 1.417, 0.003), 11.3 deg up, f 527 px): (1.839, 1.454, 0.013), pitched 8.2 deg up, f 536 px on 1200 x 800 = 96.4 x 73.4 deg (3:2). The camera sits 0.15 m inside
   the inner wall (the photographer leans in through the hatch; the near-field boots of the outer crew confirm a close camera).
 - pilot_eye: the config eye, turned toward the screen row (aim 0.15 m to the commander's side of the centre screen centre), 105 deg horizontal, field key 0.5
   (`--field_key` per shot; the dark console dominates the metering). Task 5b: `helmet_profile` (pure side view from the pilot's right, 1.1 m, 40 deg) with `helmet_side_vs_spacex_anzug`, and `helmet_side_vs_jsc066389` in the composed set. Debug options of `cockpit_shots.gd`: `--only=<shots>`, `--no_lamp_shadows`, `--hide=<nodes>`.
@@ -309,7 +309,7 @@ Cabin triangles 61.6k (before the plan) -> 63.8k (T4) -> 64.4k (T5) -> 82.9k (T7
 ### Measurements (all fits `cabin_fit`, sigma from the data covariance x sqrt(chi2/dof) for data-constrained parameters; [E] = only the prior fixes it)
 | Quantity | Value | Tag | Photos (fitted cameras) | Residual |
 |---|---|---|---|---|
-| Cameras | crew1_1 (1.839, 1.454, 0.013 m, 8.2 deg up, f 536 px), discovery2 / 10 (one GoPro mount), ksc_crew3 (Task 8) in `config/cockpits/photo_cameras.toml` | D (prior-dominated components E) | crew1_1, discovery2, discovery10, KSC-20211110-PH-SPX02_0003 | 1.25 px of 1200 / 5.9 and 4.4 px of 4128 / 3.98 px of 3603 (fit model on its own points) |
+| Cameras | crew1_1 (1.809, 1.417, 0.003 m, 11.3 deg up, f 527 px; Task 5 fit), discovery2 / 10 (one GoPro mount), ksc_crew3 (Task 8) in `config/cockpits/photo_cameras.toml` | D (prior-dominated components E) | crew1_1, discovery2, discovery10, KSC-20211110-PH-SPX02_0003 | 1.25 px of 1200 / 5.9 and 4.4 px of 4128 / 3.98 px of 3603 (fit model on its own points) |
 | Console body | hood 0.221 +- 0.011, u_bot -0.2774 +- 0.0021, tilt 46.3 +- 1.2 (built 45), width 1.40 +- 0.06 [E] | D / E | crew1_1, discovery2, discovery10 | crew1_1 body ends 0-2 px (v 200-220) |
 | Posts | base Z +-0.555 +- 0.008, top angle 52.2 +- 0.7 deg, radii +-0.003-0.004, top radius 0.945 [E] | D / E | crew1_1 only | rod axes 0-1 px, back top edge +1..2 px, lamps <= 2-6 px |
 | Screens | glass 0.400 +- 0.013 x 0.227 +- 0.008, pitch 0.449 +- 0.015 (diagonal 17.7 in) | D | discovery2, discovery10 | glass corners 3.1-6.5 px / 3.4-4.5 px of 4128 |
@@ -336,15 +336,20 @@ IDSS passage 0.800 m, iPad mini, window axial extent 0.51 m (the last [E]), ANSU
 
 ### Textures
 Baker `tools/structures/cabin_textures.py` (generators.toml): console atlas 4096 x 2048 (albedo, normal, ORM + emission mask), tablet maps, seat atlas 2048^2 with two periodic
-detail tiles (leather, carbon twill), label atlas; all procedural from our own drawn layers and from NUMBERS measured on de-lit photo views (`photo_delight.py`:
+detail tiles (fabric, carbon twill), label atlas; all procedural from our own drawn layers and from NUMBERS measured on de-lit photo views (`photo_delight.py`:
 albedo ratios, structure amplitudes). Ruling J: the fitted photos (crew1_1, discovery2 / 10) are not public domain, so no photo pixel ships and only numbers enter the maps;
 the KSC seat photo is public domain but its pixel scale (1-1.5 mm, highlight- and JPEG-dominated) is too coarse, so it also feeds numbers only. Revisit when a public-domain
 photo gets a fitted camera (e.g. jsc2026e404725). The maps are VRAM-compressed (BPTC) at run time on worker threads at boot (`VehicleModels.prewarm_console_maps`), flat colours
 until ready.
 
 ### Performance
-GPU time (stereo Pimax, cockpit view with the screen feed, `render_check --stereo --gpu_time=120`, 3534 x 2838 per eye): baseline before the plan (T1) median 23.4-24.4 ms,
-p99 29.7 ms; after Task 9 median 24.1-25.7 ms (noisy, machine state moves +-1 ms; the 16 cove omnis cost ~1-2 ms), inside the plan's 26 ms gate. Cabin triangles 64k -> 114k.
+GPU time (stereo Pimax, cockpit view with the screen feed, `render_check --webcast --mission=falcon9_crew_dragon --t_plus=-60 --cockpit --stereo=res://tests/data/pimax_dream_air_projections.json --gpu_time=120`,
+3534 x 2838 per eye): baseline before the plan (T1, other session) median 23.4-24.4 ms, p99 29.7 ms. Final review A/B (2026-11-21, one session, 3 rounds alternating, medians of the three run medians): HEAD with
+16 cove omnis 25.46 ms (25.71 / 25.46 / 24.56), 12 omnis 25.15 ms, 8 omnis 23.93 ms (24.12 / 23.90 / 23.93; p99 30.4-30.7). 16 over 8: +1.5 ms; 16 over 12: +0.3 ms. `fid_crew1_1`, `pilot_eye` and `hatch_crew1_1`
+with 8 against 16 omnis differ by 0.2-0.3 mean abs sRGB codes (the differences sit in the live screen feed), no visible difference: the ring now has 8 omnis (same 6000 lm). Result: HEAD with 16 lamps was
++1.1 to +2.1 ms over the T1 baseline (it depends on which end of the baseline range is taken; the plan's budget was +2 ms); with 8 lamps it is at the baseline (23.9 vs 23.4-24.4). The base commit 2e6aa728 itself
+was not re-measured in the same session (a second checkout of the model set is not allowed in this repo). Cabin triangles 64k -> 114k. The stereo mock's ~24 ms is above the 11.1 ms 90 Hz frame already before
+this plan; the plan only budgets the delta.
 Per-task A/B runs of the console, tray, seat and room work stayed within that noise.
 
 ### References
@@ -539,7 +544,7 @@ thin: console underside (oblique only, no straight-below view), console rear and
   jsc2026e404725), white pan side panels, black armrests, clear-coated carbon frames. The spec's "moulded black shells" = the black moulded cushion body; its
   outer shell is white in every photo.
 - Textures (`cabin_textures.bake_seat` / `bake_seat_detail`, one atlas for all seats, `seat_albedo|normal|orm.png` 2048^2 over 3.0 m = 1.46 mm / texel,
-  charts `seat_shape.SEAT_CHARTS`; two periodic 256^2 detail tiles over 0.02 m: `seat_fabric_detail.png` (leather grain), `seat_carbon_detail.png` (2/2
+  charts `seat_shape.SEAT_CHARTS`; two periodic 256^2 detail tiles over 0.02 m: `seat_fabric_detail.png` (fabric weave), `seat_carbon_detail.png` (2/2
   twill, 2.5 mm tows)). Drawn: the cushion's panel seams along the wing folds and across at the headrest, the harness on the empty seat (shoulder slots at
   x 0.60, straps to the lap, lap belt with buckle), the shell's grey rim band (0.015), seams. Projected + de-lit as NUMBERS from KSC (public domain, fitted
   camera): cushion ~0.025 linear (shaded wing 0.0126 vs the white panel 0.056 in a similar shade), straps 2.2 x the cushion; the carbon weave is below the
@@ -767,13 +772,18 @@ State after plan Task 8 (code: `game/cockpit/console_strip.gd`, `console_pointer
 ## Diagnostics
 - Cockpit shots: `game/tests/cockpit_shots.gd` (GPU, no `--headless`) with `--mission= --t_plus= --out_dir=` writing to `screenshots/m7-cockpit/<topic>/`; default = look shots
   (pilot_eye, gopro_discovery2, hatch_crew1_1, helmet_* with reference comparison sheets via `--refs=`), `--screen`, `--hand`, `--body`, `--hotas`, `--shoulder`, `--visor` (see the script header).
-- Fidelity shots (Task 1): `cockpit_shots.gd --fidelity [--photo=<ids>]` renders one shot `fid_<id>` per row of `config/cockpits/photo_cameras.toml` (crew1_1, discovery2, discovery10: the Task 4 console fit poses, tagged; fits write back here) at the photo framing, with `fid_<id>_vs` and `fid_<id>_overlay` (50 % blend + our Sobel edges in red) to `screenshots/m7-cockpit/fidelity/<task>/`. Every shot now shows the left screen feed (`render_always` and `UPDATE_ONCE` on the two frames before the capture; `cockpit_shots_feed_test.gd` measures the screen region, mean 0.64 against black). `render_check --webcast --mission=falcon9_crew_dragon --t_plus=-60 --cockpit` shows the cabin view.
+- Fidelity shots (Task 1): `cockpit_shots.gd --fidelity [--photo=<ids>]` renders one shot `fid_<id>` per row of `config/cockpits/photo_cameras.toml` (crew1_1, discovery2, discovery10, ksc_crew3: the Task 5 / 8 fit poses, tagged; fits write back here) at the photo framing, with `fid_<id>_vs` and `fid_<id>_overlay` (50 % blend + our Sobel edges in red) to `screenshots/m7-cockpit/fidelity/<task>/`. Every shot now shows the left screen feed (`render_always` and `UPDATE_ONCE` on the two frames before the capture; `cockpit_shots_feed_test.gd` measures the screen region, mean 0.64 against black). `render_check --webcast --mission=falcon9_crew_dragon --t_plus=-60 --cockpit` shows the cabin view.
 - GPU baseline before the geometry tasks (2026-11-21, RTX 4090, cockpit view with the feed, `render_check ... --cockpit --stereo=res://tests/data/pimax_dream_air_projections.json --gpu_time=120`, 3534 x 2838 per eye): median 23.4 - 24.4 ms (two runs), p99 29.7 ms. Budget for the fidelity plan: > +2 ms vs this baseline is reported; result in "Fidelity rebuild" / Performance.
 - `Start-VR.cmd --hotas-nudge`: move the HOTAS props with Alt keys, each press prints the new `[hotas] *_grip_m` lines.
 - `godot --path game --script res://tests/joy_probe.gd -- --buttons --seconds=30`: prints the 0-based stick button indices for `config/input_hotas.toml [buttons]`.
 - VR run checklist (German): `.superpowers/sdd/2026-11-07-m7-cockpit-crew-dragon/vr-run-checklist.md`; frame times from `data/perf/perf_*.csv`.
 
 ## Open points
+- **Per-part user acceptance pending (plan Done-per-part rule)**: the user has not yet accepted the comparison sheets per part: console body and screens / tray (T4, T5), textures (T6),
+  recess / lockers / tablets (T7), seats (T8), room (T9). Sheets: `screenshots/m7-cockpit/fidelity/<task>/fid_<id>_vs.png` / `_overlay.png` and `closeup_*` (T4-T9 folders). Several parts
+  are not within a few px (console front bottom edge 28-49 px, windows 33 px rms as built, keys 12 px rms): the user decides together with the window-height question below.
+- **Cabin build hitch in VR (final review)**: the first cabin build and the rebuild at every stage-signature change run on the main thread (numbers: Performance; `docs/known-issues.md`).
+  Real fix (keep the CockpitView while the capsule's own stage did not change; load tablet maps, seat detail tiles and the label atlas on the worker path) belongs to M7 Task 9.
 - **VR acceptance (M7 Task 9 Step 3) pending**: HOTAS grip points [E], stick / camera button indices [E], stick axis signs (pitch > 0 forward, roll > 0 right), the VR pointer feel
   (0.6 mm/count), frame budget of the screen feed (`update_hz` / `size_px`) and of the morphs (untimed), shoulder backward crumple (ruling O).
 - **Window height (user decision pending)**: the crew1_1 fit puts both az +-90 windows 0.064 +- 0.007 m higher (1.3 +- 0.3 deg toward -az, 0.7 +- 0.3 deg out) than the exterior
@@ -789,7 +799,7 @@ State after plan Task 8 (code: `game/cockpit/console_strip.gd`, `console_pointer
 - **Diminishing returns left by Task 9** (under-constrained or one unfitted photo each): ceiling screws and placards, the wall's horizontal seams, grab handles and cameras beside
   the windows, closed window shades, the side hatch's mechanism, the az +-33 windows (no fitted photo), the ceiling panel band as a step (single view is degenerate; built flat at
   x 3.48), hand-holds / vents / cove height [E], rim facets at 0.7 m and a light grey rim, rim crest projected at wall depth (0.02 m bias), `cove_ring` clamped in GDScript but not
-  in `photo_delight` (x), 8 or 12 cove lamps instead of 16 would save ~1 ms (A/B not run), the feed relay in `cockpit_shots_feed_test` not probed with an injected error.
+  in `photo_delight` (x), the feed relay in `cockpit_shots_feed_test` not probed with an injected error.
 - Other [E] parts: tray slope / lip / bezel, per-edge fillet radius (bottom edges sharper than 4 cm; front bottom edge 28-49 px), underside shape, the "8" placard, locker 6
   (mirrored), recess depth / floor colour (one grey), tablet mount and arm, the crew1_1 camera not refitted jointly with the room reads, and every texture structure amplitude
   (Ruling J; revisit with a fitted public-domain photo).
