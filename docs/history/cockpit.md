@@ -158,3 +158,49 @@ armrests, palms down (it read as a shrug in the hatch shots); hands were boxes o
 - Materials: shell flat white sRGB 0.82, pads and rest flat linear 0.035 (one colour, no maps).
 - `RECESS_TINT_FROM` 0.05 (fidelity Task 7 fix round 1).
 
+## Per-task render-vs-photo records of the fidelity plan (2026-11-21, consolidated in Task 10)
+- Render vs photo per feature (fid_* at the written cameras, render scaled to photo px; fix round 1):
+
+  | Feature | crew1_1 (px of 1200) | discovery2 / 10 (px of 4128) |
+  |---|---|---|
+  | Post rod axes (v 120-140) | 0-1 px (half-depth centres), widths 9 vs 8-10 px; sleeve at v 145: 1.5-2.5 px | not visible |
+  | Back top edge | render 172.2-173.1 vs photo 171 (annotated; column steps 171-175): +1..+2 px | not visible |
+  | Silver lip | no material step in the render (back face and fillet one grey): the built flat back face ends at v 221 (5.5 px above the photo lip 226.5), the 4 cm fillet runs down to v 244; the fit's sharp lip lies on it within 0.5 px | not visible |
+  | Lamp strips | v 226-231 vs 228-232 (<= 2 px); u 400-445 / 460-545 / 640-725 / 745-780 vs 406-434 / 466-546 / 642-734 / 742-786 (<= 6 px) | not visible |
+  | Body ends (outline) | v 176: -47 / -43 (render inside); v 190: -18 / -16; v 226: +30 / +31; v 240: +45 / +42; v 260: +49 / +48 (render outside; left / right, render 374-303 / 819-896 vs photo 327-352 / 862-838) | hidden by helmets |
+  | Underside | its lower edge is hidden by the helmets from v ~300 (render and photo both dark down to there) | back-facing from the crew side |
+  | Front bottom edge | not visible | render silhouette 28-49 px above the photo edge (u 700-3000) |
+  | Screens | not visible | the table row (pitch 0.402, half width 0.198) puts the outer screens' corners 87-143 px off, the centre screen 9-21 px |
+
+  So the posts, the back top edge and the lamps lie on the photo; the body outline does not. Open, carried to Task 7 (recess): the crew1_1 outline narrowing
+  downward is the contour of the white wall's trapezoid recess around the console; the recess panels must hide the render's lower body ends (+30..+49 px). Near
+  the top (v 176-190) the render is 16-47 px narrower than that contour, which an occluder cannot fix: the recess side walls must fill it, or the body is wider
+  at the top. Task 7's ledger check: re-run the crew1_1 overlay with the recess, confirm the ends are occluded, else refit the width and the end shape.
+  Open (edge radius, [E]): the photos' back lip and front bottom edge look sharper than the 4 cm fillet (lip: face end 5.5 px above, fillet to 18 px below;
+  front bottom: the fillet's silhouette 1-2 cm higher = 28-49 px); a per-edge radius (bottom edges <= 1 cm) would close both. Open (screens task): pitch
+  0.455 / half width 0.203 (discovery2 and discovery10 agree).
+
+- Underside photos, checked one by one (fix round 1); none constrains `underside_profile`, the width or the post foot:
+  - jsc2026e404725 (16 mm, f 1707 px known from EXIF): the console is 0.3-0.6 m from the lens and out of focus (edges 30-60 px wide); two screens are
+    visible, the near one with only its bottom right corner, the far one nearly edge-on (bl, tl, tr): 3-5 corners, which could place a camera, but no console
+    end, no post and no back edge is in the frame; the underside is seen only edge-on below the lower tray.
+  - jsc2025e064539 (24 mm, cropped: f unknown): same view, Crew-11 trainer state with a protruding grey module tray and a grab bar that the flight console
+    (crew1_1, discovery2/10) does not show; the underside's back edge is behind the tray, dark on dark.
+  - jsc2022e068643 / 068646 (no EXIF): the same pilot-side view up past the screens, defocused near screen, the far screen edge-on; the underside again only
+    beyond the tray. 068660 (50 mm): the console is a blurred band at the frame's top edge, no edge to read.
+  - nasatour_0242-0330 (video frames, unknown wide lens with distortion, motion blur): the module tray from below and the screens; no cabin-fixed point
+    for the lens, nothing behind the tray.
+  - Geometry: the underside's normal points toward -X +Y (the hatch side); from the crew side (eye about (2.45, -0.35)) it faces away, so only the hatch
+    view (crew1_1) sees it, and there its lower edge is behind the helmets. The underside shape stays [E]; a hatch-side photo below the helmets is needed.
+
+- Render vs photo (as built, written cameras): screen glass corners discovery2 6.2 / 6.5 / 3.1 px rms (left / centre / right; Task 4: 87-143 px at the outer
+  screens), discovery10 4.5 / 3.4 / 4.3; tablets 17 / 12 px (roll not built); keys 12 px rms, max 31 (row means, slope); tray deck start -0.7 px, lip bottom +1.2 px
+  (column u 1450). Front bottom edge of the body unchanged (28-49 px, the 4 cm fillet; per-edge radius still open).
+
+- Render vs photo (crew1_1, px of 1200, `fid_crew1_1` resized): console back-face ends v 200-220 0-2 px (both sides), v 190 -11/+12 (the end cap's highlight),
+  v 180 -4 (right); T4 had -47..+49. Panel-edge colour line (white -> grey half-way crossing, v 120-210) left -2.0..+2.5 px (mean +0.2), right +0.1..+3.4 px
+  (mean +1.9) inward of the reads (the same profile on the photo: within 1.5 px of the reads); at tint 0.15 it was +2..+8. Below the lip the silver chamfer
+  reads light like the photo's bevel; the front plate's lower outer corners (v 280-300) lie where the photo has the helmets / headrests. Built recess lines
+  projected (`recess.recess_outline_px`): out 2.0 / 2.2 px rms (max 6.1 / 6.2), in (clean rows) 1.4 / 1.6 px rms (max 2.6 / 2.3).
+
+- Provenance-table rows replaced by the Measurements table (Task 10): screens 0.382 x 0.215 m (training2 finger scale, +-15 %), screen gap 0.020 (fix round 2; was 0.045), seat shape / console body / posts / interior windows / ceiling ring / tablets / lockers rows as of Tasks 4-9 (current values: "Fidelity rebuild" / Measurements).
