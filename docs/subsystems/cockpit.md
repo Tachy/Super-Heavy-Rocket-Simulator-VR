@@ -292,7 +292,7 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
 - Debug options of `cockpit_shots.gd`: `--no_shadows`, `--lights_off=<patterns|sun>`, `--no_sky_light`, `--agx_contrast=<c>`.
 
 ## Fidelity rebuild (plan 2026-11-19, Tasks 1-9, commits 2e6aa728..4ddd71e5)
-Spec `docs/superpowers/specs/2026-11-19-dragon-cabin-fidelity-design.md`. Goal: every cabin part from photos with a fitted camera, a sigma and a tag, instead of
+Spec `docs/superpowers/archive/specs/2026-11-19-dragon-cabin-fidelity-design.md`. Goal: every cabin part from photos with a fitted camera, a sigma and a tag, instead of
 piecewise reads. The subsections below keep the method per part; this block is the state at a glance. VR acceptance (M7 Task 9) is still pending.
 
 ### Geometry state per part

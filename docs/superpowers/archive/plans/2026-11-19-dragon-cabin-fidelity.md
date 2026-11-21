@@ -14,7 +14,7 @@ script renders each part from the fitted photo camera beside the photo for user 
 **Tech Stack:** Python 3 (numpy, scipy.optimize, Pillow), Blender headless via `tools/structures/build_models.py`,
 Godot 4 double (GDScript shot script), pytest.
 
-**Spec:** `docs/superpowers/specs/2026-11-19-dragon-cabin-fidelity-design.md` (read it first).
+**Spec:** `docs/superpowers/archive/specs/2026-11-19-dragon-cabin-fidelity-design.md` (read it first).
 
 ## Global Constraints
 - Rebuild only: no downloaded mesh / texture ships, nothing traced vertex for vertex; photos are measuring references.
