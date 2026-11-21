@@ -7,6 +7,8 @@ extends SceneTree
 
 const MIN_FEED_LUMINANCE := 0.02
 const TIMEOUT_MS := 240000
+# Godot's spellings (tools/run_godot_tests.ps1 matches the same; the relayed line keeps the marker, so the runner flags it too)
+const CHILD_ERROR_MARKERS := ["SCRIPT ERROR", "SHADER ERROR", "Parse Error", "Failed to load script"]
 
 var _failures := 0
 
@@ -53,6 +55,15 @@ func _check_feed() -> void:
 	var code := OS.execute(OS.get_executable_path(), args, output, true)
 	var text := "\n".join(PackedStringArray(output))
 	_check(code == 0, "cockpit_shots ran (exit %d)" % code)
+	# the runner only sees this process's output: relay script / shader errors of the child (they do not set its exit code)
+	var child_errors := 0
+	for line in text.split("\n"):
+		for marker in CHILD_ERROR_MARKERS:
+			if line.contains(marker):
+				child_errors += 1
+				printerr("cockpit_shots child: " + line.strip_edges())
+				break
+	_check(child_errors == 0, "cockpit_shots ran without script / shader errors (%d)" % child_errors)
 	var rect := Rect2i()
 	for line in text.split("\n"):
 		if line.contains("screen_left_rect pilot_eye"):

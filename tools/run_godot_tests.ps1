@@ -28,8 +28,8 @@ $needsGpuOrModels = @(
     'vehicle_view_test'        # Starship / Super Heavy detail models
 )
 
-# GDScript runtime / parse errors as Godot prints them (stdout or stderr).
-$scriptErrorPattern = 'SCRIPT ERROR|Parse Error|Failed to load script'
+# GDScript runtime / parse errors and shader compile errors as Godot prints them (stdout or stderr; case-sensitive: Godot's own spelling).
+$scriptErrorPattern = 'SCRIPT ERROR|SHADER ERROR|Parse Error|Failed to load script'
 
 # Scripts that legitimately run longer than the default limit (seconds; the larger of this and -TimeoutSec applies).
 $slowScripts = @{ 'terrain_quadtree_test' = 900 }  # measured 502 s with the Earth and Moon terrain data (2026-11-03)
@@ -68,7 +68,7 @@ foreach ($s in $scripts) {
         $code = $p.ExitCode
     }
     $sw.Stop()
-    $scriptErrors = @(Select-String -Path $out, "$out.err" -Pattern $scriptErrorPattern -ErrorAction SilentlyContinue)
+    $scriptErrors = @(Select-String -Path $out, "$out.err" -Pattern $scriptErrorPattern -CaseSensitive -ErrorAction SilentlyContinue)
     $ok = ($code -eq 0) -and ($scriptErrors.Count -eq 0)
     $why = if ($scriptErrors.Count -gt 0) { "  script errors=$($scriptErrors.Count)" } else { '' }
     $line = '{0,-5} {1}  exit={2}  {3:N1} s{4}' -f $(if ($ok) { 'PASS' } else { 'FAIL' }), $name, $code, $sw.Elapsed.TotalSeconds, $why
