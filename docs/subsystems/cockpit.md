@@ -264,9 +264,9 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
   reach-fitted eye. The hatch comparison therefore shows our heads ~85 px lower than the photo while windows, console and ceiling line up.
 - The player figure's own eye is now the config eye (hip = eye - figure eye point (0.812, -0.288) at back 35 deg); `cockpit_view_test` checks it within 2 cm.
 - Console block: rotated 10 deg about Z and moved with the centre screen centre; posts start at the housing's back top edge; the dark upper panel ends 0.47 m up the
-  console (x 2.845; it covers the lamp panels; crew1_1 shows the dish over the console). Nodes `console_back` (silver back face + posts, brushed albedo 0.30,
-  metallic 0.25, the dark vent band by shader: `cabin.gdshader` band, up -0.11..+0.07 from the centre screen centre, +-0.58 m), `console_under` (dark grey underside
-  and top), `console_lamps` (emissive strips along the underside's back lip, crew1_1). The white slab of round 3 is gone.
+  console (x 2.845; it covers the lamp panels; crew1_1 shows the dish over the console). Nodes `console_back` (silver back face + posts), `console_under` (underside
+  and top), `console_lamps` (emissive strips along the underside's back lip, crew1_1). The white slab of round 3 is gone. Colours and surface detail of the console
+  nodes: the console atlas of fidelity Task 6 (below; the round-4 vent band shader is in the history file).
 - Console lamps: the console parts (console_*, tablets, buttons, handle, lamp panels) are on render layer `CONSOLE_LAYER` (1 << 11) and the console lamps'
   `light_cull_mask` excludes it (the lamps hang 8 cm in front of the console face and face the crew; ring and fill lights still light the console). The figures
   keep the lamp shadows. (Round 4 took this for the moire's cause; round 5 found the real one, below.)
@@ -381,7 +381,7 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
   `round_corners`) along +-`half_length_m` 0.625 in `console_shelf`: deck from the housing at u -0.149 (`shelf_top_gap_m` 0.0395 [D]) down `deck_drop_m` 0.019 [D] to
   the key face, which leans out toward its bottom by `slope_deg` 15 [E] (normal turned up toward the crew's eyes; `depth_m` 0.024 [D] at mid face), the lip
   (`lip_width_m` 0.010 [D], `lip_height_m` 0.006 [E]) down to u -0.237 (`shelf_height_m` 0.088 [D]); fillets `radius_m` 0.004 on the front edges only. The red strip
-  mark of `console_shelf` sits on the lip.
+  on the lip is a layer of the console atlas (Task 6).
 - Keys stand `KEY_HEIGHT_M` 8 mm (cover 12 mm) proud of the tray face along its normal (`centre_m` = face centre, re-seated from lat / row whenever the tray
   changes); the four end keys (CANCEL / EXECUTE, both outer modules) are square 0.026 rect keys, the 2 x 3 blocks 0.026 x 0.024 (jsc2022e068617). Labels added on
   the pilot's module from jsc2022e068617 (trainer): CANCEL, EMERGENCY DEORBIT, BREAKOUT, EXECUTE, SUPPRESS FIRE, FIRE RESPONSE (r_upper_2 / r_lower_1 stay blank).
@@ -398,6 +398,42 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
 - Shots: `--console_closeup` adds `closeup_tray` / `closeup_tray_r` (the outer modules from 0.6 m on the line to the eye, stereo, IPD 64 mm).
 - [E] / under-constrained (listed for the user): tray slope (no camera for jsc2022e068617), lip height, bezel, corner radius, recess, key sizes (ratios in the
   trainer photo), the hinge side, tablet depth and roll.
+
+### Console textures (fidelity Task 6)
+- Atlas: `cabin_layout.console_charts` packs planar charts in the console frame (`console_frame`: lat, u, o) and two cylindrical post charts into one 4096 x 2048
+  atlas (8 px gutters): `front` (housing face, frame plate, upper panel, locker faces; 0.5 mm per texel), `tray_face` / `tray_top` (0.5 mm), `tray_under`, `end_l` /
+  `end_r` (1 mm), `back` (up to the panel top, so the panel's and lockers' backs fit), `top`, `under` (1.3 mm), `post_0` / `post_1` (1.1 turns x the axis, 2 mm).
+  `chart_of(node, normal)` picks a face's chart by its dominant console-frame axis (the tray node has its own three); `gen_dragon_cabin.chart_faces` writes the UVs
+  of `console_housing` / `_back` / `_under` / `_shelf` / `_lockers` (posts via `post_face_uvs`, the angle unwrapped per face, caps one colour).
+- Maps (`tools/structures/cabin_textures.py`, baker of generators.toml; manifest `cockpit.console_maps`): `console_albedo.png` (sRGB), `console_normal.png`
+  (tangent space: x = image right, y = image up), `console_orm.png` (occlusion, roughness, metallic, A = emission mask). Game: one ShaderMaterial on the five console
+  nodes (`CockpitView._console_atlas_material`, `cabin.gdshader` uniforms (8) `maps_on`, `albedo_map`, `normal_map`, `orm_map`, `emit_gain`); the tangent frame is
+  built from screen-space derivatives (no mesh tangents); mipmaps generated at load (VR). Emission = albedo x mask x `CONSOLE_EMIT_CD_M2` 500 (scene-referred, each frame).
+- Drawn layers (positions read on the rectified, de-lit photo views; constants with tags in cabin_textures.py): front: frame black below the frame top, the dark upper
+  panel, the lighter top band above the seam at u 0.300, screws at (-0.4365 / -0.002 / +0.4365 [mirrored], 0.163), the latch at the top centre (0, 0.302), two slots
+  (lat 0.052-0.129 and -0.218..-0.157, u 0.217-0.239), locker bevels, the placards "5" / "6" (lat +-0.468..0.5505, u 0.148-0.195; white numeral 22 mm, red symbol), the
+  round latches at (+-0.4845, 0.217); tray: light grey brushed deck, seven dark key plates (u -0.2265..-0.170; lat from discovery10), the small display left of the
+  handle (lat -0.129..-0.0875, lit dim), the connector cap (0.3175, -0.203, r 10 mm), the red lip strip under the commander's two outer modules only (lat -0.638..-0.347);
+  back (crew1_1): silver with the dark panel (lat -0.415..0.42, u -0.015..0.205; darker rim above 0.155 with two dividers), the light grip in its middle, the mid grey
+  band (u -0.125..-0.015), the black vent (lat -0.505..0.51, u -0.275..-0.125, separators every 0.1625 m, 4 mm slats in the normal map); ends dark toward the crew and
+  silver behind o -0.12, the Velcro patch on the pilot-side end (trainer, [E]); underside grey with two light seams; posts: silver rod, dark sleeve / funnel / collar.
+  The blue LEDs sit on the r_led keys (lit marks, `LED_*` in CockpitView: 7 x 6 mm, 150 cd/m2); the key labels keep their own atlas, whose ink is now centred on the
+  key face (Task 6: the font box sat ~1 mm high).
+- Projected + de-lit: `tools/structures/photo_delight.py` (`delight(photo_ids, chart, cameras, shading)`: photo -> chart through the fitted camera, / shading, median).
+  Shading = `cabin_shading` (CockpitView's lamps, ring and fill on a white Lambert surface, no shadows) or a render image of the same pose. Licence: the fitted photos
+  (crew1_1, discovery2 / 10) are not public domain, so only NUMBERS from the de-lit views go into the maps (the photo pixels never ship): albedo ratios (deck / key
+  plate 5.75 -> deck 0.19) and the structure amplitudes (de-lit contrast 0.1-0.34 at 4.5-28 mm is sensor / JPEG noise dominated on the dark parts: our noise
+  stays under it, panel 4 %, brushed grain 6 %, correlation 4 mm / 30 mm along the brushing). Which photo fed what: discovery2 + discovery10 -> front and tray layers
+  and the deck ratio; crew1_1 -> back, underside, posts, silver / mid band ratios; jsc2022e068617 (trainer, no camera) -> Velcro.
+- Light states (`--lights_off`, `--utc`): cabin lamps (18:42 UTC, Sun off), Sun through the windows (11:00 UTC, low Sun, cabin lamps off; no direct Sun patch
+  reaches the console in the pad attitude), night (04:00 UTC, lamps on). The textures carry no baked light: the same contrast in all three.
+- Tests: `test_cabin_textures.py` (power-of-two sizes <= 4096 incl. the label atlas, charts disjoint, key labels and locker numerals within 1 mm of their key /
+  placard in 3D, de-lighting recovers a synthetic albedo within 3 %, generated console UVs inside [0, 1]); `cockpit_view_test` (atlas material with mipmaps, LED).
+- Materials: silver 0.35 linear with metallic 0.15 (0.6 rendered the back and the rods dark in the diffuse cabin light; crew1_1 shows them light grey), deck
+  0.19 / metallic 0.1, panels 0.03, vent 0.012.
+- Shots: `cockpit_shots.gd` keeps `console_hit` hidden (it made every console node visible again, so the hidden hit faces covered the key faces and their
+  labels in every Task 5 shot).
+- Open: the "8" placard on the back's right end (crew1_1, too blurred), locker size and placard against the photo's wider locker (Task 7), the trainer's end connector.
 
 ## Camera mode and toggle
 State after plan Task 6 (code: `game/cockpit/cockpit_camera.gd`, `hotas_buttons.gd`, `World.toggle_cockpit`).

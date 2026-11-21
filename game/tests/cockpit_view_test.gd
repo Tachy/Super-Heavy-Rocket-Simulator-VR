@@ -157,9 +157,18 @@ func _check_eye(cockpit: CockpitView) -> void:
 	var blank := (cockpit.button_node("r_led_1") as MeshInstance3D).material_override as ShaderMaterial
 	_check(float(labelled.get_shader_parameter("label_on")) > 0.0 and labelled.get_shader_parameter("label_atlas") != null and blank.get_shader_parameter("label_on") in [null, 0.0],
 			"keys: DEORBIT NOW (cam3) has its label, r_led_1 a blank face")
+	# fidelity Task 6: the console body, back, underside, tray and lockers share the baked console atlas (the red lip strip is in it); the r_led keys
+	# carry their blue LED as a lit mark; the handle keeps its red marking
 	var shelf := (cockpit.cabin_node("console_shelf").material_override as ShaderMaterial)
 	var handle := ((cockpit.button_node("handle") as MeshInstance3D).material_override as ShaderMaterial)
-	_check(float(shelf.get_shader_parameter("mark_on")) > 0.0 and float(handle.get_shader_parameter("mark_on")) > 0.0, "shelf red strips and the handle's red marking")
+	var maps_ok := float(shelf.get_shader_parameter("maps_on")) > 0.0
+	for role: String in ["albedo_map", "normal_map", "orm_map"]:
+		var tex := shelf.get_shader_parameter(role) as Texture2D
+		maps_ok = maps_ok and tex != null and tex.get_image().has_mipmaps()
+	for node: String in ["console_housing", "console_back", "console_under", "console_lockers"]:
+		maps_ok = maps_ok and cockpit.cabin_node(node).material_override == shelf
+	_check(maps_ok, "console nodes share the atlas material with mipmapped albedo / normal / ORM maps")
+	_check(float(blank.get_shader_parameter("mark_on")) > 0.0 and float(handle.get_shader_parameter("mark_on")) > 0.0, "r_led_1's blue LED and the handle's red marking")
 	_check(cockpit.cabin_node("console_shelf") != null and cockpit.cabin_node("console_back") != null and cockpit.cabin_node("console_lockers") != null, "console: shelf modules, back and lockers are nodes of their own")
 
 

@@ -320,9 +320,9 @@ def build_seat(seat, floor_x, pan_raise_deg=0.0):
     return shell, pad, rest
 
 
-def add_shape(mesh, verts, faces, to_cabin, part_of, group_of):
+def add_shape(mesh, verts, faces, to_cabin, part_of, group_of, uvs_of=None):
     """Faces of a console_shape surface (local verts) into the VMeshes: to_cabin(local) -> cabin point, part_of(local normal) -> VMesh,
-    group_of(local normal) -> smooth group (None = flat). UV = the local (x, y) (planar, metres)."""
+    group_of(local normal) -> smooth group (None = flat). UV = the local (x, y) (planar, metres) or uvs_of(cabin points)."""
     for f in faces:
         loc = [verts[i] for i in f]
         n = V((0.0, 0.0, 0.0))
@@ -332,7 +332,17 @@ def add_shape(mesh, verts, faces, to_cabin, part_of, group_of):
         n.normalize()
         pts = [to_cabin(p) for p in loc]
         out = to_cabin((n.x, n.y, n.z)) - to_cabin((0.0, 0.0, 0.0))
-        (part_of(n) if mesh is None else mesh).face(pts, [(p[0], p[1]) for p in loc], out, group_of(n))
+        uvs = uvs_of(pts) if uvs_of is not None else [(p[0], p[1]) for p in loc]
+        (part_of(n) if mesh is None else mesh).face(pts, uvs, out, group_of(n))
+
+
+def chart_faces(mesh, cockpit, charts, node):
+    """Console atlas UVs (fidelity Task 6) on every face of a console node: the face's chart by its normal (cabin_layout.chart_of), planar."""
+    mesh.bm.normal_update()
+    for face in mesh.bm.faces:
+        uvs = cl.face_uvs(cockpit, charts, node, [tuple(loop.vert.co) for loop in face.loops], tuple(face.normal))
+        for loop, uv in zip(face.loops, uvs):
+            loop[mesh.uv].uv = uv
 
 
 def build_console(cockpit):
@@ -392,6 +402,8 @@ def build_console(cockpit):
             lo, hi = sorted((sign * lat0, sign * lat1))
             centre = mid + cen.right * (0.5 * (lo + hi)) + out_n * (0.5 * UNDER_LAMP_M[1] - 0.001)
             vc.box(lamps, centre, out_n, tangent, cen.right, (0.5 * UNDER_LAMP_M[1], 0.5 * (p1 - p0).length, 0.5 * (hi - lo)))
+    charts = cl.console_charts(cockpit)
+    chart_faces(back, cockpit, charts, "console_back")  # the body's back faces; the posts get their own cylindrical charts
     # the two ceiling posts: rod, joint head (collar) at the ceiling, sleeve and funnel foot on the body (crew1_1, Task 4 fit)
     for k, (base, top) in enumerate(cl.console_posts(cockpit)):
         verts, faces = cs.post(base, top, con["post_radius_m"], con["post_head_radius_m"], con["post_head_length_m"], POST_SIDES,
@@ -399,7 +411,8 @@ def build_console(cockpit):
         axis = (V(top) - V(base)).normalized()
         # smooth within one lathe segment (rod, head, sleeve, funnel: same axial normal component), flat caps and steps
         add_shape(back, verts, faces, lambda p: V(p), None,
-                  lambda n, k=k, axis=axis: None if abs(n.dot(axis)) > 0.99 else ("post", k, round(n.dot(axis), 2)))
+                  lambda n, k=k, axis=axis: None if abs(n.dot(axis)) > 0.99 else ("post", k, round(n.dot(axis), 2)),
+                  uvs_of=lambda pts, k=k: cl.post_face_uvs(charts, k, [tuple(p) for p in pts]))
     # the tray (fidelity Task 5): one continuous sloped tray under all keys, the deck from the housing, the key face, the lip at its bottom
     tr = cockpit["tray"]
     body, lip = cl.tray_profiles(cockpit)
@@ -431,6 +444,8 @@ def build_console(cockpit):
         c = V(lk["centre_m"]) - cen.o
         cen.box(lockers, c.dot(cen.right) - lk["size_m"][0] / 2.0, c.dot(cen.right) + lk["size_m"][0] / 2.0,
                 c.dot(cen.up) - lk["size_m"][1] / 2.0, c.dot(cen.up) + lk["size_m"][1] / 2.0, con["locker_proud_m"], -SCREEN_PROUD_M)
+    for mesh, node in ((housing, "console_housing"), (under, "console_under"), (shelf, "console_shelf"), (lockers, "console_lockers")):
+        chart_faces(mesh, cockpit, charts, node)
     return housing, back, under, shelf, lockers, lamps, bezel
 
 

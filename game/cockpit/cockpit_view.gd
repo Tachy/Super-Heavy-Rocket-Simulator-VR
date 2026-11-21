@@ -34,19 +34,23 @@ const RING_LUMENS := 6000.0
 const RING_DROP_M := 0.10
 ## [E] Screen placeholder: a dark Dragon-blue UI background, display-referred (no exposure, as every emitter).
 const SCREEN_COLOUR := Color(0.025, 0.07, 0.17)
-## [E] crew1_1 (round 4): the dark vent band across the console's silver back, in the console's up coordinate from the centre screen centre
-## (the back face spans -0.235..+0.265: the band at 35-75 % of its height from the top) and to 0.58 m either side of the centre (slot 1.20 of the 1.32 m back).
 ## Render layer of the console parts (round 4): the two console lamps hang 8 cm in front of the console face and light it only at grazing
 ## angles (their shadow maps there are prone to acne). The concentric rings at the top of pilot_eye were NOT this: they were the aerial
 ## perspective's float32 noise over sub-metre paths (fix round 5, atm_to_point_offset's short-path form). The lamps face the crew, so they do not light the console (light_cull_mask without this layer); the ring and fill lights still do.
 const CONSOLE_LAYER := 1 << 11
-const CONSOLE_VENT_UP_M := Vector2(-0.11, 0.07)
-const CONSOLE_VENT_HALF_WIDTH_M := 0.58
-## [E] Task 5b, conv_42860a / discovery10: a red light strip along the bottom lip of each shelf module (the strip's height on the module face) and its
-## luminance (an indicator strip, dim red: it reads saturated red, not white, in the 2020 photo); colour linear Rec.709 at luminance 1.
-const SHELF_STRIP_HEIGHT_M := 0.010
-const SHELF_STRIP_CD_M2 := 40.0
-const SHELF_STRIP_COLOUR := Vector3(4.2, 0.08, 0.05)
+## [E] Fidelity Task 6: the console atlas' emitters (the red strip on the tray lip, the small display; ORM alpha = mask) emit albedo x mask x
+## this luminance per unit albedo: the red strip (albedo 0.35 / 0.02 / 0.02, mask 1) ~40 cd/m2 as the Task 5b strip, the display (mask 0.25) ~10 cd/m2.
+const CONSOLE_EMIT_CD_M2 := 500.0
+## The console nodes on the atlas (cabin_layout.NODE_CHARTS; the manifest's cockpit.console_maps).
+const ATLAS_NODES: Array[String] = ["console_housing", "console_back", "console_under", "console_shelf", "console_lockers"]
+## [D] discovery10 de-lit tray (fidelity Task 6, Ruling G): a blue LED in the middle of each r_led key face, 7 x 6 mm, its centre 2.5 mm above the
+## key centre; [E] luminance (a lit indicator, reads saturated blue) and colour (linear Rec.709 at luminance 1).
+const LED_KEYS: Array[String] = ["r_led_1", "r_led_2", "r_led_3"]
+const LED_SIZE_M := Vector2(0.007, 0.006)
+const LED_UP_M := 0.0025
+const LED_CD_M2 := 150.0
+const LED_COLOUR := Vector3(0.35, 0.95, 4.2)
+const LED_ALBEDO := Color(0.05, 0.25, 0.9)
 ## [E] conv_42860a: the T-handle housing ends in a red marking at its lower right (the crew's right) corner: share of the housing width and
 ## height and its colour (sRGB); the first render's full-height 22 % block read far larger than the photo's red tab.
 const HANDLE_MARK_SHARE := 0.15
@@ -91,7 +95,8 @@ var _figures := {}  # seat id -> Node3D (figure root)
 var _skeletons := {}  # seat id -> Skeleton3D
 var _crew := 0
 var _materials := {}
-var _strip_materials: Array[ShaderMaterial] = []
+var _led_materials: Array[ShaderMaterial] = []
+var _console_textures := {}  # manifest cockpit.console_maps role -> ImageTexture
 var _cockpit_manifest := {}
 var _label_atlas: ImageTexture = null
 var _figure_bones := {}  # manifest crew_figure.bones (the arm chains' finger lengths)
@@ -125,7 +130,8 @@ func build(models: Dictionary, cockpit: CockpitConfig) -> void:
 		instance.name = part
 		instance.mesh = cabin[part]
 		instance.material_override = _material_of(part)
-		if part.begins_with("window_glass") or part.begins_with("light_") or part.begins_with("screen_") or part == "ceiling_ring_light" or part == "console_lamps" 				or (part.begins_with("guard_") and not part.begins_with("guard_rim_")):
+		if part.begins_with("window_glass") or part.begins_with("light_") or part.begins_with("screen_") or part == "ceiling_ring_light" or part == "console_lamps" \
+				or (part.begins_with("guard_") and not part.begins_with("guard_rim_")):
 			instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		if part == "console_hit":  # the pointer's flat hit faces (fidelity Task 5): geometry only, never drawn
 			instance.visible = false
@@ -142,7 +148,8 @@ func build(models: Dictionary, cockpit: CockpitConfig) -> void:
 
 
 func _on_console(part: String) -> bool:
-	return part.begins_with("console_") or part.begins_with("tablet_") or part.begins_with("button_") or part == "handle" 			or part.begins_with("light_") or part.begins_with("guard_")
+	return part.begins_with("console_") or part.begins_with("tablet_") or part.begins_with("button_") or part == "handle" \
+			or part.begins_with("light_") or part.begins_with("guard_")
 
 
 ## The mesh of a screen ("left", "centre", "right").
@@ -477,8 +484,10 @@ func _process(_delta: float) -> void:
 		if material is ShaderMaterial and ((material as ShaderMaterial).shader == CABIN_SHADER or (material as ShaderMaterial).shader == SUIT_SHADER):
 			(material as ShaderMaterial).set_shader_parameter("fill", fill)
 			(material as ShaderMaterial).set_shader_parameter("fill_surround", surround)
-	for material: ShaderMaterial in _strip_materials:
-		material.set_shader_parameter("mark_emission", SHELF_STRIP_COLOUR * SHELF_STRIP_CD_M2 * scene_per_cd)
+	if _materials.has("console_atlas"):
+		(_materials["console_atlas"] as ShaderMaterial).set_shader_parameter("emit_gain", CONSOLE_EMIT_CD_M2 * scene_per_cd)
+	for material: ShaderMaterial in _led_materials:
+		material.set_shader_parameter("mark_emission", LED_COLOUR * LED_CD_M2 * scene_per_cd)
 
 
 func _build_lights() -> void:
@@ -636,19 +645,10 @@ func _material_of(part: String) -> Material:
 		return _cabin_material(WALL_ALBEDO, 0.85, 0.0, 0.5)
 	if part == "floor" or part == "hatch_frame" or part.begins_with("window_"):
 		return _cabin_material(WALL_ALBEDO, 0.8, 0.0, 0.0)
-	## [E] Console (review item 3): the housing front is near black and matte (no specular sheen: it must not read beige under the lamps),
-	## the shelf modules dark grey, the back and the posts silver with the dark vent band, the underside dark grey (crew1_1, round 4: not a white slab), the lockers dark.
-	## The console colours are LINEAR albedos (photo measures), converted for the shader's sRGB uniform (round 5: they went in as sRGB, 0.07 became 0.006 linear).
-	if part == "console_housing":
-		return _cabin_material(Color(0.028, 0.028, 0.032).linear_to_srgb(), 0.9, 0.0, 0.0, 0.1)
-	if part == "console_shelf":
-		return _shelf_material()
-	if part == "console_back":
-		return _console_back_material()
-	if part == "console_under":
-		return _cabin_material(Color(0.10, 0.10, 0.11).linear_to_srgb(), 0.6, 0.2, 0.0, 0.3)
-	if part == "console_lockers":
-		return _cabin_material(Color(0.02, 0.02, 0.024).linear_to_srgb(), 0.85, 0.0, 0.0, 0.03)
+	## Fidelity Task 6: the console body, back with the posts, underside, tray and lockers share one material on the baked console atlas
+	## (tools/structures/cabin_textures.py: colours, seams, screws, placards, vent, plates, the red lip strip; docs/subsystems/cockpit.md).
+	if part in ATLAS_NODES:
+		return _console_atlas_material()
 	## [E] Fidelity Task 5: the screens' dark glass border (glossy black glass, jsc2022e068617), the clear key guards and their red rims
 	## (rim colour from the manifest, linear), the hidden pointer hit faces.
 	if part == "console_bezel":
@@ -676,6 +676,8 @@ func _material_of(part: String) -> Material:
 	var entry: Dictionary = (_cockpit_manifest.get("buttons", {}) as Dictionary).get(key_id, {})
 	if entry.has("label_cell"):
 		return _label_material(key_id, entry)
+	if key_id in LED_KEYS and not entry.is_empty():
+		return _led_material(key_id, entry)
 	return _key_base()  # buttons without a legible label: blank key faces
 
 
@@ -699,19 +701,45 @@ func _guard_material() -> StandardMaterial3D:
 	return m
 
 
-## The shelf modules (discovery2 / conv_42860a: dark grey) with the red light strip along each module's bottom lip (mark, emission set each frame).
-func _shelf_material() -> ShaderMaterial:
-	if _materials.has("console_shelf"):
-		return _materials["console_shelf"]
-	var m := _cabin_material(Color(0.07, 0.07, 0.075).linear_to_srgb(), 0.8, 0.0, 0.0, 0.05).duplicate() as ShaderMaterial
-	var centre: Dictionary = config.screens.get("centre", {})
-	if not centre.is_empty():
-		var n: Vector3 = (centre["normal"] as Vector3).normalized()
-		var up: Vector3 = (centre["up"] as Vector3).normalized()
-		var bottom := -0.5 * (centre["size"] as Vector2).y - float(config.console["shelf_top_gap_m"]) - float(config.console["shelf_height_m"])
-		_set_mark(m, centre["centre"], (-n).cross(up).normalized(), up, n, Vector2(-1.0, 1.0), Vector2(bottom - 0.01, bottom + SHELF_STRIP_HEIGHT_M), Color(0.35, 0.02, 0.02))
-		_strip_materials.append(m)
-	_materials["console_shelf"] = m
+## The console atlas material (fidelity Task 6): albedo / normal / ORM maps of the model set (manifest cockpit.console_maps); its emission gain
+## is set every frame (_process). The cabin shader's fill and wall reflection apply as on every cabin part.
+func _console_atlas_material() -> ShaderMaterial:
+	if _materials.has("console_atlas"):
+		return _materials["console_atlas"]
+	var m := ShaderMaterial.new()
+	m.shader = CABIN_SHADER
+	m.set_shader_parameter("specular", 0.4)
+	var maps: Dictionary = _cockpit_manifest.get("console_maps", {})
+	for role: String in ["albedo", "normal", "orm"]:
+		var texture := _console_texture(String(maps.get(role, "")))
+		if texture == null:
+			push_error("CockpitView: console map '%s' missing (rebuild the crew_dragon model set)" % role)
+			continue
+		m.set_shader_parameter(role + "_map", texture)
+	m.set_shader_parameter("maps_on", 1.0)
+	_materials["console_atlas"] = m
+	return m
+
+
+func _console_texture(file: String) -> ImageTexture:
+	if file.is_empty():
+		return null
+	if not _console_textures.has(file):
+		var image := Image.load_from_file(VehicleModels._repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file))
+		if image == null or image.is_empty():
+			return null
+		image.generate_mipmaps()  # VR: the 0.5 mm atlas is seen at 0.5-2 m, so every level is used
+		_console_textures[file] = ImageTexture.create_from_image(image)
+	return _console_textures[file]
+
+
+## An r_led key: the blank key face with its blue LED (a lit mark, emission set every frame).
+func _led_material(key_id: String, entry: Dictionary) -> ShaderMaterial:
+	var m := _key_base().duplicate() as ShaderMaterial
+	_set_mark(m, CockpitConfig._vec(entry["centre"]), CockpitConfig._vec(entry["right"]), CockpitConfig._vec(entry["up"]), CockpitConfig._vec(entry["normal"]),
+			Vector2(-0.5 * LED_SIZE_M.x, 0.5 * LED_SIZE_M.x), Vector2(LED_UP_M - 0.5 * LED_SIZE_M.y, LED_UP_M + 0.5 * LED_SIZE_M.y), LED_ALBEDO.linear_to_srgb())
+	_materials["led_" + key_id] = m
+	_led_materials.append(m)
 	return m
 
 
@@ -822,28 +850,6 @@ func _visor_material(base: ShaderMaterial, tint: Dictionary) -> ShaderMaterial:
 		m.set_shader_parameter("metallic_low", float(tint["metallic_low"]))
 		_materials[key] = m
 	return _materials[key]
-
-
-## The silver back with the dark vent band across it (shader band in the console frame; surface detail, not geometry).
-func _console_back_material() -> ShaderMaterial:
-	var m := ShaderMaterial.new()
-	m.shader = CABIN_SHADER
-	m.set_shader_parameter("albedo", Color(0.30, 0.31, 0.33))  # [E] crew1_1: brushed silver, mid grey under the ring light
-	m.set_shader_parameter("roughness", 0.5)
-	m.set_shader_parameter("metallic", 0.25)
-	m.set_shader_parameter("seam_depth", 0.0)
-	_materials["console_back"] = m  # gets the fill term every frame like the other cabin materials
-	var centre: Dictionary = config.screens.get("centre", {})
-	if not centre.is_empty():
-		var normal := _console_normal()
-		m.set_shader_parameter("band_on", 1.0)
-		m.set_shader_parameter("band_origin", centre["centre"])
-		m.set_shader_parameter("band_up", CockpitConfig._vec(config.console.get("up")).normalized())
-		m.set_shader_parameter("band_face_normal", -normal)
-		m.set_shader_parameter("band_up_range", CONSOLE_VENT_UP_M)
-		m.set_shader_parameter("band_half_width", CONSOLE_VENT_HALF_WIDTH_M)
-		m.set_shader_parameter("band_albedo", Color(0.03, 0.03, 0.035))
-	return m
 
 
 func _display(colour: Color) -> ShaderMaterial:

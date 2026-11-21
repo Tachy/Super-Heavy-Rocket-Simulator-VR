@@ -549,9 +549,14 @@ def cockpit_labels(cockpit: dict) -> np.ndarray:
         margin = LABEL_MARGIN_SHARE * min(w, h)
         lines, font = _label_lines(buttons[bid]["label"].upper(), lambda s: ImageFont.load_default(size=max(6, round(LABEL_LINE_SHARE * h * s))), round(w - 2 * margin), text_h - 2 * margin, 1 if round_key else 3)
         line_h = font.getbbox("HG")[3] * 1.15
-        top = y0 + margin + max(0.0, (text_h - 2 * margin - line_h * len(lines)) / 2.0)
+        block = Image.new("L", (w, int(math.ceil(line_h * len(lines))) + 2 * h), 0)  # fidelity Task 6: the block's INK is centred (the font box sat ~1 mm high)
+        bdraw = ImageDraw.Draw(block)
         for k, line in enumerate(lines):
-            draw.text((x0 + w / 2.0, top + k * line_h), line, fill=255, font=font, anchor="mt")
+            bdraw.text((w / 2.0, h + k * line_h), line, fill=255, font=font, anchor="mt")
+        ink = np.asarray(block) > 127
+        ys, xs = np.nonzero(ink)
+        ink_cx, ink_cy = 0.5 * (xs.min() + xs.max() + 1), 0.5 * (ys.min() + ys.max() + 1)
+        image.paste(255, (round(x0 + w / 2.0 - ink_cx), round(y0 + text_h / 2.0 - ink_cy)), block)
         if round_key:
             r = 0.17 * min(w, h)
             cx, cy = x0 + w / 2.0, y0 + 0.72 * h

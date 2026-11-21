@@ -7,7 +7,7 @@ render_mode ambient_light_disabled;
 // split-sum environment BRDF (fix round 5: AO 0.03 on the sky's radiance still left the sky - far brighter than the cabin the eye
 // adaptation meters - in every reflection: black seats, brackets and the lower visor read mid grey). (2) Panel seams: thin dark
 // lines on a grid in the part's own coordinates (surface detail by shader, not geometry), strength seam_depth (0 = none). Further
-// surface detail by uniforms (3)-(7): band, two-tone visor, helmet panel lines, key labels, markings.
+// surface detail by uniforms (3)-(8): band, two-tone visor, helmet panel lines, key labels, markings, the console atlas maps.
 
 #include "res://shaders/atmosphere.gdshaderinc"
 
@@ -68,6 +68,14 @@ uniform vec2 mark_lat = vec2(0.0);
 uniform vec2 mark_up_range = vec2(0.0);
 uniform vec4 mark_albedo : source_color = vec4(0.5, 0.02, 0.02, 1.0);
 uniform vec3 mark_emission = vec3(0.0);
+// (8) Console atlas (fidelity Task 6, tools/structures/cabin_textures.py): albedo (sRGB), tangent-space normal (x = the atlas' +U, y = its -V =
+// the chart's image up), ORM (R occlusion, G roughness, B metallic, A emission mask). The tangent frame comes from the screen-space derivatives
+// of position and UV (no mesh tangents needed); the emission is albedo x mask x emit_gain (scene value, set every frame by CockpitView).
+uniform float maps_on = 0.0;
+uniform sampler2D albedo_map : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
+uniform sampler2D normal_map : filter_linear_mipmap_anisotropic, repeat_disable;
+uniform sampler2D orm_map : filter_linear_mipmap_anisotropic, repeat_disable;
+uniform float emit_gain = 0.0;
 
 varying vec3 world_offset;  // fragment - the render origin (= the atmosphere's camera), world axes
 varying vec3 local_position;
@@ -111,6 +119,28 @@ void fragment() {
 	vec3 base = albedo.rgb;
 	float rough = roughness;
 	float metal = metallic;
+	float occlusion = 1.0;
+	vec3 glow = vec3(0.0);
+	if (maps_on > 0.0) {
+		base = texture(albedo_map, UV).rgb;
+		vec4 orm = texture(orm_map, UV);
+		occlusion = orm.r;
+		rough = orm.g;
+		metal = orm.b;
+		glow = base * orm.a * emit_gain;
+		vec3 nt = texture(normal_map, UV).xyz * 2.0 - 1.0;
+		vec3 n0 = normalize(NORMAL);
+		vec3 dp1 = dFdx(VERTEX);
+		vec3 dp2 = dFdy(VERTEX);
+		vec2 duv1 = dFdx(UV);
+		vec2 duv2 = dFdy(UV);
+		vec3 dp2perp = cross(dp2, n0);
+		vec3 dp1perp = cross(n0, dp1);
+		vec3 t = dp2perp * duv1.x + dp1perp * duv2.x;  // along +U
+		vec3 b = dp2perp * duv1.y + dp1perp * duv2.y;  // along +V (down the image)
+		float inv = inversesqrt(max(max(dot(t, t), dot(b, b)), 1.0e-20));
+		NORMAL = normalize(t * inv * nt.x - b * inv * nt.y + n0 * nt.z);
+	}
 	if (band_on > 0.0 && dot(normalize(local_normal), band_face_normal) > 0.9) {
 		vec3 d = local_position - band_origin;
 		float u = dot(d, band_up);
@@ -128,7 +158,6 @@ void fragment() {
 		rough = mix(rough, roughness_low, low);
 		metal = mix(metal, metallic_low, low);
 	}
-	vec3 glow = vec3(0.0);
 	if (groove_count > 0 && length(local_position - groove_centre) < groove_radius) {
 		float g = 0.0;
 		for (int i = 0; i < min(groove_count, 2); i++) {
@@ -167,5 +196,6 @@ void fragment() {
 	SPECULAR = specular;
 	vec3 f0 = mix(vec3(0.16 * specular * specular), base, metal);  // Godot's dielectric F0 from SPECULAR
 	float n_dot_v = clamp(dot(normalize(NORMAL), normalize(VIEW)), 1.0e-3, 1.0);
-	EMISSION = (base * (1.0 - metal) * fill + env_brdf(f0, rough, n_dot_v) * fill_surround + glow) * colour_factor;
+	EMISSION = ((base * (1.0 - metal) * fill + env_brdf(f0, rough, n_dot_v) * fill_surround) * occlusion + glow) * colour_factor;
+	AO = occlusion;
 }

@@ -163,7 +163,7 @@ func _shoot() -> bool:
 		(figure as Node3D).visible = not isolate or figure.name == keep_figure
 	for part: String in ["seat_rest_", "seat_shell_s1", "seat_shell_s2", "seat_shell_s4", "seat_pad_s1", "seat_pad_s2", "seat_pad_s4", "console_", "screen_", "tablet_", "button_", "handle"]:
 		for node in _cockpit.find_children(part + "*" if part.ends_with("_") else part, "MeshInstance3D", false, false):
-			(node as Node3D).visible = not isolate
+			(node as Node3D).visible = not isolate and node.name != "console_hit"  # fidelity Task 6: the hidden hit faces covered every key face in the shots
 	if _args.has("hide"):  # debugging: hide cabin parts by name (comma separated)
 		for hidden_name: String in String(_args["hide"]).split(","):
 			var hidden_node := _cockpit.cabin_node(hidden_name)

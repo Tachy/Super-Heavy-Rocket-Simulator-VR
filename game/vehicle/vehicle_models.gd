@@ -33,7 +33,7 @@ const SOURCE_SCRIPTS := {
 	"crew_dragon": ["vehicle_common.py", "cabin_layout.py", "console_shape.py", "figure_layout.py", "figure_body.py", "figure_measure.py", "gen_dragon.py", "idss_mechanism.py", "gen_dragon_cabin.py", "gen_crew_figure.py"], "iss": ["vehicle_common.py", "idss_mechanism.py", "iss_station.py", "iss_arrays.py", "idss_passive_ring.py"],
 }
 const SOURCE_BAKERS := {"starship_block3": ["hull_textures.py", "hull_tiles.py"], "starship_tanker": ["hull_textures.py", "hull_tiles.py"],
-		"starship_depot": ["hull_textures.py", "hull_tiles.py"], "starship_hls": ["hull_textures.py", "hull_tiles.py"], "falcon9_block5": ["surface_textures.py"], "crew_dragon": ["surface_textures.py", "suit_textures.py"], "iss": ["iss_textures.py"]}
+		"starship_depot": ["hull_textures.py", "hull_tiles.py"], "starship_hls": ["hull_textures.py", "hull_tiles.py"], "falcon9_block5": ["surface_textures.py"], "crew_dragon": ["surface_textures.py", "suit_textures.py", "cabin_textures.py"], "iss": ["iss_textures.py"]}
 ## Ship variants take the detail tables they do not list, and the stages they take over, from Block 3: its files also make
 ## their model set stale (tools/structures/vehicle_spec.py, VARIANT_BASE).
 const VARIANT_VEHICLES: Array[String] = ["starship_tanker", "starship_depot", "starship_hls"]

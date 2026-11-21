@@ -112,3 +112,9 @@ armrests, palms down (it read as a shrug in the hatch shots); hands were boxes o
 - `photo_cameras.toml` Task 4 fix round 1 rows: crew1_1 (1.8362, 1.4265, 0.0035) fov 97.054; discovery2 (2.2152, -0.6499, -0.0313) fov 115.094; discovery10
   (2.2147, -0.6291, -0.0190) fov 118.399.
 - `console_pointer_test.gd` KNOWN_REACH_GAP_M: only r_upper_5, 30.7 mm.
+
+## Console materials before fidelity Task 6 (2026-11-21)
+- Flat colours per node (CockpitView): `console_housing` linear 0.028 (roughness 0.9), `console_shelf` 0.07 with a red strip mark (`SHELF_STRIP_*`: 10 mm, 40 cd/m2)
+  across the whole lip, `console_back` 0.30 sRGB silver (metallic 0.25) with the dark vent band by shader (`CONSOLE_VENT_UP_M` -0.11..+0.07 from the centre screen centre,
+  +-0.58 m; it covered the silver), the posts the same silver, `console_under` 0.10, `console_lockers` 0.02. Console UVs were the local planar (x, y) in metres.
+- Key labels: the text block was centred by the font box ("HG" x 1.15 line height), which put the ink 0.7-1.1 mm above the key centre.

@@ -196,6 +196,185 @@ def console_posts(cockpit):
     return out
 
 
+CONSOLE_MAPS = {"albedo": "console_albedo.png", "normal": "console_normal.png", "orm": "console_orm.png"}  # cabin_textures.py bakes them
+CONSOLE_ATLAS_SIZE = (4096, 2048)  # [E] fidelity Task 6: power of two (mipmaps), one atlas for the console body, tray and posts
+CHART_MARGIN_M = 0.01  # [E] every chart reaches this far past the surface it covers (fillets, the frame plate's walls)
+CHART_GUTTER_PX = 8  # [E] free texels between charts (the baker paints into them: no bleeding down to the 8th mip)
+CHART_TEXEL_M = {"front": 0.0005, "tray_face": 0.0005, "tray_top": 0.0005, "tray_under": 0.001, "back": 0.0013, "top": 0.0013,
+                 "under": 0.0013, "end_l": 0.001, "end_r": 0.001, "post": 0.002}  # [E] 0.5 mm where the crew looks from 0.5-0.8 m (~3.6 px per mm at the Pimax target), coarser elsewhere
+POST_UV_WRAP = 1.1  # the post charts run 1.1 turns around: a face across the angle seam keeps continuous UVs
+NODE_CHARTS = ("console_housing", "console_back", "console_under", "console_shelf", "console_lockers")  # the nodes on the console atlas
+
+
+def console_local(cockpit, p):
+    """(lat, u, o) of a cabin point in console_frame (origin the centre screen centre)."""
+    f = console_frame(cockpit)
+    d = [p[i] - f["origin"][i] for i in range(3)]
+    return dot3(d, f["right"]), dot3(d, f["up"]), dot3(d, f["normal"])
+
+
+def _pack(sizes, atlas):
+    """{name: (x, y)}: first fit in decreasing area on an 8 px grid (deterministic); raises if a chart does not fit."""
+    g = CHART_GUTTER_PX
+    cols, rows = atlas[0] // g, atlas[1] // g
+    used = [[False] * cols for _ in range(rows)]
+    out = {}
+    for name, (w, h) in sorted(sizes.items(), key=lambda kv: (-kv[1][0] * kv[1][1], kv[0])):
+        cw, chh = -(-(w + g) // g), -(-(h + g) // g)
+        spot = None
+        for r in range(rows - chh + 1):
+            for c in range(cols - cw + 1):
+                if any(used[r + i][c + j] for i in (0, chh - 1) for j in (0, cw - 1)):
+                    continue
+                if not any(any(used[r + i][c:c + cw]) for i in range(chh)):
+                    spot = (c, r)
+                    break
+            if spot:
+                break
+        if spot is None:
+            raise ValueError(f"console atlas: chart {name} ({w} x {h} px) does not fit {atlas}")
+        for i in range(chh):
+            for j in range(cw):
+                used[spot[1] + i][spot[0] + j] = True
+        out[name] = (spot[0] * g, spot[1] * g)
+    return out
+
+
+def console_charts(cockpit):
+    """{chart: {a, b, plane, facing, a_range, b_range, texel, rect}}: the console atlas (fidelity Task 6). Planar charts project a face onto two
+    console_frame axes: a / b = (axis, sign) of the chart's horizontal (right in the image) and vertical (up in the image) coordinate, the face
+    lies at `plane` on the third axis and faces `facing` along it; a_range / b_range in the signed coordinates (m), texel (m), rect (x, y, w, h) px
+    in the atlas (y down). Post charts (post_0 / post_1, kind "cyl"): a = POST_UV_WRAP turns around the post axis (a_range in turns),
+    b = the distance from the post's base along its axis."""
+    con, f, rows = cockpit["console"], console_frame(cockpit), tray_rows(cockpit)
+    m, hw = CHART_MARGIN_M, con["width_m"] / 2.0 + CHART_MARGIN_M
+    drop = max(d for _, d in con["underside_profile"])
+    u_panel = (con["upper_top_x_m"] - f["origin"][0]) / f["up"][0]
+    o_lo, o_hi = -con["hood_depth_m"] - m, 0.06
+    u_lo, u_hi = f["u_bot"] - drop - m, u_panel + m
+    tl = cockpit["tray"]["half_length_m"] + m
+    planar = {
+        "front": (("lat", 1), ("u", 1), "o", -SCREEN_PROUD_M, 1, (-hw, hw), (f["u_bot"] - m, u_hi)),
+        "back": (("lat", -1), ("u", 1), "o", -con["hood_depth_m"], -1, (-hw, hw), (u_lo, u_hi)),  # up to the panel: its back and the lockers' backs
+        "top": (("lat", 1), ("o", 1), "u", f["u_top"], 1, (-hw, hw), (o_lo, o_hi)),
+        "under": (("lat", 1), ("o", 1), "u", f["u_bot"], -1, (-hw, hw), (o_lo, o_hi)),
+        "end_r": (("o", 1), ("u", 1), "lat", con["width_m"] / 2.0, 1, (o_lo, o_hi), (u_lo, u_hi)),
+        "end_l": (("o", -1), ("u", 1), "lat", -con["width_m"] / 2.0, -1, (-o_hi, -o_lo), (u_lo, u_hi)),
+        "tray_face": (("lat", 1), ("u", 1), "o", cockpit["tray"]["depth_m"], 1, (-tl, tl), (rows["bottom"] - m, rows["top"] + m)),
+        "tray_top": (("lat", 1), ("o", 1), "u", rows["top"], 1, (-tl, tl), (-0.012, 0.05)),
+        "tray_under": (("lat", 1), ("o", 1), "u", rows["bottom"], -1, (-tl, tl), (-0.012, 0.05)),
+    }
+    charts = {}
+    for name, (a, b, _, plane, facing, ar, br) in planar.items():
+        charts[name] = {"kind": "plane", "a": a, "b": b, "plane": plane, "facing": facing, "a_range": list(ar), "b_range": list(br),
+                        "texel": CHART_TEXEL_M[name]}
+    foot = con["post_foot_m"]
+    for k, (base, top) in enumerate(console_posts(cockpit)):
+        length = math.sqrt(sum((t - b) ** 2 for t, b in zip(top, base)))
+        circ = 2.0 * math.pi * con["post_head_radius_m"]  # texels around = the collar's circumference (the widest part but the funnel's lip)
+        charts[f"post_{k}"] = {"kind": "cyl", "a_range": [0.0, POST_UV_WRAP], "b_range": [-m, length + 2.0 * con["post_head_radius_m"] + m], "texel": CHART_TEXEL_M["post"],  # the head's flush cut reaches past the axis' end
+                               "circumference_m": circ, "base": list(base), "top": list(top), "foot_m": list(foot)}
+    sizes = {}
+    for name, c in charts.items():
+        span_a = (c["a_range"][1] - c["a_range"][0]) * (c["circumference_m"] if c["kind"] == "cyl" else 1.0)
+        sizes[name] = (int(math.ceil(span_a / c["texel"])), int(math.ceil((c["b_range"][1] - c["b_range"][0]) / c["texel"])))
+    for name, (x, y) in _pack(sizes, CONSOLE_ATLAS_SIZE).items():
+        charts[name]["rect"] = [x, y, sizes[name][0], sizes[name][1]]
+    return charts
+
+
+def chart_of(node, n_local):
+    """The chart of a face of a console node by its console-frame normal (lat, u, o): the dominant axis picks the face's chart."""
+    a = [abs(c) for c in n_local]
+    k = a.index(max(a))
+    if node == "console_shelf":
+        if k == 1:
+            return "tray_top" if n_local[1] > 0 else "tray_under"
+        if k == 0:
+            return "end_r" if n_local[0] > 0 else "end_l"
+        return "tray_face"
+    if k == 0:
+        return "end_r" if n_local[0] > 0 else "end_l"
+    if k == 1:
+        return "top" if n_local[1] > 0 else "under"
+    return "front" if n_local[2] > 0 else "back"
+
+
+def chart_uv(chart, a, b):
+    """Atlas (x, y) in 0..1 (y down from the top, the glTF / Godot convention) of chart coordinates (a, b)."""
+    x, y, w, h = chart["rect"]
+    if chart["kind"] == "cyl":
+        a = a * chart["circumference_m"]
+        a0 = chart["a_range"][0] * chart["circumference_m"]
+    else:
+        a0 = chart["a_range"][0]
+    W, H = CONSOLE_ATLAS_SIZE
+    return (x + (a - a0) / chart["texel"]) / W, (y + (chart["b_range"][1] - b) / chart["texel"]) / H
+
+
+def plane_ab(chart, lat_u_o):
+    """Chart coordinates (a, b) of a console-local point on a planar chart."""
+    idx = {"lat": 0, "u": 1, "o": 2}
+    (an, asg), (bn, bsg) = chart["a"], chart["b"]
+    return asg * lat_u_o[idx[an]], bsg * lat_u_o[idx[bn]]
+
+
+def plane_point(chart, a, b, depth=None):
+    """Console-local (lat, u, o) of chart coordinates (a, b) on the chart's plane (or at `depth` on its normal axis)."""
+    idx = {"lat": 0, "u": 1, "o": 2}
+    (an, asg), (bn, bsg) = chart["a"], chart["b"]
+    p = [0.0, 0.0, 0.0]
+    p[idx[an]], p[idx[bn]] = a * asg, b * bsg
+    k = ({0, 1, 2} - {idx[an], idx[bn]}).pop()
+    p[k] = chart["plane"] if depth is None else depth
+    return tuple(p)
+
+
+def post_ab(chart, p):
+    """(turns around the axis in [0, 1), distance from the base, distance from the axis) of a cabin point on a post (the axis frame of console_shape.post)."""
+    base, top = chart["base"], chart["top"]
+    ez = [t - b for t, b in zip(top, base)]
+    length = math.sqrt(dot3(ez, ez))
+    ez = [c / length for c in ez]
+    ref = (1.0, 0.0, 0.0) if abs(ez[0]) < 0.9 else (0.0, 1.0, 0.0)
+    ex = [ref[1] * ez[2] - ref[2] * ez[1], ref[2] * ez[0] - ref[0] * ez[2], ref[0] * ez[1] - ref[1] * ez[0]]
+    k = math.sqrt(dot3(ex, ex))
+    ex = [c / k for c in ex]
+    ey = [ez[1] * ex[2] - ez[2] * ex[1], ez[2] * ex[0] - ez[0] * ex[2], ez[0] * ex[1] - ez[1] * ex[0]]
+    d = [p[i] - base[i] for i in range(3)]
+    s = dot3(d, ez)
+    x, y = dot3(d, ex), dot3(d, ey)
+    return (math.atan2(y, x) / (2.0 * math.pi)) % 1.0, s, math.hypot(x, y)
+
+
+def face_uvs(cockpit, charts, node, pts, normal):
+    """Atlas UVs (Blender convention: v up = 1 - y) of one face of a console node: pts cabin points, normal the face's cabin normal."""
+    f = console_frame(cockpit)
+    n_local = (dot3(normal, f["right"]), dot3(normal, f["up"]), dot3(normal, f["normal"]))
+    ch = charts[chart_of(node, n_local)]
+    out = []
+    for p in pts:
+        x, y = chart_uv(ch, *plane_ab(ch, console_local(cockpit, p)))
+        out.append((x, 1.0 - y))
+    return out
+
+
+def post_face_uvs(charts, k, pts):
+    """Atlas UVs (Blender convention) of one face of post k: the turns unwrapped across the seam within the face."""
+    ch = charts[f"post_{k}"]
+    ab = [post_ab(ch, p) for p in pts]
+    turns = [a for a, _, _ in ab]
+    if max(turns) - min(turns) > 0.5:
+        turns = [t + 1.0 if t < 0.5 else t for t in turns]
+    if max(turns) - min(turns) > 0.5 or min(r for _, _, r in ab) < 1e-6:  # an end cap (round the axis): one colour, no wrap
+        turns = [0.5] * len(turns)
+    out = []
+    for t, (_, s, _) in zip(turns, ab):
+        x, y = chart_uv(ch, t, s)
+        out.append((x, 1.0 - y))
+    return out
+
+
 def button_node(button):
     return "handle" if button["kind"] == "handle" else f"button_{button['id']}"
 
@@ -256,6 +435,7 @@ def cockpit_manifest(cockpit):
         "buttons": {b["id"]: {"centre": b["centre_m"], "size": b["size_m"], "node": button_node(b), "shape": b["shape"], **button_frame(cockpit, b),
                               **({"label": b["label"], "label_cell": cells[b["id"]]} if b["id"] in cells else {})} for b in cockpit["button"]},
         "labels": {"file": LABEL_FILE, "size": list(size)},
+        "console_maps": dict(CONSOLE_MAPS),
         "button_ids": [b["id"] for b in cockpit["button"]],
         "tablets": {t["id"]: {"node": f"tablet_{t['id']}", "centre": t["centre_m"], "normal": t["normal"], "up": t["up"], "size": t["size_m"]} for t in cockpit["tablet"]},
         "guards": {g["id"]: {"node": f"guard_{g['id']}", "rim_node": f"guard_rim_{g['id']}", "rim_colour": list(g["rim_colour"]), "hinge_edge": g["hinge_edge"],
