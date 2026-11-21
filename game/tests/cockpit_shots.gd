@@ -63,6 +63,8 @@ var _out_dir := ""
 var _refs_dir := ""
 var _hatch_vfov := 0.0  # crew1_1 row: vertical field of the hatch shots
 var _pointer: ConsolePointer
+var _maps_wait_start_ms := 0
+const MAPS_TIMEOUT_MS := 60000
 
 
 func _initialize() -> void:
@@ -137,6 +139,20 @@ func _shoot() -> bool:
 		var crew := int(_args.get("crew", MissionCatalogue.crew_count(String(_args["mission"]))))
 		_cockpit.set_crew(crew)
 		_define_shots()
+	# The console / seat maps are prepared in the background and swapped in later: no shot before they are in (a failed map or a timeout fails).
+	var maps := _cockpit.maps_state()
+	if maps == 0:
+		if _maps_wait_start_ms == 0:
+			_maps_wait_start_ms = maxi(Time.get_ticks_msec(), 1)
+		if Time.get_ticks_msec() - _maps_wait_start_ms > MAPS_TIMEOUT_MS:
+			push_error("cockpit_shots: the console / seat maps were not ready after %d s" % (MAPS_TIMEOUT_MS / 1000))
+			quit(1)
+			return true
+		return false
+	if maps < 0:
+		push_error("cockpit_shots: a console / seat map is missing or failed (rebuild the crew_dragon model set)")
+		quit(1)
+		return true
 	if _index >= _shots.size():
 		_set_exterior_visible(true)
 		if _args.has("body"):

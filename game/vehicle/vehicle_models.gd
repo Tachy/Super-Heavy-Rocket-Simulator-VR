@@ -177,7 +177,9 @@ static func console_texture(path: String, file: String, role: String) -> ImageTe
 	_console_mutex.unlock()
 	if not done:
 		return null
-	_console_started.erase(file)
+	if _console_started.has(file):
+		WorkerThreadPool.wait_for_task_completion(_console_started[file])  # the work is done; Godot wants every task waited so the pool can free it
+		_console_started.erase(file)
 	if image == null:
 		_console_failed[file] = true
 		return null

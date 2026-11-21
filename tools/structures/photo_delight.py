@@ -34,7 +34,7 @@ ROOT = HERE.parents[1]
 LAMP_LUMENS = 3000.0  # [D] = CockpitView.LAMP_LUMENS (game/cockpit/cockpit_view.gd)
 LAMP_DROP_M = 0.08  # [D] = CockpitView.LAMP_DROP_M
 RING_LUMENS = 6000.0  # [D] = CockpitView.RING_LUMENS, over RING_LAMPS omnis
-RING_LAMPS = 16  # [D] = CockpitView.RING_LAMPS
+RING_LAMPS = 8  # [D] = CockpitView.RING_LAMPS
 RING_DROP_M = 0.30  # [D] = CockpitView.RING_DROP_M (Task 9 fix 1: under the cove light)
 RING_IN_M = 0.25  # [D] = CockpitView.RING_IN_M (in from the side wall)
 FILL_LUMENS = 7000.0  # [D] = CockpitView.FILL_LUMENS (fill_ceiling, fill_seats)

@@ -29,7 +29,7 @@ const LAMP_DROP_M := 0.08
 ## [E] The cove light all round the side wall under the ceiling corner (fidelity Task 9; was a ceiling annulus r 0.50-0.85): RING_LAMPS omnis
 ## RING_DROP_M below the middle of [cabin] cove_light_x_m and RING_IN_M in from the wall (cove_ring), RING_LUMENS in total (an area light's stand-in; its emissive band
 ## `ceiling_ring_light` is the generator's). tools/structures/photo_delight.cove_ring uses the same rule.
-const RING_LAMPS := 16
+const RING_LAMPS := 8
 const RING_LUMENS := 6000.0
 const RING_DROP_M := 0.30
 const RING_IN_M := 0.25
@@ -118,6 +118,7 @@ var _led_materials: Array[ShaderMaterial] = []
 var _console_pending := false  ## console maps still being prepared in the background (polled in _process)
 var _seat_pending := false  ## seat atlas maps still being prepared in the background (polled in _process)
 var _seat_warned := false
+var _console_warned := false
 var _cockpit_manifest := {}
 var _label_atlas: ImageTexture = null
 var _figure_bones := {}  # manifest crew_figure.bones (the arm chains' finger lengths)
@@ -529,7 +530,7 @@ func _build_lights() -> void:
 		lamp.shadow_bias = 0.12  # the ceiling is lit at a grazing angle: the default bias showed radial shadow acne (pilot_eye, round 3)
 		lamp.shadow_normal_bias = 3.0
 		lamp.light_cull_mask &= ~CONSOLE_LAYER
-	var ceiling_x := float(config.cabin.get("ceiling_x_m", 3.35))
+	var ceiling_x := float(config.cabin.get("ceiling_x_m", 3.48))
 	var ring := cove_ring(config.cabin)
 	for k in RING_LAMPS:
 		var az := TAU * float(k) / RING_LAMPS
@@ -771,6 +772,23 @@ func _guard_material() -> StandardMaterial3D:
 	return m
 
 
+## [E] Console colours while the atlas is pending or missing (cabin_textures.DARK_PANEL 0.030 / 0.030 / 0.034 linear, panel roughness 0.85).
+const CONSOLE_FLAT_ALBEDO := Color(0.030, 0.030, 0.034)
+const CONSOLE_FLAT_ROUGHNESS := 0.85
+
+
+## Background maps state: 0 = still waiting (cabin not built yet or maps pending), 1 = console and seat maps are in, -1 = a map is missing / failed
+## (flat colours). For the look and timing scripts, which must not capture before the maps are in.
+func maps_state() -> int:
+	if not _materials.has("console_atlas") or _console_pending or _seat_pending:
+		return 0
+	var ok := float((_materials["console_atlas"] as ShaderMaterial).get_shader_parameter("maps_on")) == 1.0
+	for kind: String in ["shell", "pad", "rest"]:
+		if _materials.has("seat_" + kind):
+			ok = ok and float((_materials["seat_" + kind] as ShaderMaterial).get_shader_parameter("maps_on")) == 1.0
+	return 1 if ok else -1
+
+
 ## The console atlas material (fidelity Task 6): albedo / normal / ORM maps of the model set (manifest cockpit.console_maps); its emission gain
 ## is set every frame (_process). The cabin shader's fill and wall reflection apply as on every cabin part.
 func _console_atlas_material() -> ShaderMaterial:
@@ -779,6 +797,8 @@ func _console_atlas_material() -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = CABIN_SHADER
 	m.set_shader_parameter("specular", 0.4)
+	m.set_shader_parameter("albedo", CONSOLE_FLAT_ALBEDO.linear_to_srgb())  # flat colours until (or without) the maps; the shader default is white
+	m.set_shader_parameter("roughness", CONSOLE_FLAT_ROUGHNESS)
 	_apply_console_maps(m)
 	_materials["console_atlas"] = m
 	return m
@@ -799,7 +819,8 @@ func _apply_console_maps(m: ShaderMaterial) -> void:
 		all_loaded = false
 		if not file.is_empty() and VehicleModels.is_console_map_pending(file):
 			_console_pending = true
-		else:
+		elif not _console_warned:
+			_console_warned = true
 			push_warning("CockpitView: console map '%s' missing (rebuild the crew_dragon model set); the console keeps its flat colours" % role)
 	m.set_shader_parameter("maps_on", 1.0 if all_loaded else 0.0)
 

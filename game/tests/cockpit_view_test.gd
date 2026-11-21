@@ -130,6 +130,8 @@ func _check_launch() -> void:
 func _check_console_swap(cockpit: CockpitView) -> void:
 	var m: ShaderMaterial = cockpit._materials["console_atlas"]
 	var early := float(m.get_shader_parameter("maps_on"))
+	var early_albedo: Color = (m.get_shader_parameter("albedo") as Color).srgb_to_linear()
+	_check(early != 0.0 or (early_albedo.get_luminance() < 0.1 and cockpit.maps_state() == 0), "flat console fallback is dark, not the shader's white (linear luminance %.3f), maps_state waiting" % early_albedo.get_luminance())
 	var t0 := Time.get_ticks_msec()
 	while cockpit._console_pending and Time.get_ticks_msec() - t0 < 30000:
 		OS.delay_msec(50)
@@ -154,6 +156,7 @@ func _check_console_swap(cockpit: CockpitView) -> void:
 		seat_ok = seat_ok and (detail != null and float(detail) == 1.0) == (kind != "shell")
 		seat_ok = seat_ok and (kind == "shell" or sm.get_shader_parameter("detail_map") != null)
 	_check(seat_ok, "seats: the compressed seat atlas swapped in on shell / pad / rest; fabric and carbon detail tiles on pad / rest")
+	_check(cockpit.maps_state() == 1, "maps_state ready (1) once console and seat maps are in (%d)" % cockpit.maps_state())
 
 
 func _check_return() -> void:

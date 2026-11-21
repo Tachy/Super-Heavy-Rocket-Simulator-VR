@@ -132,6 +132,14 @@ def test_photo_cameras_file_rows_load():
         assert cam.to_row()["fov_h_deg"] == pytest.approx(row["fov_h_deg"], abs=1e-6)
 
 
+def test_photo_cameras_file_values_are_tagged():
+    from vehicle_spec import value_lines_without_tag
+    path = ROOT / "config" / "cockpits" / "photo_cameras.toml"
+    if not path.exists():
+        pytest.skip("photo_cameras.toml not present")
+    assert value_lines_without_tag(path) == []
+
+
 def test_annotation_load(tmp_path):
     (tmp_path / "ph.toml").write_text('sigma_px = 2.0\n[[point]]\nlabel = "a"\npx = [1.0, 2.0]\n[[edge]]\nlabel = "e"\npx = [[0,0],[1,1]]\n')
     cams = tmp_path / "cams.toml"

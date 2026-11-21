@@ -160,6 +160,7 @@ var _halo_visibility_range := Vector2(INF, -INF)  ## --halo_sequence --stereo: t
 var _halo_pending_terms := ""  ## --halo_sequence --stereo: the Sun terms of the frame whose eye images are being read back
 var _repeat_failed := false  ## --repeat_identical: the frames differ (exit code 1)
 var _gpu_wall_us: Array[int] = []  ## --gpu_series: the wall clock of each measured frame
+var _maps_wait_start_ms := 0  ## --gpu_time: when the wait for the cabin's background maps began
 var _gpu_ms: Array[float] = []  ## --gpu_time: the measured frames' GPU render times
 var _gpu_passes := {}  ## --gpu_passes: timestamp name -> Array of the measured frames' GPU ms
 var _sweep_left: Array[float] = []  ## --divisor_sweep: the divisors still to measure
@@ -608,6 +609,20 @@ func _print_probe_luminance(image: Image) -> void:
 ## divisor (CloudLayer.divisor_override), each after FRAMES_TO_SETTLE frames at it; the image is the last divisor's.
 func _gpu_frames(world: World) -> bool:
 	var wanted: int = int(_args["gpu_time"]) if _args["gpu_time"].is_valid_int() else 120
+	# A cabin's console / seat maps are prepared in the background and swapped in later: no timed frame before they are in.
+	for view in world.flight.views:
+		if view.cockpit == null:
+			continue
+		var maps: int = view.cockpit.maps_state()
+		if maps < 0:
+			_refuse("render_check: a cockpit console / seat map is missing or failed (rebuild the crew_dragon model set)")
+			return false
+		if maps == 0:
+			if _maps_wait_start_ms == 0:
+				_maps_wait_start_ms = maxi(Time.get_ticks_msec(), 1)
+			if Time.get_ticks_msec() - _maps_wait_start_ms > 60000:
+				_refuse("render_check: the cockpit maps were not ready after 60 s")
+			return false
 	if _args.has("divisor_sweep") and _sweep_wait < 0:
 		for d in _args["divisor_sweep"].split(",", false):
 			_sweep_left.append(float(d))
