@@ -1,0 +1,39 @@
+# discovery2 (4128 x 2322, GoPro fisheye between the heads toward the screens): screen glass corners and the console's front bottom edge
+# (fidelity Task 4). Read on 2x zoom tiles with a 20 px grid. Corners hidden by the helmets / visors (right screen tr / br, centre br partly) are left out.
+# Labels: model points of cabin_fit/parts/console.py (tl = the crew's left, top).
+sigma_px = 6.0
+
+[[point]]
+label = "scr_left_tl"
+px = [387.0, 803.0]
+[[point]]
+label = "scr_left_tr"
+px = [1227.0, 678.0]
+[[point]]
+label = "scr_left_br"
+px = [1320.0, 1295.0]
+[[point]]
+label = "scr_left_bl"
+px = [528.0, 1296.0]
+[[point]]
+label = "scr_centre_tl"
+px = [1352.0, 663.0]
+[[point]]
+label = "scr_centre_tr"
+px = [2611.0, 617.0]
+[[point]]
+label = "scr_centre_br"
+px = [2577.0, 1262.0]
+[[point]]
+label = "scr_centre_bl"
+px = [1440.0, 1292.0]
+[[point]]
+label = "scr_right_tl"
+px = [2758.0, 622.0]
+[[point]]
+label = "scr_right_bl"
+px = [2706.0, 1252.0]
+
+[[edge]]
+label = "front_bottom"    # lowest dark -> light step under the button modules (the arm hides u 1800-2200)
+px = [[700.0, 1620.0], [1100.0, 1632.0], [1700.0, 1645.0], [2300.0, 1617.0], [3000.0, 1594.0]]

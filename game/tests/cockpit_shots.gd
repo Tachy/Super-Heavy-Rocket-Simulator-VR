@@ -26,6 +26,7 @@
 #   --visor: the commander's open helmet (helmet_open_*) and the pilot's own view turned up / left / right / down (pilot_eye_*), Task 9 VR fix B
 #   --fidelity: instead of the cabin shots, one shot fid_<id> per row of config/cockpits/photo_cameras.toml (the photo's fitted camera and framing) with
 #   fid_<id>_vs (side by side) and fid_<id>_overlay (50 % blend + our edges in red); --photo=<ids> limits the rows. The left screen's feed is shown in every shot.
+#   --console_closeup: stereo pairs of the console body and its ceiling posts (fidelity Task 4): closeup_eye_l/_r, closeup_back_l/_r + *_stereo sheets
 #   --tone=agx (Godot's AgX alone, no display tone step), --hunt=day (the Hunt factor against L_day, as before look fixes T5)
 extends SceneTree
 
@@ -140,6 +141,8 @@ func _shoot() -> bool:
 			_compose_body()
 		elif _args.has("fidelity"):
 			_compose_fidelity()
+		elif _args.has("console_closeup"):
+			_compose_console_closeup()
 		elif not _args.has("only") and not _args.has("screen") and not _args.has("hand") and not _args.has("hotas") and not _args.has("shoulder") and not _args.has("visor"):
 			_compose()
 		quit(0)
@@ -260,6 +263,9 @@ func _define_shots() -> void:
 		return
 	if _args.has("fidelity"):
 		_define_fidelity_shots()
+		return
+	if _args.has("console_closeup"):
+		_define_console_closeup_shots(eye)
 		return
 	if _args.has("hand"):
 		_define_hand_shots(eye, pilot, hatch)
@@ -522,6 +528,33 @@ func _define_fidelity_shots() -> void:
 			var fov_v := 2.0 * atan(tan(fov_h * 0.5) * size.y / size.x)
 			shot.merge({"fov": rad_to_deg(fov_v), "keep_height": true, "crop_aspect": size.x / size.y})
 		_shots.append(shot)
+
+
+## --console_closeup (fidelity Task 4): stereo pairs (IPD STEREO_IPD_M) of the console body and its ceiling posts: closeup_eye_<l|r> from the
+## commander's eye looking up past the screens at the posts, closeup_back_<l|r> from 1.1 m behind the console's back (hatch side, below it);
+## composed side by side (left | right eye) into closeup_eye_stereo / closeup_back_stereo.
+const STEREO_IPD_M := 0.064
+const CLOSEUP_SHOTS := ["closeup_eye", "closeup_back"]
+
+
+func _define_console_closeup_shots(eye: Transform3D) -> void:
+	_shots.clear()
+	var centre_screen: Dictionary = _cockpit.config.screens["centre"]
+	var up: Vector3 = centre_screen["up"]
+	var normal: Vector3 = centre_screen["normal"]
+	var top_mid: Vector3 = centre_screen["centre"] + up * 0.35 - normal * 0.1
+	var back_cam: Vector3 = top_mid - normal * 1.1 - up * 0.35
+	for view: Array in [["closeup_eye", eye.origin, top_mid + up * 0.25, 80.0, eye.basis.y], ["closeup_back", back_cam, top_mid, 70.0, Vector3(1.0, 0.0, 0.0)]]:
+		var origin: Vector3 = view[1]
+		var basis := Basis.looking_at(Vector3(view[2]) - origin, Vector3(view[4]))
+		for side: Array in [["l", -0.5], ["r", 0.5]]:
+			var pos: Vector3 = origin + basis.x * (STEREO_IPD_M * float(side[1]))
+			_shots.append({"name": "%s_%s" % [view[0], side[0]], "local": Transform3D(basis, pos), "fov": float(view[3]), "hide_exterior": false, "hide_head": true})
+
+
+func _compose_console_closeup() -> void:
+	for shot_name: String in CLOSEUP_SHOTS:
+		_side_by_side(shot_name + "_l", _out_dir.path_join(shot_name + "_r.png"), shot_name + "_stereo", false)
 
 
 func _compose_fidelity() -> void:

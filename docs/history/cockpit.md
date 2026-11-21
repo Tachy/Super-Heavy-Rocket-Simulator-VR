@@ -79,3 +79,11 @@ armrests, palms down (it read as a shrug in the hatch shots); hands were boxes o
 - Suit: torso u = column index / 32 (equal angles; the panels squeezed into the section corners), chevron in the light insert grey 18 mm, gloves light grey
   0.62, shoulder / hip shapes weighted by bend angle only (any swing direction), elbow weight blend +-0.05 m, cavity shade 0.35, one joined mesh with the 16
   morph targets on every primitive (10.5 MB .bin), the non-index fingers flat while pointing.
+
+## Console body and struts before fidelity Task 4 (2026-11-21)
+- `[console]`: centre_m (2.5226, -0.0536, 0) = centre screen centre + 0.015 up; width_m 1.32 [E] (discovery2 iPad scale); height_m 0.50 (0.265 above, 0.235 below the
+  centre screen centre); depth_m 0.15 [E] (crew11 / crew13 "thin box"); strut_z_m +-0.55 [E] (round 4 crew1_1 post bases). The body was a sharp box (housing, back
+  plate 3 mm, underside plate 3 mm) and the two struts were straight tubes r 0.02 from the back top edge vertically (+X) to the ceiling plane (0.66 m long).
+  Lamp strips 12 mm inside the back edge. Task 4 showed the posts lean back toward the crew to the ring's rim and the body is 0.205 deep and 1.40 wide.
+- `photo_cameras.toml` round-4 rows: crew1_1 (1.839, 1.454, 0.013), forward (0.14263, -0.98978, 0), fov_h 96.449 [E]; discovery2 (2.2437, -0.6322, -0.0251),
+  forward (0.32649, 0.94528, 0.00729), up (0.94491, -0.32614, -0.02800), fov_h 113.412 [E] (rms 20 px).

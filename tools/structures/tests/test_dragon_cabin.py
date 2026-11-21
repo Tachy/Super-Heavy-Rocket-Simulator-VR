@@ -472,3 +472,45 @@ def test_key_labels_only_where_a_photo_shows_them_and_ids_stay(spec):
     assert atlas.shape == (h, w, 4)
     for bid, (u0, v0, u1, v1) in cells.items():  # every labelled cell has letters in it
         assert atlas[round(v0 * h):round(v1 * h), round(u0 * w):round(u1 * w), 0].max() > 200, bid
+
+
+POST_END_TOL_M = 0.005  # [S] fidelity plan Task 4: the posts end on the ceiling ring surface within 5 mm
+TILT_TOL_DEG = 0.5  # [S] fidelity plan Task 4: console tilt = tilt_deg +- 0.5 deg
+
+
+def test_console_tilt_is_the_screens_tilt(spec):
+    """tilt_deg = the angle of the console's (and every screen's) up axis from +X toward -Y; the housing's normal is the screens' normal."""
+    c = spec["cockpit"]
+    con = c["console"]
+    for s in c["screen"] + [con]:
+        up = s["up"]
+        tilt = math.degrees(math.atan2(-up[1], up[0]))
+        assert tilt == pytest.approx(con["tilt_deg"], abs=TILT_TOL_DEG), s.get("id", "console")
+    frame = cl.console_frame(c)
+    assert sum(a * b for a, b in zip(frame["normal"], con["normal"])) > math.cos(math.radians(TILT_TOL_DEG))
+
+
+def test_console_posts_end_on_the_ceiling_ring(spec):
+    """Both posts run from the housing's top (behind its back edge's fillet, inside its width) up to the flat ceiling ring around the tunnel."""
+    c = spec["cockpit"]
+    cab, con = c["cabin"], c["console"]
+    ring_outer = cab["profile_m"][next(i for i, (x, r) in enumerate(cab["profile_m"]) if x == cab["ceiling_x_m"])][1]
+    posts = cl.console_posts(c)
+    assert len(posts) == 2
+    frame = cl.console_frame(c)
+    for base, top in posts:
+        assert abs(top[0] - cab["ceiling_x_m"]) <= POST_END_TOL_M
+        assert cab["tunnel_radius_m"] < math.hypot(top[1], top[2]) <= ring_outer
+        rel = [b - o for b, o in zip(base, frame["origin"])]
+        u = sum(a * b for a, b in zip(rel, frame["up"]))
+        o = sum(a * b for a, b in zip(rel, frame["normal"]))
+        lat = sum(a * b for a, b in zip(rel, frame["right"]))
+        assert frame["u_top"] - con["edge_radius_m"] <= u <= frame["u_top"] + 1e-9, "the base sits on the housing top"
+        assert -con["hood_depth_m"] < o < 0.0 and abs(lat) < con["width_m"] / 2.0
+    assert posts[0][1][2] == pytest.approx(-posts[1][1][2]) and posts[0][1][1] == pytest.approx(posts[1][1][1]), "mirror pair"
+
+
+def test_generated_posts_reach_the_ceiling(spec, nodes):
+    c = spec["cockpit"]
+    top_x = max(p[0] for p in nodes["console_back"]["pos"])
+    assert abs(top_x - c["cabin"]["ceiling_x_m"]) <= POST_END_TOL_M

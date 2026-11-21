@@ -78,15 +78,26 @@ forward = [0.37956, 0.92517, 0.0]     # [D] straight ahead in the seat plane tow
 up = [0.92517, -0.37956, 0.0]         # [D] perpendicular to forward in the X-Y plane, head-up side
 
 [console]
-# Housing: one straight slab across the panel, front face in the centre screen's plane; the three screens are coplanar (user decision 2026-11-07).
-centre_m = [2.5226, -0.0536, 0.0000]  # [D] centre screen centre + 0.015 up (housing reaches 0.265 above and 0.235 below the screen centre: 0.1575 above the screen top, review item 3: 0.15-0.17) (round 4: console block moved rigidly with the joint fit, docs/subsystems/cockpit.md "Fix round 4")
+# Housing: one straight filleted body across the panel, front face in the centre screen's plane; the three screens are coplanar (user decision 2026-11-07).
+# Fidelity Task 4 (2026-11-21): multi-view fit tools/structures/cabin_fit/parts/console.py on crew1_1 (back face, both posts; 1.33 px rms of 1200) and discovery2
+# (10 screen glass corners, the front bottom edge; 5.6 px rms of 4128), "as built" run (python -m cabin_fit.parts.console --as-built): block placement, top edge kept.
+centre_m = [2.5083, -0.0393, 0.0000]  # [D] centre screen centre - 0.0052 up: the housing runs from u_bot -0.2754 to u_top +0.265 along up (Task 4 fit; was centre + 0.015 for -0.235 .. 0.265)
 normal = [-0.70711, -0.70711, 0.0]   # [D] = centre screen normal
 up = [0.70711, -0.70711, 0.0]        # [D] = eye up
-width_m = 1.32                      # [E] discovery2 / discovery10 at the iPad-mini scale (134.8 mm tablet = ~255 px, ~1,900-2,100 px/m): the three screens with gaps span 1.22 m, the button shelf ends 0.03-0.05 m past the outer screen edges (dark upper panel 0.05-0.08 m); the tablets stand above the outer screens, not on wings; +-0.05
-height_m = 0.50                     # [D] 0.1575 housing above the screens (discovery2 / discovery10, review item 3: 0.15-0.17) + 0.215 screen + 0.1275 below the screens (0.0175 gap + the 0.10 button shelf + 0.01 lip; the photo shelf ~0.083 + 0.015 lip)
-depth_m = 0.15                      # [E] crew11, crew13: thin box; crew1_1 fit: back face 0.50 m from the lip (2.45, 0.23) to the post bases
+tilt_deg = 45.0                     # [D] console up axis 45 deg from +X toward -Y (= the screens' up, round 4 crew1_1 44.7 +-4); Task 4 free fit 45.13 +-1.73 deg (data-constrained) confirms it, the block is not moved
+width_m = 1.40                      # [D] Task 4 fit with the round-4 block and width 1.32 at the front: the back face (crew1_1 ends u 334 / 858 px) came out 1.399 +-0.04 wide (draft -10.8 +-5.8 deg); the front width is seen by no photo, so the body is built 1.40 with square sides (rerun at 1.40: same chi2, residual 1.33 px); discovery2's outer screen glass edges at +-0.66 (pitch 0.456) fit inside; was 1.32 [E] (discovery2 iPad scale); +-0.04
+height_m = 0.540                    # [D] u_top 0.265 (kept: prior-dominated, free fit 0.255 +-0.045) - u_bot -0.2754 +-0.0032 (Task 4 fit, discovery2 front bottom edge under the modules, data-constrained); was 0.50
+hood_depth_m = 0.205                # [D] the body's back face 0.205 +-0.021 m behind the screen plane (Task 4 as-built fit, crew1_1 back face top / lip edges with discovery2's screens; free fit 0.164 +-0.035 with the block free); replaces depth_m 0.15 [E]
+edge_radius_m = 0.04                # [E] fillet radius of every housing edge: crew1_1 back-face end caps round over ~20 px at 1.7 m (0.06-0.07 in plan view), nasatour_0320 right end cap ~0.03-0.05; the front edges keep a flat face 4 cm past the screens / modules; +-0.02
+side_draft_deg = 0.0                # [E] the side faces stand square: the free fit reads -6 +-10 deg (prior-dominated, no draft measurable); the sculpting is the fillet; +-10
+underside_profile = [[0.0, 0.0], [0.205, 0.022]]  # [D] [depth behind the front face m, drop below the front bottom edge m]: Task 4 fit back_drop 0.022 +-0.035 (crew1_1 silver lip edge at v 226.5 px): the underside runs nearly flat to the back lip
 fold_deg = 0.0                      # [S] user decision 2026-11-07: the console runs straight across all three screens, no folded wings. Photo check: discovery10 (top-down: screens and the button shelf in one straight line), crew2_1 / inspiration4_1 (side views: one flat front, the three screens share the plane), training2 / discovery10 shelf continuous under all three
-strut_z_m = [0.55, -0.55]           # [E] hand-hold posts of crew1_1 / Wikimedia, silver, from the housing's back top edge to the ceiling (crew1_1 fit: post bases at u 420 / 770 px, residual 2-5 px)
+strut_z_m = [0.549, -0.549]         # [D] post bases |Z| 0.549 +-0.008 (Task 4 as-built fit, crew1_1 rod axes and feet, residual < 1 px); the base stands on the housing top post_foot_m[0] in front of the back face (fit 0.199 +-0.022 behind the screen plane); was 0.55
+post_top_m = [-0.632, 0.751]        # [D] the +Z post's top on the ceiling plane (Y, Z; the other post mirrored in Z): 50.0 +-1.6 deg off -Y (data) at r 0.981 +-0.026 (prior-dominated [E]: crew1_1 sees the top only along its ray; prior 0.95 +-0.03 = inside the ring, collars at the dish's rim); the posts lean back toward the crew's heads and out
+post_radius_m = 0.017               # [D] rod radius: crew1_1 7.5 px wide at 2.47 m (f 534 px) -> 0.0174; +-0.003 (1.5 px)
+post_head_radius_m = 0.039          # [D] the cylindrical joint head (collar) where the rod enters the ceiling: crew1_1 15-16 px at 2.7 m -> 0.039; +-0.004
+post_head_length_m = 0.04           # [E] collar length: seen end-on from the hatch (8 px ellipse), not measurable; +-0.02
+post_foot_m = [0.022, 0.069, 0.050, 0.319]  # [D] the post's foot on the housing: sleeve radius 0.022 (10-11 px at 2.2 m), sleeve length 0.069, funnel foot radius 0.050 (28-29 px at 1.9 m), funnel length 0.319 (crew1_1 v 145-150 / 150-172 of the post's 112-172, times the fitted 0.86 m length); radii +-0.004, lengths +-50 % (foreshortened 14 mm/px); the real funnel flares outboard only
 
 screen_gap_m = 0.020                # [D] gap between the active areas of neighbouring screens: 2 x 0.007 bezel + 0.006 seam of the housing (discovery2: bezels nearly touch, review item 3 says 1-2 cm; the earlier 0.045 was read from discovery10's 90 px active gap and is superseded); left / right screen centres = 0.382 + 0.020 = 0.402 m from the centre
 shelf_height_m = 0.10               # [D] button shelf (modules) height: discovery2 module row ~160 px of 415 px screen height (0.215 m) = 0.083 m + 0.015 m lip (review item 3: ~0.10)

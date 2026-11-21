@@ -291,7 +291,7 @@ COCKPIT_KEYS = {
     "cockpit": ("capsule_stage",),
     "cabin": ("wall_m", "floor_x_m", "ceiling_x_m", "tunnel_radius_m", "tunnel_top_x_m", "profile_m", "windows", "hatch", "window_reveal_radius_m", "window_bezel_m", "hatch_trim_m", "ring_light_radii_m"),
     "eye": ("position_m", "forward", "up"),
-    "console": ("centre_m", "normal", "up", "width_m", "height_m", "depth_m", "fold_deg", "strut_z_m", "screen_gap_m", "shelf_height_m", "shelf_top_gap_m", "module_split_m", "module_margin_m", "upper_top_x_m", "upper_depth_m", "locker_proud_m"),
+    "console": ("centre_m", "normal", "up", "tilt_deg", "width_m", "height_m", "hood_depth_m", "edge_radius_m", "side_draft_deg", "underside_profile", "fold_deg", "strut_z_m", "post_top_m", "post_radius_m", "post_head_radius_m", "post_head_length_m", "post_foot_m", "screen_gap_m", "shelf_height_m", "shelf_top_gap_m", "module_split_m", "module_margin_m", "upper_top_x_m", "upper_depth_m", "locker_proud_m"),
     "hotas": ("props", "stick_grip_m", "throttle_grip_m"),
 }
 COCKPIT_SCREENS = ("left", "centre", "right")

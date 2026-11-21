@@ -9,18 +9,18 @@
 id = "crew1_1"                                   # [D] photo id = shot name suffix (fid_crew1_1)
 file = "screenshots/m7-cockpit-refs/mielke/crew1_1.jpg"   # [D] reference photo, hatch view of the four seats
 size_px = [1200, 800]                            # [S] file size
-position_m = [1.839, 1.454, 0.013]               # [E] round 4 joint fit (cockpit.md "Fix round 4"), residual 1-8 px of 1200, +-0.05 m
-forward = [0.14263, -0.98978, 0.0]               # [E] looks along -Y pitched 8.2 deg up toward +X (round 4 fit), +-1 deg
-up = [0.98978, 0.14263, 0.0]                     # [E] image up = +X pitched with the camera (round 4 fit)
-fov_h_deg = 96.449                               # [E] f 536 px on 1200 px (round 4 fit), +-1 deg
+position_m = [1.8568, 1.4261, 0.0047]           # [D] fidelity Task 4 console fit (cabin_fit/parts/console.py --as-built, prior = round 4 pose +-0.05 m / 0.02 rad), console residual 1.33 px rms of 1200; 3.4 cm from round 4 (windows / seats not in this fit)
+forward = [0.17176, -0.98513, 0.00301]           # [D] same fit: 9.9 deg up toward +X (round 4: 8.2), +-1 deg
+up = [0.98513, 0.17177, 0.00392]                 # [D] same fit
+fov_h_deg = 96.615                               # [D] same fit: f 534 px on 1200 px, +-1 deg
 model = "pinhole"                                # [D] rectilinear photo
 
 [[photo]]
 id = "discovery2"                                # [D] photo id = shot name suffix (fid_discovery2)
 file = "screenshots/m7-cockpit-refs/mielke/discovery2.jpg"   # [D] reference photo, GoPro between the heads toward the screens
 size_px = [4128, 2322]                           # [S] file size
-position_m = [2.2437, -0.6322, -0.0251]          # [E] fix-round-1 fit moved with the console block in round 4 (0.61 m along the screen normal, 0.23 m along their up), rms 20 px of 4128, +-0.05 m
-forward = [0.32649, 0.94528, 0.00729]            # [E] same fit, +-2 deg
-up = [0.94491, -0.32614, -0.02800]               # [E] same fit (image up = back x right of the fit basis), +-2 deg
-fov_h_deg = 113.412                              # [E] equidistant f = 2085.47 px/rad on 4128 px: 2 * 2064 / 2085.47 rad, +-2 deg
+position_m = [2.2102, -0.6497, -0.0327]          # [D] fidelity Task 4 console fit (10 screen glass corners + front bottom edge, prior = round 4 pose +-0.05 m / 0.035 rad), rms 5.6 px of 4128 (round 4: 20 px); +-0.04 m
+forward = [0.35901, 0.93322, 0.01485]            # [D] same fit, +-2 deg
+up = [0.93306, -0.35847, -0.02988]               # [D] same fit, +-2 deg
+fov_h_deg = 114.972                              # [D] same fit: equidistant f 2057 px/rad (k1 fit: -0.013, not used: the shots render k = 0), +-2 deg
 model = "fisheye_equidistant"                    # [D] GoPro wide lens

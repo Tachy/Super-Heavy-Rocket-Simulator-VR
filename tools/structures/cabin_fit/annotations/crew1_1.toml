@@ -1,0 +1,36 @@
+# crew1_1 (1200 x 800, hatch view, camera looks -Y, image right = +Z): console back face and the two ceiling posts (fidelity Task 4).
+# Read on 8x / 5x zoom crops with a pixel grid and column intensity profiles (top edge = white wall -> silver step, bottom = the silver lip's lower dark line).
+# Labels: model points of cabin_fit/parts/console.py. post_l = image left (-Z) post. back_end_r = image left end (-Z, the crew's right).
+sigma_px = 2.0
+
+[[point]]
+label = "post_l_top"      # centre of the collar ellipse where the post enters the ceiling (u 415-430, v 109-117)
+px = [422.5, 113.0]
+[[point]]
+label = "post_r_top"      # collar ellipse u 762-778, v 106-115
+px = [770.0, 110.5]
+[[point]]
+label = "post_l_base"     # foot of the post on the housing top (axis at the flare's lower edge)
+px = [419.5, 172.0]
+[[point]]
+label = "post_r_base"
+px = [771.5, 172.0]
+[[point]]
+label = "back_end_r"      # left end of the rounded back face (silver end cap silhouette at mid height)
+px = [334.0, 190.0]
+[[point]]
+label = "back_end_l"
+px = [858.0, 188.0]
+
+[[edge]]
+label = "post_l"          # rod axis (centre of the 7 px rod) between the collar and the sleeve
+px = [[421.5, 120.0], [420.8, 130.0], [420.3, 140.0], [419.5, 150.0]]
+[[edge]]
+label = "post_r"
+px = [[770.3, 120.0], [770.6, 130.0], [771.2, 140.0], [772.0, 150.0]]
+[[edge]]
+label = "back_top"        # top edge of the back face (wall white -> silver)
+px = [[450.0, 171.0], [520.0, 171.5], [600.0, 171.0], [680.0, 171.0], [740.0, 170.5]]
+[[edge]]
+label = "back_bottom"     # lower edge of the silver lip under the vent band
+px = [[450.0, 226.5], [520.0, 226.5], [600.0, 226.5], [680.0, 226.5], [740.0, 226.5]]

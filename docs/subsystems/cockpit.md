@@ -37,7 +37,9 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 | Screens | 0.382 x 0.215 m (16:9) | E | training2 finger scale (index finger ~0.072 m on the glass) 0.35-0.40 wide; aspect 1.76-1.88 measured | +-15 % |
 | Console placement | centre screen centre (2.512, -0.043, 0), normal (-0.707, -0.707, 0) (console up 45 deg from +X) | E | round 4 joint fit on crew1_1 (back lip (2.450, 0.229) and post bases, residual 2-7 px of 1200); every console item moved rigidly with it | +-0.06 m, +-4 deg |
 | Screen layout | centre on the centre line, gap 0.020 (fix round 2, was 0.045), the three screens coplanar (console straight, fold_deg 0, user decision 2026-11-07) | S / D | user decision 2026-11-07 after photo check (discovery10 top-down, crew2_1, inspiration4_1: one straight front); gap discovery10 (90 / 780 px) | +-0.1 m, +-5 deg |
-| Console housing | 1.32 x 0.54 x 0.15 m | E / D | discovery2 / discovery10 at the iPad-mini scale: screens span 1.22 m, shelf ends 0.03-0.05 m past the outer screens (corrected from 1.60 in fix round 1; the tablets stand above the outer screens) | +-0.05 m |
+| Console tilt | `tilt_deg` 45.0: up axis from +X toward -Y | D | = screens; Task 4 free fit 45.13 +-1.73 deg confirms round 4 (block not moved) | +-1.7 deg |
+| Console body | 1.40 x 0.540 m, back face 0.205 behind the screen plane, all edges filleted r 0.04, square sides, underside falls 0.022 to the back lip | D / E | Task 4 multi-view fit (crew1_1 + discovery2, "Console (fidelity Task 4)"): width +-0.04, height (u_bot) +-0.003, depth +-0.021, drop +-0.035 [D]; fillet r and draft [E] | see section |
+| Ceiling posts | bases Z +-0.549 on the body top, tops on the ceiling ring at (Y -0.632, Z +-0.751); rod r 0.017, collar r 0.039 x 0.04, sleeve r 0.022 x 0.069, funnel foot r 0.050 x 0.319 | D / E | Task 4 fit on crew1_1 (the only photo showing them): base Z +-0.008, top angle 50.0 +-1.6 deg [D], top radius 0.981 prior-dominated [E]; radii from px widths at the fitted distance | radii +-0.003-0.004, lengths +-50 % |
 | Tablets | 0.1348 x 0.2032 m | S / E | Apple iPad mini spec; model assumed from the shape | - |
 | Button positions | rows 0.17 / 0.20 m below the screen centres | E | discovery10 x along the screens' lower edges (fisheye: fractions per screen) | +-0.02 along, +-0.03 across |
 | HOTAS grips | hip + 0.32 forward + 0.28 up the back = 0.09 m forward, 0.55 m below the eye (seat axes), +-0.25 / 0.27 lateral | E | armrest, forearm reach | calibrated in Task 9 |
@@ -180,7 +182,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   the apertures so the cut edge hides under the bezel). `vehicle_spec.load_dragon` loads and validates `config/cockpits/<[vehicle] cockpit>.toml` into
   `spec["cockpit"]` (hashed into the manifest; `VehicleModels` staleness includes the cockpit TOML). Capsule stage frame.
   Nodes: `cabin_shell`, `floor`, `hatch_frame`, `window_<i>` / `window_glass_<i>` (i = exterior table row, +az then -az: 0 = +33.3, 1 = -33.3,
-  2 = +90, 3 = -90), `seat_s1..s4`, `console_housing` (one straight box and one straight lower shelf across all three screens, two struts; the shelf front plane is the lowest button face minus its height; tested: every button stands >= 5 mm proud of the housing, the three screens are coplanar within 1 mm / 0.1 deg), `screen_left|centre|right`
+  2 = +90, 3 = -90), `seat_s1..s4`, `console_housing` (the filleted body's front and ends + the dark upper panel, `console_shape.rounded_box`; `console_back` = its back face + the two ceiling posts, `console_under` = its underside and top; the shelf modules in front of it; the shelf front plane is the lowest button face minus its height; tested: every button stands >= 5 mm proud of the housing, the three screens are coplanar within 1 mm / 0.1 deg), `screen_left|centre|right`
   (one quad each, exactly the TOML centre / size, UV 0..1 with (0, 0) top left, +normal toward the crew), `tablet_l|r` (`[[tablet]]` ids l / r),
   `button_<id>` (one node per button; the centre handle is the node `handle`, no `button_handle`), `light_<i>` (`[[light]]` rows in file order),
   `hotas_stick`, `hotas_throttle`. Manifest `cockpit`: `nodes`, `screens[id] = {centre, normal, up, size}`, `buttons[id] = {centre, size}` (all 39 incl.
@@ -298,6 +300,31 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
   `fit.py` (`fit(photos, PartModel, anchors)`: part parameters shared, per photo pose 6 + ln f (+ k1), soft-L1 on image rows only (anchors and priors stay quadratic), sigma from a rank-aware SVD of (J^T J)^-1 scaled by max(1, chi2/dof) for data-constrained parameters only (data dof); `FitResult.constrained_by_data[name]` False = only the prior fixes it (tag [E]): sigma == prior_sigma exactly, inf without a prior or for an unobserved camera),
   `annotations.py` (`annotations/<photo_id>.toml`: `[[point]] label, px`, `[[edge]] label, px = [[u,v],...]`, `sigma_px`), `anchors.py` (known lengths: IDSS passage 0.800 m [S], iPad mini 0.2032 x 0.1348 m [S], window axial extent 0.51 m [E], ANSUR II hand / head medians [S]).
   Tests: `python -m pytest tools/structures/tests -q -k cabin_fit`.
+
+### Console (fidelity Task 4: suspension and body)
+- Fit: `tools/structures/cabin_fit/parts/console.py` (`Console` PartModel; `python -m cabin_fit.parts.console [--as-built]` from `tools/structures`), annotations
+  `cabin_fit/annotations/crew1_1.toml` (4 post points, 2 back-face ends, 4 edges: both rod axes, back top edge, silver lip edge; sigma 2 px) and
+  `discovery2.toml` (10 screen glass corners, the front bottom edge under the modules; sigma 6 px). Cameras with the round-4 pose as prior (0.05 m, 0.02 / 0.035 rad).
+  Free fit (block free): tilt 45.13 +-1.73 deg, hood 0.164 +-0.035, u_bot -0.2753 +-0.003, post Z 0.546 +-0.024, post top angle 50.5 +-1.9 deg [data]; block centre
+  (2.551, -0.003), width 1.354, draft -6 +-10 deg, u_top 0.255, post base depth 0.158, top radius 0.969 [prior-dominated]. As built (block, front width 1.32 -> body
+  1.40 square, u_top 0.265 held): hood 0.205 +-0.021, u_bot -0.2754 +-0.003, back drop 0.022 +-0.035, post Z 0.549 +-0.008, top angle 49.9 +-1.6 deg, top radius 0.981
+  +-0.026 [prior]; residuals crew1_1 1.33 px rms of 1200, discovery2 5.60 px rms of 4128 (round 4: 20 px). Both fitted cameras are written to `photo_cameras.toml` [D].
+- Findings: the posts are short (0.86 m) and lean from the body's back top edge up and back toward the crew's heads to the ceiling ring's rim (r ~0.98, collars at
+  the dish's lower edge in crew1_1), not vertical struts; a funnel foot (outboard flare in the photo, built round) and a sleeve sit on the body, a collar (joint
+  head) at the ceiling. discovery2 wants a screen pitch 0.456 m (gap ~0.048) and glass half width 0.204 (nuisance parameters of this fit, the screens are the
+  next task's; the table keeps 0.402 / 0.020).
+- Generator: `blender/console_shape.py` (pure: `rounded_box(w, h, d, r, segments)` cube-sphere fillets, closed; `drop_underside`, `draft_sides`; `post(base, top, r,
+  head_r, head_len, sides, foot, top_plane_normal)` lathe, head cut flush on the ceiling plane), `cabin_layout.console_frame` / `console_posts`. Body faces are split
+  by direction into `console_housing` / `console_back` / `console_under` (same materials as before); lamp strips sit right in front of the back lip's fillet.
+  FILLET_SEGMENTS 4, POST_SIDES 20; cabin 63,750 triangles. Tests: `test_console_shape.py` (closed, extents, volume, every vertex r from the inner box, post
+  radii / flush head), `test_dragon_cabin.py` (tilt = screens +-0.5 deg, posts end on the ceiling ring within 5 mm, generated posts reach the ceiling).
+- Not measurable from the photos ([E], listed for the user): the body's rear mount and a straight-below view (no photo), the front width (helmets / visors hide
+  the ends in discovery2), the fillet radius and the side draft, the post top's radius along crew1_1's ray, the collar length (seen end-on), the funnel / sleeve
+  lengths (foreshortened). jsc2026e404725 / jsc2025e064539 (side profile: dark housing on dark ground, no cabin-fixed points), discovery10, jsc2022e068643 /
+  646 / 660 and the T2 stills were checked but not fitted (no fixed cabin points to place a free camera; console shapes only qualitatively: rounded end caps in
+  nasatour_0320). The Hawthorne trainer was not used for the suspension.
+- Shots: `cockpit_shots.gd --console_closeup` (stereo pairs `closeup_eye_*`, `closeup_back_*` + `_stereo` sheets, IPD 64 mm).
+- GPU (stereo pimax, cockpit view): median 24.08 / 23.58 ms (two runs; baseline 24.43 / 23.41): no change.
 
 ## Camera mode and toggle
 State after plan Task 6 (code: `game/cockpit/cockpit_camera.gd`, `hotas_buttons.gd`, `World.toggle_cockpit`).

@@ -92,6 +92,33 @@ def shelf_modules(cockpit):
     return [(lo - m, hi + m) for lo, hi in groups]
 
 
+def console_frame(cockpit):
+    """The console body's frame: origin = the centre screen centre, normal (toward the crew), up, right (crew's right); u_top / u_bot = the body's
+    top and front bottom edge along up from the origin ([console] centre_m and height_m)."""
+    con = cockpit["console"]
+    cen = next(s for s in cockpit["screen"] if s["id"] == "centre")
+    shift = dot3([a - b for a, b in zip(cen["centre_m"], con["centre_m"])], cen["up"])
+    return {"origin": list(cen["centre_m"]), "normal": list(cen["normal"]), "up": list(cen["up"]), "right": list(screen_right(cen)),
+            "u_top": -shift + con["height_m"] / 2.0, "u_bot": -shift - con["height_m"] / 2.0}
+
+
+def console_posts(cockpit):
+    """[(base, top)] of the two ceiling posts (fidelity Task 4): the base on the body's top, its sleeve (post_foot_m[0]) in front of the back
+    face, lowered onto the back edge's fillet; the top on the ceiling plane at post_top_m (Y, |Z|), on the base's side."""
+    con, cab = cockpit["console"], cockpit["cabin"]
+    f = console_frame(cockpit)
+    r, inset = con["edge_radius_m"], con["post_foot_m"][0]
+    sag = r - math.sqrt(r * r - (r - inset) ** 2) if inset < r else 0.0  # the fillet's surface this far under the flat top
+    o = -(con["hood_depth_m"] - inset)
+    out = []
+    for z in con["strut_z_m"]:
+        lat = (z - f["origin"][2]) / f["right"][2]
+        base = tuple(f["origin"][i] + f["right"][i] * lat + f["up"][i] * (f["u_top"] - sag) + f["normal"][i] * o for i in range(3))
+        top = (cab["ceiling_x_m"], con["post_top_m"][0], math.copysign(con["post_top_m"][1], z))
+        out.append((base, top))
+    return out
+
+
 def button_node(button):
     return "handle" if button["kind"] == "handle" else f"button_{button['id']}"
 

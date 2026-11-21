@@ -7,8 +7,8 @@ Z = az +90 = the crew's left). Silhouette only: panel lines, labels and placards
 Nodes: `cabin_shell` (inner wall of revolution with the ceiling ring, the forward tunnel and the top plate; normals into the cabin; cut at the window
 reveals and the hatch), `floor`, `hatch_frame` (white trim, the recessed hatch inner face and its reveal), `window_<i>` (funnel from the round interior
 reveal to the exterior pane, bezel ring; i = exterior table row, +az then -az) with `window_glass_<i>`, `seat_shell|pad|rest_<s1..s4>` (white shell, black pads, black leg-rest rails
-+ foot plate at the seat's foot_rest_m), `console_housing` (dark: one straight box across the three screens + the dark upper panel above it), `console_back`
-(silver back face, two hand-hold posts), `console_under` (dark grey underside and top), `console_lamps` (lamp strips under the console), `console_shelf` (the button shelf as separate light grey modules, cabin_layout.shelf_modules), `console_lockers` (5 / 6),
++ foot plate at the seat's foot_rest_m), `console_housing` (dark: front and ends of the filleted body across the three screens + the dark upper panel above it, console_shape), `console_back`
+(silver back face, the two ceiling posts with joint heads and funnel feet), `console_under` (dark grey underside and top), `console_lamps` (lamp strips under the console), `console_shelf` (the button shelf as separate light grey modules, cabin_layout.shelf_modules), `console_lockers` (5 / 6),
 `ceiling_ring_light` (emissive annulus), `screen_left|centre|right` (one quad, UV 0..1 over the active area,
 (0, 0) top left, +normal toward the crew), `tablet_l|r`, `button_<id>` (one node per button; the centre handle is the node `handle`), `light_<i>`
 ([[light]] rows in file order), `hotas_stick`, `hotas_throttle`.
@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bpy  # noqa: E402,F401
 import cabin_layout as cl  # noqa: E402
+import console_shape as cs  # noqa: E402
 import vehicle_common as vc  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
@@ -39,7 +40,8 @@ COVER_PROUD_M = 0.012  # [E] hinged cover height
 SHELF_TOP_GAP_M = 0.0175  # [E] the shelf's top edge lies this far under a screen's lower edge
 TABLET_THICKNESS_M = 0.008  # [E] iPad mini 6.1 mm [S] plus the case
 TABLET_POST_M = 0.012  # [E] mount post radius
-STRUT_RADIUS_M = 0.02  # [E] console strut
+FILLET_SEGMENTS = 4  # [E] steps per 90 deg fillet of the console body (22.5 deg: smooth highlight at 0.6 m; 4 cm radius -> 1.6 cm facets)
+POST_SIDES = 20  # [E] sides of the ceiling posts (the 3.9 cm collar: 1.2 cm facets)
 SEAT_BACK_HALF_M = (0.05, 0.40)  # [E] seat back half thickness / half height (a 0.8 m back, crew1_1 / Wikimedia)
 SEAT_THIGH_M, SEAT_SHIN_M = 0.44, 0.40  # [E] pan length / lower-leg support length (seated adult, 5th percentile hip to knee 0.5)
 SIDES = 16  # [E] sides of round parts
@@ -47,13 +49,13 @@ FOOT_PLATE_M = (0.32, 0.34, 0.02)  # [E] foot tray: length along the foot, width
 FOOT_RAIL_Z_M = 0.17  # [E] leg-rest rails stand this far either side of the seat centre (outside the shins: hip joint 0.088 + boot half width 0.05)
 FOOT_RAIL_RADIUS_M = 0.014  # [E] carbon rail radius (crew1_1 frame tubes ~30 mm)
 LIGHT_PROUD_M = 0.006  # [E] lamp panel height over the console front
-BACK_PLATE_M = 0.003  # [E] the light grey skin of the console's back / underside, outside the dark housing
 RING_LIFT_M = 0.015  # [E] the ring light stands this far under the ceiling plane (0.004 z-fought with the ceiling: concentric banding in pilot_eye)
 RING_STEP_DEG = 3.0  # [E] segments of the ring light
 # [E] crew1_1 (round 4): two groups of light rectangles on the console's underside along its back lip, at u 400-500 and 640-790 px of the 350-855 px back
-# (1.32 m): lateral ranges from the centre (mirrored), and one strip's (width along the console normal, height under the underside, inset from the back edge)
+# (1.32 m): lateral ranges from the centre (mirrored), and one strip's (width along the console normal, height under the underside, inset from the start of
+# the back lip's fillet: Task 4 crew1_1 shows the strips right under the lip, v 228-232 against the lip edge at 226.5 px)
 UNDER_LAMPS_LAT_M = ((0.10, 0.36), (0.42, 0.56))
-UNDER_LAMP_M = (0.015, 0.003, 0.012)
+UNDER_LAMP_M = (0.015, 0.003, 0.0)
 
 V = Vector
 
@@ -311,37 +313,73 @@ def shelf_front_off(cockpit, cen):
     return min((V(b["centre_m"]) - cen.o).dot(cen.n) for b in cockpit["button"] if b["kind"] != "handle") - BUTTON_PROUD_M
 
 
+def add_shape(mesh, verts, faces, to_cabin, part_of, group_of):
+    """Faces of a console_shape surface (local verts) into the VMeshes: to_cabin(local) -> cabin point, part_of(local normal) -> VMesh,
+    group_of(local normal) -> smooth group (None = flat). UV = the local (x, y) (planar, metres)."""
+    for f in faces:
+        loc = [verts[i] for i in f]
+        n = V((0.0, 0.0, 0.0))
+        for i in range(len(loc)):  # Newell normal of the local face (console_shape winds counter-clockwise from outside)
+            a, b = loc[i], loc[(i + 1) % len(loc)]
+            n += V(((a[1] - b[1]) * (a[2] + b[2]), (a[2] - b[2]) * (a[0] + b[0]), (a[0] - b[0]) * (a[1] + b[1])))
+        n.normalize()
+        pts = [to_cabin(p) for p in loc]
+        out = to_cabin((n.x, n.y, n.z)) - to_cabin((0.0, 0.0, 0.0))
+        (part_of(n) if mesh is None else mesh).face(pts, [(p[0], p[1]) for p in loc], out, group_of(n))
+
+
 def build_console(cockpit):
-    """(housing, back, under, shelf, lockers, lamps): one straight dark housing and dark upper panel across all three screens (fold_deg 0, user decision 2026-11-07),
-    the silver back face and the two posts (`back`), the dark grey underside and top (`under`, crew1_1), the shelf as separate modules, the two lockers 5 / 6,
-    the lamp strips under the console (`lamps`, crew1_1: light rectangles along the back lip of the underside). The vent band on the back: shader (CockpitView)."""
+    """(housing, back, under, shelf, lockers, lamps): the console body (fidelity Task 4): one straight filleted body across all three screens
+    (console_shape.rounded_box, every edge rounded to edge_radius_m, the underside lowered along underside_profile; fold_deg 0, user decision
+    2026-11-07), split by face direction into the dark front / ends (`housing`), the silver back face (`back`, crew1_1; the vent band by shader,
+    CockpitView) and the dark grey underside and top (`under`); the dark upper panel above it (`housing`); the two ceiling posts with their
+    joint heads and funnel feet (`back`, console_shape.post at cabin_layout.console_posts); the shelf as separate modules, the two lockers 5 / 6,
+    the lamp strips under the body along its back lip (`lamps`, crew1_1)."""
     con = cockpit["console"]
     if con["fold_deg"] != 0.0:
         raise ValueError("console: only the straight console (fold_deg 0) is built")
     cen = Panel(screens_by_id(cockpit)["centre"])
-    shift = (cen.o - V(con["centre_m"])).dot(cen.up)  # the screens' centre stands this far above the housing's front-plane centre
-    half_w, depth = con["width_m"] / 2.0, con["depth_m"]
-    u0, u1 = -shift - con["height_m"] / 2.0, -shift + con["height_m"] / 2.0
-    u_top = (con["upper_top_x_m"] - cen.o.x) / cen.up.x  # the dark upper panel's front top edge reaches this station
-    up_depth = con["upper_depth_m"]
+    frame = cl.console_frame(cockpit)
+    u0, u1 = frame["u_bot"], frame["u_top"]
+    half_w, depth, r = con["width_m"] / 2.0, con["hood_depth_m"] - SCREEN_PROUD_M, con["edge_radius_m"]
+    u_panel = (con["upper_top_x_m"] - cen.o.x) / cen.up.x  # the dark upper panel's front top edge reaches this station
     housing, back, under, shelf, lockers, lamps = vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh()
-    cen.box(housing, -half_w, half_w, u0, u1, -SCREEN_PROUD_M, -depth)
-    cen.box(housing, -half_w, half_w, u1, u_top, -SCREEN_PROUD_M, -up_depth)
-    # silver back face (crew1_1: the face seen from the hatch, with the dark vent band by shader) and the upper panel's back
-    cen.box(back, -half_w, half_w, u0, u1, -depth, -depth - BACK_PLATE_M)
-    cen.box(back, -half_w, half_w, u1, u_top, -up_depth, -up_depth - BACK_PLATE_M)
-    # dark grey underside and the housing's top between the upper panel and the back (crew1_1: dark under the silver lip)
-    cen.box(under, -half_w, half_w, u0 - BACK_PLATE_M, u0, -SCREEN_PROUD_M, -depth - BACK_PLATE_M)
-    cen.box(under, -half_w, half_w, u1, u1 + BACK_PLATE_M, -up_depth, -depth)
-    for lat0, lat1 in UNDER_LAMPS_LAT_M:  # lamp strips on the underside, along its back edge
+
+    def body_part(n):  # local normal: x right, y up, z toward the crew
+        if n.z < -0.7071:
+            return back
+        return under if abs(n.y) > 0.7071 else housing
+
+    def flat_or_fillet(tag):
+        return lambda n: None if max(abs(n.x), abs(n.y), abs(n.z)) > 0.99999 else tag
+
+    # the body: front face SCREEN_PROUD_M behind the screens, back face at hood_depth_m
+    h = u1 - u0
+    verts, faces = cs.rounded_box(2.0 * half_w, h, depth, r, FILLET_SEGMENTS)
+    verts = cs.draft_sides(cs.drop_underside(verts, con["underside_profile"], h, depth), con["side_draft_deg"], 2.0 * half_w, depth)
+    uc, oc = 0.5 * (u0 + u1), -SCREEN_PROUD_M - 0.5 * depth
+    add_shape(None, verts, faces, lambda p: cen.at(p[0], uc + p[1], oc + p[2]), body_part, flat_or_fillet("console_body"))
+    # the dark upper panel (it closes the view up toward the ceiling; its lower fillet hides in the body)
+    t = con["upper_depth_m"]
+    pr = min(r, 0.4 * t)
+    pv, pf = cs.rounded_box(2.0 * half_w, u_panel - (u1 - pr), t, pr, FILLET_SEGMENTS)
+    pc = 0.5 * (u_panel + u1 - pr)
+    add_shape(housing, pv, pf, lambda p: cen.at(p[0], pc + p[1], -SCREEN_PROUD_M - 0.5 * t + p[2]), None, flat_or_fillet("console_panel"))
+    # lamp strips on the underside, just in front of the back lip's fillet (crew1_1)
+    lamp_depth = con["hood_depth_m"] - r - UNDER_LAMP_M[2]
+    u_under = u0 - cs.interp(con["underside_profile"], lamp_depth)
+    for lat0, lat1 in UNDER_LAMPS_LAT_M:
         for sign in (-1.0, 1.0):
             a, b = sorted((sign * lat0, sign * lat1))
-            cen.box(lamps, a, b, u0 - BACK_PLATE_M - UNDER_LAMP_M[1], u0 - BACK_PLATE_M,
-                    -depth + UNDER_LAMP_M[2], -depth + UNDER_LAMP_M[2] + UNDER_LAMP_M[0])
-    for z_strut in con["strut_z_m"]:  # the hand-hold posts: from the housing's back top edge to the ceiling (crew1_1, round 4)
-        lat = (z_strut - cen.o.z) / cen.right.z
-        top = cen.at(lat, u1, -depth - STRUT_RADIUS_M)
-        vc.tube(back, top - V((0.01, 0.0, 0.0)), V((cockpit["cabin"]["ceiling_x_m"], top.y, top.z)), STRUT_RADIUS_M, SIDES, ("strut", z_strut))
+            cen.box(lamps, a, b, u_under - UNDER_LAMP_M[1], u_under + 0.001, -lamp_depth, -lamp_depth + UNDER_LAMP_M[0])
+    # the two ceiling posts: rod, joint head (collar) at the ceiling, sleeve and funnel foot on the body (crew1_1, Task 4 fit)
+    for k, (base, top) in enumerate(cl.console_posts(cockpit)):
+        verts, faces = cs.post(base, top, con["post_radius_m"], con["post_head_radius_m"], con["post_head_length_m"], POST_SIDES,
+                               foot=tuple(con["post_foot_m"]), top_plane_normal=(1.0, 0.0, 0.0))  # flush on the flat ceiling ring
+        axis = (V(top) - V(base)).normalized()
+        # smooth within one lathe segment (rod, head, sleeve, funnel: same axial normal component), flat caps and steps
+        add_shape(back, verts, faces, lambda p: V(p), None,
+                  lambda n, k=k, axis=axis: None if abs(n.dot(axis)) > 0.99 else ("post", k, round(n.dot(axis), 2)))
     # the shelf: separate modules (clusters of buttons), dark housing showing in the gaps; the ledge stands proud of the screens
     front = shelf_front_off(cockpit, cen)
     s1 = -cen.h / 2.0 - con["shelf_top_gap_m"]
