@@ -1,0 +1,26 @@
+# Camera poses of the cabin reference photos (fidelity comparison shots, docs/subsystems/cockpit.md "Photo cameras").
+# Frame: the capsule cabin frame of crew_dragon.toml (X nose, Y toward the hatch, Z crew left), metres, unit vectors, degrees.
+# `file` is relative to the repo root (photos are git-ignored measuring references, nothing of them ships); `size_px` the photo size.
+# `forward` / `up` give the camera axes (image right = forward x up of the render convention: right-handed, up = image up).
+# model: "pinhole" (fov_h_deg horizontal field) or "fisheye_equidistant" (r = f * theta, fov_h_deg = 2 * (width / 2) / f in rad).
+# Every value line carries [S] / [E] / [D] (config/README.md). Later fits (tools, Task 3 of the fidelity plan) write their poses here.
+
+[[photo]]
+id = "crew1_1"                                   # [D] photo id = shot name suffix (fid_crew1_1)
+file = "screenshots/m7-cockpit-refs/mielke/crew1_1.jpg"   # [D] reference photo, hatch view of the four seats
+size_px = [1200, 800]                            # [S] file size
+position_m = [1.839, 1.454, 0.013]               # [E] round 4 joint fit (cockpit.md "Fix round 4"), residual 1-8 px of 1200, +-0.05 m
+forward = [0.14263, -0.98978, 0.0]               # [E] looks along -Y pitched 8.2 deg up toward +X (round 4 fit), +-1 deg
+up = [0.98978, 0.14263, 0.0]                     # [E] image up = +X pitched with the camera (round 4 fit)
+fov_h_deg = 96.449                               # [E] f 536 px on 1200 px (round 4 fit), +-1 deg
+model = "pinhole"                                # [D] rectilinear photo
+
+[[photo]]
+id = "discovery2"                                # [D] photo id = shot name suffix (fid_discovery2)
+file = "screenshots/m7-cockpit-refs/mielke/discovery2.jpg"   # [D] reference photo, GoPro between the heads toward the screens
+size_px = [4128, 2322]                           # [S] file size
+position_m = [2.2437, -0.6322, -0.0251]          # [E] fix-round-1 fit moved with the console block in round 4 (0.61 m along the screen normal, 0.23 m along their up), rms 20 px of 4128, +-0.05 m
+forward = [0.32649, 0.94528, 0.00729]            # [E] same fit, +-2 deg
+up = [0.94491, -0.32614, -0.02800]               # [E] same fit (image up = back x right of the fit basis), +-2 deg
+fov_h_deg = 113.412                              # [E] equidistant f = 2085.47 px/rad on 4128 px: 2 * 2064 / 2085.47 rad, +-2 deg
+model = "fisheye_equidistant"                    # [D] GoPro wide lens

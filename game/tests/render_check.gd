@@ -390,6 +390,8 @@ func _process(_delta: float) -> bool:
 			_fly_vehicle(world)
 		if _args.has("webcast"):
 			_fly_mission(world)
+			if _args.has("cockpit"):  # the pilot's cabin view (GPU baseline of the cabin, cockpit fidelity plan)
+				world.toggle_cockpit()
 			cam = world.camera  # the mission's focus switch resets the camera: the requested view again
 			if _args.has("yaw"): cam.yaw = float(_args["yaw"])
 			if _args.has("pitch"): cam.pitch = float(_args["pitch"])

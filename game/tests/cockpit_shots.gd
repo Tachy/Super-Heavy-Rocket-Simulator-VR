@@ -24,6 +24,8 @@
 #   hotas_hatch_deflected (hatch camera, stick and lever deflected)
 #   --shoulder: the commander's shoulders at six arm poses (Task 9 VR fix B; shoulder_<pose>_eye/out/top_<side>)
 #   --visor: the commander's open helmet (helmet_open_*) and the pilot's own view turned up / left / right / down (pilot_eye_*), Task 9 VR fix B
+#   --fidelity: instead of the cabin shots, one shot fid_<id> per row of config/cockpits/photo_cameras.toml (the photo's fitted camera and framing) with
+#   fid_<id>_vs (side by side) and fid_<id>_overlay (50 % blend + our edges in red); --photo=<ids> limits the rows. The left screen's feed is shown in every shot.
 #   --tone=agx (Godot's AgX alone, no display tone step), --hunt=day (the Hunt factor against L_day, as before look fixes T5)
 extends SceneTree
 
@@ -44,6 +46,8 @@ const GOPRO_RENDER_FOV := 140.0  # rectilinear, covers the fisheye frame's corne
 ## [call] Field key of the white cabin (Atmosphere.field_key; 0.18 = the default grey world): the wall reads ~0.85-0.9 sRGB as in the photos.
 const CABIN_FIELD_KEY := 1.2
 const RENDER_SIZE := Vector2i(2560, 1440)
+## Edge overlay of the fidelity sheets: our shot's luminance gradient (|dx| + |dy| over 2 px, 0..1) above this is drawn red.
+const EDGE_THRESHOLD := 0.12
 ## crew1_1 camera, round 4 joint fit (docs/subsystems/cockpit.md "Fix round 4"): position, pitch above level, vertical fov of the 1200 x 800 photo
 ## (f 536 px: 96.4 x 73.4 deg); residual 1-8 px on windows, helmets, console back and ceiling.
 const HATCH_POS := Vector3(1.839, 1.454, 0.013)
@@ -146,6 +150,8 @@ func _shoot() -> bool:
 		_set_exterior_visible(true)
 		if _args.has("body"):
 			_compose_body()
+		elif _args.has("fidelity"):
+			_compose_fidelity()
 		elif not _args.has("only") and not _args.has("screen") and not _args.has("hand") and not _args.has("hotas") and not _args.has("shoulder") and not _args.has("visor"):
 			_compose()
 		quit(0)
@@ -197,17 +203,23 @@ func _shoot() -> bool:
 		var key := float(shot.get("field_key", CABIN_FIELD_KEY)) if _args.has("cabin_keys") else EyeAdaptation.FIELD_MID_GREY
 		_world.atmosphere.field_key = float(_args["field_key"]) if _args.has("field_key") else key
 		_world.atmosphere.snap_adaptation()
+	# the left screen's feed: the free camera is no cockpit view, so the feed would stay black; render it on each of the two frames before the capture
+	_world.screen_camera.render_always = true
+	if _wait >= int(shot.get("settle", SHOT_SETTLE_FRAMES)) - 2:
+		_world.screen_camera.viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	if _wait < int(shot.get("settle", SHOT_SETTLE_FRAMES)):
 		return false
 	var path := _out_dir.path_join(String(shot["name"]) + ".png")
 	var image := root.get_viewport().get_texture().get_image()
 	image.convert(Image.FORMAT_RGB8)
 	if shot.has("fisheye"):
-		image = _fisheye(image)
+		image = _fisheye(image, shot.get("fisheye_f_px", GOPRO_F_PX), shot.get("fisheye_photo_size", GOPRO_PHOTO_SIZE), shot.get("fisheye_out_size", GOPRO_OUT_SIZE))
 	elif shot.has("crop_aspect"):
 		var width := roundi(image.get_height() * float(shot["crop_aspect"]))
 		image = image.get_region(Rect2i((image.get_width() - width) / 2, 0, width, image.get_height()))
 	print("cockpit_shots: saved %s (error %d), %s" % [path, image.save_png(path), _brightness(image)])
+	if not shot.has("fisheye") and not shot.has("crop_aspect"):
+		print("cockpit_shots: screen_left_rect %s %s" % [shot["name"], _screen_rect_px("left")])
 	if shot.has("screen_id"):
 		var feed := _world.screen_camera.viewport.get_texture().get_image()
 		feed.convert(Image.FORMAT_RGB8)
@@ -259,6 +271,9 @@ func _define_shots() -> void:
 		_shots.clear()
 		for id in CameraCatalog.available(_world.flight.sim):
 			_shots.append({"name": "screen_" + id, "local": eye_left, "fov": float(_args.get("fov", 40.0)), "screen_id": id})
+		return
+	if _args.has("fidelity"):
+		_define_fidelity_shots()
 		return
 	if _args.has("hand"):
 		_define_hand_shots(eye, pilot, hatch_basis)
@@ -462,6 +477,46 @@ func _define_shoulder_shots() -> void:
 					"pointer_ops": again, "settle": 12, "keep_height": true, "crop_aspect": 1.2})
 
 
+## --fidelity: one shot fid_<id> per row of config/cockpits/photo_cameras.toml, rendered from the row's camera at the photo's framing
+## (pinhole: the photo's aspect, keep height; fisheye_equidistant: rectilinear 140 deg remapped to the fisheye at width 1600).
+func _fidelity_rows() -> Array:
+	var rows: Array = TomlLite.load_file(Paths.config_dir().path_join("cockpits/photo_cameras.toml")).get("photo", [])
+	if _args.has("photo"):
+		var keep := String(_args["photo"]).split(",")
+		rows = rows.filter(func(row: Dictionary) -> bool: return keep.has(String(row["id"])))
+	return rows
+
+
+func _define_fidelity_shots() -> void:
+	_shots.clear()
+	for row: Dictionary in _fidelity_rows():
+		var position := Vector3(row["position_m"][0], row["position_m"][1], row["position_m"][2])
+		var forward := Vector3(row["forward"][0], row["forward"][1], row["forward"][2]).normalized()
+		var up := Vector3(row["up"][0], row["up"][1], row["up"][2]).normalized()
+		var right := forward.cross(up).normalized()
+		var basis := Basis(right, right.cross(forward).normalized(), -forward)
+		var size := Vector2(float(row["size_px"][0]), float(row["size_px"][1]))
+		var fov_h := deg_to_rad(float(row["fov_h_deg"]))
+		var shot := {"name": "fid_" + String(row["id"]), "local": Transform3D(basis, position), "hide_exterior": false, "hide_head": false}
+		if String(row["model"]) == "fisheye_equidistant":
+			var f_px := size.x * 0.5 / (fov_h * 0.5)  # r = f theta
+			shot.merge({"fov": GOPRO_RENDER_FOV, "fisheye": true, "fisheye_f_px": f_px, "fisheye_photo_size": size,
+					"fisheye_out_size": Vector2i(GOPRO_OUT_SIZE.x, roundi(GOPRO_OUT_SIZE.x * size.y / size.x))})
+		else:
+			var fov_v := 2.0 * atan(tan(fov_h * 0.5) * size.y / size.x)
+			shot.merge({"fov": rad_to_deg(fov_v), "keep_height": true, "crop_aspect": size.x / size.y})
+		_shots.append(shot)
+
+
+func _compose_fidelity() -> void:
+	var repo := ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
+	for row: Dictionary in _fidelity_rows():
+		var id := String(row["id"])
+		var photo := repo.path_join(String(row["file"]))
+		_side_by_side("fid_" + id, photo, "fid_%s_vs" % id, false)
+		_side_by_side("fid_" + id, photo, "fid_%s_overlay" % id, true, true)
+
+
 func _compose_body() -> void:
 	_side_by_side("body_side", "../nasa/KSC-20190731-PH_SPX01_0002", "body_side_vs_ksc0002", false)
 	_side_by_side("body_34", "../eva_suit_newatlas", "body_34_vs_newatlas", false)
@@ -504,6 +559,28 @@ func _run_pointer_ops(ops: Array) -> void:
 		_pointer.update(1.0 / 30.0, null)
 
 
+## The screen's mesh box projected into the current frame: "x y w h" in px of the window (for tests that measure the screen region).
+func _screen_rect_px(id: String) -> String:
+	var mesh := _cockpit.screen_surface(id)
+	var cam := root.get_viewport().get_camera_3d()
+	if mesh == null or cam == null:
+		return "0 0 0 0"
+	var box := mesh.get_aabb()
+	var lo := Vector2(1.0e9, 1.0e9)
+	var hi := Vector2(-1.0e9, -1.0e9)
+	for i in 8:
+		var corner := box.position + box.size * Vector3(i & 1, (i >> 1) & 1, (i >> 2) & 1)
+		var world_point := mesh.global_transform * corner
+		if cam.is_position_behind(world_point):
+			continue
+		var p := cam.unproject_position(world_point)
+		lo = lo.min(p)
+		hi = hi.max(p)
+	if hi.x < lo.x:
+		return "0 0 0 0"
+	return "%d %d %d %d" % [lo.x, lo.y, hi.x - lo.x, hi.y - lo.y]
+
+
 ## The hatch frame and the exterior hull (every stage node child but the cockpit) are hidden for the shot from outside the inner wall.
 func _set_exterior_visible(on: bool) -> void:
 	var stage := _cockpit.get_parent() as Node3D
@@ -516,15 +593,15 @@ func _set_exterior_visible(on: bool) -> void:
 
 
 ## Rectilinear render (GOPRO_RENDER_FOV, keep width) -> the GoPro's equidistant fisheye (r = f theta), bilinear.
-func _fisheye(src: Image) -> Image:
-	var out := Image.create(GOPRO_OUT_SIZE.x, GOPRO_OUT_SIZE.y, false, Image.FORMAT_RGB8)
-	var f := GOPRO_F_PX * GOPRO_OUT_SIZE.x / GOPRO_PHOTO_SIZE.x
+func _fisheye(src: Image, f_photo_px: float, photo_size: Vector2, out_size: Vector2i) -> Image:
+	var out := Image.create(out_size.x, out_size.y, false, Image.FORMAT_RGB8)
+	var f := f_photo_px * out_size.x / photo_size.x
 	var px_per_tan := src.get_width() * 0.5 / tan(deg_to_rad(GOPRO_RENDER_FOV) * 0.5)
 	var sw := src.get_width()
 	var sh := src.get_height()
-	var centre := Vector2(GOPRO_OUT_SIZE) * 0.5
-	for y in GOPRO_OUT_SIZE.y:
-		for x in GOPRO_OUT_SIZE.x:
+	var centre := Vector2(out_size) * 0.5
+	for y in out_size.y:
+		for x in out_size.x:
 			var d := Vector2(x + 0.5, y + 0.5) - centre
 			var r := d.length()
 			var theta := r / f
@@ -572,9 +649,10 @@ func _compose() -> void:
 
 
 ## Our shot and the photo (reference photos stay outside the repo) scaled to our height, next to each other or blended 50 %.
-func _side_by_side(ours: String, photo: String, name: String, overlay: bool) -> void:
+## `photo` is a name below the refs dir (no extension) or, when absolute, the photo file itself; `edges`: our shot's edges (Sobel) in red on the blend.
+func _side_by_side(ours: String, photo: String, name: String, overlay: bool, edges := false) -> void:
 	var a := Image.load_from_file(_out_dir.path_join(ours + ".png"))
-	var b := Image.load_from_file(_refs_dir.path_join(photo + ".jpg"))
+	var b := Image.load_from_file(photo if photo.is_absolute_path() else _refs_dir.path_join(photo + ".jpg"))
 	if a == null or b == null:
 		print("cockpit_shots: %s skipped (image missing)" % name)
 		return
@@ -587,6 +665,13 @@ func _side_by_side(ours: String, photo: String, name: String, overlay: bool) -> 
 		for y in a.get_height():
 			for x in a.get_width():
 				out.set_pixel(x, y, a.get_pixel(x, y).lerp(b.get_pixel(x, y), 0.5))
+		if edges:
+			for y in range(1, a.get_height() - 1):
+				for x in range(1, a.get_width() - 1):
+					var gx := a.get_pixel(x + 1, y).get_luminance() - a.get_pixel(x - 1, y).get_luminance()
+					var gy := a.get_pixel(x, y + 1).get_luminance() - a.get_pixel(x, y - 1).get_luminance()
+					if absf(gx) + absf(gy) > EDGE_THRESHOLD:
+						out.set_pixel(x, y, Color(1.0, 0.1, 0.1))
 	else:
 		out = Image.create(a.get_width() + b.get_width(), a.get_height(), false, Image.FORMAT_RGB8)
 		out.blit_rect(a, Rect2i(Vector2i.ZERO, a.get_size()), Vector2i.ZERO)
