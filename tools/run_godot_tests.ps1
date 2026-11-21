@@ -1,5 +1,7 @@
 # Runs every game/tests/*_test.gd headless in the double-precision Godot editor build and logs time and exit code per
-# script to build/godot_tests.log. Exit code 1 when any script fails, 0 otherwise.
+# script to build/godot_tests.log. Exit code 1 when any script fails, 0 otherwise. A script fails on a non-zero exit code,
+# a timeout, or when its output holds a GDScript error ($scriptErrorPattern): a runtime error aborts the running function,
+# its remaining checks never run and the script can still exit 0. A failed script's captured output is kept (path logged).
 #   -Gpu     also run the scripts in $needsGpuOrModels (they need a GPU window or the generated models in data/models)
 #   -Only    run only these scripts (names with or without .gd, e.g. -Only clock_hold_test,ui_rate_test)
 #   -TimeoutSec  per-script time limit (default 300)
@@ -25,6 +27,9 @@ $needsGpuOrModels = @(
     'tower_view_test',        # data/models/starbase_olp2
     'vehicle_view_test'        # Starship / Super Heavy detail models
 )
+
+# GDScript runtime / parse errors as Godot prints them (stdout or stderr).
+$scriptErrorPattern = 'SCRIPT ERROR|Parse Error|Failed to load script'
 
 # Scripts that legitimately run longer than the default limit (seconds; the larger of this and -TimeoutSec applies).
 $slowScripts = @{ 'terrain_quadtree_test' = 900 }  # measured 502 s with the Earth and Moon terrain data (2026-11-03)
@@ -63,16 +68,21 @@ foreach ($s in $scripts) {
         $code = $p.ExitCode
     }
     $sw.Stop()
-    $ok = ($code -eq 0)
-    $line = '{0,-5} {1}  exit={2}  {3:N1} s' -f $(if ($ok) { 'PASS' } else { 'FAIL' }), $name, $code, $sw.Elapsed.TotalSeconds
+    $scriptErrors = @(Select-String -Path $out, "$out.err" -Pattern $scriptErrorPattern -ErrorAction SilentlyContinue)
+    $ok = ($code -eq 0) -and ($scriptErrors.Count -eq 0)
+    $why = if ($scriptErrors.Count -gt 0) { "  script errors=$($scriptErrors.Count)" } else { '' }
+    $line = '{0,-5} {1}  exit={2}  {3:N1} s{4}' -f $(if ($ok) { 'PASS' } else { 'FAIL' }), $name, $code, $sw.Elapsed.TotalSeconds, $why
     $line | ForEach-Object { Write-Host $_; Add-Content $log $_ -Encoding utf8 }
     if (-not $ok) {
         $failed += $name
         "---- tail of $name" | Add-Content $log -Encoding utf8
         Get-Content $out -Tail 15 | Add-Content $log -Encoding utf8
         Get-Content "$out.err" -Tail 5 | Add-Content $log -Encoding utf8
+        $scriptErrors | Select-Object -First 5 | ForEach-Object { $_.Line } | Add-Content $log -Encoding utf8
+        "---- full output kept: $out , $out.err" | ForEach-Object { Write-Host $_; Add-Content $log $_ -Encoding utf8 }
+    } else {
+        Remove-Item $out, "$out.err" -ErrorAction SilentlyContinue
     }
-    Remove-Item $out, "$out.err" -ErrorAction SilentlyContinue
 }
 
 if ($failed.Count -gt 0) {
