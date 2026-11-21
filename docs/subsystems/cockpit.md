@@ -408,7 +408,7 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
 - Maps (`tools/structures/cabin_textures.py`, baker of generators.toml; manifest `cockpit.console_maps`): `console_albedo.png` (sRGB), `console_normal.png`
   (tangent space: x = image right, y = image up), `console_orm.png` (occlusion, roughness, metallic, A = emission mask). Game: one ShaderMaterial on the five console
   nodes (`CockpitView._console_atlas_material`, `cabin.gdshader` uniforms (8) `maps_on`, `albedo_map`, `normal_map`, `orm_map`, `emit_gain`); the tangent frame is
-  built from screen-space derivatives (no mesh tangents); mipmaps generated at load (VR). Emission = albedo x mask x `CONSOLE_EMIT_CD_M2` 500 (scene-referred, each frame).
+  built from screen-space derivatives (no mesh tangents); mipmaps generated at load and the maps VRAM-compressed there (BPTC / BC7, normal map as normal source; they are not Godot imports): 10.7 MB each with mips, ~32 MB for the three instead of ~136 MB raw (measured), ~3 s once at cabin build; `maps_on` only when all three loaded (else a warning and flat colours). Emission = albedo x mask x `CONSOLE_EMIT_CD_M2` 500 (scene-referred, each frame).
 - Drawn layers (positions read on the rectified, de-lit photo views; constants with tags in cabin_textures.py): front: frame black below the frame top, the dark upper
   panel, the lighter top band above the seam at u 0.300, screws at (-0.4365 / -0.002 / +0.4365 [mirrored], 0.163), the latch at the top centre (0, 0.302), two slots
   (lat 0.052-0.129 and -0.218..-0.157, u 0.217-0.239), locker bevels, the placards "5" / "6" (lat +-0.468..0.5505, u 0.148-0.195; white numeral 22 mm, red symbol), the
@@ -423,12 +423,12 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
   Shading = `cabin_shading` (CockpitView's lamps, ring and fill on a white Lambert surface, no shadows) or a render image of the same pose. Licence: the fitted photos
   (crew1_1, discovery2 / 10) are not public domain, so only NUMBERS from the de-lit views go into the maps (the photo pixels never ship): albedo ratios (deck / key
   plate 5.75 -> deck 0.19) and the structure amplitudes (de-lit contrast 0.1-0.34 at 4.5-28 mm is sensor / JPEG noise dominated on the dark parts: our noise
-  stays under it, panel 4 %, brushed grain 6 %, correlation 4 mm / 30 mm along the brushing). Which photo fed what: discovery2 + discovery10 -> front and tray layers
+  stays under it, panel 4 %, brushed grain 6 %, correlation 4 mm / 30 mm along the brushing) [E]: numeric de-lighting plus our own procedural structure is the accepted result (Ruling J) because the fitted photos are not public domain; revisit when a public-domain photo has a fitted camera (e.g. jsc2026e404725). Which photo fed what: discovery2 + discovery10 -> front and tray layers
   and the deck ratio; crew1_1 -> back, underside, posts, silver / mid band ratios; jsc2022e068617 (trainer, no camera) -> Velcro.
 - Light states (`--lights_off`, `--utc`): cabin lamps (18:42 UTC, Sun off), Sun through the windows (11:00 UTC, low Sun, cabin lamps off; no direct Sun patch
   reaches the console in the pad attitude), night (04:00 UTC, lamps on). The textures carry no baked light: the same contrast in all three.
 - Tests: `test_cabin_textures.py` (power-of-two sizes <= 4096 incl. the label atlas, charts disjoint, key labels and locker numerals within 1 mm of their key /
-  placard in 3D, de-lighting recovers a synthetic albedo within 3 %, generated console UVs inside [0, 1]); `cockpit_view_test` (atlas material with mipmaps, LED).
+  placard in 3D, de-lighting recovers a synthetic albedo within 3 %, generated console UVs inside [0, 1], `test_generator_uvs_land_on_the_painted_features`: cl.face_uvs incl. the V flip -> atlas pixel -> placard numerals 5 / 6 within 2 mm, a screw head, vent vs grey band); `cockpit_view_test` (atlas material with mipmaps, LED).
 - Materials: silver 0.35 linear with metallic 0.15 (0.6 rendered the back and the rods dark in the diffuse cabin light; crew1_1 shows them light grey), deck
   0.19 / metallic 0.1, panels 0.03, vent 0.012.
 - Shots: `cockpit_shots.gd` keeps `console_hit` hidden (it made every console node visible again, so the hidden hit faces covered the key faces and their

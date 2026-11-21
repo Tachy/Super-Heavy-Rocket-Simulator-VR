@@ -7,7 +7,7 @@ render_mode ambient_light_disabled;
 // split-sum environment BRDF (fix round 5: AO 0.03 on the sky's radiance still left the sky - far brighter than the cabin the eye
 // adaptation meters - in every reflection: black seats, brackets and the lower visor read mid grey). (2) Panel seams: thin dark
 // lines on a grid in the part's own coordinates (surface detail by shader, not geometry), strength seam_depth (0 = none). Further
-// surface detail by uniforms (3)-(8): band, two-tone visor, helmet panel lines, key labels, markings, the console atlas maps.
+// surface detail by uniforms (3)-(8): two-tone visor, helmet panel lines, key labels, markings, the console atlas maps.
 
 #include "res://shaders/atmosphere.gdshaderinc"
 
@@ -20,15 +20,6 @@ uniform float fill_surround = 0.0;  // scene luminance of the walls the glossy p
 uniform float seam_depth : hint_range(0.0, 1.0) = 0.0;
 uniform vec2 seam_pitch_m = vec2(0.42, 0.30);
 uniform float seam_width_m = 0.0015;
-// (3) Band: a dark band on one face of a part (the vent across the console's silver back, crew1_1): fragments whose local normal is within
-// ~25 deg of band_face_normal and whose position lies in [band_up_range] along band_up (from band_origin) and within band_half_width along Z.
-uniform float band_on = 0.0;
-uniform vec3 band_origin = vec3(0.0);
-uniform vec3 band_up = vec3(1.0, 0.0, 0.0);
-uniform vec3 band_face_normal = vec3(0.0, 1.0, 0.0);
-uniform vec2 band_up_range = vec2(0.0, 0.0);
-uniform float band_half_width = 0.0;
-uniform vec4 band_albedo : source_color = vec4(0.0, 0.0, 0.0, 1.0);
 // (4) Two-tone surface by UV.y (the visor: copper-tinted top, dark clear glass below; UV.y = 0 at its top edge): tint_split < 0 = off.
 uniform float tint_split = -1.0;
 uniform vec4 albedo_low : source_color = vec4(0.0, 0.0, 0.0, 1.0);
@@ -140,16 +131,6 @@ void fragment() {
 		vec3 b = dp2perp * duv1.y + dp1perp * duv2.y;  // along +V (down the image)
 		float inv = inversesqrt(max(max(dot(t, t), dot(b, b)), 1.0e-20));
 		NORMAL = normalize(t * inv * nt.x - b * inv * nt.y + n0 * nt.z);
-	}
-	if (band_on > 0.0 && dot(normalize(local_normal), band_face_normal) > 0.9) {
-		vec3 d = local_position - band_origin;
-		float u = dot(d, band_up);
-		float aa = max(fwidth(u), 1.0e-4);
-		float in_up = smoothstep(band_up_range.x - aa, band_up_range.x + aa, u) * (1.0 - smoothstep(band_up_range.y - aa, band_up_range.y + aa, u));
-		float in_lat = 1.0 - smoothstep(band_half_width - aa, band_half_width + aa, abs(d.z));
-		base = mix(base, band_albedo.rgb, in_up * in_lat);
-		rough = mix(rough, 0.9, in_up * in_lat);  // the vent is a matte dark slot, no metal sheen
-		metal = mix(metal, 0.0, in_up * in_lat);
 	}
 	if (tint_split >= 0.0) {
 		float w = fwidth(UV.y) + 0.02;

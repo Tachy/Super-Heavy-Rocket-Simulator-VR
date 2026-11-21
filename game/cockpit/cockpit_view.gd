@@ -624,7 +624,7 @@ func _suit_texture(file: String) -> ImageTexture:
 	if file.is_empty():
 		return null
 	if not _suit_textures.has(file):
-		var image := Image.load_from_file(VehicleModels._repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file))
+		var image := Image.load_from_file(VehicleModels.repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file))
 		if image == null or image.is_empty():
 			return null
 		image.generate_mipmaps()
@@ -710,25 +710,33 @@ func _console_atlas_material() -> ShaderMaterial:
 	m.shader = CABIN_SHADER
 	m.set_shader_parameter("specular", 0.4)
 	var maps: Dictionary = _cockpit_manifest.get("console_maps", {})
+	var all_loaded := true
 	for role: String in ["albedo", "normal", "orm"]:
-		var texture := _console_texture(String(maps.get(role, "")))
+		var texture := _console_texture(String(maps.get(role, "")), role)
 		if texture == null:
-			push_error("CockpitView: console map '%s' missing (rebuild the crew_dragon model set)" % role)
+			push_warning("CockpitView: console map '%s' missing (rebuild the crew_dragon model set); the console keeps its flat colours" % role)
+			all_loaded = false
 			continue
 		m.set_shader_parameter(role + "_map", texture)
-	m.set_shader_parameter("maps_on", 1.0)
+	m.set_shader_parameter("maps_on", 1.0 if all_loaded else 0.0)
 	_materials["console_atlas"] = m
 	return m
 
 
-func _console_texture(file: String) -> ImageTexture:
+func _console_texture(file: String, role: String) -> ImageTexture:
 	if file.is_empty():
 		return null
 	if not _console_textures.has(file):
-		var image := Image.load_from_file(VehicleModels._repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file))
+		var image := Image.load_from_file(VehicleModels.repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file))
 		if image == null or image.is_empty():
 			return null
-		image.generate_mipmaps()  # VR: the 0.5 mm atlas is seen at 0.5-2 m, so every level is used
+		# VR: the 0.5 mm atlas is seen at 0.5-2 m, so every level is used. The maps are loaded at run time (no .import), so the import settings
+		# "VRAM compressed + mipmaps (normal map as normal)" are applied here: BPTC (BC7) 4096 x 2048 = 10.7 MB with mips per map instead of 37-57 MB
+		# raw (~136 MB -> 32 MB total, measured); costs ~3 s once at cabin build. Fallback: the uncompressed mipmapped image.
+		image.generate_mipmaps(role == "normal")
+		var source := Image.COMPRESS_SOURCE_SRGB if role == "albedo" else (Image.COMPRESS_SOURCE_NORMAL if role == "normal" else Image.COMPRESS_SOURCE_GENERIC)
+		if image.compress(Image.COMPRESS_BPTC, source) != OK:
+			push_warning("CockpitView: BPTC compression of console map '%s' failed, using the uncompressed image" % role)
 		_console_textures[file] = ImageTexture.create_from_image(image)
 	return _console_textures[file]
 
@@ -792,7 +800,7 @@ func _labels() -> ImageTexture:
 		var file := String((_cockpit_manifest.get("labels", {}) as Dictionary).get("file", ""))
 		if file.is_empty():
 			return null
-		var image := Image.load_from_file(VehicleModels._repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file))
+		var image := Image.load_from_file(VehicleModels.repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file))
 		if image == null or image.is_empty():
 			return null
 		image.generate_mipmaps()

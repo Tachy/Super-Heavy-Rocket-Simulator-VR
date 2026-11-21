@@ -133,6 +133,10 @@ static func _say(line: String) -> void:
 	print(line)
 
 
+static func repo_dir() -> String:
+	return _repo_dir()
+
+
 static func _repo_dir() -> String:
 	return root_override if root_override != "" else Paths.repo_dir()
 

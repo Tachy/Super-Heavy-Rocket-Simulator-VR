@@ -171,3 +171,46 @@ def test_generated_console_faces_use_the_atlas():
         raw = buffers[view["buffer"]][view.get("byteOffset", 0) + acc.get("byteOffset", 0):][:acc["count"] * 8]
         uv = np.frombuffer(raw, dtype="<f4").reshape(-1, 2)
         assert uv.min() >= -1e-4 and uv.max() <= 1.0 + 1e-4, node
+
+
+def _cabin_point(cockpit, lat, u, o):
+    f = cl.console_frame(cockpit)
+    return tuple(f["origin"][i] + f["right"][i] * lat + f["up"][i] * u + f["normal"][i] * o for i in range(3))
+
+
+def _pixel_of(cockpit, charts, node, local_p, local_n):
+    """The atlas pixel (x, y from the top) the generator's UVs give a cabin point: gen_dragon_cabin.chart_faces calls cl.face_uvs (Blender V up),
+    the glTF exporter flips V back (v_gltf = 1 - v_blender); Godot samples y down from the top."""
+    f = cl.console_frame(cockpit)
+    n = tuple(f["right"][i] * local_n[0] + f["up"][i] * local_n[1] + f["normal"][i] * local_n[2] for i in range(3))
+    (u, v), = cl.face_uvs(cockpit, charts, node, [_cabin_point(cockpit, *local_p)], n)
+    W, H = cl.CONSOLE_ATLAS_SIZE
+    return u * W, (1.0 - v) * H
+
+
+def test_generator_uvs_land_on_the_painted_features(cockpit, baked):
+    """Ties the mesh UVs (cl.face_uvs, incl. the V flip) to the painted atlas: known 3D features -> UV -> atlas pixel -> the painted feature is
+    there (placard numerals 5 / 6 within 2 mm, a screw head lighter than its surround, the black vent vs the grey band above it)."""
+    out, files = baked
+    albedo = _png(out / files["albedo"]).astype(float) / 255.0
+    charts = cl.console_charts(cockpit)
+    front, back = charts["front"], charts["back"]
+    tol_m = 0.002  # stated tolerance: 2 mm (4 texels of the 0.5 mm front chart)
+    # placard numerals: the white ink's centre in a +-12 mm window around the numeral, reached through the generator's UV path
+    for text, _, (n_lat, n_u), _ in cabin_textures.PLACARDS:
+        px, py = _pixel_of(cockpit, charts, "console_housing", (n_lat, n_u, 0.0), (0, 0, 1))
+        r = int(0.012 / front["texel"])
+        x0, y0 = int(px) - r, int(py) - r
+        patch = albedo[y0:y0 + 2 * r, x0:x0 + 2 * r, :3]
+        cx, cy = _ink_centre((patch.min(axis=-1) > 0.6).astype(float))
+        off_m = math.hypot(x0 + cx - px, y0 + cy - py) * front["texel"]
+        assert off_m <= tol_m, (text, off_m)
+    # a screw head: lighter (sRGB) than the console face 8 mm away
+    lat, u = cabin_textures.SCREWS_FRONT[0]
+    px, py = _pixel_of(cockpit, charts, "console_housing", (lat, u, 0.0), (0, 0, 1))
+    qx, qy = _pixel_of(cockpit, charts, "console_housing", (lat, u - 0.008, 0.0), (0, 0, 1))
+    assert albedo[round(py), round(px), :3].mean() > 1.25 * albedo[round(qy), round(qx), :3].mean()
+    # the back: the black vent (u -0.275..-0.125) is darker than the grey band above it (u -0.125..-0.015), both on the back chart (normal -o)
+    vx, vy = _pixel_of(cockpit, charts, "console_back", (0.0, -0.2, -0.2), (0, 0, -1))
+    bx, by = _pixel_of(cockpit, charts, "console_back", (0.0, -0.07, -0.2), (0, 0, -1))
+    assert albedo[round(by), round(bx), :3].mean() > 3.0 * albedo[round(vy), round(vx), :3].mean()
