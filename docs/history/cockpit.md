@@ -126,3 +126,11 @@ armrests, palms down (it read as a shrug in the hatch shots); hands were boxes o
   (`cabin_textures.LATCHES` (+-0.4845, 0.217)). The ends were silver behind o -0.12 (`END_SILVER_O`).
 - `[[tablet]]`: no roll (fit 1.3 / 1.9 deg not built), a plain 8 mm slab with a 12 mm post 6 cm straight back, dark flat material (linear 0.03, rendered as black
   slabs in discovery2).
+
+## Wall recess and console end fit before fidelity Task 7 fix round 1 (2026-11-21)
+- In edge fitted per side (left / right averaged) from every crew1_1 `REVEAL_IN_PX` row, the console band rows 170-220 included: 123.45 +- 0.46 deg,
+  -81.9 +- 3.9 deg/m, 18 +- 56 deg/m2 over x 2.824-3.139 (l/r 0.52 deg, rms 0.97 deg). The same rows were also back-projected onto the console's back face as
+  equalities, so one image line stood for two features ~0.8 m apart (review Important 1).
+- `end_taper` [0.6063, 0.590, 0.543] was tagged [D] from a plane fit (`recess.fit_taper`) of the L/R-averaged back rows 186-221 and the left underside rows
+  230-260, +-0.015 / 0.025 / 0.057, rms 1.6 mm. Values unchanged by the refit (now [E], an upper bound).
+- `RECESS_TINT_FROM` 0.15 (the colour line 2-8 px inside the photo's panel edge). The cabin glTF loaded with Godot's default mesh compression (seam sparkle).

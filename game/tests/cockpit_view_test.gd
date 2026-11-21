@@ -22,6 +22,11 @@ func _initialize() -> void:
 		_check(false, "crew_dragon models with the cabin generated (%s)" % VehicleModels.fallback_reason("crew_dragon"))
 		quit(1)
 		return
+	# fidelity Task 7 fix round 1: shell and recess share their seam vertices; compressed (16 bit in each mesh's AABB) positions crack there
+	for seam_part: String in ["cabin_shell", "cabin_recess"]:
+		var seam_mesh: Mesh = (models["cabin"] as Dictionary).get(seam_part)
+		_check(seam_mesh != null and seam_mesh.surface_get_format(0) & Mesh.ARRAY_FLAG_COMPRESS_ATTRIBUTES == 0,
+				"%s loaded with float vertex positions (no crack at the shell / recess seam)" % seam_part)
 	_core = StarsimCore.new()
 	_core.open(ProjectSettings.globalize_path("res://").path_join("../data/spice").simplify_path())
 	_config_dir = ProjectSettings.globalize_path("res://").path_join("../config").simplify_path()

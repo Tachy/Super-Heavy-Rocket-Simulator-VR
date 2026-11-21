@@ -701,10 +701,33 @@ def test_recess_edges_lie_within_sigma_of_the_fit(spec):
         assert rec[f"{name}_x_m"] == pytest.approx(list(f["x"]), abs=0.005), name
     # the built lines, projected into crew1_1, lie on the reads within a few px (read sigma 2 px, line rms 1-2 deg)
     built = recess_fit.recess_outline_px(spec["cockpit"])
+    clean = recess_fit.in_edge_reads()  # the console band rows are the console's end, not the floor edge
     for key, reads in (("out_l", recess_fit.REVEAL_OUT_PX["l"]), ("out_r", recess_fit.REVEAL_OUT_PX["r"]),
-                       ("in_l", recess_fit.REVEAL_IN_PX["l"]), ("in_r", recess_fit.REVEAL_IN_PX["r"])):
+                       ("in_l", clean["l"]), ("in_r", clean["r"])):
         rms, worst = recess_fit.line_residual_px(built[key], reads)
         assert rms <= 4.0 and worst <= 8.0, (key, rms, worst)
+
+
+def test_recess_in_edge_fit_leaves_out_the_console_rows():
+    """The crew1_1 dark line is the recess floor edge only where the console does not stand in front of it: the console band rows
+    (CONSOLE_BAND_V) feed the end taper, never the in-edge fit, and the clean rows fit the mirrored wall line within the read sigma."""
+    lo, hi = recess_fit.CONSOLE_BAND_V
+    for s in ("l", "r"):
+        assert all(not lo <= v <= hi for v in recess_fit.in_edge_reads()[s]), s
+    fit = recess_fit.fit_recess()
+    assert fit["in"]["rms_deg"] < 0.5
+    for v, *_ in recess_fit.silhouette_samples():  # the taper's equality points are console-band rows of the silhouette side
+        assert lo <= v <= hi
+
+
+def test_recess_in_edge_must_lie_beyond_the_out_edge(spec):
+    import copy
+    broken = copy.deepcopy(spec["cockpit"])
+    broken["recess"]["edge_in_deg"] = [100.0, 0.0, 0.0]  # in edge inside the panel edge (out ~107 deg)
+    with pytest.raises(vehicle_spec.VehicleSpecError, match="in edge"):
+        vehicle_spec.validate_cockpit(broken)
+    with pytest.raises(ValueError, match="in edge"):
+        cl.recess_offset(broken, 3.0, 110.0)
 
 
 def test_generated_recess_follows_its_edges(spec, nodes):
@@ -732,13 +755,19 @@ def test_generated_recess_follows_its_edges(spec, nodes):
 
 
 def test_console_end_taper_is_the_measured_contour(spec):
-    """[console] end_taper within sigma of the plane fit of crew1_1's end contour (cabin_fit/parts/recess.py), and the width stays whole where
-    the photos need it: the front zone under the outer glass edges (+-0.649) and the back face at mid height (end cap at 0.70-0.72)."""
+    """[console] end_taper: on the back face within sigma of the line fit of the console silhouette rows (right side, CONSOLE_BAND_V), an
+    upper bound at every other contour read (left back-face rows, left underside rows: the console end lies at or inside the wall line), equal
+    at the silver lip band end (|lat| 0.53); the width stays whole where the photos need it: the front zone under the outer glass edges
+    (+-0.649) and the back face at mid height (end cap at 0.70-0.72)."""
     c = spec["cockpit"]
-    sol, sig, rms = recess_fit.fit_taper(recess_fit.end_samples(c))
-    for v, f, s in zip(c["console"]["end_taper"], sol, sig):
-        assert abs(v - f) <= s, (v, f, s)
+    (a, du), (sa, sdu), rms = recess_fit.fit_taper_back(recess_fit.silhouette_samples(c))
+    w0, cdu, dd = c["console"]["end_taper"]
+    hood = c["console"]["hood_depth_m"]
+    assert abs(w0 + dd * hood - a) <= sa and abs(cdu - du) <= sdu, (a, du, sa, sdu)
     assert rms < 0.005
+    for u, depth, w, s in recess_fit.bound_samples(c):  # the plane within 1 sigma; the built end (with the [E] front chamfer) within 2
+        assert w0 + cdu * u + dd * depth <= w + s, (u, depth, w)
+        assert cl.end_half_width(c, u, depth) <= w + 2.0 * s, (u, depth, w)
     assert cl.end_half_width(c, -0.11, 0.0) == pytest.approx(c["console"]["width_m"] / 2.0)
     assert cl.end_half_width(c, 0.0, c["console"]["hood_depth_m"]) == pytest.approx(c["console"]["width_m"] / 2.0)
     assert cl.end_half_width(c, -0.336, c["console"]["hood_depth_m"]) == pytest.approx(0.53, abs=0.01)

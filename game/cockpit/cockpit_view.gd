@@ -45,7 +45,9 @@ const CONSOLE_EMIT_CD_M2 := 500.0
 const ATLAS_NODES: Array[String] = ["console_housing", "console_back", "console_under", "console_shelf", "console_lockers"]
 ## [E] Fidelity Task 7: the wall recess around the console and its bevels (crew1_1 / KSC-20240927: light grey against the white panels).
 const RECESS_ALBEDO := Color(0.6, 0.6, 0.6)
-const RECESS_TINT_FROM := 0.15
+## [D] fix round 1: the grey starts 0.05 down the bevel (smoothstep half width >= 0.02, so it never reaches the white panel at 0): crew1_1's
+## white -> grey line then lies on the read panel edge (at 0.15 it sat 2-8 px inside it).
+const RECESS_TINT_FROM := 0.05
 ## [E] Fidelity Task 7: the iPads' lit placeholder page (tablet maps, ORM alpha = the display): emits albedo x this luminance per unit albedo,
 ## the white text ~280 cd/m2, the dark page ~15 (an iPad mini at a comfortable cabin brightness; max 500 cd/m2 [S]).
 const TABLET_EMIT_CD_M2 := 400.0
@@ -101,6 +103,8 @@ var _figures := {}  # seat id -> Node3D (figure root)
 var _skeletons := {}  # seat id -> Skeleton3D
 var _crew := 0
 var _materials := {}
+static var _tablet_textures := {}  # tablet map file -> ImageTexture (or null when missing), shared by every CockpitView
+static var _tablet_warned := false
 var _led_materials: Array[ShaderMaterial] = []
 var _console_pending := false  ## console maps still being prepared in the background (polled in _process)
 var _cockpit_manifest := {}
@@ -767,29 +771,49 @@ func _recess_material() -> ShaderMaterial:
 
 
 ## The iPads (fidelity Task 7): the cabin shader on the tablet maps (manifest cockpit.tablet_maps: white bezel, the lit placeholder page, the
-## aluminium and arm swatches). Small maps (576 x 1024), loaded at once; without them a dark flat material.
+## aluminium and arm swatches). Small maps (576 x 1024), loaded once per process (_tablet_textures, shared by every CockpitView); without
+## them a dark flat material, cached per view like the lit one, with one warning per process.
 func _tablet_material() -> ShaderMaterial:
 	if _materials.has("tablet"):
 		return _materials["tablet"]
+	if _materials.has("tablet_fallback"):
+		return _materials["tablet_fallback"]
 	var maps: Dictionary = _cockpit_manifest.get("tablet_maps", {})
 	var m := ShaderMaterial.new()
 	m.shader = CABIN_SHADER
 	m.set_shader_parameter("specular", 0.5)
 	var loaded := 0
 	for role: String in ["albedo", "normal", "orm"]:
-		var file := String(maps.get(role, ""))
-		var image: Image = Image.load_from_file(VehicleModels.repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file)) if not file.is_empty() else null
-		if image == null or image.is_empty():
+		var texture := _tablet_texture(String(maps.get(role, "")), role == "normal")
+		if texture == null:
 			continue
-		image.generate_mipmaps(role == "normal")
-		m.set_shader_parameter(role + "_map", ImageTexture.create_from_image(image))
+		m.set_shader_parameter(role + "_map", texture)
 		loaded += 1
 	if loaded < 3:
-		push_warning("CockpitView: tablet maps missing (rebuild the crew_dragon model set); the tablets stay dark")
-		return _cabin_material(Color(0.03, 0.03, 0.036).linear_to_srgb(), 0.85, 0.0, 0.0, 0.03)
+		if not _tablet_warned:
+			_tablet_warned = true
+			push_warning("CockpitView: tablet maps missing (rebuild the crew_dragon model set); the tablets stay dark")
+		var fallback := _cabin_material(Color(0.03, 0.03, 0.036).linear_to_srgb(), 0.85, 0.0, 0.0, 0.03)
+		_materials["tablet_fallback"] = fallback
+		return fallback
 	m.set_shader_parameter("maps_on", 1.0)
 	_materials["tablet"] = m
 	return m
+
+
+## One tablet map as a mipmapped texture, loaded once per process (null when the file is missing; the miss is cached too).
+static func _tablet_texture(file: String, normal_map: bool) -> ImageTexture:
+	if file.is_empty():
+		return null
+	if _tablet_textures.has(file):
+		return _tablet_textures[file]
+	var image := Image.load_from_file(VehicleModels.repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file))
+	var texture: ImageTexture = null
+	if image != null and not image.is_empty():
+		image.generate_mipmaps(normal_map)
+		texture = ImageTexture.create_from_image(image)
+	_tablet_textures[file] = texture
+	return texture
 
 
 ## An r_led key: the blank key face with its blue LED (a lit mark, emission set every frame).

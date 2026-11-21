@@ -359,6 +359,19 @@ def validate_cockpit(cockpit: dict) -> None:
         lo, hi = rec[f"{name}_x_m"]
         if not lo < hi:
             raise VehicleSpecError(f"cockpit [recess] {name}_x_m must be ascending")
+
+    def edge_az(name, x):  # = cabin_layout.recess_edge_az: the fitted curve inside its station range, constant outside
+        lo, hi = rec[f"{name}_x_m"]
+        t = min(max(x, lo), hi) - rec["x_ref_m"]
+        return sum(c * t ** p for p, c in enumerate(rec[f"edge_{name}_deg"]))
+
+    x0 = min(rec["out_x_m"][0], rec["in_x_m"][0])
+    x1 = max(rec["out_x_m"][1], rec["in_x_m"][1])
+    for i in range(65):
+        x = x0 + (x1 - x0) * i / 64
+        if not edge_az("in", x) > edge_az("out", x):
+            raise VehicleSpecError(f"cockpit [recess]: the in edge (|az| {edge_az('in', x):.2f} deg) must lie beyond the out edge "
+                                   f"(|az| {edge_az('out', x):.2f} deg) at x {x:.3f} m")
     if not 0.0 < rec["depth_m"] < cockpit["cabin"]["wall_m"] - 0.02:
         raise VehicleSpecError("cockpit [recess] depth_m must leave >= 2 cm of the wall")
     ids = set()

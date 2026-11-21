@@ -58,6 +58,10 @@ const ENGINE_FILE := {false: "raptor", true: "rvac"}
 const ENGINE_ID := {false: "raptor3", true: "raptor_vacuum3"}
 ## Nozzle exit below the gimbal point when no model says better (the former view's value).
 const DEFAULT_EXIT_DEPTH_M := 3.0
+## Model files loaded with float vertex positions (no mesh attribute compression): Godot's glTF import quantises positions to 16 bit inside
+## each mesh's own AABB, so two meshes that share a seam (dragon_cabin: cabin_shell and cabin_recess, fidelity Task 7 fix round 1) get
+## different roundings there and the sky sparkles through the crack at grazing angles. The cabin is seen at 0.3-2 m in VR.
+const UNCOMPRESSED_FILES: Array[String] = ["dragon_cabin"]
 const HULL_SHADER := preload("res://shaders/vehicle_hull.gdshader")
 const MAPPED_SHADER := preload("res://shaders/lit_aerial_mapped.gdshader")
 const PAINTED_SHADER := preload("res://shaders/vehicle_painted.gdshader")
@@ -250,7 +254,7 @@ static func _load(vehicle_id: String) -> Dictionary:
 		return _fallback(vehicle_id, "manifest unreadable")
 	var parts := {}
 	for file: String in MODEL_FILES[vehicle_id]:
-		parts[file] = _meshes_of(model_dir.path_join(file + ".gltf"))
+		parts[file] = _meshes_of(model_dir.path_join(file + ".gltf"), file in UNCOMPRESSED_FILES)
 		if (parts[file] as Dictionary).is_empty():
 			return _fallback(vehicle_id, _load_error)
 	if vehicle_id == "falcon9_block5":
@@ -590,12 +594,13 @@ static func _missing_or_stale(vehicle_id: String, model_dir: String) -> String:
 	return ""
 
 
-## Meshes of a glTF by node name (in the file's frame: the nodes carry identity transforms); the scene is freed.
-static func _meshes_of(path: String) -> Dictionary:
+## Meshes of a glTF by node name (in the file's frame: the nodes carry identity transforms); the scene is freed. `uncompressed`: float
+## vertex attributes (UNCOMPRESSED_FILES).
+static func _meshes_of(path: String, uncompressed := false) -> Dictionary:
 	var meshes := {}
 	var document := GLTFDocument.new()
 	var state := GLTFState.new()
-	var err := document.append_from_file(path, state)
+	var err := document.append_from_file(path, state, GLTFDocument.IMPORT_FLAG_FORCE_DISABLE_MESH_COMPRESSION if uncompressed else 0)
 	if err != OK:
 		_load_error = "%s: glTF load failed (%s)" % [path.get_file(), error_string(err)]
 		return meshes

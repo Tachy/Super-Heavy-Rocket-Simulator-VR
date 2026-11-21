@@ -6,15 +6,23 @@ the console hangs. Two lines per side are read on the photo (column profiles, 1 
 - REVEAL_OUT_PX: the panel's edge, white -> grey (the bevel's top, on the panel surface),
 - REVEAL_IN_PX: the dark line where the bevel meets the recess floor (v 160-290; above v 160 the bevel fades into the lit dish without a line).
 Single view: each pixel is back-projected through the fitted crew1_1 camera (config/cockpits/photo_cameras.toml) onto the cabin's inner wall
-surface of revolution (crew_dragon.toml [cabin] profile_m; the floor lies PANEL_M further out), giving (x, az) on the wall. The two lines are
-fitted per side as az = az_c + k (x - X_REF_M) and averaged over both sides (mirror symmetry about the camera's plane Z = 0); the sigma
-combines the read sigma (READ_SIGMA_PX through the ray), the fit scatter and the left / right difference. The camera's pose sigma (x and
-pitch prior-dominated, ~3.5 cm / 0.7 deg) shifts both lines together and is quoted separately (CAMERA_SHIFT).
+surface of revolution (crew_dragon.toml [cabin] profile_m; the floor lies PANEL_M further out), giving (x, az) on the wall. Each line is
+fitted as |az| = c0 + c1 t + c2 t^2 (t = x - X_REF_M) with c1, c2 shared by both sides (mirror symmetry about the camera's plane Z = 0) and
+one c0 per side; c0 is their mean, its sigma combines the fit sigma (read sigma READ_SIGMA_PX through the ray, inflated by the scatter) and
+half the left / right difference. The camera's pose sigma (x and pitch prior-dominated, ~3.5 cm / 0.7 deg) shifts both lines together and
+is quoted separately (CAMERA_SHIFT).
 
-The console end: the same dark line passes along the console's back-face end from the back top edge (v ~172) to the lip (v ~221): the end
-cap's highlight touches it at mid height (lat 0.70-0.72) and the silver lip band ends exactly on it on both sides (lat 0.51). Below the lip
-(v 221-290) the underside is dark on the dark recess: the line is an upper bound for the underside's ends there. END_BACK: the ray through
-the contour meets the back-face plane (o = -hood_depth_m) at (lat, u); END_UNDER: it meets the underside plane at (lat, depth).
+One image line, two features: in CONSOLE_BAND_V (v 170-220) the console's back-face end stands ~0.8 m in front of the wall along the same
+rays, so the dark line there is either the recess floor edge or the console's silhouette, never both. Those rows are left out of the in-edge
+fit (in_edge_reads); the clean rows (left 160 + 230-290, right 270-290) fit the mirrored wall line to 0.1 deg rms. Against that line the
+band rows read: row 170 inside on both sides (the back top edge), left 180-220 0.6-2.6 px out (at the line: the console end lies at or
+inside it, an upper bound), right 180-220 2-5 px out (the console's silhouette covers the wall line; row 180 maps to |lat| 0.77 on the back
+plane, beyond the 0.70 end cap: not the back face). The console end taper is therefore fitted only from the right rows SILHOUETTE_V
+(190-220) on the back-face plane (o = -hood_depth_m): half width = a + du u (fit_taper_back); the depth slope below the lip is not seen
+(dark underside on the dark recess) and is only bounded by the left underside rows UNDER_CLEAN_V. bound_samples: every other contour read
+(left back rows, left underside rows) as an upper bound for the built taper. Equality is also where the silver lip band ends on the line on
+both sides (|lat| 0.53 at the lip). No second fitted view sees a console end (only crew1_1 / discovery2 / discovery10 have fitted cameras;
+the end-on stills nasatour_0310 / 0320 have none).
 
 Run: python -m cabin_fit.parts.recess (from tools/structures) prints the fit and the table values.
 """
@@ -46,8 +54,9 @@ REVEAL_IN_PX = {
     "l": {160: 316, 170: 327, 180: 328, 190: 333, 200: 342, 210: 349, 220: 355, 230: 365, 240: 373, 250: 380, 260: 388, 270: 397, 280: 405, 290: 413},
     "r": {170: 858, 180: 863, 190: 858, 200: 848, 210: 841, 220: 834, 270: 793, 280: 784, 290: 776},  # v 230-260: the wall camera's mount covers it
 }
-END_BACK_V = (186, 221)  # rows where the contour is the console's back-face end (end cap at mid height .. the lip)
-END_UNDER_V = (226, 290)  # rows where it bounds the underside (dark on dark: an upper bound)
+CONSOLE_BAND_V = (170, 220)  # rows where the console's back-face end is seen against the wall line: not in the in-edge fit
+SILHOUETTE_SIDE, SILHOUETTE_V = "r", (190, 220)  # rows where the read lies outside the wall line and on the back face: the console's silhouette
+BOUND_BACK_V = (190, 220)  # left rows at the wall line: the console end at or inside it (upper bound)
 UNDER_CLEAN_V = (230, 260)  # underside rows read on the left only: the bevel's smooth light-to-dark gradient shows no console silhouette outside the line
 CAMERA_SHIFT = {"position_m": 0.035, "pitch_deg": 0.7}  # [E] crew1_1 prior-dominated pose components (photo_cameras.toml)
 
@@ -109,18 +118,24 @@ def wall_point(run, x, az_deg, off=0.0):
 EDGE_DEGREE = 2  # the straight image lines map to curves on the cone: |az| quadratic in x (linear left 1-2 deg rms, 5-19 px in the photo)
 
 
-def fit_line(samples):
-    """Least squares |az| = c0 + c1 (x - X_REF_M) + c2 (x - X_REF_M)^2 over [(x, az, sigma_az)]: (coefficients, sigmas, rms)."""
-    x = np.array([s[0] for s in samples]) - X_REF_M
-    y = np.array([abs(s[1]) for s in samples])
-    w = 1.0 / np.array([s[2] for s in samples]) ** 2
-    A = np.stack([x ** p for p in range(EDGE_DEGREE + 1)], axis=1)
+def fit_mirrored(per_side):
+    """Least squares |az| = c0_side + c1 t + c2 t^2 (t = x - X_REF_M) over {"l"|"r": [(x, az, sigma_az)]}, c1 / c2 shared (mirror):
+    (c0_l, c0_r, c1, c2), their sigmas, rms (deg)."""
+    rows = [(i, s[0] - X_REF_M, abs(s[1]), s[2]) for i, side in enumerate(("l", "r")) for s in per_side[side]]
+    A = np.array([[1.0 - i, float(i)] + [t ** p for p in range(1, EDGE_DEGREE + 1)] for i, t, _, _ in rows])
+    y = np.array([r[2] for r in rows])
+    w = 1.0 / np.array([r[3] for r in rows]) ** 2
     cov = np.linalg.inv(A.T @ (A * w[:, None]))
     sol = cov @ (A.T @ (w * y))
     res = y - A @ sol
-    rms = float(np.sqrt(np.mean(res ** 2)))
     scale = max(1.0, float(np.sqrt(np.sum(w * res ** 2) / max(1, len(y) - len(sol)))))  # inflate by the scatter when it exceeds the read sigma
-    return np.array(sol), np.sqrt(np.diag(cov)) * scale, rms
+    return np.array(sol), np.sqrt(np.diag(cov)) * scale, float(np.sqrt(np.mean(res ** 2)))
+
+
+def in_edge_reads():
+    """REVEAL_IN_PX without the console band rows (CONSOLE_BAND_V): the rows where the dark line is the recess floor edge."""
+    lo, hi = CONSOLE_BAND_V
+    return {s: {v: u for v, u in REVEAL_IN_PX[s].items() if not lo <= v <= hi} for s in ("l", "r")}
 
 
 def edge_samples(cam, run, reads, off):
@@ -134,19 +149,19 @@ def edge_samples(cam, run, reads, off):
 
 def fit_recess(cockpit=None, cam=None):
     """{"out"|"in": {"coef": [c0, c1, c2] (deg, deg/m, deg/m2), "sigma": [...], "lr_deg": left / right difference at x_ref,
-    "rms_deg", "x": (min, max)}}: both sides fitted separately, then averaged (mirror symmetry)."""
+    "rms_deg", "x": (min, max)}}: mirrored fit (fit_mirrored), the in edge from the clean rows only (in_edge_reads)."""
     cockpit = cockpit or load_cockpit()
     cam = cam or camera()
     run = side_wall(cockpit["cabin"])
     result = {}
-    for name, reads, off in (("out", REVEAL_OUT_PX, 0.0), ("in", REVEAL_IN_PX, PANEL_M)):
-        per_side = {s: fit_line(edge_samples(cam, run, reads[s], off)) for s in ("l", "r")}
+    for name, reads, off in (("out", REVEAL_OUT_PX, 0.0), ("in", in_edge_reads(), PANEL_M)):
+        sol, sig, rms = fit_mirrored({s: edge_samples(cam, run, reads[s], off) for s in ("l", "r")})
         xs = [wall_hit(cam, (u, v), run, off)[0] for s in ("l", "r") for v, u in reads[s].items()]
-        (cl_, sl, rl), (cr, sr, rr) = per_side["l"], per_side["r"]
-        coef = 0.5 * (cl_ + cr)
-        sigma = np.hypot(0.5 * np.hypot(sl, sr), 0.5 * np.abs(cl_ - cr))
-        result[name] = {"coef": [float(v) for v in coef], "sigma": [float(v) for v in sigma], "lr_deg": float(abs(cl_[0] - cr[0])),
-                        "rms_deg": max(rl, rr), "x": (min(xs), max(xs))}
+        lr = float(abs(sol[0] - sol[1]))
+        coef = [0.5 * (sol[0] + sol[1])] + list(sol[2:])
+        sigma = [math.hypot(0.5 * math.hypot(sig[0], sig[1]), 0.5 * lr)] + list(sig[2:])
+        result[name] = {"coef": [float(v) for v in coef], "sigma": [float(v) for v in sigma], "lr_deg": lr, "rms_deg": rms,
+                        "x": (min(xs), max(xs))}
     return result
 
 
@@ -166,14 +181,6 @@ def plane_hit(cam, px, p0, normal):
     return cam.position_m + d * t
 
 
-def _contour_rows(lo, hi):
-    rows = {}
-    for v, u in REVEAL_IN_PX["l"].items():
-        if lo <= v <= hi and v in REVEAL_IN_PX["r"]:
-            rows[v] = (u, REVEAL_IN_PX["r"][v])
-    return rows
-
-
 def body_planes(cockpit):
     """(u_top, u_bot, u_lip, hood): the console body's back-face span along up and the hood depth (frame of console_frame)."""
     con = cockpit["console"]
@@ -185,53 +192,50 @@ def body_planes(cockpit):
     return u_top, u_bot, u_bot - drop, con["hood_depth_m"]
 
 
-def measure_ends(cockpit=None, cam=None):
-    """{"back": [(u, half_lat, sigma)], "under": [(depth, half_lat, sigma)]}: the console's end contour on the back face and the underside."""
+def _back_read(cam, centre, up, n, right, hood, u, v):
+    """(u_up, half_lat, sigma) where the ray through (u, v) meets the back-face plane (o = -hood)."""
+    p0 = centre - n * hood
+    p = plane_hit(cam, (u, v), p0, n)
+    q = plane_hit(cam, (u + READ_SIGMA_PX, v), p0, n)
+    w = abs(float(np.dot(p - centre, right)))
+    return float(np.dot(p - centre, up)), w, abs(abs(float(np.dot(q - centre, right))) - w)
+
+
+def _under_plane(cockpit):
+    """(point, normal) of the underside plane through the front bottom edge (o 0, u_bot) and the back lip (o -hood, u_lip)."""
+    centre, up, n, right = console_frame(cockpit)
+    _, u_bot, u_lip, hood = body_planes(cockpit)
+    a = centre + up * u_bot
+    b = centre + up * u_lip - n * hood
+    nn = np.cross(b - a, right)
+    return a, nn / np.linalg.norm(nn)
+
+
+def silhouette_samples(cockpit=None, cam=None):
+    """[(v, u, half_lat, sigma)]: the console silhouette rows (SILHOUETTE_SIDE, SILHOUETTE_V) on the back-face plane: equalities."""
     cockpit = cockpit or load_cockpit()
     cam = cam or camera()
     centre, up, n, right = console_frame(cockpit)
-    u_top, u_bot, u_lip, hood = body_planes(cockpit)
-    back_p0 = centre - n * hood
-    out = {"back": [], "under": []}
-    for v, (ul, ur) in sorted(_contour_rows(*END_BACK_V).items()):
-        lats, us = [], []
-        for u in (ul, ur):
-            p = plane_hit(cam, (u, v), back_p0, n)
-            lats.append(abs(float(np.dot(p - centre, right))))
-            us.append(float(np.dot(p - centre, up)))
-        q = plane_hit(cam, (ul + READ_SIGMA_PX, v), back_p0, n)
-        s = abs(abs(float(np.dot(q - centre, right))) - lats[0])
-        out["back"].append((float(np.mean(us)), float(np.mean(lats)), math.hypot(s, 0.5 * abs(lats[0] - lats[1]))))
-    # the underside: the plane through the front bottom edge (o 0, u_bot) and the back lip (o -hood, u_lip)
-    a = centre + up * u_bot
-    b = centre + up * u_lip - n * hood
-    under_n = np.cross(b - a, right)
-    under_n /= np.linalg.norm(under_n)
-    for v, (ul, ur) in sorted(_contour_rows(*END_UNDER_V).items()):
-        lats, deps = [], []
-        for u in (ul, ur):
-            p = plane_hit(cam, (u, v), a, under_n)
-            lats.append(abs(float(np.dot(p - centre, right))))
-            deps.append(-float(np.dot(p - centre, n)))
-        q = plane_hit(cam, (ul + READ_SIGMA_PX, v), a, under_n)
-        s = abs(abs(float(np.dot(q - centre, right))) - lats[0])
-        out["under"].append((float(np.mean(deps)), float(np.mean(lats)), math.hypot(s, 0.5 * abs(lats[0] - lats[1]))))
-    return out
+    hood = body_planes(cockpit)[3]
+    lo, hi = SILHOUETTE_V
+    return [(v, *_back_read(cam, centre, up, n, right, hood, u, v)) for v, u in sorted(REVEAL_IN_PX[SILHOUETTE_SIDE].items()) if lo <= v <= hi]
 
 
-def end_samples(cockpit=None, cam=None):
-    """[(u, depth, half_lat, sigma)] of the end contour: back-face rows and the clean underside rows (UNDER_CLEAN_V, left side: the right
-    side's rows 230-260 are covered by the wall camera's mount, rows > 260 by the headrests)."""
+def bound_samples(cockpit=None, cam=None):
+    """[(u, depth, half_lat, sigma)]: contour reads that only bound the console end from outside (the end lies at or inside them): the left
+    back-face rows BOUND_BACK_V (at the wall line) and the left underside rows UNDER_CLEAN_V (the right side's rows 230-260 are covered by
+    the wall camera's mount, rows > 260 by the headrests)."""
     cockpit = cockpit or load_cockpit()
     cam = cam or camera()
     centre, up, n, right = console_frame(cockpit)
-    u_top, u_bot, u_lip, hood = body_planes(cockpit)
-    out = [(u, hood, w, s) for u, w, s in measure_ends(cockpit, cam)["back"]]
-    a = centre + up * u_bot
-    b = centre + up * u_lip - n * hood
-    under_n = np.cross(b - a, right)
-    under_n /= np.linalg.norm(under_n)
-    for v, u in REVEAL_IN_PX["l"].items():
+    hood = body_planes(cockpit)[3]
+    out = []
+    for v, u in sorted(REVEAL_IN_PX["l"].items()):
+        if BOUND_BACK_V[0] <= v <= BOUND_BACK_V[1]:
+            uu, w, s = _back_read(cam, centre, up, n, right, hood, u, v)
+            out.append((uu, hood, w, s))
+    a, under_n = _under_plane(cockpit)
+    for v, u in sorted(REVEAL_IN_PX["l"].items()):
         if UNDER_CLEAN_V[0] <= v <= UNDER_CLEAN_V[1]:
             p = plane_hit(cam, (u, v), a, under_n)
             q = plane_hit(cam, (u + READ_SIGMA_PX, v), a, under_n)
@@ -240,16 +244,17 @@ def end_samples(cockpit=None, cam=None):
     return out
 
 
-def fit_taper(samples):
-    """Plane half_lat = w0 + dw_du u + dw_ddepth depth: ((w0, dw_du, dw_ddepth), (sigmas), rms_m)."""
-    A = np.array([[1.0, s[0], s[1]] for s in samples])
+def fit_taper_back(samples):
+    """Line half_lat = a + du u on the back-face plane over silhouette_samples: ((a, du), (sigmas), rms_m). a = w0 + dw_ddepth hood_depth_m
+    of [console] end_taper; the depth slope is not constrained here (bound_samples only)."""
+    A = np.array([[1.0, s[1]] for s in samples])
     y = np.array([s[2] for s in samples])
     w = 1.0 / np.array([s[3] for s in samples]) ** 2
     cov = np.linalg.inv(A.T @ (A * w[:, None]))
     sol = cov @ (A.T @ (w * y))
     res = y - A @ sol
-    scale = max(1.0, float(np.sqrt(np.sum(w * res ** 2) / max(1, len(y) - 3))))
-    return tuple(float(v) for v in sol), tuple(float(math.sqrt(cov[i, i]) * scale) for i in range(3)), float(np.sqrt(np.mean(res ** 2)))
+    scale = max(1.0, float(np.sqrt(np.sum(w * res ** 2) / max(1, len(y) - 2))))
+    return tuple(float(v) for v in sol), tuple(float(math.sqrt(cov[i, i]) * scale) for i in range(2)), float(np.sqrt(np.mean(res ** 2)))
 
 
 def edge_az(rec, name, x):
@@ -294,18 +299,24 @@ def main():
     for name, r in res.items():
         print(f"{name}: coef {np.round(r['coef'], 2)} +- {np.round(r['sigma'], 2)} (deg, deg/m, deg/m2 at x {X_REF_M}), "
               f"l/r {r['lr_deg']:.2f} deg, rms {r['rms_deg']:.2f} deg, x {r['x'][0]:.3f}..{r['x'][1]:.3f}")
-    ends = measure_ends(cockpit)
-    for k, rows in ends.items():
-        for row in rows:
-            print(k, " ".join(f"{v:.4f}" for v in row))
-    taper = fit_taper(end_samples(cockpit))
-    print("end taper (w0, dw/du, dw/ddepth)", np.round(taper[0], 4), "+-", np.round(taper[1], 4), f"rms {taper[2]:.4f} m")
+    sil = silhouette_samples(cockpit)
+    for row in sil:
+        print("silhouette v %d: u %.4f half lat %.4f +- %.4f" % row)
+    taper = fit_taper_back(sil)
+    print("end taper on the back face (a = w0 + dw_ddepth hood, dw/du)", np.round(taper[0], 4), "+-", np.round(taper[1], 4),
+          f"rms {taper[2]:.4f} m")
+    con = cockpit["console"]
+    for row in bound_samples(cockpit):
+        u, depth, w, s = row
+        w0, du, dd = con["end_taper"]
+        print("bound u %.4f depth %.4f half lat %.4f +- %.4f; built taper %.4f" % (u, depth, w, s, w0 + du * u + dd * depth))
     if "recess" in cockpit:
         built = recess_outline_px(cockpit)
-        for key, reads in (("out_l", REVEAL_OUT_PX["l"]), ("out_r", REVEAL_OUT_PX["r"]), ("in_l", REVEAL_IN_PX["l"]), ("in_r", REVEAL_IN_PX["r"])):
+        clean = in_edge_reads()
+        for key, reads in (("out_l", REVEAL_OUT_PX["l"]), ("out_r", REVEAL_OUT_PX["r"]), ("in_l", clean["l"]), ("in_r", clean["r"])):
             rms, worst = line_residual_px(built[key], reads)
             print(f"built {key}: {rms:.1f} px rms, max {worst:.1f} px")
-    return res, ends, taper
+    return res, sil, taper
 
 
 if __name__ == "__main__":

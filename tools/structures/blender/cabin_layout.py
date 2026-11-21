@@ -212,6 +212,8 @@ def recess_offset(cockpit, x, az_deg):
         return 0.0
     a = abs((az_deg + 180.0) % 360.0 - 180.0)
     lo, hi = recess_edge_az(rec, "out", x), recess_edge_az(rec, "in", x)
+    if not hi > lo:
+        raise ValueError(f"[recess] the in edge (|az| {hi:.2f} deg) must lie beyond the out edge (|az| {lo:.2f} deg) at x {x:.3f} m")
     side = min(max((a - lo) / (hi - lo), 0.0), 1.0)
     bottom = min((x - rec["bottom_x_m"]) / rec["bottom_bevel_m"], 1.0)
     top = min((ceiling - x) / rec["top_bevel_m"], 1.0)
