@@ -295,6 +295,9 @@ COCKPIT_KEYS = {
     "recess": ("x_ref_m", "depth_m", "edge_out_deg", "out_x_m", "edge_in_deg", "in_x_m", "bottom_x_m", "bottom_bevel_m", "top_bevel_m"),
     "tray": ("depth_m", "slope_deg", "deck_drop_m", "lip_width_m", "lip_height_m", "radius_m", "half_length_m"),
     "hotas": ("props", "stick_grip_m", "throttle_grip_m"),
+    "seat_shape": ("back_rows", "back_depth_m", "back_bulge_m", "rim_radius_m", "corner_radius_m", "top_radius_m", "pan_start_m", "pan_length_m",
+                   "pan_flat_half_m", "pan_wing_m", "pan_depth_m", "pan_front_radius_m", "frame_width_m", "rail_section_m", "rail_radius_m", "plate_m",
+                   "plate_radius_m"),
 }
 COCKPIT_GUARD_EDGES = ("top", "bottom", "left", "right")
 COCKPIT_SCREENS = ("left", "centre", "right")
@@ -325,6 +328,12 @@ def validate_cockpit(cockpit: dict) -> None:
         for k in ("foot_rest_m", "foot_rest_normal"):
             if k not in seat:
                 raise VehicleSpecError(f"cockpit seat {seat['id']}: missing key '{k}'")
+    rows = cockpit["seat_shape"]["back_rows"]
+    if any(len(r) != 4 for r in rows) or any(b[0] <= a[0] for a, b in zip(rows, rows[1:])):
+        raise VehicleSpecError("cockpit [seat_shape] back_rows: rows [x, half width, flat half width, wing] with ascending x")
+    for x, hw, flat, wing in rows:
+        if not (0.0 < flat < hw and wing > 0.0):
+            raise VehicleSpecError(f"cockpit [seat_shape] back_rows at x {x}: needs 0 < flat half width < half width and a wing > 0")
     if sorted(l.get("id") for l in cockpit.get("locker", [])) != ["5", "6"]:
         raise VehicleSpecError("cockpit: [[locker]] ids must be 5 and 6")
 

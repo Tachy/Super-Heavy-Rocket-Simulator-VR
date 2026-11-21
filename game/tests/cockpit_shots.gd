@@ -161,7 +161,7 @@ func _shoot() -> bool:
 	var isolate := bool(shot.get("isolate", false))  # close-up of one figure: the other figures and the leg rests are hidden
 	var keep_figure := "figure_" + String(shot.get("isolate_seat", "s3"))
 	for figure in _cockpit.find_children("figure_*", "Node3D", false, false):
-		(figure as Node3D).visible = not isolate or figure.name == keep_figure
+		(figure as Node3D).visible = (not isolate or figure.name == keep_figure) and not bool(shot.get("hide_crew", false))
 	for part: String in ["seat_rest_", "seat_shell_s1", "seat_shell_s2", "seat_shell_s4", "seat_pad_s1", "seat_pad_s2", "seat_pad_s4", "console_", "screen_", "tablet_", "button_", "handle"]:
 		for node in _cockpit.find_children(part + "*" if part.ends_with("_") else part, "MeshInstance3D", false, false):
 			(node as Node3D).visible = not isolate and node.name != "console_hit"  # fidelity Task 6: the hidden hit faces covered every key face in the shots
@@ -535,7 +535,15 @@ func _define_fidelity_shots() -> void:
 ## commander's eye looking up past the screens at the posts, closeup_back_<l|r> from 1.1 m behind the console's back (hatch side, below it);
 ## composed side by side (left | right eye) into closeup_eye_stereo / closeup_back_stereo.
 const STEREO_IPD_M := 0.064
-const CLOSEUP_SHOTS := ["closeup_eye", "closeup_back", "closeup_tray", "closeup_tray_r", "closeup_tablet", "closeup_recess"]
+const CLOSEUP_SHOTS := ["closeup_eye", "closeup_back", "closeup_tray", "closeup_tray_r", "closeup_tablet", "closeup_recess", "closeup_seat",
+		"closeup_seat_legs", "closeup_figure"]
+## fidelity Task 8: the empty outer seat s1 seen from in front (camera SEAT_CLOSEUP_FROM in its seat frame: up the back, chest normal, lateral), its
+## back / headrest wings and its leg support; the pilot figure's (s3) helmet / neck ring and shoulder at SEAT_FIGURE_CLOSEUP_M from the commander's
+## eye side (the crack check of the figure meshes)
+const SEAT_CLOSEUP_FROM := Vector3(0.45, 0.85, -0.15)
+const SEAT_CLOSEUP_TARGET := Vector3(0.45, 0.05, 0.0)
+const SEAT_LEGS_TARGET := Vector3(-0.35, 0.42, 0.0)
+const SEAT_FIGURE_CLOSEUP_M := 0.6
 const TABLET_CLOSEUP_M := 0.5  ## fidelity Task 7: the left iPad from this far, on the line to the commander's eye
 ## fidelity Task 7: the left recess bevel (the crew's right, -Z) beside the console end, seen from the hatch side of the cabin
 const RECESS_CLOSEUP_FROM := Vector3(2.2, 0.75, -0.1)
@@ -559,12 +567,24 @@ func _define_console_closeup_shots(eye: Transform3D) -> void:
 	var tab_c: Vector3 = tablet["centre"]
 	views.append(["closeup_tablet", tab_c + (eye.origin - tab_c).normalized() * TABLET_CLOSEUP_M, tab_c, 35.0, eye.basis.y])
 	views.append(["closeup_recess", RECESS_CLOSEUP_FROM, RECESS_CLOSEUP_AT, 60.0, Vector3(1.0, 0.0, 0.0)])
+	var seat_frames := {}
+	for seat: Dictionary in _cockpit.config.seats:
+		var ang := deg_to_rad(float(seat.get("back_angle_deg", 35.0)))
+		seat_frames[String(seat["id"])] = [Vector3(seat["hip"]), Vector3(cos(ang), -sin(ang), 0.0), Vector3(sin(ang), cos(ang), 0.0)]
+	var f1: Array = seat_frames["s1"]
+	var at1 := func(q: Vector3) -> Vector3: return Vector3(f1[0]) + Vector3(f1[1]) * q.x + Vector3(f1[2]) * q.y + Vector3(0.0, 0.0, 1.0) * q.z
+	views.append(["closeup_seat", at1.call(SEAT_CLOSEUP_FROM), at1.call(SEAT_CLOSEUP_TARGET), 70.0, Vector3(f1[1]), true])
+	views.append(["closeup_seat_legs", at1.call(SEAT_CLOSEUP_FROM), at1.call(SEAT_LEGS_TARGET), 70.0, Vector3(f1[1]), true])
+	var f3: Array = seat_frames["s3"]
+	var neck := Vector3(f3[0]) + Vector3(f3[1]) * 0.66 + Vector3(f3[2]) * 0.14 + Vector3(0.0, 0.0, 0.08)  # helmet's lower edge, neck ring, left shoulder
+	views.append(["closeup_figure", neck + (eye.origin - neck).normalized() * SEAT_FIGURE_CLOSEUP_M, neck, 45.0, Vector3(f3[1])])
 	for view: Array in views:
 		var origin: Vector3 = view[1]
 		var basis := Basis.looking_at(Vector3(view[2]) - origin, Vector3(view[4]))
 		for side: Array in [["l", -0.5], ["r", 0.5]]:
 			var pos: Vector3 = origin + basis.x * (STEREO_IPD_M * float(side[1]))
-			_shots.append({"name": "%s_%s" % [view[0], side[0]], "local": Transform3D(basis, pos), "fov": float(view[3]), "hide_exterior": false, "hide_head": true})
+			_shots.append({"name": "%s_%s" % [view[0], side[0]], "local": Transform3D(basis, pos), "fov": float(view[3]), "hide_exterior": false, "hide_head": true,
+					"hide_crew": view.size() > 5 and bool(view[5])})
 
 
 func _compose_console_closeup() -> void:

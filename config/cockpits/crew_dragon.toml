@@ -72,6 +72,32 @@ width_m = 0.58                 # [E] see s1
 foot_rest_m = [1.2923, 0.8861, -1.050]   # [D] sole plate centre under the boots: seat hip + (-0.152, 0.754) from the figure bones (fix 8/8b round 1: thigh raise -21, interior knee 102 deg, knee swung out 20 deg about the hip-ankle line; was (-0.185, 0.753) for -25 / 105) + the same sole / plate offset from the ankle in the shin-foot frame (0.082 along the shin, 0.109 along the foot); moves with the hip (round 4)
 foot_rest_normal = [0.8988, -0.4384, 0.0]  # [D] plate normal, toward the knee = minus the sagittal shin direction (shin 64 deg below the hatch axis before the knee swings out, figure_layout.leg_joints): a tray under the soles facing up the shin, seen nearly edge-on from the hatch (crew1_1)
 
+# Seat shape (fidelity Task 8; generator tools/structures/blender/seat_shape.py, measurement tools/structures/cabin_fit/parts/seats.py). Frame: the seat
+# frame of the crew figure (x up the seat back from the hip reference point hip_m, y the chest normal, z the crew's left). A moulded black cushion body
+# with wings in a white outer shell (KSC-20211110-PH-SPX02_0003 / _0004, jsc2022e068619, jsc2024e026550, jsc2026e404725: black padded back with
+# shoulder and big headrest wings, the outer shell white with a grey rim, white pan side panels, black armrests, carbon leg-support frames).
+# Both hatch photos show the seats in the pad / ingress position (cockpit.md "Discrepancy with crew1_1"), so lateral sizes are read as ratios to the
+# seat pitch in the same image row ([D] ratio) and carry the pitch's +-0.05 m (7 %) as metres; heights and wing depths are [E] (side photos, no
+# fitted camera). Placement ([[seat]] hip_m, back_angle_deg) is unchanged: no photo shows the launch posture.
+[seat_shape]
+back_rows = [[-0.06, 0.290, 0.200, 0.030], [0.15, 0.310, 0.215, 0.040], [0.30, 0.3335, 0.245, 0.055], [0.55, 0.3335, 0.250, 0.060], [0.62, 0.320, 0.200, 0.110], [0.70, 0.305, 0.150, 0.150], [0.88, 0.305, 0.150, 0.150]]  # [x up the back, half width, flat half width, wing height] m. Half width: [D] shoulders 0.3335 = shell width / pitch 0.953 +- 0.002 (KSC rows 1000 / 1050, both inner seats; pitch - gap: gap / pitch 0.047 +- 0.006 from KSC 0.046 and crew1_1 0.054 agree) x pitch 0.70 -> 0.667 +- 0.048 m; [E] head 0.305 (KSC row 850: 610 px against the 696 px pitch = 0.61, one row, the wing tops slope), hip 0.29 (= width_m / 2, hidden by the arms in both photos; +-0.03). Flat half width [E]: head 0.150 = the helmet's half width 0.135 (crew_figure [helmet]) + 0.015 (KSC: the wings flank the helmet); shoulders 0.245-0.25 (the figure's upper arms lie in front of the wings: test_figure_inside_seat_shell). Wing [E]: head 0.15 (jsc2022e068619 / jsc2026e404725: the headrest wing reaches the cheek / ear, ~0.15 in front of the back cushion; +-0.05), shoulders 0.055-0.06, lumbar 0.03-0.04 (KSC: low side bolsters; +-0.03). x: [E] top 0.88 (KSC: the wing tops at the helmet's mid height, head centre 0.80; jsc2022e068619: at the top of the head; +-0.05), head wings from 0.62-0.70 (above the shoulders, acromion ~0.55)
+back_depth_m = 0.07             # [E] the shell's back lies this far behind the cushion surface in the middle (cushion ~0.04 + shell; jsc2026e404725 side view ~0.07-0.10 at the back's side); +-0.03
+back_bulge_m = 0.015            # [E] the back curves forward this much toward its sides (jsc2026e404725: rounded white back)
+rim_radius_m = 0.02             # [E] the wing's front edge rolls over this radius into the side face (KSC, jsc2022e068619: soft rounded cushion edges)
+corner_radius_m = 0.03          # [E] the shell's rounded back corners (jsc2026e404725)
+top_radius_m = 0.025            # [E] the back's top edge rounding (KSC / jsc2022e068619: rounded wing tops)
+pan_start_m = -0.10             # [E] the pan body starts this far behind the hip point along the pan (inside the back's shell)
+pan_length_m = 0.44             # [E] pan length along the thighs (seated adult, 5th percentile hip to knee 0.5); was gen_dragon_cabin SEAT_THIGH_M
+pan_flat_half_m = 0.20          # [E] the pan cushion is flat to this half width, then rises into low side bolsters (KSC: the thighs lie between them; the figure's knees 0.35 apart)
+pan_wing_m = 0.03               # [E] pan side bolster height (KSC)
+pan_depth_m = 0.14              # [E] the white pan side panels reach this far below the cushion top (KSC: white side panels under the black cushion, ~0.12-0.16)
+pan_front_radius_m = 0.04       # [E] the pan's front edge rounding under the knees
+frame_width_m = [0.40, 0.49]    # [E] the carbon leg-support frame's outer width at the knee end / the foot end: crew1_1 (2x crop, both inner seats) 0.400 / 0.491 x the 0.70 pitch (ratios 0.571 / 0.701 +- 0.015 / 0.010 read, the pitch's +-0.05 m: +-0.038 m); one clean view (KSC agrees within ~10 %, its outer rails are cut / blurred)
+rail_section_m = [0.027, 0.045] # [E] rail section: lateral width (crew1_1: 12-15 px at the foot bar, 0.027 +- 0.006) x depth (KSC / crew1_1 seen edge-on ~0.04-0.05)
+rail_radius_m = 0.008           # [E] corner radius of the rail section (KSC: rounded carbon edges)
+plate_m = [0.32, 0.02]          # [E] the foot plate under the soles (the frame's bottom bar): length along the foot, thickness (crew1_1: edge-on 13 px at the foot bar); its width = the frame's foot width
+plate_radius_m = 0.03           # [E] the foot plate's corner radius (crew1_1: rounded frame corners)
+
 [eye]
 position_m = [2.2857, -0.5945, 0.35]  # [D] round 4: centre screen centre + 0.55 m along its normal + 0.23 m along its up (the discovery2 GoPro sits 0.61 / 0.23 from it between the heads); eye to centre screen centre 0.69 m, right shoulder to it 0.69 m of the 0.78 m reach (near-straight arm: crew2_1, inspiration4_1, demo1_3); +-0.08 per axis
 forward = [0.37956, 0.92517, 0.0]     # [D] straight ahead in the seat plane toward the screen plane (z = 0.35): 22 deg above horizontal, 13 deg below the chest normal, 22.7 deg off the screen normal

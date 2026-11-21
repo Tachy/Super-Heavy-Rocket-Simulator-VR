@@ -1,0 +1,28 @@
+# KSC-20211110-PH-SPX02_0003 (NASA, public domain; 3603 x 2160, Crew-3 on the pad, seen from the hatch, image right = +Z): the two ceiling posts and
+# the console's back top edge (fidelity Task 8: this photo's camera, the console held at the table values). Read on 3x crops with a 10 px grid
+# (posts) and column intensity profiles over 7 columns, 1.5 px Gaussian (back top edge: the white recess band -> the dark back face).
+# Labels: points / edges of cabin_fit/parts/seats.py ConsoleFixed. post_l = image left (-Z) post.
+sigma_px = 3.0
+
+[[point]]
+label = "post_l_top"      # centre of the collar ellipse at the ceiling (x 1148-1200 visible, cut by the frame top; centre from the rod axis)
+px = [1175.0, 4.0]
+[[point]]
+label = "post_r_top"      # collar ellipse x 2448-2505, y 12-45
+px = [2477.0, 27.0]
+[[point]]
+label = "post_l_base"     # the rod axis extended to the funnel's lower edge (the funnel flares outboard only)
+px = [1150.0, 230.0]
+[[point]]
+label = "post_r_base"
+px = [2498.0, 246.0]
+
+[[edge]]
+label = "post_l"          # rod axis (centre of the ~38 px rod) between the collar and the sleeve
+px = [[1170.5, 50.0], [1167.0, 80.0], [1164.5, 100.0], [1162.5, 120.0]]
+[[edge]]
+label = "post_r"
+px = [[2482.5, 60.0], [2484.0, 80.0], [2485.5, 100.0], [2488.5, 130.0]]
+[[edge]]
+label = "back_top"        # top edge of the back face (white -> dark step), strongest step per column
+px = [[1500.0, 228.0], [1700.0, 229.0], [1900.0, 230.0], [2100.0, 234.0], [2300.0, 239.0]]

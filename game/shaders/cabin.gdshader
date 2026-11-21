@@ -67,6 +67,14 @@ uniform sampler2D albedo_map : source_color, filter_linear_mipmap_anisotropic, r
 uniform sampler2D normal_map : filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D orm_map : filter_linear_mipmap_anisotropic, repeat_disable;
 uniform float emit_gain = 0.0;
+// (9) Detail tile on the maps (fidelity Task 8, the seats: cabin_textures.bake_seat_detail): a small periodic tile repeated detail_tiles times
+// over the atlas UV (the atlas is metric, so one tile = one fixed size on every chart): RGB a tangent-space normal added to the map's normal
+// (x detail_strength), A = 0.5 + a roughness offset (x detail_rough). detail_on = 0: off.
+uniform float detail_on = 0.0;
+uniform sampler2D detail_map : filter_linear_mipmap_anisotropic, repeat_enable;
+uniform float detail_tiles = 1.0;
+uniform float detail_strength = 1.0;
+uniform float detail_rough = 1.0;
 
 varying vec3 world_offset;  // fragment - the render origin (= the atmosphere's camera), world axes
 varying vec3 local_position;
@@ -120,6 +128,11 @@ void fragment() {
 		metal = orm.b;
 		glow = base * orm.a * emit_gain;
 		vec3 nt = texture(normal_map, UV).xyz * 2.0 - 1.0;
+		if (detail_on > 0.0) {
+			vec4 d = texture(detail_map, UV * detail_tiles);
+			nt = normalize(vec3(nt.xy + (d.xy * 2.0 - 1.0) * detail_strength, nt.z));
+			rough = clamp(rough + (d.a - 0.5) * detail_rough, 0.04, 1.0);
+		}
 		vec3 n0 = normalize(NORMAL);
 		vec3 dp1 = dFdx(VERTEX);
 		vec3 dp2 = dFdy(VERTEX);

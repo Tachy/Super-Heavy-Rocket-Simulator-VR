@@ -260,6 +260,9 @@ TABLET_FACE_U = 512.0 / 576.0  # the tablet maps: the front face spans U 0..TABL
 TABLET_BACK_UV = (0.95, 0.75)  # Blender UV (v up) of the aluminium back / sides swatch
 TABLET_ARM_UV = (0.95, 0.25)  # Blender UV of the dark arm swatch
 CONSOLE_MAPS = {"albedo": "console_albedo.png", "normal": "console_normal.png", "orm": "console_orm.png"}  # cabin_textures.py bakes them
+# the seat atlas (fidelity Task 8, cabin_textures.bake_seat; layout seat_shape.SEAT_CHARTS) and the two tiling detail maps (fabric grain, carbon twill)
+SEAT_MAPS = {"albedo": "seat_albedo.png", "normal": "seat_normal.png", "orm": "seat_orm.png", "fabric": "seat_fabric_detail.png", "carbon": "seat_carbon_detail.png"}
+SEAT_DETAIL_TILE_M = {"fabric": 0.02, "carbon": 0.02}  # [E] the detail tiles' size (m): CockpitView repeats them seat_shape.SEAT_ATLAS_M / tile times over the atlas UV
 CONSOLE_ATLAS_SIZE = (4096, 2048)  # [E] fidelity Task 6: power of two (mipmaps), one atlas for the console body, tray and posts
 CHART_MARGIN_M = 0.01  # [E] every chart reaches this far past the surface it covers (fillets, the frame plate's walls)
 CHART_GUTTER_PX = 8  # [E] free texels between charts (the baker paints into them: no bleeding down to the 8th mip)
@@ -500,6 +503,8 @@ def cockpit_manifest(cockpit):
         "labels": {"file": LABEL_FILE, "size": list(size)},
         "console_maps": dict(CONSOLE_MAPS),
         "tablet_maps": dict(TABLET_MAPS),
+        "seat_maps": dict(SEAT_MAPS),
+        "seat_detail_tiles": {k: 3.0 / v for k, v in SEAT_DETAIL_TILE_M.items()},  # atlas UV -> detail UV (seat_shape.SEAT_ATLAS_M 3.0 m)
         "button_ids": [b["id"] for b in cockpit["button"]],
         "tablets": {t["id"]: {"node": f"tablet_{t['id']}", "centre": t["centre_m"], "normal": t["normal"], "up": t["up"], "size": t["size_m"]} for t in cockpit["tablet"]},
         "guards": {g["id"]: {"node": f"guard_{g['id']}", "rim_node": f"guard_rim_{g['id']}", "rim_colour": list(g["rim_colour"]), "hinge_edge": g["hinge_edge"],

@@ -106,7 +106,7 @@ func _check_launch() -> void:
 	if cockpits.size() == 1:
 		_check_console_swap(cockpits[0])
 	var compressed := VehicleModels.console_compress_count
-	_check(compressed - counter_before == 3, "exactly three console maps prepared (%d)" % (compressed - counter_before))
+	_check(compressed - counter_before == 6, "exactly six maps prepared: three console, three seat atlas (fidelity Task 8) (%d)" % (compressed - counter_before))
 	_check(cockpits.size() == 1, "T+0: exactly one CockpitView (%d)" % cockpits.size())
 	if cockpits.size() == 1:
 		_check_eye(cockpits[0])
@@ -139,6 +139,21 @@ func _check_console_swap(cockpit: CockpitView) -> void:
 	_check(float(m.get_shader_parameter("maps_on")) == 1.0, "maps swapped in later: maps_on 1")
 	var albedo: ImageTexture = m.get_shader_parameter("albedo_map")
 	_check(albedo != null and albedo.get_image().is_compressed(), "the swapped-in albedo map is BPTC compressed")
+	# fidelity Task 8: the seat atlas follows the same path (prepared off the main thread, swapped in); the cushion carries the fabric tile, the
+	# leg supports the carbon twill tile, the shell none
+	t0 = Time.get_ticks_msec()
+	while cockpit._seat_pending and Time.get_ticks_msec() - t0 < 30000:
+		OS.delay_msec(50)
+		cockpit._process(0.0)
+	var seat_ok := true
+	for kind: String in ["shell", "pad", "rest"]:
+		var sm: ShaderMaterial = (cockpit.cabin_node("seat_%s_s2" % kind) as MeshInstance3D).material_override
+		var tex: ImageTexture = sm.get_shader_parameter("albedo_map")
+		seat_ok = seat_ok and float(sm.get_shader_parameter("maps_on")) == 1.0 and tex != null and tex.get_image().is_compressed()
+		var detail: Variant = sm.get_shader_parameter("detail_on")  # null where never set (the shell)
+		seat_ok = seat_ok and (detail != null and float(detail) == 1.0) == (kind != "shell")
+		seat_ok = seat_ok and (kind == "shell" or sm.get_shader_parameter("detail_map") != null)
+	_check(seat_ok, "seats: the compressed seat atlas swapped in on shell / pad / rest; fabric and carbon detail tiles on pad / rest")
 
 
 func _check_return() -> void:

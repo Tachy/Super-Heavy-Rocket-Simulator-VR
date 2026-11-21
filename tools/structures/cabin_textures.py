@@ -29,6 +29,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "blender"))
 import cabin_layout as cl  # noqa: E402
+import seat_shape as ss  # noqa: E402
 from hull_textures import png_bytes  # noqa: E402
 
 # ---- albedos (linear), roughness, metallic ----
@@ -439,6 +440,7 @@ def write(out_dir, cfg) -> dict:
     (out / tf["albedo"]).write_bytes(png_bytes(encode_srgb(t_albedo)))
     (out / tf["normal"]).write_bytes(png_bytes(encode_linear(0.5 + 0.5 * t_normal)))
     (out / tf["orm"]).write_bytes(png_bytes(encode_linear(t_orm)))
+    write_seat(out, cfg)
     return dict(files)
 
 
@@ -513,3 +515,171 @@ def bake_tablet():
     normal = np.zeros((8, 8, 3), np.float32)  # flat: the tablets carry no relief (one tiny map, any UV)
     normal[..., 2] = 1.0
     return albedo, normal, orm
+
+
+# ---- the seats (fidelity Task 8): one atlas for all four seats (seat_shape.SEAT_CHARTS) + two tiling detail maps ----
+# Drawn (vector, our own): the cushion's panel seams along the wing folds and across at the headrest, the harness (shoulder-strap slots, the
+# straps lying on the empty seat, the lap belt and the buckle), the grey rim band on the white shell's front edge, the pan panel seams.
+# Projected + de-lit as NUMBERS from KSC-20211110-PH-SPX02_0003 (NASA, public domain, fitted camera ksc_crew3; medians of the linearised
+# luminance, Task 8 report): the cushion on the s2 left wing 0.0126 against the white pan side panel of s3 in a similar shade 0.056 (4.4 x)
+# -> with the panel's paint 0.62 the matte cushion base is ~0.02-0.03: CUSHION 0.025 [E] (glossy: KSC highlights reach 0.7 on the wing tops);
+# the straps 2.2 x the cushion (KSC s2 strap 0.028); the carbon: KSC's rails show a 3 px (~2 mm at 1.3 m) autocorrelation peak, the tows are
+# not resolved -> our own 2/2 twill of CARBON_TOW_M (3K tow). No photo pixel is baked: at 1-1.5 mm per photo pixel the de-lit patches are
+# dominated by the glossy highlights and JPEG blocks, below the detail the procedural tiles carry.
+SEAT_ATLAS_PX = 2048  # [E] 3.0 m / 2048 = 1.46 mm per texel (seat_shape.SEAT_ATLAS_M)
+CUSHION = (0.025, 0.025, 0.027)  # [E] black leather-look cushion (KSC de-lit, above)
+CUSHION_ROUGH = 0.5  # [E] semi-gloss (KSC: broad highlights on the wings; jsc2022e068619 fine grain sheen)
+STRAP = (0.055, 0.055, 0.058)  # [E] harness webbing, dark grey-black (KSC strap / cushion 2.2)
+STRAP_ROUGH = 0.8  # [E]
+BUCKLE = (0.35, 0.35, 0.36)  # [E] the lap-belt buckle (metal)
+SHELL_WHITE = (0.62, 0.62, 0.61)  # [E] white outer shell and pan side panels (= the wall paint, WALL_ALBEDO sRGB 0.82)
+SHELL_RIM = (0.28, 0.29, 0.31)  # [E] the grey band along the shell's front edge (jsc2024e026550 / jsc2026e404725: a grey-blue rim beside the cushion)
+SHELL_RIM_M = 0.015  # [E] its width
+CARBON = (0.030, 0.030, 0.032)  # [E] clear-coated carbon (KSC rails: black with highlights)
+CARBON_ROUGH = 0.28  # [E] clear coat
+CARBON_TOW_M = 0.0025  # [E] 3K tow width of a 2/2 twill (KSC: the weave lies below the photo's resolution)
+SEAM_M = (0.002, 0.0006)  # [E] cushion panel seam: width, depth
+STRAP_W_M = 0.045  # [E] harness webbing width (KSC: ~4.5 cm against the 0.67 m seat)
+SLOT_M = (0.06, 0.014)  # [E] the shoulder-strap slots (width across, height)
+HARNESS_X_M = 0.60  # [E] slot height up the back (KSC: the straps leave the back at the shoulders)
+HARNESS_Z_M = (0.10, 0.075)  # [E] strap centre |z| at the slot / at the lap
+LAP_A_M = 0.10  # [E] the lap belt crosses the pan this far along it (from the hip point)
+HEAD_SEAM_X_M = 0.62  # [E] the cushion's seam between the shoulder panel and the headrest (= the head wings' start row)
+
+
+def _seat_layer():
+    """Atlas coordinates (u, v metres) of every texel and the texel size."""
+    t = ss.SEAT_ATLAS_M / SEAT_ATLAS_PX
+    c = (np.arange(SEAT_ATLAS_PX, dtype=np.float32) + 0.5) * t
+    U, V = np.meshgrid(c, c)
+    return U, V, t
+
+
+def _shell_front_arc(shape, x):
+    """Arc length from the back's middle to the shell's front edge (where the rim meets the side face) at back height x."""
+    sec = ss.back_section(shape, x)
+    mid = len(sec) // 2
+    arc = 0.0
+    for i in range(mid, 0, -1):  # from the back's middle toward the front along the +z half
+        a, b = sec[i], sec[i - 1]
+        if b[2] == "pad":
+            break
+        arc += math.hypot(a[0] - b[0], a[1] - b[1])
+    return arc
+
+
+def bake_seat(cockpit):
+    """(albedo, normal, orm) float32 of the seat atlas (SEAT_ATLAS_PX square)."""
+    shape = cockpit["seat_shape"]
+    U, V, texel = _seat_layer()
+    albedo = np.zeros(U.shape + (3,), np.float32)
+    albedo[:] = CARBON
+    rough = np.full(U.shape, CARBON_ROUGH, np.float32)
+    height = np.zeros(U.shape, np.float32)
+
+    def region(chart, s0, s1, t0, t1):
+        u0, v0 = ss.SEAT_CHARTS[chart]
+        return (U >= u0 + s0) & (U <= u0 + s1) & (V >= v0 + t0) & (V <= v0 + t1)
+
+    def paint(mask, col, r):
+        m = mask.astype(np.float32)
+        albedo[:] = albedo * (1 - m[..., None]) + np.asarray(col, np.float32) * m[..., None]
+        rough[:] = rough * (1 - m) + r * m
+
+    rows = shape["back_rows"]
+    x_lo, x_hi = rows[0][0] - 0.05, rows[-1][0] + 0.05
+    # back cushion: s = arc from the front's middle, x = -(v - v0)
+    bu, bv = ss.SEAT_CHARTS["back_pad"]
+    back_pad = region("back_pad", -0.62, 0.62, -x_hi, -x_lo)
+    paint(back_pad, CUSHION, CUSHION_ROUGH)
+    S, X = U - bu, -(V - bv)
+    flat = np.interp(X, [r[0] for r in rows], [r[2] for r in rows]).astype(np.float32)
+    seam = back_pad & (np.abs(np.abs(S) - flat) < SEAM_M[0] / 2 + texel / 2) & (X < rows[-1][0] - 0.03)
+    seam |= back_pad & (np.abs(X - HEAD_SEAM_X_M) < SEAM_M[0] / 2 + texel / 2) & (np.abs(S) < 0.5)
+    height -= SEAM_M[1] * seam
+    albedo[seam] *= 0.6
+    for side in (-1.0, 1.0):  # harness: slots and the straps down to the lap
+        slot = back_pad & (np.abs(X - HARNESS_X_M) < SLOT_M[1] / 2) & (np.abs(S - side * HARNESS_Z_M[0]) < SLOT_M[0] / 2)
+        albedo[slot] = (0.005, 0.005, 0.005)
+        height -= 0.004 * slot
+        f = np.clip((HARNESS_X_M - X) / HARNESS_X_M, 0.0, 1.0)
+        zc = side * (HARNESS_Z_M[0] + (HARNESS_Z_M[1] - HARNESS_Z_M[0]) * f)
+        strap = back_pad & (X < HARNESS_X_M - SLOT_M[1] / 2) & (X > 0.0) & (np.abs(S - zc) < STRAP_W_M / 2)
+        paint(strap, STRAP, STRAP_ROUGH)
+        height += 0.0015 * strap
+    # back shell: white, the grey rim band along its front edge, a seam down the middle of the back
+    su, sv = ss.SEAT_CHARTS["back_shell"]
+    shell = region("back_shell", -0.7, 0.7, -x_hi, -x_lo)
+    paint(shell, SHELL_WHITE, 0.45)
+    xs = np.linspace(rows[0][0], rows[-1][0], 40)
+    edge = np.interp(-(V - sv), xs, [_shell_front_arc(shape, x) for x in xs]).astype(np.float32)
+    S2 = np.abs(U - su)
+    paint(shell & (S2 > edge - SHELL_RIM_M) & (S2 <= edge + 0.01), SHELL_RIM, 0.35)
+    height -= SEAM_M[1] * (shell & (np.abs(U - su) < SEAM_M[0] / 2 + texel / 2))
+    # pan cushion: its seams, the lap belt and the buckle
+    pu_, pv_ = ss.SEAT_CHARTS["pan_pad"]
+    pan_pad = region("pan_pad", -0.45, 0.45, -0.62, 0.15)
+    paint(pan_pad, CUSHION, CUSHION_ROUGH)
+    S, A = U - pu_, -(V - pv_)  # v = v0 - a (seat_shape.loft)
+    height -= SEAM_M[1] * (pan_pad & (np.abs(np.abs(S) - shape["pan_flat_half_m"]) < SEAM_M[0] / 2 + texel / 2))
+    lap = pan_pad & (np.abs(A - LAP_A_M) < STRAP_W_M / 2) & (np.abs(S) < 0.5 * cockpit["seat"][0]["width_m"])
+    paint(lap, STRAP, STRAP_ROUGH)
+    height += 0.0015 * lap
+    buckle = pan_pad & (np.abs(A - LAP_A_M) < 0.03) & (np.abs(S) < 0.035)
+    paint(buckle, BUCKLE, 0.35)
+    height += 0.004 * buckle
+    paint(region("pan_shell", -0.55, 0.55, -0.62, 0.15), SHELL_WHITE, 0.45)  # pan shell: white side panels
+    dh_dv, dh_du = np.gradient(height, texel)
+    n = np.stack([-dh_du, dh_dv, np.ones_like(height)], axis=-1)  # image up = -v
+    n /= np.linalg.norm(n, axis=-1, keepdims=True)
+    orm = np.zeros(U.shape + (4,), np.float32)
+    orm[..., 0] = np.clip(1.0 + height / 0.002, 0.6, 1.0)
+    orm[..., 1] = np.clip(rough, 0.04, 1.0)
+    orm[..., 2] = np.where(buckle, 0.8, 0.0)
+    return np.clip(albedo, 0.0, 1.0), n.astype(np.float32), orm
+
+
+SEAT_DETAIL_PX = 256  # [E] one tile (cabin_layout.SEAT_DETAIL_TILE_M: 0.02 m -> 0.08 mm per texel)
+FABRIC_GRAIN_M = 0.0003  # [E] leather pebble grain correlation (jsc2022e068619: a fine even grain, < 1 mm)
+FABRIC_SLOPE = 0.25  # [E] normal slope rms of the grain (a soft sheen break-up, no glitter at 0.5 m)
+FABRIC_ROUGH = 0.08  # [E] roughness rms of the grain
+CARBON_SLOPE = 0.35  # [E] normal slope rms of the twill's tow relief (under the clear coat)
+
+
+def _tile_normal(h, slope):
+    gy, gx = np.gradient(h)
+    k = slope / max(float(np.hypot(gx, gy).std()), 1e-9)
+    n = np.stack([-gx * k, gy * k, np.ones_like(h)], axis=-1)
+    return n / np.linalg.norm(n, axis=-1, keepdims=True)
+
+
+def bake_seat_detail():
+    """(fabric, carbon): RGBA float32 tiles (RGB = tangent-space normal 0.5 + 0.5 n, A = 0.5 + roughness offset), periodic (seamless)."""
+    N = SEAT_DETAIL_PX
+    texel = cl.SEAT_DETAIL_TILE_M["fabric"] / N
+    h = _noise((N, N), (FABRIC_GRAIN_M / texel,) * 2, 81)  # FFT noise is periodic: the tile repeats without a seam
+    fabric = np.concatenate([0.5 + 0.5 * _tile_normal(h, FABRIC_SLOPE), (0.5 + FABRIC_ROUGH * h)[..., None]], axis=-1)
+    # carbon: 2/2 twill, warp tows along u, weft along v, each over two and under two, shifted one tow per row (the diagonal)
+    texel = cl.SEAT_DETAIL_TILE_M["carbon"] / N
+    c = (np.arange(N) + 0.5) * texel
+    Uc, Vc = np.meshgrid(c, c)
+    iu, iv = np.floor(Uc / CARBON_TOW_M).astype(int), np.floor(Vc / CARBON_TOW_M).astype(int)
+    fu, fv = Uc / CARBON_TOW_M - iu, Vc / CARBON_TOW_M - iv
+    warp_on_top = ((iu + iv) % 4) < 2
+    hc = np.where(warp_on_top, np.sin(math.pi * fv), np.sin(math.pi * fu)).astype(np.float32)  # each tow a rounded ridge across its width
+    carbon = np.concatenate([0.5 + 0.5 * _tile_normal(hc, CARBON_SLOPE), (0.5 + 0.05 * (hc - hc.mean()))[..., None]], axis=-1)
+    return fabric.astype(np.float32), carbon.astype(np.float32)
+
+
+def write_seat(out_dir, cockpit) -> dict:
+    """Bakes the seat atlas and the two detail tiles into out_dir; returns cabin_layout.SEAT_MAPS."""
+    out = Path(out_dir)
+    albedo, normal, orm = bake_seat(cockpit)
+    files = cl.SEAT_MAPS
+    (out / files["albedo"]).write_bytes(png_bytes(encode_srgb(albedo)))
+    (out / files["normal"]).write_bytes(png_bytes(encode_linear(0.5 + 0.5 * normal)))
+    (out / files["orm"]).write_bytes(png_bytes(encode_linear(orm)))
+    fabric, carbon = bake_seat_detail()
+    (out / files["fabric"]).write_bytes(png_bytes(encode_linear(fabric)))
+    (out / files["carbon"]).write_bytes(png_bytes(encode_linear(carbon)))
+    return dict(files)

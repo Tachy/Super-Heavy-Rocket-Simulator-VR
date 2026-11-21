@@ -134,3 +134,11 @@ armrests, palms down (it read as a shrug in the hatch shots); hands were boxes o
 - `end_taper` [0.6063, 0.590, 0.543] was tagged [D] from a plane fit (`recess.fit_taper`) of the L/R-averaged back rows 186-221 and the left underside rows
   230-260, +-0.015 / 0.025 / 0.057, rms 1.6 mm. Values unchanged by the refit (now [E], an upper bound).
 - `RECESS_TINT_FROM` 0.15 (the colour line 2-8 px inside the photo's panel edge). The cabin glTF loaded with Godot's default mesh compression (seam sparkle).
+
+## Seats before fidelity Task 8 (2026-11-21)
+- Boxes (`gen_dragon_cabin.build_seat`): back shell box 0.075 x 0.80 x width (SEAT_BACK_HALF_M (0.05, 0.40)) with two side bolster boxes, a pad box on its
+  front (0.78 of the width), headrest shell / pad boxes (0.30 / 0.26 wide), pan shell / pad boxes (SEAT_THIGH_M 0.44), armrest boxes; leg rest = two round
+  carbon tubes r 0.014 at z +-0.17 (FOOT_RAIL_Z_M) from the pan's front to a 0.32 x 0.34 x 0.02 foot plate (FOOT_PLATE_M) with a heel stop and a toe lip.
+- Materials: shell flat white sRGB 0.82, pads and rest flat linear 0.035 (one colour, no maps).
+- `RECESS_TINT_FROM` 0.05 (fidelity Task 7 fix round 1).
+

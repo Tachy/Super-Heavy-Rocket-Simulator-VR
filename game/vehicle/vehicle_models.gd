@@ -30,7 +30,7 @@ const SOURCE_SCRIPTS := {
 	"starship_depot": ["vehicle_common.py", "hull_profile.py", "dorsal_layout.py", "gen_hull.py", "gen_grid_fin.py", "gen_engine.py", "gen_dorsal_hardware.py"],
 	"starship_hls": ["vehicle_common.py", "hull_profile.py", "dorsal_layout.py", "hls_layout.py", "hls_legs_layout.py", "gen_hull.py", "gen_engine.py", "gen_dorsal_hardware.py", "gen_hls_parts.py"],
 	"falcon9_block5": ["vehicle_common.py", "gen_falcon9_hull.py", "gen_falcon9_grid_fin.py", "gen_falcon9_leg.py", "falcon9_second_stage.py", "gen_engine.py"],
-	"crew_dragon": ["vehicle_common.py", "cabin_layout.py", "console_shape.py", "figure_layout.py", "figure_body.py", "figure_measure.py", "gen_dragon.py", "idss_mechanism.py", "gen_dragon_cabin.py", "gen_crew_figure.py"], "iss": ["vehicle_common.py", "idss_mechanism.py", "iss_station.py", "iss_arrays.py", "idss_passive_ring.py"],
+	"crew_dragon": ["vehicle_common.py", "cabin_layout.py", "console_shape.py", "seat_shape.py", "figure_layout.py", "figure_body.py", "figure_measure.py", "gen_dragon.py", "idss_mechanism.py", "gen_dragon_cabin.py", "gen_crew_figure.py"], "iss": ["vehicle_common.py", "idss_mechanism.py", "iss_station.py", "iss_arrays.py", "idss_passive_ring.py"],
 }
 const SOURCE_BAKERS := {"starship_block3": ["hull_textures.py", "hull_tiles.py"], "starship_tanker": ["hull_textures.py", "hull_tiles.py"],
 		"starship_depot": ["hull_textures.py", "hull_tiles.py"], "starship_hls": ["hull_textures.py", "hull_tiles.py"], "falcon9_block5": ["surface_textures.py"], "crew_dragon": ["surface_textures.py", "suit_textures.py", "cabin_textures.py"], "iss": ["iss_textures.py"]}
@@ -120,18 +120,21 @@ static var _console_mutex := Mutex.new()
 static var _console_work_mutex := Mutex.new()
 
 
-## Starts the background preparation of the Crew Dragon console maps (manifest cockpit.console_maps). Called at boot; idempotent, returns at once.
+## Starts the background preparation of the Crew Dragon console and seat maps (manifest cockpit.console_maps, cockpit.seat_maps). Called at boot;
+## idempotent, returns at once.
 static func prewarm_console_maps(vehicle_id: String = "crew_dragon") -> void:
 	var dir := _repo_dir().path_join("data/models").path_join(vehicle_id)
 	var text := FileAccess.get_file_as_string(dir.path_join("manifest.json"))
 	var parsed: Variant = JSON.parse_string(text)
 	if not (parsed is Dictionary):
 		return
-	var maps: Dictionary = ((parsed as Dictionary).get("cockpit", {}) as Dictionary).get("console_maps", {})
-	for role: String in ["albedo", "normal", "orm"]:
-		var file := String(maps.get(role, ""))
-		if not file.is_empty():
-			start_console_map(dir.path_join(file), file, role)
+	var cockpit: Dictionary = (parsed as Dictionary).get("cockpit", {})
+	for key: String in ["console_maps", "seat_maps"]:  # the console atlas (Task 6) and the seat atlas (fidelity Task 8)
+		var maps: Dictionary = cockpit.get(key, {})
+		for role: String in ["albedo", "normal", "orm"]:
+			var file := String(maps.get(role, ""))
+			if not file.is_empty():
+				start_console_map(dir.path_join(file), file, role)
 
 
 static func start_console_map(path: String, file: String, role: String) -> void:
@@ -625,7 +628,8 @@ static func scene_for(vehicle_id: String, file: String) -> Node:
 		return null
 	var document := GLTFDocument.new()
 	var state := GLTFState.new()
-	if document.append_from_file(path, state) != OK:
+	var flags := GLTFDocument.IMPORT_FLAG_FORCE_DISABLE_MESH_COMPRESSION if file in UNCOMPRESSED_FILES else 0  # fidelity Task 8: as _meshes_of
+	if document.append_from_file(path, state, flags) != OK:
 		return null
 	return document.generate_scene(state)
 

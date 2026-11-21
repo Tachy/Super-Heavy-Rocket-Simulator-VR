@@ -45,9 +45,9 @@ const CONSOLE_EMIT_CD_M2 := 500.0
 const ATLAS_NODES: Array[String] = ["console_housing", "console_back", "console_under", "console_shelf", "console_lockers"]
 ## [E] Fidelity Task 7: the wall recess around the console and its bevels (crew1_1 / KSC-20240927: light grey against the white panels).
 const RECESS_ALBEDO := Color(0.6, 0.6, 0.6)
-## [D] fix round 1: the grey starts 0.05 down the bevel (smoothstep half width >= 0.02, so it never reaches the white panel at 0): crew1_1's
-## white -> grey line then lies on the read panel edge (at 0.15 it sat 2-8 px inside it).
-const RECESS_TINT_FROM := 0.05
+## [D] the grey starts 0.09 down the bevel (fidelity Task 8; T7 fix round 1 had 0.05, where the edge followed the wall's seam-cell staircase in
+## close-up): crew1_1's white -> grey line lies 0.5-5.5 px inside the read panel edge (mean 2.0 / 3.7 px l / r; at 0.15 it sat 2-8 px inside).
+const RECESS_TINT_FROM := 0.09
 ## [E] Fidelity Task 7: the iPads' lit placeholder page (tablet maps, ORM alpha = the display): emits albedo x this luminance per unit albedo,
 ## the white text ~280 cd/m2, the dark page ~15 (an iPad mini at a comfortable cabin brightness; max 500 cd/m2 [S]).
 const TABLET_EMIT_CD_M2 := 400.0
@@ -107,6 +107,8 @@ static var _tablet_textures := {}  # tablet map file -> ImageTexture (or null wh
 static var _tablet_warned := false
 var _led_materials: Array[ShaderMaterial] = []
 var _console_pending := false  ## console maps still being prepared in the background (polled in _process)
+var _seat_pending := false  ## seat atlas maps still being prepared in the background (polled in _process)
+var _seat_warned := false
 var _cockpit_manifest := {}
 var _label_atlas: ImageTexture = null
 var _figure_bones := {}  # manifest crew_figure.bones (the arm chains' finger lengths)
@@ -487,6 +489,11 @@ func _process(_delta: float) -> void:
 	_update_player_head()
 	if _console_pending and _materials.has("console_atlas"):
 		_apply_console_maps(_materials["console_atlas"])
+	if _seat_pending:
+		_seat_pending = false
+		for kind: String in ["shell", "pad", "rest"]:
+			if _materials.has("seat_" + kind):
+				_apply_seat_maps(_materials["seat_" + kind])
 	var scene_per_cd: float = ShaderGlobals.value(&"atmosphere_scene_per_cd_m2")
 	for i in _lights.size():
 		_lights[i].light_energy = TowerLights.energy_of(_light_cd[i], scene_per_cd)
@@ -677,11 +684,14 @@ func _material_of(part: String) -> Material:
 		return _cabin_material(Color(float(c[0]), float(c[1]), float(c[2])).linear_to_srgb(), 0.4, 0.0, 0.0, 0.4)
 	if part.begins_with("guard_"):
 		return _guard_material()
-	## [E] Seats (review item 4, crew1_1): white shells, black pads and black carbon leg-rest frames.
+	## Seats (fidelity Task 8): the seat atlas (manifest cockpit.seat_maps: white shell with its grey rim, black cushion with seams and the
+	## harness, carbon) on all three seat nodes; the cushion carries the fabric grain tile, the leg supports / armrests the carbon twill tile.
 	if part.begins_with("seat_shell_"):
-		return _cabin_material(Color(0.82, 0.82, 0.81), 0.5, 0.0, 0.0)  # sRGB 0.82 = linear 0.64: white paint, like the walls (WALL_ALBEDO, sRGB)
+		return _seat_material("shell")
+	if part.begins_with("seat_pad_"):
+		return _seat_material("pad")
 	if part.begins_with("seat_"):
-		return _cabin_material(Color(0.035, 0.035, 0.037).linear_to_srgb(), 0.7, 0.0, 0.0, 0.2)  # Task 5b: LINEAR 0.035 (black pads / carbon), was the sRGB literal 0.03 = 0.0023 linear
+		return _seat_material("rest")
 	if part.begins_with("tablet_"):
 		return _tablet_material()
 	if part.begins_with("hotas_"):
@@ -754,6 +764,58 @@ func _console_texture(file: String, role: String) -> ImageTexture:
 	if file.is_empty():
 		return null
 	return VehicleModels.console_texture(VehicleModels.repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file), file, role)
+
+
+## [E] Seat colours while the atlas is still being prepared (the atlas' own values, cabin_textures.py: shell 0.62, cushion 0.025, carbon 0.03 linear).
+const SEAT_FLAT := {"shell": [Color(0.62, 0.62, 0.61), 0.45, 0.6], "pad": [Color(0.025, 0.025, 0.027), 0.5, 0.2], "rest": [Color(0.03, 0.03, 0.032), 0.28, 0.5]}
+## [E] Detail tile per seat part (cabin_textures.bake_seat_detail): normal gain, roughness gain.
+const SEAT_DETAIL := {"pad": ["fabric", 1.0, 1.0], "rest": ["carbon", 1.0, 1.0]}
+
+
+## One seat material per part ("shell", "pad", "rest") on the seat atlas; maps come from the background preparation (VehicleModels.console_texture:
+## compressed off the main thread, prewarmed at boot), polled in _process while pending (flat SEAT_FLAT colours meanwhile).
+func _seat_material(kind: String) -> ShaderMaterial:
+	var key := "seat_" + kind
+	if _materials.has(key):
+		return _materials[key]
+	var flat: Array = SEAT_FLAT[kind]
+	var m := ShaderMaterial.new()
+	m.shader = CABIN_SHADER
+	m.set_shader_parameter("albedo", (flat[0] as Color).linear_to_srgb())
+	m.set_shader_parameter("roughness", float(flat[1]))
+	m.set_shader_parameter("specular", float(flat[2]))
+	if SEAT_DETAIL.has(kind):
+		var d: Array = SEAT_DETAIL[kind]
+		var maps: Dictionary = _cockpit_manifest.get("seat_maps", {})
+		var tile := _tablet_texture(String(maps.get(String(d[0]), "")), false)  # small periodic tile, mipmapped once per process
+		if tile != null:
+			m.set_shader_parameter("detail_map", tile)
+			m.set_shader_parameter("detail_tiles", float((_cockpit_manifest.get("seat_detail_tiles", {}) as Dictionary).get(String(d[0]), 1.0)))
+			m.set_shader_parameter("detail_strength", float(d[1]))
+			m.set_shader_parameter("detail_rough", float(d[2]))
+			m.set_shader_parameter("detail_on", 1.0)
+	_materials[key] = m
+	_apply_seat_maps(m)
+	return m
+
+
+## Sets the seat atlas maps on a seat material as far as they are prepared; never blocks (_seat_pending: _process polls).
+func _apply_seat_maps(m: ShaderMaterial) -> void:
+	var maps: Dictionary = _cockpit_manifest.get("seat_maps", {})
+	var all_loaded := true
+	for role: String in ["albedo", "normal", "orm"]:
+		var file := String(maps.get(role, ""))
+		var texture := _console_texture(file, role)
+		if texture != null:
+			m.set_shader_parameter(role + "_map", texture)
+			continue
+		all_loaded = false
+		if not file.is_empty() and VehicleModels.is_console_map_pending(file):
+			_seat_pending = true
+		elif not _seat_warned:
+			_seat_warned = true
+			push_warning("CockpitView: seat map '%s' missing (rebuild the crew_dragon model set); the seats keep their flat colours" % role)
+	m.set_shader_parameter("maps_on", 1.0 if all_loaded else 0.0)
 
 
 ## The wall recess (fidelity Task 7): white at the panel edge, RECESS_ALBEDO from RECESS_TINT_FROM of the way down the bevel (the generator writes

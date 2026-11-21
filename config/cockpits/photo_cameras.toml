@@ -34,3 +34,13 @@ forward = [0.34498, 0.93860, -0.00294]           # [D] same fit, +-0.3-0.8 deg (
 up = [0.93810, -0.34490, -0.03195]               # [D] same fit
 fov_h_deg = 117.178                              # [D] same fit: equidistant f 2019 px/rad, +-1.2 % (data-constrained)
 model = "fisheye_equidistant"                    # [D] GoPro wide lens
+
+[[photo]]
+id = "ksc_crew3"                                 # [D] photo id = shot name suffix (fid_ksc_crew3)
+file = "screenshots/m7-cockpit-refs/r2/KSC-20211110-PH-SPX02_0003.jpg"   # [D] reference photo (NASA, public domain), hatch view of the four seats, Crew-3 on the pad
+size_px = [3603, 2160]                           # [S] file size
+position_m = [1.8669, 1.3039, -0.0041]          # [D] fidelity Task 8 (cabin_fit/parts/seats.py fit_camera): the two ceiling posts (tops, bases, rod axes) and the back face's top edge (the fillet's tangent line) of the console as built, no free part parameter; 3.98 px rms of 3603 (posts' tops <= 2 px, the bases 8 / 15 px: the funnel foot read); +-0.029 / 0.039 / 0.012 m, data-constrained
+forward = [0.19267, -0.98126, -0.00150]          # [D] same fit: 11.1 deg up toward +X; +-0.7 / 0.3 / 0.2 deg (pitch / yaw / roll), data-constrained
+up = [0.98111, 0.19267, -0.01755]                # [D] same fit
+fov_h_deg = 87.427                               # [D] same fit: f 1891 px on 3603 px, +-3.0 % (data-constrained)
+model = "pinhole"                                # [D] rectilinear photo
