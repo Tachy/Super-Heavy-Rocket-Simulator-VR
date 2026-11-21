@@ -96,6 +96,7 @@ var _skeletons := {}  # seat id -> Skeleton3D
 var _crew := 0
 var _materials := {}
 var _led_materials: Array[ShaderMaterial] = []
+var _console_pending := false  ## console maps still being prepared in the background (polled in _process)
 var _cockpit_manifest := {}
 var _label_atlas: ImageTexture = null
 var _figure_bones := {}  # manifest crew_figure.bones (the arm chains' finger lengths)
@@ -474,6 +475,8 @@ func light_colour() -> Vector3:
 
 func _process(_delta: float) -> void:
 	_update_player_head()
+	if _console_pending and _materials.has("console_atlas"):
+		_apply_console_maps(_materials["console_atlas"])
 	var scene_per_cd: float = ShaderGlobals.value(&"atmosphere_scene_per_cd_m2")
 	for i in _lights.size():
 		_lights[i].light_energy = TowerLights.energy_of(_light_cd[i], scene_per_cd)
@@ -708,37 +711,35 @@ func _console_atlas_material() -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = CABIN_SHADER
 	m.set_shader_parameter("specular", 0.4)
-	var maps: Dictionary = _cockpit_manifest.get("console_maps", {})
-	var all_loaded := true
-	for role: String in ["albedo", "normal", "orm"]:
-		var texture := _console_texture(String(maps.get(role, "")), role)
-		if texture == null:
-			push_warning("CockpitView: console map '%s' missing (rebuild the crew_dragon model set); the console keeps its flat colours" % role)
-			all_loaded = false
-			continue
-		m.set_shader_parameter(role + "_map", texture)
-	m.set_shader_parameter("maps_on", 1.0 if all_loaded else 0.0)
+	_apply_console_maps(m)
 	_materials["console_atlas"] = m
 	return m
+
+
+## Sets the three maps on the atlas material as far as the background preparation (VehicleModels.prewarm_console_maps) has finished; never blocks.
+## While one is pending maps_on stays 0 (flat colours) and _process polls until all are in.
+func _apply_console_maps(m: ShaderMaterial) -> void:
+	var maps: Dictionary = _cockpit_manifest.get("console_maps", {})
+	var all_loaded := true
+	_console_pending = false
+	for role: String in ["albedo", "normal", "orm"]:
+		var file := String(maps.get(role, ""))
+		var texture := _console_texture(file, role)
+		if texture != null:
+			m.set_shader_parameter(role + "_map", texture)
+			continue
+		all_loaded = false
+		if not file.is_empty() and VehicleModels.is_console_map_pending(file):
+			_console_pending = true
+		else:
+			push_warning("CockpitView: console map '%s' missing (rebuild the crew_dragon model set); the console keeps its flat colours" % role)
+	m.set_shader_parameter("maps_on", 1.0 if all_loaded else 0.0)
 
 
 func _console_texture(file: String, role: String) -> ImageTexture:
 	if file.is_empty():
 		return null
-	if not VehicleModels.console_textures.has(file):
-		var image := Image.load_from_file(VehicleModels.repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file))
-		if image == null or image.is_empty():
-			return null
-		# VR: the 0.5 mm atlas is seen at 0.5-2 m, so every level is used. The maps are loaded at run time (no .import), so the import settings
-		# "VRAM compressed + mipmaps (normal map as normal)" are applied here: BPTC (BC7) 4096 x 2048 = 10.7 MB with mips per map instead of 37-57 MB
-		# raw (~136 MB -> 32 MB total, measured); costs ~3 s once per process (cache VehicleModels.console_textures, shared by the CockpitViews of every stage rebuild). Fallback: the uncompressed mipmapped image.
-		image.generate_mipmaps(role == "normal")
-		var source := Image.COMPRESS_SOURCE_SRGB if role == "albedo" else (Image.COMPRESS_SOURCE_NORMAL if role == "normal" else Image.COMPRESS_SOURCE_GENERIC)
-		if image.compress(Image.COMPRESS_BPTC, source) != OK:
-			push_warning("CockpitView: BPTC compression of console map '%s' failed, using the uncompressed image" % role)
-		VehicleModels.console_compress_count += 1
-		VehicleModels.console_textures[file] = ImageTexture.create_from_image(image)
-	return VehicleModels.console_textures[file]
+	return VehicleModels.console_texture(VehicleModels.repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file), file, role)
 
 
 ## An r_led key: the blank key face with its blue LED (a lit mark, emission set every frame).

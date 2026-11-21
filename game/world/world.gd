@@ -166,6 +166,7 @@ func _ready() -> void:
 	spice_ok = true
 	await LoadingScreen.step("loading.sites_vehicles")
 	sites = TomlLite.load_file(Paths.config_dir().path_join("launch_sites.toml")).get("site", [])
+	VehicleModels.prewarm_console_maps("crew_dragon")  # background threads: the cabin's console maps are ready long before the first cabin build
 	flight.setup(Paths.config_dir())
 	free_control.setup(Paths.config_dir())
 	hotas_buttons.setup(Paths.config_dir())

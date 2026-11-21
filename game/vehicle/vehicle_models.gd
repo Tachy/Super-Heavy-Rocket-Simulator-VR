@@ -107,6 +107,82 @@ static var log_count := 0
 static var console_textures: Dictionary = {}
 ## Number of console map compressions done (tests assert a second CockpitView does not compress again).
 static var console_compress_count := 0
+## Console map preparation (load + mipmaps + BPTC, ~3.5 s in all) runs on WorkerThreadPool tasks, never on the main thread (a VR headset would freeze).
+## file -> Image (prepared) or null (failed); filled by the workers under _console_mutex, consumed by console_texture on the main thread.
+static var _console_prepared: Dictionary = {}
+static var _console_started: Dictionary = {}  # file -> WorkerThreadPool task id
+static var _console_failed: Dictionary = {}  # file -> true (a missing / broken map is not retried)
+static var _console_mutex := Mutex.new()
+static var _console_work_mutex := Mutex.new()
+
+
+## Starts the background preparation of the Crew Dragon console maps (manifest cockpit.console_maps). Called at boot; idempotent, returns at once.
+static func prewarm_console_maps(vehicle_id: String = "crew_dragon") -> void:
+	var dir := _repo_dir().path_join("data/models").path_join(vehicle_id)
+	var text := FileAccess.get_file_as_string(dir.path_join("manifest.json"))
+	var parsed: Variant = JSON.parse_string(text)
+	if not (parsed is Dictionary):
+		return
+	var maps: Dictionary = ((parsed as Dictionary).get("cockpit", {}) as Dictionary).get("console_maps", {})
+	for role: String in ["albedo", "normal", "orm"]:
+		var file := String(maps.get(role, ""))
+		if not file.is_empty():
+			start_console_map(dir.path_join(file), file, role)
+
+
+static func start_console_map(path: String, file: String, role: String) -> void:
+	if _console_started.has(file) or _console_prepared.has(file) or _console_failed.has(file) or console_textures.has(file):
+		return
+	_console_started[file] = WorkerThreadPool.add_task(_prepare_console_map.bind(path, file, role), false, "console map " + role)
+
+
+static func _prepare_console_map(path: String, file: String, role: String) -> void:
+	_console_work_mutex.lock()  # one map at a time: the engine's BPTC encoder is itself parallel, three at once would starve the main thread
+	var image := Image.load_from_file(path)
+	if image == null or image.is_empty():
+		image = null
+	else:
+		# The 0.5 mm atlas is seen at 0.5-2 m, so every level is used: mipmaps (normal map renormalised) + BPTC (BC7) 10.7 MB per map instead of 37-57 MB raw.
+		image.generate_mipmaps(role == "normal")
+		var source := Image.COMPRESS_SOURCE_SRGB if role == "albedo" else (Image.COMPRESS_SOURCE_NORMAL if role == "normal" else Image.COMPRESS_SOURCE_GENERIC)
+		if image.compress(Image.COMPRESS_BPTC, source) != OK:
+			push_warning("VehicleModels: BPTC compression of console map '%s' failed, using the uncompressed image" % role)
+	_console_work_mutex.unlock()
+	_console_mutex.lock()
+	_console_prepared[file] = image
+	console_compress_count += 1
+	_console_mutex.unlock()
+
+
+## The console map as a texture, or null while it is still being prepared (is_console_map_pending) or when it failed. Main thread, never blocks.
+static func console_texture(path: String, file: String, role: String) -> ImageTexture:
+	if console_textures.has(file):
+		return console_textures[file]
+	start_console_map(path, file, role)
+	_console_mutex.lock()
+	var done := _console_prepared.has(file)
+	var image: Image = _console_prepared.get(file)
+	_console_mutex.unlock()
+	if not done:
+		return null
+	_console_prepared.erase(file)
+	_console_started.erase(file)
+	if image == null:
+		_console_failed[file] = true
+		return null
+	console_textures[file] = ImageTexture.create_from_image(image)
+	return console_textures[file]
+
+
+static func is_console_map_pending(file: String) -> bool:
+	return not console_textures.has(file) and not _console_failed.has(file)
+
+
+## Tests: waits for the running preparations (only in tests, never in the game).
+static func wait_console_maps() -> void:
+	for task: int in _console_started.values():
+		WorkerThreadPool.wait_for_task_completion(task)
+	_console_started.clear()
 
 
 ## {} or {"manifest": Dictionary, "hulls": {stage_id: {node: Mesh}}, "flap": {"fwd"|"aft": {node: Mesh}},
@@ -125,12 +201,21 @@ static func load_for(vehicle_id: String) -> Dictionary:
 	return _cache[vehicle_id]
 
 
+## Drops the console maps only (tests that measure a first cabin build).
+static func reset_console_maps() -> void:
+	wait_console_maps()
+	console_textures.clear()
+	_console_prepared.clear()
+	_console_started.clear()
+	_console_failed.clear()
+
+
 ## Drops the cached results (tests that regenerate the models).
 static func clear_cache() -> void:
 	_cache.clear()
 	_logged.clear()
 	_reasons.clear()
-	console_textures.clear()
+	reset_console_maps()
 	root_override = ""
 
 

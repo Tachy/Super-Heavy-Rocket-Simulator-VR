@@ -88,13 +88,20 @@ func _check_launch() -> void:
 	var sim := _session("falcon9_crew_dragon")
 	var zero := _zero(sim)
 	_advance(sim, zero + SIM_TICK_S)
-	VehicleModels.clear_cache()
+	VehicleModels.reset_console_maps()
+	var counter_before := VehicleModels.console_compress_count
+	VehicleModels.prewarm_console_maps("crew_dragon")  # what world.gd does at boot: background threads
 	var t0 := Time.get_ticks_msec()
 	var views := _views(sim)
 	var first_ms := Time.get_ticks_msec() - t0
-	var compressed := VehicleModels.console_compress_count
-	print("  first cabin build %d ms, %d console maps compressed" % [first_ms, compressed])
+	print("  first cabin build %d ms (main thread, maps still preparing)" % first_ms)
+	# The build itself is ~100-190 ms headless; with the encoder busy on all cores it is slowed (measured 400-700 ms), never by the ~3.5 s of the compression.
+	_check(first_ms < 1000, "first cabin build right after boot does not block on the console maps (%d ms < 1000)" % first_ms)
 	var cockpits := _cockpits(views)
+	if cockpits.size() == 1:
+		_check_console_swap(cockpits[0])
+	var compressed := VehicleModels.console_compress_count
+	_check(compressed - counter_before == 3, "exactly three console maps prepared (%d)" % (compressed - counter_before))
 	_check(cockpits.size() == 1, "T+0: exactly one CockpitView (%d)" % cockpits.size())
 	if cockpits.size() == 1:
 		_check_eye(cockpits[0])
@@ -112,6 +119,21 @@ func _check_launch() -> void:
 	_check(cockpits.size() == 1, "after staging (T+170 s, %d bodies): still exactly one CockpitView (%d)" % [sim.body_count(), cockpits.size()])
 	for view in views:
 		view.free()
+
+
+## The cabin built before the maps were ready runs without them (maps_on 0) and swaps the compressed textures in when they are done.
+func _check_console_swap(cockpit: CockpitView) -> void:
+	var m: ShaderMaterial = cockpit._materials["console_atlas"]
+	var early := float(m.get_shader_parameter("maps_on"))
+	var t0 := Time.get_ticks_msec()
+	while cockpit._console_pending and Time.get_ticks_msec() - t0 < 30000:
+		OS.delay_msec(50)
+		cockpit._process(0.0)
+	print("  console maps ready %d ms after the first build (maps_on at build %.0f)" % [Time.get_ticks_msec() - t0, early])
+	_check(early == 0.0, "built while preparing: maps_on 0 (flat colours)")
+	_check(float(m.get_shader_parameter("maps_on")) == 1.0, "maps swapped in later: maps_on 1")
+	var albedo: ImageTexture = m.get_shader_parameter("albedo_map")
+	_check(albedo != null and albedo.get_image().is_compressed(), "the swapped-in albedo map is BPTC compressed")
 
 
 func _check_return() -> void:
