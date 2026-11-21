@@ -76,8 +76,6 @@ PLACARDS = (("5", (-0.5505, -0.468, 0.148, 0.195), (-0.4925, 0.173), (-0.534, 0.
             ("6", (0.468, 0.5505, 0.148, 0.195), (0.5285, 0.173), (0.489, 0.173)))  # [D] "5" discovery10 (rect, numeral centre, symbol centre); "6" [E] mirrored
 NUMERAL_HEIGHT_M = 0.022  # [D] discovery10: 44 px of 0.5 mm
 SYMBOL_RADIUS_M = 0.006  # [D] discovery10
-LATCHES = ((-0.4845, 0.217), (0.4845, 0.217))  # [D] left discovery10 (the round latch at the locker's inner edge); right [E] mirrored
-LATCH_RADIUS_M = 0.015  # [D] discovery10: 60 px of 0.5 mm
 KEY_PLATES = ((-0.6125, -0.4625), (-0.4575, -0.3025), (-0.299, -0.140), (-0.134, -0.085), (0.1425, 0.300), (0.3025, 0.455), (0.4625, 0.6125))  # [D] discovery10 tray (lat); the last [E] = mirror of the first
 KEY_PLATE_U = (-0.2265, -0.170)  # [D] discovery10: the plates' bottom / top (u), clipped to the key face
 PLATE_RADIUS_M = 0.004  # [E]
@@ -93,7 +91,7 @@ VENT = (-0.505, 0.51, -0.275, -0.125)  # [D] crew1_1: the vent strip (lat0, lat1
 VENT_DIVIDERS = (-0.32, -0.155, 0.005, 0.165, 0.33)  # [D] crew1_1: the separators (lat), 0.1625 apart
 VENT_SLAT_PITCH_M = 0.004  # [E] slats of the grille (not resolved in crew1_1)
 UNDER_SEAMS_O = (-0.07, -0.15)  # [E] crew1_1: light lines across the underside
-END_SILVER_O = -0.12  # [E] the ends are silver behind this o (crew1_1 end caps), dark toward the crew (discovery: dark housing)
+END_SILVER_O = -0.045  # [E] the ends are silver behind this o (crew1_1: the end caps and the tapered lower ends read light), dark in the front zone (discovery: dark housing); was -0.12 before the end taper (Task 7)
 TEXT_FONT_SHARE = 1.38  # font size / cap height of Pillow's Aileron
 
 
@@ -256,14 +254,16 @@ def paint_front(L, cockpit):
         L.paint(_cover(ds, t), albedo=RED_SYMBOL)
         px = chart_px(L, *cl.plane_ab(L.chart, (numeral[0], numeral[1], 0.0)))
         L.paint(text_mask(text, NUMERAL_HEIGHT_M, t, lat.shape, px), albedo=NUMERAL)
-    for cx, cy in LATCHES:
+    for lk in cockpit["locker"]:  # the round finger latch of each door (fidelity Task 7: [[locker]] latch_m, latch_radius_m)
+        cx, cy = cl.console_local(cockpit, lk["latch_m"])[:2]
+        rl = lk["latch_radius_m"]
         d = np.hypot(lat - cx, u - cy)
-        ring = _cover(np.abs(d - LATCH_RADIUS_M * 0.85) - LATCH_RADIUS_M * 0.15, t)
-        L.paint(_cover(d - LATCH_RADIUS_M, t), albedo=(0.012, 0.012, 0.013), rough=0.6)
+        ring = _cover(np.abs(d - rl * 0.85) - rl * 0.15, t)
+        L.paint(_cover(d - rl, t), albedo=(0.012, 0.012, 0.013), rough=0.6)
         L.paint(ring, albedo=(0.09, 0.09, 0.095), metal=0.4, rough=0.4)
         hook = _sdf_box(lat, u, cx - 0.0025, cx + 0.0025, cy - 0.008, cy + 0.006, 0.002)
         L.paint(_cover(hook, t), albedo=(0.14, 0.14, 0.15), metal=0.5, rough=0.35)
-        L.height += -0.002 * _cover(d - LATCH_RADIUS_M * 0.7, 2 * t) + 0.0015 * _cover(hook, 2 * t)
+        L.height += -0.002 * _cover(d - rl * 0.7, 2 * t) + 0.0015 * _cover(hook, 2 * t)
 
 
 def paint_tray_face(L, cockpit):
@@ -434,4 +434,82 @@ def write(out_dir, cfg) -> dict:
     (out / files["albedo"]).write_bytes(png_bytes(encode_srgb(albedo)))
     (out / files["normal"]).write_bytes(png_bytes(encode_linear(0.5 + 0.5 * normal)))
     (out / files["orm"]).write_bytes(png_bytes(encode_linear(orm)))
+    t_albedo, t_normal, t_orm = bake_tablet()
+    tf = cl.TABLET_MAPS
+    (out / tf["albedo"]).write_bytes(png_bytes(encode_srgb(t_albedo)))
+    (out / tf["normal"]).write_bytes(png_bytes(encode_linear(0.5 + 0.5 * t_normal)))
+    (out / tf["orm"]).write_bytes(png_bytes(encode_linear(t_orm)))
     return dict(files)
+
+
+# ---- the iPad tablets (fidelity Task 7): our own placeholder screen, no photo pixels ----
+TABLET_MAP_SIZE = (576, 1024)  # (W, H): the front face over U 0..cl.TABLET_FACE_U (512 px), the swatch strip right of it
+IPAD_DISPLAY_M = (0.1203, 0.1604)  # [S] Apple iPad mini (5th gen) 7.9 in 4:3 display, active area (2048 x 1536 at 326 ppi)
+IPAD_HOME_M = (0.0107, 0.0050)  # [S]-derived: home button centre above the body's bottom edge, radius (Apple dimension drawings, 10 mm button)
+IPAD_CAMERA_M = (0.0107, 0.0010)  # [S]-derived: front camera below the top edge, radius
+BEZEL_WHITE = (0.70, 0.70, 0.70)  # [E] the white front glass bezel (discovery2 / 10: white-front iPads)
+IPAD_BACK = (0.55, 0.55, 0.56)  # [E] the aluminium back and edges
+ARM_DARK = (0.04, 0.04, 0.043)  # [E] the mount and arm (dark anodised, hidden behind the iPad)
+SCREEN_BG = (0.030, 0.032, 0.036)  # [E] the lit dark-theme page (discovery2: a dark procedure page with white text)
+SCREEN_TEXT = (0.70, 0.70, 0.70)  # [E] its text
+SCREEN_BAR = (0.55, 0.56, 0.58)  # [E] the light header bar at the top of the page
+TABLET_SEED = 7  # deterministic placeholder text layout
+
+
+def _rect(img, ss, x0, y0, x1, y1, value, w_m, h_m):
+    """Fill [x0, x1] x [y0, y1] (m from the body's top-left, y down) on the supersampled image."""
+    H, W = img.shape[:2]
+    sx, sy = W / w_m, H / h_m
+    img[max(0, int(round(y0 * sy))):min(H, int(round(y1 * sy))), max(0, int(round(x0 * sx))):min(W, int(round(x1 * sx)))] = value
+
+
+def bake_tablet():
+    """(albedo, normal, orm) of the tablet maps: the iPad's white bezel, the lit placeholder page (emission mask 1: CockpitView sets the
+    tablets' emitter luminance), the home button and camera; the aluminium and arm swatches in the strip right of the face."""
+    W, H = TABLET_MAP_SIZE
+    face_w = int(round(W * cl.TABLET_FACE_U))
+    ss = 4
+    w_m, h_m = 0.1348, 0.2032  # the body (= [[tablet]] size_m, [S])
+    fa = np.zeros((H * ss, face_w * ss, 3), np.float32)
+    fa[:] = BEZEL_WHITE
+    fe = np.zeros((H * ss, face_w * ss), np.float32)
+    x0, y0 = 0.5 * (w_m - IPAD_DISPLAY_M[0]), 0.5 * (h_m - IPAD_DISPLAY_M[1])
+    x1, y1 = x0 + IPAD_DISPLAY_M[0], y0 + IPAD_DISPLAY_M[1]
+    _rect(fa, ss, x0, y0, x1, y1, SCREEN_BG, w_m, h_m)
+    _rect(fe, ss, x0, y0, x1, y1, 1.0, w_m, h_m)
+    _rect(fa, ss, x0, y0, x1, y0 + 0.009, SCREEN_BAR, w_m, h_m)  # header bar with a darker field in it
+    _rect(fa, ss, x0 + 0.030, y0 + 0.0025, x1 - 0.030, y0 + 0.0065, (0.32, 0.33, 0.35), w_m, h_m)
+    rng = np.random.default_rng(TABLET_SEED)
+    _rect(fa, ss, x0 + 0.006, y0 + 0.014, x0 + 0.040, y0 + 0.0175, SCREEN_TEXT, w_m, h_m)  # title
+    y = y0 + 0.026
+    while y < y1 - 0.010:  # rows of a three-column table: activity, two time lines, duration
+        lines = 1 + int(rng.integers(0, 2))
+        for k in range(lines):
+            _rect(fa, ss, x0 + 0.006, y + k * 0.0032, x0 + 0.006 + float(rng.uniform(0.012, 0.030)), y + k * 0.0032 + 0.0016, SCREEN_TEXT, w_m, h_m)
+        for k in range(2):
+            _rect(fa, ss, x0 + 0.050, y + k * 0.0032, x0 + 0.068, y + k * 0.0032 + 0.0016, SCREEN_TEXT, w_m, h_m)
+        if rng.random() < 0.6:
+            _rect(fa, ss, x1 - 0.018, y, x1 - 0.008, y + 0.0016, SCREEN_TEXT, w_m, h_m)
+        y += 0.0105
+    yy, xx = np.mgrid[0:H * ss, 0:face_w * ss]
+    px_x, px_y = (xx + 0.5) * w_m / (face_w * ss), (yy + 0.5) * h_m / (H * ss)
+    home = np.hypot(px_x - 0.5 * w_m, px_y - (h_m - IPAD_HOME_M[0]))
+    ring = (np.abs(home - IPAD_HOME_M[1]) < 0.0004)
+    fa[ring] = (0.45, 0.45, 0.46)
+    cam = np.hypot(px_x - 0.5 * w_m, px_y - IPAD_CAMERA_M[0]) < IPAD_CAMERA_M[1]
+    fa[cam] = (0.02, 0.02, 0.02)
+    albedo = np.zeros((H, W, 3), np.float32)
+    albedo[:, :face_w] = fa.reshape(H, ss, face_w, ss, 3).mean(axis=(1, 3))
+    emit = np.zeros((H, W), np.float32)
+    emit[:, :face_w] = fe.reshape(H, ss, face_w, ss).mean(axis=(1, 3))
+    albedo[:H // 2, face_w:] = IPAD_BACK
+    albedo[H // 2:, face_w:] = ARM_DARK
+    orm = np.zeros((H, W, 4), np.float32)
+    orm[..., 0] = 1.0
+    orm[..., 1] = np.where(emit > 0.5, 0.08, 0.2)  # glass front
+    orm[:H // 2, face_w:, 1], orm[:H // 2, face_w:, 2] = 0.35, 0.9  # aluminium
+    orm[H // 2:, face_w:, 1], orm[H // 2:, face_w:, 2] = 0.6, 0.2  # anodised arm
+    orm[..., 3] = emit
+    normal = np.zeros((8, 8, 3), np.float32)  # flat: the tablets carry no relief (one tiny map, any UV)
+    normal[..., 2] = 1.0
+    return albedo, normal, orm

@@ -43,6 +43,12 @@ const CONSOLE_LAYER := 1 << 11
 const CONSOLE_EMIT_CD_M2 := 500.0
 ## The console nodes on the atlas (cabin_layout.NODE_CHARTS; the manifest's cockpit.console_maps).
 const ATLAS_NODES: Array[String] = ["console_housing", "console_back", "console_under", "console_shelf", "console_lockers"]
+## [E] Fidelity Task 7: the wall recess around the console and its bevels (crew1_1 / KSC-20240927: light grey against the white panels).
+const RECESS_ALBEDO := Color(0.6, 0.6, 0.6)
+const RECESS_TINT_FROM := 0.15
+## [E] Fidelity Task 7: the iPads' lit placeholder page (tablet maps, ORM alpha = the display): emits albedo x this luminance per unit albedo,
+## the white text ~280 cd/m2, the dark page ~15 (an iPad mini at a comfortable cabin brightness; max 500 cd/m2 [S]).
+const TABLET_EMIT_CD_M2 := 400.0
 ## [D] discovery10 de-lit tray (fidelity Task 6, Ruling G): a blue LED in the middle of each r_led key face, 7 x 6 mm, its centre 2.5 mm above the
 ## key centre; [E] luminance (a lit indicator, reads saturated blue) and colour (linear Rec.709 at luminance 1).
 const LED_KEYS: Array[String] = ["r_led_1", "r_led_2", "r_led_3"]
@@ -488,6 +494,8 @@ func _process(_delta: float) -> void:
 			(material as ShaderMaterial).set_shader_parameter("fill_surround", surround)
 	if _materials.has("console_atlas"):
 		(_materials["console_atlas"] as ShaderMaterial).set_shader_parameter("emit_gain", CONSOLE_EMIT_CD_M2 * scene_per_cd)
+	if _materials.has("tablet"):
+		(_materials["tablet"] as ShaderMaterial).set_shader_parameter("emit_gain", TABLET_EMIT_CD_M2 * scene_per_cd)
 	for material: ShaderMaterial in _led_materials:
 		material.set_shader_parameter("mark_emission", LED_COLOUR * LED_CD_M2 * scene_per_cd)
 
@@ -645,6 +653,8 @@ func _material_of(part: String) -> Material:
 		return _display(Color(0.95, 0.95, 0.9))
 	if part == "cabin_shell":
 		return _cabin_material(WALL_ALBEDO, 0.85, 0.0, 0.5)
+	if part == "cabin_recess":
+		return _recess_material()
 	if part == "floor" or part == "hatch_frame" or part.begins_with("window_"):
 		return _cabin_material(WALL_ALBEDO, 0.8, 0.0, 0.0)
 	## Fidelity Task 6: the console body, back with the posts, underside, tray and lockers share one material on the baked console atlas
@@ -669,7 +679,7 @@ func _material_of(part: String) -> Material:
 	if part.begins_with("seat_"):
 		return _cabin_material(Color(0.035, 0.035, 0.037).linear_to_srgb(), 0.7, 0.0, 0.0, 0.2)  # Task 5b: LINEAR 0.035 (black pads / carbon), was the sRGB literal 0.03 = 0.0023 linear
 	if part.begins_with("tablet_"):
-		return _cabin_material(Color(0.03, 0.03, 0.036).linear_to_srgb(), 0.85, 0.0, 0.0, 0.03)  # glass front: dark, no metal sheen under the lamps
+		return _tablet_material()
 	if part.begins_with("hotas_"):
 		return _cabin_material(Color(0.04, 0.04, 0.043).linear_to_srgb(), 0.5, 0.4, 0.0)  # Task 5b: LINEAR 0.04 (black plastic), was the sRGB literal 0.06 = 0.005 linear
 	if part == "handle":
@@ -740,6 +750,46 @@ func _console_texture(file: String, role: String) -> ImageTexture:
 	if file.is_empty():
 		return null
 	return VehicleModels.console_texture(VehicleModels.repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file), file, role)
+
+
+## The wall recess (fidelity Task 7): white at the panel edge, RECESS_ALBEDO from RECESS_TINT_FROM of the way down the bevel (the generator writes
+## the recess fraction into UV.y; the shader's tint split follows it smoothly across the wall grid).
+func _recess_material() -> ShaderMaterial:
+	if _materials.has("recess"):
+		return _materials["recess"]
+	var m := _cabin_material(WALL_ALBEDO, 0.85, 0.0, 0.5).duplicate() as ShaderMaterial
+	m.set_shader_parameter("tint_split", RECESS_TINT_FROM)
+	m.set_shader_parameter("albedo_low", RECESS_ALBEDO)
+	m.set_shader_parameter("roughness_low", 0.85)
+	m.set_shader_parameter("metallic_low", 0.0)
+	_materials["recess"] = m
+	return m
+
+
+## The iPads (fidelity Task 7): the cabin shader on the tablet maps (manifest cockpit.tablet_maps: white bezel, the lit placeholder page, the
+## aluminium and arm swatches). Small maps (576 x 1024), loaded at once; without them a dark flat material.
+func _tablet_material() -> ShaderMaterial:
+	if _materials.has("tablet"):
+		return _materials["tablet"]
+	var maps: Dictionary = _cockpit_manifest.get("tablet_maps", {})
+	var m := ShaderMaterial.new()
+	m.shader = CABIN_SHADER
+	m.set_shader_parameter("specular", 0.5)
+	var loaded := 0
+	for role: String in ["albedo", "normal", "orm"]:
+		var file := String(maps.get(role, ""))
+		var image: Image = Image.load_from_file(VehicleModels.repo_dir().path_join("data/models").path_join(VEHICLE_ID).path_join(file)) if not file.is_empty() else null
+		if image == null or image.is_empty():
+			continue
+		image.generate_mipmaps(role == "normal")
+		m.set_shader_parameter(role + "_map", ImageTexture.create_from_image(image))
+		loaded += 1
+	if loaded < 3:
+		push_warning("CockpitView: tablet maps missing (rebuild the crew_dragon model set); the tablets stay dark")
+		return _cabin_material(Color(0.03, 0.03, 0.036).linear_to_srgb(), 0.85, 0.0, 0.0, 0.03)
+	m.set_shader_parameter("maps_on", 1.0)
+	_materials["tablet"] = m
+	return m
 
 
 ## An r_led key: the blank key face with its blue LED (a lit mark, emission set every frame).

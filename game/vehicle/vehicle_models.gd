@@ -131,7 +131,10 @@ static func prewarm_console_maps(vehicle_id: String = "crew_dragon") -> void:
 
 
 static func start_console_map(path: String, file: String, role: String) -> void:
-	if _console_started.has(file) or _console_prepared.has(file) or _console_failed.has(file) or console_textures.has(file):
+	_console_mutex.lock()
+	var known := _console_prepared.has(file)
+	_console_mutex.unlock()
+	if known or _console_started.has(file) or _console_failed.has(file) or console_textures.has(file):
 		return
 	_console_started[file] = WorkerThreadPool.add_task(_prepare_console_map.bind(path, file, role), false, "console map " + role)
 
@@ -162,10 +165,11 @@ static func console_texture(path: String, file: String, role: String) -> ImageTe
 	_console_mutex.lock()
 	var done := _console_prepared.has(file)
 	var image: Image = _console_prepared.get(file)
+	if done:
+		_console_prepared.erase(file)
 	_console_mutex.unlock()
 	if not done:
 		return null
-	_console_prepared.erase(file)
 	_console_started.erase(file)
 	if image == null:
 		_console_failed[file] = true
@@ -205,7 +209,9 @@ static func load_for(vehicle_id: String) -> Dictionary:
 static func reset_console_maps() -> void:
 	wait_console_maps()
 	console_textures.clear()
+	_console_mutex.lock()
 	_console_prepared.clear()
+	_console_mutex.unlock()
 	_console_started.clear()
 	_console_failed.clear()
 

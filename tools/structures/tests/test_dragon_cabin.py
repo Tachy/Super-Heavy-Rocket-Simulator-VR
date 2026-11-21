@@ -194,7 +194,8 @@ def test_shell_has_no_hole_except_the_apertures(spec, nodes):
     cockpit, profile = spec["cockpit"], spec["detail"]["capsule"]["profile_m"]
     cabin = cockpit["cabin"]
     edges, owner = collections.Counter(), {}
-    for name in ("cabin_shell", "floor", "hatch_frame", *(n for n in nodes if n.startswith("window_"))):
+    assert nodes["cabin_recess"]["idx"], "the wall recess around the console (fidelity Task 7) has faces"
+    for name in ("cabin_shell", "cabin_recess", "floor", "hatch_frame", *(n for n in nodes if n.startswith("window_"))):
         pos, idx = nodes[name]["pos"], nodes[name]["idx"]
         key = [tuple(round(c * WELD) for c in p) for p in pos]
         for t in range(0, len(idx), 3):
@@ -473,7 +474,7 @@ def test_shelf_is_proud_of_the_screens_and_the_dark_panel_runs_up_to_the_ceiling
 def test_lockers_5_and_6_flank_the_tablets(spec, nodes):
     c = spec["cockpit"]
     lk = {l["id"]: l for l in c["locker"]}
-    assert lk["5"]["size_m"] == pytest.approx([0.15, 0.165], abs=0.02)
+    assert lk["5"]["size_m"] == pytest.approx([0.198, 0.139], abs=0.01)  # fidelity Task 7: the measured door (cabin_fit/parts/lockers.py)
     tab = {t["id"]: t for t in c["tablet"]}
     assert lk["5"]["centre_m"][2] > tab["l"]["centre_m"][2] + 0.1 and lk["6"]["centre_m"][2] < tab["r"]["centre_m"][2] - 0.1
     assert "console_lockers" in nodes
@@ -682,3 +683,119 @@ def test_generated_console_front_is_square_to_tilt_deg(spec, nodes):
     span_lat = [sum(a * b for a, b in zip(p, right)) for p in on]
     assert max(span_up) - min(span_up) > 0.3
     assert max(span_lat) - min(span_lat) > c["console"]["width_m"] - 2.0 * c["console"]["edge_radius_m"] - 1e-3
+
+
+# ---- fidelity Task 7: recess, console end taper, lockers, tablets ----
+from cabin_fit.parts import lockers as lockers_fit  # noqa: E402
+from cabin_fit.parts import recess as recess_fit  # noqa: E402
+
+
+def test_recess_edges_lie_within_sigma_of_the_fit(spec):
+    rec = spec["cockpit"]["recess"]
+    assert rec["depth_m"] == recess_fit.PANEL_M and rec["x_ref_m"] == recess_fit.X_REF_M  # the fit back-projects onto the built floor
+    fit = recess_fit.fit_recess(spec["cockpit"])
+    for name in ("out", "in"):
+        f = fit[name]
+        for v, m, s in zip(rec[f"edge_{name}_deg"], f["coef"], f["sigma"]):
+            assert abs(v - m) <= s, (name, v, f)
+        assert rec[f"{name}_x_m"] == pytest.approx(list(f["x"]), abs=0.005), name
+    # the built lines, projected into crew1_1, lie on the reads within a few px (read sigma 2 px, line rms 1-2 deg)
+    built = recess_fit.recess_outline_px(spec["cockpit"])
+    for key, reads in (("out_l", recess_fit.REVEAL_OUT_PX["l"]), ("out_r", recess_fit.REVEAL_OUT_PX["r"]),
+                       ("in_l", recess_fit.REVEAL_IN_PX["l"]), ("in_r", recess_fit.REVEAL_IN_PX["r"])):
+        rms, worst = recess_fit.line_residual_px(built[key], reads)
+        assert rms <= 4.0 and worst <= 8.0, (key, rms, worst)
+
+
+def test_generated_recess_follows_its_edges(spec, nodes):
+    """cabin_recess: every vertex lies on the wall pushed out by cabin_layout.recess_offset (within 1 mm), the floor reaches depth_m, and the
+    seam with the panels (vertices the recess shares with cabin_shell) lies at the out edge, within one fine column."""
+    c = spec["cockpit"]
+    rec = c["recess"]
+    run = recess_fit.side_wall(c["cabin"])
+    deepest = 0.0
+    for x, y, z in nodes["cabin_recess"]["pos"]:
+        az = math.degrees(math.atan2(z, y))
+        off = math.hypot(y, z) - recess_fit.wall_r(run, x)
+        assert off == pytest.approx(cl.recess_offset(c, x, az), abs=1e-3), (x, az)
+        deepest = max(deepest, off)
+    assert deepest == pytest.approx(rec["depth_m"], abs=1e-3)
+    shell = {tuple(round(v * WELD) for v in p) for p in nodes["cabin_shell"]["pos"]}
+    seam = [p for p in nodes["cabin_recess"]["pos"] if tuple(round(v * WELD) for v in p) in shell]
+    assert seam
+    for x, y, z in seam:  # within one fine column, plus what the edge moves over one fine row (a face spans two rows)
+        a = abs(math.degrees(math.atan2(z, y)))
+        edge = cl.recess_edge_az(rec, "out", x)
+        slack = 0.8 + max(abs(cl.recess_edge_az(rec, "out", x + d) - edge) for d in (-0.021, 0.021))
+        if rec["bottom_x_m"] + rec["bottom_bevel_m"] < x < c["cabin"]["ceiling_x_m"] - rec["top_bevel_m"]:
+            assert edge - slack <= a <= edge + 1e-6, (x, a)
+
+
+def test_console_end_taper_is_the_measured_contour(spec):
+    """[console] end_taper within sigma of the plane fit of crew1_1's end contour (cabin_fit/parts/recess.py), and the width stays whole where
+    the photos need it: the front zone under the outer glass edges (+-0.649) and the back face at mid height (end cap at 0.70-0.72)."""
+    c = spec["cockpit"]
+    sol, sig, rms = recess_fit.fit_taper(recess_fit.end_samples(c))
+    for v, f, s in zip(c["console"]["end_taper"], sol, sig):
+        assert abs(v - f) <= s, (v, f, s)
+    assert rms < 0.005
+    assert cl.end_half_width(c, -0.11, 0.0) == pytest.approx(c["console"]["width_m"] / 2.0)
+    assert cl.end_half_width(c, 0.0, c["console"]["hood_depth_m"]) == pytest.approx(c["console"]["width_m"] / 2.0)
+    assert cl.end_half_width(c, -0.336, c["console"]["hood_depth_m"]) == pytest.approx(0.53, abs=0.01)
+
+
+def test_generated_console_body_lies_inside_the_end_taper(spec, nodes):
+    c = spec["cockpit"]
+    worst = -1.0
+    for node in ("console_back", "console_under"):
+        for p in nodes[node]["pos"]:
+            lat, u, o = cl.console_local(c, p)
+            if o > -0.03 or abs(lat) < 0.3 or u > cl.console_frame(c)["u_top"] + 1e-3:  # the front zone / the posts
+                continue
+            worst = max(worst, abs(lat) - cl.end_half_width(c, u, -o))
+    assert worst <= 0.002, worst
+
+
+def test_lockers_are_the_measured_doors_with_their_latch(spec):
+    c = spec["cockpit"]
+    m = lockers_fit.measure()
+    lat0, lat1, u0, u1 = m["door"]
+    lk = next(item for item in c["locker"] if item["id"] == "5")
+    lat, u, _ = cl.console_local(c, lk["centre_m"])
+    assert lat == pytest.approx(0.5 * (lat0 + lat1), abs=m["sigma"]) and u == pytest.approx(0.5 * (u0 + u1), abs=m["sigma"])
+    assert lk["size_m"] == pytest.approx([lat1 - lat0, u1 - u0], abs=m["sigma"])
+    llat, lu, _ = cl.console_local(c, lk["latch_m"])
+    assert (llat, lu) == pytest.approx(m["latch"], abs=m["sigma"])
+    for item in c["locker"]:  # the latch and the placard (cabin_textures) lie on the door
+        clat, cu, _ = cl.console_local(c, item["centre_m"])
+        w, h = item["size_m"]
+        llat, lu, _ = cl.console_local(c, item["latch_m"])
+        assert abs(llat - clat) + item["latch_radius_m"] <= w / 2.0 + 1e-3 and abs(lu - cu) + item["latch_radius_m"] <= h / 2.0
+    import cabin_textures
+    for text, (x0, x1, y0, y1), _, _ in cabin_textures.PLACARDS:
+        item = next(i for i in c["locker"] if i["id"] == text)
+        clat, cu, _ = cl.console_local(c, item["centre_m"])
+        w, h = item["size_m"]
+        assert clat - w / 2.0 <= x0 and x1 <= clat + w / 2.0 and cu - h / 2.0 <= y0 and y1 <= cu + h / 2.0, text
+
+
+def test_tablets_hang_on_their_arms(spec, nodes):
+    """Each iPad's front face is its rolled body (cabin_layout.tablet_corners within 1 mm), and its arm runs from the mount behind it back
+    into the upper panel's front (screen plane - SCREEN_PROUD_M), under the iPad's outline (hidden from the crew)."""
+    c = spec["cockpit"]
+    for t in c["tablet"]:
+        pos = nodes[f"tablet_{t['id']}"]["pos"]
+        n, t_up, t_right = cl.tablet_axes(t)
+        rel = lambda p, a: cl.dot3([p[i] - t["centre_m"][i] for i in range(3)], a)
+        front = max(cl.dot3(p, n) for p in pos)
+        face = [p for p in pos if cl.dot3(p, n) > front - 1e-4]
+        assert max(rel(p, t_right) for p in face) == pytest.approx(t["size_m"][0] / 2.0, abs=1e-3)
+        assert max(rel(p, t_up) for p in face) == pytest.approx(t["size_m"][1] / 2.0, abs=1e-3)
+        assert min(rel(p, t_up) for p in face) == pytest.approx(-t["size_m"][1] / 2.0, abs=1e-3)
+        _, _, o_t = cl.console_local(c, t["centre_m"])
+        back = min(cl.console_local(c, p)[2] for p in pos)
+        assert back == pytest.approx(-cl.SCREEN_PROUD_M - 0.001, abs=0.002), back
+        behind = [p for p in pos if cl.console_local(c, p)[2] < o_t - 0.01]
+        assert behind
+        for p in behind:
+            assert abs(rel(p, t_right)) < t["size_m"][0] / 2.0 and abs(rel(p, t_up)) < t["size_m"][1] / 2.0, p

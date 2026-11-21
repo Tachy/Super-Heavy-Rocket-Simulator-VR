@@ -38,9 +38,10 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 | Console placement | centre screen centre (2.512, -0.043, 0); `[console] centre_m` = that - 0.0062 along up (2.5076, -0.0386, 0) | E (block) / D (shift) | round 4 joint fit on crew1_1; the Task 4 free fit (crew1_1 + discovery2 + discovery10) reads (2.537, -0.032) +-0.029, within 1 sigma, block not moved; the 6.2 mm shift along up is the fitted u_bot (see Console body); every console item moved rigidly with round 4 | +-0.06 m, +-4 deg |
 | Screen layout | centre on the centre line, gap 0.020 (fix round 2, was 0.045), the three screens coplanar (console straight, fold_deg 0, user decision 2026-11-07) | S / D | user decision 2026-11-07 after photo check (discovery10 top-down, crew2_1, inspiration4_1: one straight front); gap discovery10 (90 / 780 px) | +-0.1 m, +-5 deg |
 | Console tilt | `tilt_deg` 45.0: up axis from +X toward -Y; the generator builds the body on it (`cabin_layout.console_frame`, refused if the centre screen differs > 0.5 deg) | D | Task 4 free fit 46.3 +-1.2 deg (data-constrained), built 45 within 1.1 sigma | +-1.2 deg |
-| Console body | 1.40 x 0.542 m, back face 0.221 behind the screen plane, all edges filleted r 0.04, square sides, underside falls 0.059 to the back lip | E / D | Task 4 fit ("Console (fidelity Task 4)"), tags by `constrained_by_data`: hood depth 0.221 +-0.011 and u_bot -0.2772 +-0.0021 [D]; width (lower bound, the crew1_1 ends lie on the recess contour), u_top 0.265, underside drop (0.059 +-0.036, crew1_1 lip only), fillet r, draft [E] | width +-0.06, u_top +-0.05, drop +-0.04, r +-0.02 |
+| Console body | 1.40 x 0.542 m, back face 0.221 behind the screen plane, all edges filleted r 0.04, square sides, underside falls 0.059 to the back lip; the lower back ends taper in to the measured contour (end_taper, Task 7: 0.53 at the lip) | E / D | Task 4 fit ("Console (fidelity Task 4)"), tags by `constrained_by_data`: hood depth 0.221 +-0.011 and u_bot -0.2772 +-0.0021 [D]; width (confirmed at mid height by Task 7; the end taper [D], its front zone / chamfer [E]), u_top 0.265, underside drop (0.059 +-0.036, crew1_1 lip only), fillet r, draft [E] | width +-0.06, u_top +-0.05, drop +-0.04, r +-0.02 |
 | Ceiling posts | bases Z +-0.555 on the body top, tops on the ceiling ring at (Y -0.579, Z +-0.747); rod r 0.017, collar r 0.039 x 0.04, sleeve r 0.022 x 0.066, funnel foot r 0.051 x 0.306 | D / E | Task 4 fit on crew1_1 (the only photo showing them): base Z +-0.008, top angle 52.2 +-0.7 deg, radii from px widths [D]; top radius 0.945 [E] (along crew1_1's ray; set so the collar stays inside the ring's outer radius 0.997), collar / sleeve / funnel lengths [E] | radii +-0.003-0.004, top radius +-0.03, lengths +-50 % |
-| Tablets | 0.1348 x 0.2032 m | S / E | Apple iPad mini spec; model assumed from the shape | - |
+| Tablets | 0.1348 x 0.2032 m, roll 1.31 / 1.93 deg, on a mount and arm into the upper panel | S / D / E | Apple iPad mini spec; roll from the Task 5 fit; mount / arm unseen [E] (Task 7) | roll +-0.7 / 1.4 deg |
+| Lockers / wall recess | door 0.198 x 0.139 at (-0.558, 0.214), latch (-0.474, 0.219); recess bevel edges on the upper cone (azimuth 91-138 deg off the hatch, x 2.8-3.1) | D / E | Task 7: discovery2 / 10 door corners; crew1_1 bevel lines back-projected onto the wall | +-0.008 m; edges +-0.3-0.5 deg |
 | Button positions | rows 0.17 / 0.20 m below the screen centres | E | discovery10 x along the screens' lower edges (fisheye: fractions per screen) | +-0.02 along, +-0.03 across |
 | HOTAS grips | hip + 0.32 forward + 0.28 up the back = 0.09 m forward, 0.55 m below the eye (seat axes), +-0.25 / 0.27 lateral | E | armrest, forearm reach | calibrated in Task 9 |
 
@@ -181,7 +182,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   `dragon_cabin.gltf` into the Crew Dragon model set (last generator; 61.6k triangles, `cabin_shell` 52.6k of them, rows 2 cm / columns 0.75 deg around
   the apertures so the cut edge hides under the bezel). `vehicle_spec.load_dragon` loads and validates `config/cockpits/<[vehicle] cockpit>.toml` into
   `spec["cockpit"]` (hashed into the manifest; `VehicleModels` staleness includes the cockpit TOML). Capsule stage frame.
-  Nodes: `cabin_shell`, `floor`, `hatch_frame`, `window_<i>` / `window_glass_<i>` (i = exterior table row, +az then -az: 0 = +33.3, 1 = -33.3,
+  Nodes: `cabin_shell`, `cabin_recess` (Task 7: the wall recess around the console), `floor`, `hatch_frame`, `window_<i>` / `window_glass_<i>` (i = exterior table row, +az then -az: 0 = +33.3, 1 = -33.3,
   2 = +90, 3 = -90), `seat_s1..s4`, `console_housing` (the filleted body's front and ends + the dark upper panel, `console_shape.rounded_box`; `console_back` = its back face + the two ceiling posts, `console_under` = its underside and top; `console_shelf` = the continuous sloped tray with its lip, `console_bezel` the screens' dark glass borders, `guard_<id>` / `guard_rim_<id>` the clear key guards and their red rims, `console_hit` the hidden flat key hit faces (fidelity Task 5); tested: every button stands >= 5 mm proud of the housing, the three screens are coplanar within 1 mm / 0.1 deg), `screen_left|centre|right`
   (one quad each, exactly the TOML centre / size, UV 0..1 with (0, 0) top left, +normal toward the crew), `tablet_l|r` (`[[tablet]]` ids l / r),
   `button_<id>` (one node per button; the centre handle is the node `handle`, no `button_handle`), `light_<i>` (`[[light]]` rows in file order),
@@ -433,7 +434,52 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
   0.19 / metallic 0.1, panels 0.03, vent 0.012.
 - Shots: `cockpit_shots.gd` keeps `console_hit` hidden (it made every console node visible again, so the hidden hit faces covered the key faces and their
   labels in every Task 5 shot).
-- Open: the "8" placard on the back's right end (crew1_1, too blurred), locker size and placard against the photo's wider locker (Task 7), the trainer's end connector.
+- Open: the "8" placard on the back's right end (crew1_1, too blurred), the trainer's end connector. (Locker size: done in Task 7.)
+
+### Recess, console ends, lockers and tablets (fidelity Task 7)
+- Wall recess (`[recess]`, `cabin_fit/parts/recess.py`): crew1_1 shows the white wall panelling on both sides of the console ending in a light grey bevel that runs
+  as a straight diagonal (hatch view) from the ceiling dish past the console ends to the headrests. Two lines per side are read on the photo (column profiles,
+  1 px Gaussian, every 10 rows): `REVEAL_OUT_PX` the panel edge (white -> grey, v 100-240), `REVEAL_IN_PX` the dark line where the bevel meets the recess floor
+  (v 160-290; right side v 230-260 covered by the wall camera's mount). Each pixel is back-projected through the fitted crew1_1 camera onto the inner wall of
+  revolution (floor: `depth_m` 0.03 [E] further out) and fitted per side as |az| = c0 + c1 t + c2 t^2 (t = x - 3.0; a straight image line is a curve on the
+  cone: a linear fit left 1-2 deg rms = 5-19 px), left / right averaged. Result [D]: out edge 107.12 +- 0.31 deg, -184.7 +- 7.1 deg/m, -692 +- 76 deg/m2 over
+  x 2.896-3.065 (l/r 0.36 deg, rms 0.78 deg); in edge 123.45 +- 0.46, -81.9 +- 3.9, 18 +- 56 over x 2.824-3.139 (l/r 0.52 deg, rms 0.97 deg). Outside the read
+  ranges the edges continue at constant az [E]; the recess ends at x 2.35 behind the headrests [E] and ramps back to the panel surface at the ceiling trim
+  (0.06) and the bottom (0.08) [E]. Single view: the wall surface is the assumed depth; the crew1_1 pose's prior-dominated x / pitch move both lines together.
+  On the wall the edges run nearly around the cone (x ~2.8-3.1, |az| 91-138): the recess is the far half of the upper cone between the window panels.
+- Generator: the wall lathe pushes every vertex out by `cabin_layout.recess_offset` (a ramp from the out edge to the in edge, `depth_m` on the floor); the cells
+  with a pushed vertex form the node `cabin_recess` (same vertices as the shell at the seam: shell + recess closed), their UV v = 1 - fraction so the glTF
+  UV.y is the recess fraction; `CockpitView._recess_material` tints by it (white at the panel edge, `RECESS_ALBEDO` 0.6 sRGB from `RECESS_TINT_FROM` 0.15 of the
+  bevel; the colour line follows the bevel smoothly, not the wall grid). Fine wall columns (0.75 deg) over the recess bevels' azimuths +-3 deg
+  (`RECESS_FINE_MARGIN_DEG`) and fine rows up to x 3.2. Cabin 64,368 -> 82,908 triangles.
+- Console ends (`[console] end_taper`, `end_taper_from_m`, `end_ramp`): the crew1_1 recess contour passes along the console's back-face end: the end cap's
+  highlight touches it at mid height (|lat| 0.70-0.72: width_m 1.40 confirmed there) and the silver lip band ends exactly on it on both sides (|lat| 0.53); below
+  the lip the bevel's smooth light-to-dark gradient shows no console outside the line (an upper bound, |lat| 0.45-0.52). Decision (asked by the T4 carry-over):
+  the body is wider at the top / the lower back ends taper in; the recess lies ~0.8 m behind the console ends along the hatch rays, so it cannot occlude them.
+  Plane fit of the contour (`recess.fit_taper`, back rows both sides + clean underside rows): half width = 0.6063 + 0.590 u + 0.543 depth (+-0.015 / 0.025 /
+  0.057, rms 1.6 mm) [D]; the front zone (depth <= 0.04 [E]) keeps 0.70 (outer glass edges +-0.649, tray +-0.625), between them a chamfer of 2.5 m half width per
+  m depth [E] (`cabin_layout.end_half_width`). `console_shape.rounded_box(cuts=)` adds vertex rows (`TAPER_DEPTHS_M`, `TAPER_U_STEP_M`), `taper_ends` scales x.
+  The tapered ends are silver behind o -0.045 (`cabin_textures.END_SILVER_O`, was -0.12): crew1_1 reads them light.
+- Lockers (`cabin_fit/parts/lockers.py`): locker 5's door (black plate, placard in its lower inner corner) read in discovery2 and discovery10 (top-left,
+  top-right, bottom-right corners; the lower-left is behind a helmet rim) back-projected onto o 0.012: lat -0.6573..-0.4589, u 0.1439..0.2830 -> centre
+  (-0.5581, 0.2135), 0.198 x 0.139 +- 0.008 [D] (was 0.15 x 0.165 [E]: the placard straddled its edge); the round finger latch at (-0.4735, 0.2189) [D]
+  (`[[locker]] latch_m`, `latch_radius_m` 0.015; the baker draws it from the table, the LATCHES constant is gone). Locker 6 mirrored [E].
+- Tablets: `[[tablet]] roll_deg` 1.31 / 1.93 [D] (Task 5 fit) is built (`cabin_layout.tablet_axes`, `tablet_corners`); the body is a rounded slab
+  (`TABLET_CORNER_M` 0.010 [E], 8 mm thick) on a mount plate (`arm_mount_m` 0.07 x 0.09 x 0.005 [E]) and an arm (`arm_radius_m` 0.008, `arm_u_m` 0.04 above the
+  centre [E]) straight back into the upper panel's front: no photo sees behind the iPads (discovery2 / 10 face-on). The "black slabs" of the earlier shots were
+  the dark flat material: the tablets now use the cabin shader on `tablet_albedo/normal/orm.png` (`cabin_textures.bake_tablet`, manifest `cockpit.tablet_maps`):
+  white front bezel, our own placeholder page (dark theme, light header, a three-column table of text bars; no photo pixels), home button, camera; the page
+  emits albedo x `TABLET_EMIT_CD_M2` 400 (white text ~280 cd/m2); back / sides on an aluminium swatch, mount and arm on a dark swatch.
+- Render vs photo (crew1_1, px of 1200, `fid_crew1_1` resized): console back-face ends v 200-220 0-2 px (both sides), v 190 -11/+12 (the end cap's highlight),
+  v 180 -4 (right); T4 had -47..+49. Panel edge 2-6 px inside the photo's (the tint line sits at 0.15 of the bevel) at v 130-230, 16 px at v 110 (above the read
+  range: constant az). Below the lip the silver chamfer reads light like the photo's bevel; the front plate's lower outer corners (v 280-300) lie where the
+  photo has the helmets / headrests. Built recess lines projected (`recess.recess_outline_px`): out 2.0 / 2.2 px rms (max 6), in 2.5 / 2.7 px rms (max 7).
+- Tests: `test_shell_has_no_hole_except_the_apertures` (now with `cabin_recess`), `test_recess_edges_lie_within_sigma_of_the_fit`,
+  `test_generated_recess_follows_its_edges`, `test_console_end_taper_is_the_measured_contour`, `test_generated_console_body_lies_inside_the_end_taper`,
+  `test_lockers_are_the_measured_doors_with_their_latch`, `test_tablets_hang_on_their_arms`.
+- Shots: `--console_closeup` adds `closeup_tablet` (the left iPad at 0.5 m) and `closeup_recess` (the left recess bevel beside the console end).
+- Open / [E]: recess depth and its continuation outside the read rows (single view), the recess floor colour (one grey; the photos show it lighter above the
+  console, darker panels below), the chamfer slope, the tablets' mount / arm, locker 6 (mirrored), the front plate's lower corners (no photo sees them).
 
 ## Camera mode and toggle
 State after plan Task 6 (code: `game/cockpit/cockpit_camera.gd`, `hotas_buttons.gd`, `World.toggle_cockpit`).

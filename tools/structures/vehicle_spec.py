@@ -291,7 +291,8 @@ COCKPIT_KEYS = {
     "cockpit": ("capsule_stage",),
     "cabin": ("wall_m", "floor_x_m", "ceiling_x_m", "tunnel_radius_m", "tunnel_top_x_m", "profile_m", "windows", "hatch", "window_reveal_radius_m", "window_bezel_m", "hatch_trim_m", "ring_light_radii_m"),
     "eye": ("position_m", "forward", "up"),
-    "console": ("centre_m", "normal", "up", "tilt_deg", "width_m", "height_m", "hood_depth_m", "edge_radius_m", "side_draft_deg", "underside_profile", "fold_deg", "strut_z_m", "post_top_m", "post_radius_m", "post_head_radius_m", "post_head_length_m", "post_foot_m", "screen_gap_m", "shelf_height_m", "shelf_top_gap_m", "upper_top_x_m", "upper_depth_m", "locker_proud_m"),
+    "console": ("centre_m", "normal", "up", "tilt_deg", "width_m", "height_m", "hood_depth_m", "edge_radius_m", "side_draft_deg", "underside_profile", "fold_deg", "strut_z_m", "post_top_m", "post_radius_m", "post_head_radius_m", "post_head_length_m", "post_foot_m", "screen_gap_m", "shelf_height_m", "shelf_top_gap_m", "upper_top_x_m", "upper_depth_m", "locker_proud_m", "end_taper", "end_taper_from_m", "end_ramp"),
+    "recess": ("x_ref_m", "depth_m", "edge_out_deg", "out_x_m", "edge_in_deg", "in_x_m", "bottom_x_m", "bottom_bevel_m", "top_bevel_m"),
     "tray": ("depth_m", "slope_deg", "deck_drop_m", "lip_width_m", "lip_height_m", "radius_m", "half_length_m"),
     "hotas": ("props", "stick_grip_m", "throttle_grip_m"),
 }
@@ -346,6 +347,20 @@ def validate_cockpit(cockpit: dict) -> None:
         raise VehicleSpecError("cockpit screens: recess_m must be equal on all three screens (one face-frame plate)")
     for t in cockpit["tablet"]:
         unit(f"tablet {t['id']} normal", t["normal"])
+        for k in ("roll_deg", "arm_mount_m", "arm_radius_m", "arm_u_m"):
+            if k not in t:
+                raise VehicleSpecError(f"cockpit tablet {t['id']}: missing key '{k}'")
+    for lk in cockpit["locker"]:
+        for k in ("centre_m", "size_m", "latch_m", "latch_radius_m"):
+            if k not in lk:
+                raise VehicleSpecError(f"cockpit locker {lk['id']}: missing key '{k}'")
+    rec = cockpit["recess"]
+    for name in ("out", "in"):
+        lo, hi = rec[f"{name}_x_m"]
+        if not lo < hi:
+            raise VehicleSpecError(f"cockpit [recess] {name}_x_m must be ascending")
+    if not 0.0 < rec["depth_m"] < cockpit["cabin"]["wall_m"] - 0.02:
+        raise VehicleSpecError("cockpit [recess] depth_m must leave >= 2 cm of the wall")
     ids = set()
     for b in cockpit.get("button", []):
         for k in ("id", "panel", "centre_m", "size_m", "shape", "kind", "function"):

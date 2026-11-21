@@ -196,6 +196,67 @@ def console_posts(cockpit):
     return out
 
 
+def recess_edge_az(rec, name, x):
+    """|az| (deg) of the recess edge `name` ("out" = the panel edge, "in" = the floor edge) at station x: the fitted line inside its read
+    station range (|az| = c0 + c1 t + c2 t^2, t = x - x_ref_m; cabin_fit/parts/recess.py), constant outside it."""
+    lo, hi = rec[f"{name}_x_m"]
+    t = min(max(x, lo), hi) - rec["x_ref_m"]
+    return sum(c * t ** p for p, c in enumerate(rec[f"edge_{name}_deg"]))
+
+
+def recess_offset(cockpit, x, az_deg):
+    """How far (m) the wall lies outside the panel surface at (x, az) (fidelity Task 7, [recess]): 0 on the panels, depth_m on the recess floor,
+    a linear ramp across the bevel from the out edge to the in edge (|az| grows toward the recess at az 180) and at the bottom / top."""
+    rec, ceiling = cockpit["recess"], cockpit["cabin"]["ceiling_x_m"]
+    if x <= rec["bottom_x_m"] or x >= ceiling:
+        return 0.0
+    a = abs((az_deg + 180.0) % 360.0 - 180.0)
+    lo, hi = recess_edge_az(rec, "out", x), recess_edge_az(rec, "in", x)
+    side = min(max((a - lo) / (hi - lo), 0.0), 1.0)
+    bottom = min((x - rec["bottom_x_m"]) / rec["bottom_bevel_m"], 1.0)
+    top = min((ceiling - x) / rec["top_bevel_m"], 1.0)
+    return rec["depth_m"] * side * bottom * top
+
+
+def end_half_width(cockpit, u, depth):
+    """Half width (m) of the console body at height u (up from the centre screen centre) and depth behind the screen plane (fidelity Task 7):
+    the full width_m / 2 in the front zone (depth <= end_taper_from_m); behind it the end_taper plane, reached from the full width by a
+    chamfer that loses end_ramp metres of half width per metre of depth (the sloped end face behind the front plate)."""
+    con = cockpit["console"]
+    w = con["width_m"] / 2.0
+    d0 = con["end_taper_from_m"]
+    if depth <= d0:
+        return w
+    w0, du, dd = con["end_taper"]
+    return min(w, max(w0 + du * u + dd * depth, w - con["end_ramp"] * (depth - d0)))
+
+
+def tablet_axes(t):
+    """(normal, up, right) of a tablet with its in-plane roll (roll_deg: right turned toward up, as the crew sees it)."""
+    n, u = t["normal"], t["up"]
+    r = screen_right(t)
+    a = math.radians(t["roll_deg"])
+    c, s = math.cos(a), math.sin(a)
+    right = tuple(c * r[i] + s * u[i] for i in range(3))
+    up = tuple(c * u[i] - s * r[i] for i in range(3))
+    return tuple(n), up, right
+
+
+def tablet_corners(t):
+    """{"tl"|"tr"|"br"|"bl": point} of the tablet body's front face (tl = the crew's left, top)."""
+    n, up, right = tablet_axes(t)
+    w, h = t["size_m"]
+    c = t["centre_m"]
+    out = {}
+    for name, (a, b) in (("tl", (-1, 1)), ("tr", (1, 1)), ("br", (1, -1)), ("bl", (-1, -1))):
+        out[name] = tuple(c[i] + right[i] * a * w / 2.0 + up[i] * b * h / 2.0 for i in range(3))
+    return out
+
+
+TABLET_MAPS = {"albedo": "tablet_albedo.png", "normal": "tablet_normal.png", "orm": "tablet_orm.png"}  # cabin_textures.py bakes them (fidelity Task 7)
+TABLET_FACE_U = 512.0 / 576.0  # the tablet maps: the front face spans U 0..TABLET_FACE_U, the strip right of it holds the back (top half) and arm (bottom half) swatches
+TABLET_BACK_UV = (0.95, 0.75)  # Blender UV (v up) of the aluminium back / sides swatch
+TABLET_ARM_UV = (0.95, 0.25)  # Blender UV of the dark arm swatch
 CONSOLE_MAPS = {"albedo": "console_albedo.png", "normal": "console_normal.png", "orm": "console_orm.png"}  # cabin_textures.py bakes them
 CONSOLE_ATLAS_SIZE = (4096, 2048)  # [E] fidelity Task 6: power of two (mipmaps), one atlas for the console body, tray and posts
 CHART_MARGIN_M = 0.01  # [E] every chart reaches this far past the surface it covers (fillets, the frame plate's walls)
@@ -381,7 +442,7 @@ def button_node(button):
 
 def node_names(cockpit):
     """Every mesh node of dragon_cabin.gltf, sorted."""
-    names = ["cabin_shell", "floor", "hatch_frame", "console_housing", "console_back", "console_under", "console_lamps", "console_shelf", "console_lockers", "ceiling_ring_light",
+    names = ["cabin_shell", "cabin_recess", "floor", "hatch_frame", "console_housing", "console_back", "console_under", "console_lamps", "console_shelf", "console_lockers", "ceiling_ring_light",
              "console_bezel", "console_hit", "handle", "hotas_stick", "hotas_throttle", "tablet_l", "tablet_r"]
     names += [n for g in cockpit.get("guard", []) for n in (f"guard_{g['id']}", f"guard_rim_{g['id']}")]
     names += [f"seat_{part}_{s['id']}" for s in cockpit["seat"] for part in SEAT_PARTS]
@@ -436,6 +497,7 @@ def cockpit_manifest(cockpit):
                               **({"label": b["label"], "label_cell": cells[b["id"]]} if b["id"] in cells else {})} for b in cockpit["button"]},
         "labels": {"file": LABEL_FILE, "size": list(size)},
         "console_maps": dict(CONSOLE_MAPS),
+        "tablet_maps": dict(TABLET_MAPS),
         "button_ids": [b["id"] for b in cockpit["button"]],
         "tablets": {t["id"]: {"node": f"tablet_{t['id']}", "centre": t["centre_m"], "normal": t["normal"], "up": t["up"], "size": t["size_m"]} for t in cockpit["tablet"]},
         "guards": {g["id"]: {"node": f"guard_{g['id']}", "rim_node": f"guard_rim_{g['id']}", "rim_colour": list(g["rim_colour"]), "hinge_edge": g["hinge_edge"],

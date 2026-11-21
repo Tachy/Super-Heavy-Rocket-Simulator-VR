@@ -88,7 +88,10 @@ centre_m = [2.5076, -0.0386, 0.0000]  # [E] block placement = the centre screen 
 normal = [-0.70711, -0.70711, 0.0]   # [D] = centre screen normal (from tilt_deg)
 up = [0.70711, -0.70711, 0.0]        # [D] = eye up (from tilt_deg)
 tilt_deg = 45.0                     # [D] console up axis 45 deg from +X toward -Y; the generator builds the body on it (cabin_layout.console_frame, checked against the centre screen +-0.5 deg); free fit 46.3 +-1.2 deg (data-constrained), built 45 within 1.1 sigma
-width_m = 1.40                      # [E] lower bound: crew1_1's back_end points (u 334 / 858 px) lie on the contour of the wall's trapezoid recess around the console, a likely occlusion edge, not a free end; free fit 1.344 +-0.046 not data-constrained; the front width is seen by no photo; built square (no draft). Open until Task 7's recess (re-run the crew1_1 overlay with the recess, refit if the ends are not occluded); +-0.06
+width_m = 1.40                      # [E] the front plate and the upper half: crew1_1's end cap at mid height of the back face lies at |lat| 0.70-0.72 (Task 7: cabin_fit/parts/recess.py, rays onto the back plane), the outer glass edges at +-0.649 need >= 1.30 at the front; free fit 1.344 +-0.046 not data-constrained; the lower back ends taper in (end_taper); +-0.04
+end_taper = [0.6063, 0.590, 0.543]  # [D] the lower ends behind the front plate: half width = min(width / 2, w0 + dw_du u + dw_ddepth depth) (u up from the centre screen centre, depth behind the screen plane), plane fit (cabin_fit/parts/recess.py fit_taper) of crew1_1's end contour: the silver lip band ends on it at |lat| 0.53 (both sides), the back face's end runs 0.70 -> 0.53 from mid height to the lip, and below the lip the bevel's smooth light-dark gradient shows no console out to 0.45-0.52 (an upper bound there); rms 1.6 mm, +-0.015 / 0.025 / 0.057
+end_ramp = 2.5                      # [E] behind the front zone the ends slope in to the end_taper plane by 2.5 m of half width per m of depth (a 68 deg chamfer: crew1_1 shows a light, smoothly shaded surface there, read as the silver tapered end, not a dark overhang of the front plate); 1.5-5
+end_taper_from_m = 0.04             # [E] the taper starts this far behind the screen plane (= edge_radius_m: the front fillet zone keeps the full width under the outer screens and the tray ends; crew1_1 sees the front corners only behind the helmets / headrests); +-0.02
 height_m = 0.542                    # [E] top half: u_top 0.265 kept (free fit 0.270 +-0.046, not data-constrained, +-0.05); [D] bottom half: u_bot -0.2772 +-0.0021 (front bottom edge under the modules, discovery2 + discovery10, data-constrained); was 0.540
 hood_depth_m = 0.221                # [D] the body's back face 0.221 +-0.011 m behind the screen plane (as-built fit, crew1_1 back top / lip edges with the screens of discovery2 / 10; data-constrained; free fit 0.181 +-0.030); was 0.205
 edge_radius_m = 0.04                # [E] fillet radius of every housing edge: crew1_1 back-face end caps round over ~20 px at 1.7 m (0.06-0.07 in plan view), nasatour_0320 right end cap ~0.03-0.05; the front edges keep a flat face 4 cm past the screens / modules; +-0.02
@@ -108,6 +111,24 @@ shelf_top_gap_m = 0.0395            # [D] the tray starts this far under the scr
 upper_top_x_m = 2.845               # [D] the dark upper panel above the housing reaches this station at its front top edge: 0.47 m up the console from the centre screen centre (covers the lamp panels at 0.43; discovery2 dark to the frame top); crew1_1 shows the dish over the console from the hatch, so the panel does not run to the ceiling (round 4)
 upper_depth_m = 0.04                # [E] thickness of the upper panel (it only closes the view up to the ceiling; crew1_1 / discovery2: dark grey structure up to the frame top)
 locker_proud_m = 0.012              # [E] the lockers 5 / 6 stand this far proud of the housing front (discovery2)
+
+[recess]
+# The trapezoid recess of the white wall panelling around the console (fidelity Task 7, crew1_1): the panels on both sides end in a light grey bevel
+# that runs as a straight diagonal (in the hatch view) from the ceiling dish down past the console ends to the headrests. cabin_fit/parts/recess.py
+# reads both bevel lines per side (out = the panel edge, white -> grey; in = the dark line where the bevel meets the recess floor) and back-projects
+# them through the fitted crew1_1 camera onto the inner wall (floor depth_m further out); both are fitted as |az| quadratic in (x - x_ref_m), left and
+# right averaged (mirror). Single view: the wall surface is the assumed depth; the camera's prior-dominated x / pitch (+-3.5 cm / 0.7 deg) move both
+# lines together by ~1 deg / 2 cm. The generator pushes the wall out by depth_m over the recess (a ramp from the out edge to the in edge, the bevel)
+# and puts those faces in the node cabin_recess (light grey). Outside the read station ranges the edges continue at constant az [E].
+x_ref_m = 3.0                       # [D] reference station of the edge lines
+depth_m = 0.03                      # [E] the recess floor lies this far outside the panel surface (single view: not measurable; the bevel's width on the wall follows from the two lines); +-0.02
+edge_out_deg = [107.12, -184.66, -691.56]  # [D] panel edge: |az| = c0 + c1 (x - x_ref_m) + c2 (x - x_ref_m)^2 (the straight image line is a curve on the cone): 107.12 +- 0.31 deg, -184.7 +- 7.1 deg/m, -692 +- 76 deg/m2 (15 rows per side, v 100-240; left / right differ 0.36 deg; rms 0.78 deg)
+out_x_m = [2.896, 3.065]            # [D] station range of the out-edge reads (above / below: constant az [E])
+edge_in_deg = [123.45, -81.93, 17.77]  # [D] floor edge, same form: 123.45 +- 0.46 deg, -81.9 +- 3.9 deg/m, 18 +- 56 deg/m2 (14 / 9 rows, v 160-290; left / right differ 0.52 deg; rms 0.97 deg)
+in_x_m = [2.824, 3.139]             # [D] station range of the in-edge reads
+bottom_x_m = 2.35                   # [E] the recess ends behind the seat headrests (crew1_1 / KSC-20240927: the grey recess runs down to the headrests, below them hidden); +-0.15
+bottom_bevel_m = 0.08               # [E] the floor ramps back to the panel surface over this height at the bottom (hidden)
+top_bevel_m = 0.06                  # [E] and at the ceiling trim (the shell meets the ceiling ring there)
 
 [tray]
 # The button tray (fidelity Task 5): ONE continuous sloped tray under all three screens (discovery10: one grey band from the left to the right module;
@@ -176,6 +197,10 @@ centre_m = [2.6514, -0.2251, 0.3209]  # [E] (o prior-dominated; lat, u are [D]) 
 normal = [-0.70711, -0.70711, 0.0]   # [D] = left screen normal = centre normal (fold 0)
 up = [0.70711, -0.70711, 0.0]        # [D] portrait, = eye up
 size_m = [0.1348, 0.2032]           # [S] Apple iPad mini (5th gen) 134.8 x 203.2 mm; model assumed from the shape in discovery1..15 [E]
+roll_deg = 1.31                     # [D] in-plane roll (right toward up, as the crew sees it): fidelity Task 5 fit of the body corners (cabin_fit/parts/console.py --as-built, discovery10), 1.31 +- 0.69 deg, data-constrained
+arm_mount_m = [0.07, 0.09, 0.005]   # [E] the mount behind the iPad (width, height, thickness): no photo sees behind it (discovery2 / 10 face-on, the iPad hides it); a plate under its upper half; +-50 %
+arm_radius_m = 0.008                # [E] the arm from the upper panel to the mount (hidden behind the iPad in every photo); +-0.004
+arm_u_m = 0.04                      # [E] the arm leaves the mount this far above the iPad centre (under its upper half, clear of the screen frame); +-0.03
 
 [[tablet]]
 id = "r"                            # [E] see l
@@ -183,6 +208,10 @@ centre_m = [2.6396, -0.2413, -0.3342] # [E] (o prior-dominated; lat, u are [D]) 
 normal = [-0.70711, -0.70711, 0.0]   # [D] = right screen normal = centre normal (fold 0)
 up = [0.70711, -0.70711, 0.0]        # [D] = eye up
 size_m = [0.1348, 0.2032]           # [S] see l
+roll_deg = 1.93                     # [D] see l: 1.93 +- 1.40 deg (discovery10 sees the right iPad's two bottom corners only)
+arm_mount_m = [0.07, 0.09, 0.005]   # [E] see l
+arm_radius_m = 0.008                # [E] see l
+arm_u_m = 0.04                      # [E] see l
 
 [[light]]
 id = "l"                            # [E] lamp panel in the top-left corner of the dark upper panel, discovery2 (white rectangle above the locker 5, outboard of it)
@@ -195,14 +224,18 @@ position_m = [2.8160, -0.3470, -0.5850]  # [E] mirror of l
 size_m = [0.10, 0.04]               # [E] see l
 
 [[locker]]
-id = "5"                            # [E] dark locker with the placard 5, outboard of the left tablet (discovery2 x 1375-1495 / y 90-215 of 2576 x 725; the right one is 6)
-centre_m = [2.6647, -0.1957, 0.5620]  # [D] on the console front plane: centre-screen centre + 0.216 up (lower edge 0.026 above the screen top) + 0.160 outboard of the left screen centre (0.402 + 0.160 = 0.562 along the row)
-size_m = [0.15, 0.165]              # [E] discovery2 120 x 125 px at 0.00132 m/px (the review: ~0.15 x 0.17)
+id = "5"                            # [D] the black locker door with the placard 5, outboard of the left iPad (discovery2 / discovery10; the right one is 6)
+centre_m = [2.6630, -0.1940, 0.5581]  # [D] on the console front plane: lat -0.5581, u 0.2135 (fidelity Task 7, cabin_fit/parts/lockers.py: the door's top-left, top-right and bottom-right corners in discovery2 and discovery10 back-projected onto o 0.012; the lower-left corner is behind a helmet rim), +-0.008; was (-0.562, 0.216)
+size_m = [0.198, 0.139]             # [D] the door 0.198 x 0.139 +- 0.008 (the placard 5 sits in its lower inner corner); was 0.15 x 0.165 [E] (the placard straddled its edge)
+latch_m = [2.6668, -0.1978, 0.4735]  # [D] the round finger latch (ring, recessed) at the door's inner edge above the placard: lat -0.4735, u 0.2189 on the front plane (same reads), +-0.008
+latch_radius_m = 0.015              # [D] discovery10: 60 px of 0.5 mm (fidelity Task 6)
 
 [[locker]]
-id = "6"                            # [E] mirror of locker 5 (discovery2, right side)
-centre_m = [2.6647, -0.1957, -0.5620]  # [E] mirror of locker 5
-size_m = [0.15, 0.165]              # [E] see 5
+id = "6"                            # [E] mirror of locker 5 (behind the pilot's helmet in every discovery frame)
+centre_m = [2.6630, -0.1940, -0.5581]  # [E] mirror of locker 5
+size_m = [0.198, 0.139]             # [E] see 5
+latch_m = [2.6668, -0.1978, -0.4735]  # [E] mirror of locker 5
+latch_radius_m = 0.015              # [E] see 5
 
 # Buttons on the left / right panels: fold 0, they lie on the flat plane at their in-plane (row, height) position (re-placed 2026-11-07 from the folded values).
 # Physical buttons, flight panel as discovery10 shows it (camera between s2 and s3). Positions: read along the screens' lower

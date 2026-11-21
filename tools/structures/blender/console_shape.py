@@ -30,23 +30,27 @@ def _weld(quads):
     return verts, faces
 
 
-def rounded_box(w, h, d, r, segments):
-    """Box of size w x h x d (along x, y, z, centred on the origin) with all edges rounded to radius r, `segments` steps per 90 deg fillet."""
+def rounded_box(w, h, d, r, segments, cuts=None):
+    """Box of size w x h x d (along x, y, z, centred on the origin) with all edges rounded to radius r, `segments` steps per 90 deg fillet.
+    cuts = (xs, ys, zs): extra vertex rows across the flat faces at these local coordinates (so a later bend, taper_ends, has vertices there)."""
     half = (w / 2.0, h / 2.0, d / 2.0)
     if r <= 0.0 or r >= min(half):
         raise ValueError(f"rounded_box: radius {r} must lie in (0, {min(half)})")
     inner = tuple(a - r for a in half)
     m = max(1, math.ceil(segments / 2))  # steps per 45 deg: each face carries its half of the fillets up to the bisector
 
-    def samples(b):
+    cuts = cuts or ((), (), ())
+
+    def samples(b, axis):
         left = [(-b, -math.tan(math.radians(45.0 * (m - k) / m))) for k in range(m + 1)]
         right = [(b, math.tan(math.radians(45.0 * k / m))) for k in range(m + 1)]
-        return left + right
+        mid = [(c, 0.0) for c in sorted(cuts[axis]) if -b + 1e-6 < c < b - 1e-6]
+        return left + mid + right
 
     quads = []
     for k in range(3):
         t1, t2 = (k + 1) % 3, (k + 2) % 3
-        l1, l2 = samples(inner[t1]), samples(inner[t2])
+        l1, l2 = samples(inner[t1], t1), samples(inner[t2], t2)
         for s in (-1.0, 1.0):
             grid = []
             for c1, g1 in l1:
@@ -90,6 +94,15 @@ def draft_sides(verts, draft_deg, w, d):
     """Lean the side faces in toward the back: the half width shrinks by depth * tan(draft) (depth from the front face at z = +d / 2)."""
     t = math.tan(math.radians(draft_deg))
     return [(x * (1.0 - (d / 2.0 - z) * t / (w / 2.0)), y, z) for x, y, z in verts]
+
+
+def taper_ends(verts, half_width_at, w):
+    """Pull the ends in: every vertex's x scales by half_width_at(y, z) / (w / 2) where that is < 1 (the end cap keeps its fillet, scaled)."""
+    out = []
+    for x, y, z in verts:
+        s = min(1.0, half_width_at(y, z) / (w / 2.0))
+        out.append((x * s, y, z))
+    return out
 
 
 def _area2(poly):

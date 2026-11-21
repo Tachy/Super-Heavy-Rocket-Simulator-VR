@@ -26,7 +26,8 @@
 #   --visor: the commander's open helmet (helmet_open_*) and the pilot's own view turned up / left / right / down (pilot_eye_*), Task 9 VR fix B
 #   --fidelity: instead of the cabin shots, one shot fid_<id> per row of config/cockpits/photo_cameras.toml (the photo's fitted camera and framing) with
 #   fid_<id>_vs (side by side) and fid_<id>_overlay (50 % blend + our edges in red); --photo=<ids> limits the rows. The left screen's feed is shown in every shot.
-#   --console_closeup: stereo pairs of the console body and its ceiling posts (fidelity Task 4): closeup_eye_l/_r, closeup_back_l/_r + *_stereo sheets
+#   --console_closeup: stereo pairs of the console body and its ceiling posts (fidelity Task 4): closeup_eye_l/_r, closeup_back_l/_r + *_stereo sheets;
+#   closeup_tray / _tray_r (Task 5), closeup_tablet (the left iPad at 0.5 m) and closeup_recess (the left wall recess beside the console end, Task 7)
 #   --tone=agx (Godot's AgX alone, no display tone step), --hunt=day (the Hunt factor against L_day, as before look fixes T5)
 extends SceneTree
 
@@ -534,7 +535,11 @@ func _define_fidelity_shots() -> void:
 ## commander's eye looking up past the screens at the posts, closeup_back_<l|r> from 1.1 m behind the console's back (hatch side, below it);
 ## composed side by side (left | right eye) into closeup_eye_stereo / closeup_back_stereo.
 const STEREO_IPD_M := 0.064
-const CLOSEUP_SHOTS := ["closeup_eye", "closeup_back", "closeup_tray", "closeup_tray_r"]
+const CLOSEUP_SHOTS := ["closeup_eye", "closeup_back", "closeup_tray", "closeup_tray_r", "closeup_tablet", "closeup_recess"]
+const TABLET_CLOSEUP_M := 0.5  ## fidelity Task 7: the left iPad from this far, on the line to the commander's eye
+## fidelity Task 7: the left recess bevel (the crew's right, -Z) beside the console end, seen from the hatch side of the cabin
+const RECESS_CLOSEUP_FROM := Vector3(2.2, 0.75, -0.1)
+const RECESS_CLOSEUP_AT := Vector3(2.95, -0.45, -0.85)
 const TRAY_CLOSEUP_M := 0.6  ## fidelity Task 5: the tray close-ups stand this far from the module, on the line to the commander's eye
 
 
@@ -550,6 +555,10 @@ func _define_console_closeup_shots(eye: Transform3D) -> void:
 	for tray: Array in [["closeup_tray", -0.53], ["closeup_tray_r", 0.53]]:  # Task 5: the outer modules (guarded blocks) at VR distance
 		var target: Vector3 = centre_screen["centre"] + right * float(tray[1]) - up * 0.2 + normal * 0.03
 		views.append([tray[0], target + (eye.origin - target).normalized() * TRAY_CLOSEUP_M, target, 40.0, eye.basis.y])
+	var tablet: Dictionary = _cockpit.config.tablets[0]
+	var tab_c: Vector3 = tablet["centre"]
+	views.append(["closeup_tablet", tab_c + (eye.origin - tab_c).normalized() * TABLET_CLOSEUP_M, tab_c, 35.0, eye.basis.y])
+	views.append(["closeup_recess", RECESS_CLOSEUP_FROM, RECESS_CLOSEUP_AT, 60.0, Vector3(1.0, 0.0, 0.0)])
 	for view: Array in views:
 		var origin: Vector3 = view[1]
 		var basis := Basis.looking_at(Vector3(view[2]) - origin, Vector3(view[4]))

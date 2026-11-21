@@ -5,7 +5,7 @@ Frame = the capsule stage body frame of gen_dragon.py / dragon_capsule.gltf (X s
 Z = az +90 = the crew's left). Silhouette only: panel lines, labels and placards come later by texture.
 
 Nodes: `cabin_shell` (inner wall of revolution with the ceiling ring, the forward tunnel and the top plate; normals into the cabin; cut at the window
-reveals and the hatch), `floor`, `hatch_frame` (white trim, the recessed hatch inner face and its reveal), `window_<i>` (funnel from the round interior
+reveals and the hatch), `cabin_recess` (the wall cells over the trapezoid recess around the console, pushed out by [recess] depth_m: Task 7), `floor`, `hatch_frame` (white trim, the recessed hatch inner face and its reveal), `window_<i>` (funnel from the round interior
 reveal to the exterior pane, bezel ring; i = exterior table row, +az then -az) with `window_glass_<i>`, `seat_shell|pad|rest_<s1..s4>` (white shell, black pads, black leg-rest rails
 + foot plate at the seat's foot_rest_m), `console_housing` (dark: front and ends of the filleted body across the three screens + the dark upper panel above it, console_shape), `console_back`
 (silver back face, the two ceiling posts with joint heads and funnel feet), `console_under` (dark grey underside and top), `console_lamps` (lamp strips under the console), `console_shelf` (the continuous sloped button tray with its lip, cabin_layout.tray_profiles), `console_lockers` (5 / 6),
@@ -13,7 +13,7 @@ reveal to the exterior pane, bezel ring; i = exterior table row, +az then -az) w
 `guard_<id>` / `guard_rim_<id>` (clear cover over a guarded key block / its red rim and hinge), `console_hit` (one flat quad per key face: the pointer's hit
 geometry, hidden in the game),
 `ceiling_ring_light` (emissive annulus), `screen_left|centre|right` (one quad, UV 0..1 over the active area,
-(0, 0) top left, +normal toward the crew), `tablet_l|r`, `button_<id>` (one node per button; the centre handle is the node `handle`), `light_<i>`
+(0, 0) top left, +normal toward the crew), `tablet_l|r` (the iPad on its mount and arm, roll built), `button_<id>` (one node per button; the centre handle is the node `handle`), `light_<i>`
 ([[light]] rows in file order), `hotas_stick`, `hotas_throttle`.
 The cabin layout helpers (apertures, node names, manifest block) live in cabin_layout.py; the wall is the exterior meridian offset along its normal.
 """
@@ -28,11 +28,12 @@ import console_shape as cs  # noqa: E402
 import vehicle_common as vc  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
-FINE_ROWS_X_M = (1.6, 3.1)  # [E] the stations the hatch (1.70-2.99) and the windows' reveals (about 1.8-2.9) cover: fine rows there
+FINE_ROWS_X_M = (1.6, 3.2)  # [E] the stations the hatch (1.70-2.99), the windows' reveals (about 1.8-2.9) and the recess bevels (2.82-3.14, Task 7) cover: fine rows there
 FINE_ROW_M, COARSE_ROW_M = 0.02, 0.06  # [E] row pitch of the wall: under the bezel width (0.06) so the cut edge hides under it
 FINE_COL_DEG, COARSE_COL_DEG = 0.75, 3.0  # [E] column pitch around the apertures (about 0.02 m at r 1.45) and elsewhere
 FINE_MARGIN_DEG = 15.0  # [E] fine columns this far past a window's centre (reveal 0.24 + bezel 0.06 at r 1.43 is 12 deg)
 HATCH_FINE_MARGIN_DEG = 8.0  # [E] fine columns this far past the hatch's half angle
+RECESS_FINE_MARGIN_DEG = 3.0  # [E] fine columns this far past the recess bevels' azimuth range (Task 7)
 CUT_MARGIN_M = 0.012  # [E] cells whose centre lies within the aperture + this are removed: the remainder never pokes into the opening
 RING_POINTS = 32  # [E] points around a window ring
 HATCH_POINTS = 64  # [E] points around the hatch outline
@@ -47,7 +48,9 @@ GUARD_RADIUS_M = 0.002  # [E] the clear cover's edge fillet
 GUARD_RIM_M = (0.003, 0.002)  # [E] red rim bar width / height on the cover's top perimeter (jsc2022e068617: a thin red outline)
 GUARD_HINGE_RADIUS_M = 0.003  # [E] hinge barrel along the hinge edge
 TABLET_THICKNESS_M = 0.008  # [E] iPad mini 6.1 mm [S] plus the case
-TABLET_POST_M = 0.012  # [E] mount post radius
+TABLET_CORNER_M = 0.010  # [E] iPad mini body corner radius (Apple product photos: ~7 % of the 134.8 mm width)
+TAPER_DEPTHS_M = (0.045, 0.07, 0.10, 0.13, 0.16)  # [E] vertex rows of the body behind the screen plane (the end taper's depth samples: 3 cm steps)
+TAPER_U_STEP_M = 0.04  # [E] vertex rows up the lower half (the taper reaches the full width at u ~ -0.04)
 FILLET_SEGMENTS = 4  # [E] steps per 90 deg fillet of the console body (22.5 deg: smooth highlight at 0.6 m; 4 cm radius -> 1.6 cm facets)
 POST_SIDES = 20  # [E] sides of the ceiling posts (the 3.9 cm collar: 1.2 cm facets)
 SEAT_BACK_HALF_M = (0.05, 0.40)  # [E] seat back half thickness / half height (a 0.8 m back, crew1_1 / Wikimedia)
@@ -93,9 +96,14 @@ def wall_step(x):
     return FINE_ROW_M if FINE_ROWS_X_M[0] <= x <= FINE_ROWS_X_M[1] else COARSE_ROW_M
 
 
-def column_angles(cabin):
-    """Azimuths (deg, 0..360, ascending, without the closing 360): fine around the windows and the hatch, coarse elsewhere."""
+def column_angles(cabin, rec=None):
+    """Azimuths (deg, 0..360, ascending, without the closing 360): fine around the windows, the hatch and the recess bevels, coarse elsewhere."""
     spans = []
+    if rec is not None:
+        xs = (rec["out_x_m"][0], rec["out_x_m"][1], rec["in_x_m"][0], rec["in_x_m"][1])
+        lo = min(cl.recess_edge_az(rec, "out", x) for x in xs) - RECESS_FINE_MARGIN_DEG
+        hi = max(cl.recess_edge_az(rec, "in", x) for x in xs) + RECESS_FINE_MARGIN_DEG
+        spans += [(lo, hi), (-hi, -lo)]
     h_az, _, _, h_haz = cabin["hatch"]
     spans.append((h_az - h_haz - HATCH_FINE_MARGIN_DEG, h_az + h_haz + HATCH_FINE_MARGIN_DEG))
     for w in cl.window_apertures(cabin):
@@ -129,8 +137,11 @@ class Cut:
         return (abs(x_o - h_x) / (hx + CUT_MARGIN_M)) ** cl.HATCH_POWER + (abs(daz) / (h_haz + math.degrees(CUT_MARGIN_M / r))) ** cl.HATCH_POWER < 1.0
 
 
-def lathe(mesh, run, hint, angles, group, cut=None):
-    """Surface of revolution of the polyline `run` [(x, r)...] over the column angles; `hint`: "in" (toward the axis) or an axial vector."""
+def lathe(mesh, run, hint, angles, group, cut=None, offset=None, recess=None, max_offset=1.0):
+    """Surface of revolution of the polyline `run` [(x, r)...] over the column angles; `hint`: "in" (toward the axis) or an axial vector.
+    offset(x, az_deg) -> m pushes a vertex out radially (the wall recess); faces with a pushed vertex go to `recess` (another VMesh) with
+    their UV v = 1 - offset / max_offset (glTF v = the recess fraction: the recess material tints by it, so the panel edge's colour boundary
+    follows the bevel smoothly instead of the face grid)."""
     m = len(angles)
     for k in range(len(run) - 1):
         (x0, r0), (x1, r1) = run[k], run[k + 1]
@@ -139,12 +150,22 @@ def lathe(mesh, run, hint, angles, group, cut=None):
             pts = [vc.pt(x0, a0, r0), vc.pt(x0, a1, r0), vc.pt(x1, a1, r1), vc.pt(x1, a0, r1)]
             if cut is not None and cut(sum(pts, V()) / 4.0):
                 continue
+            target = mesh
             uvs = [(a0 * 1.5, x0), (a1 * 1.5, x0), (a1 * 1.5, x1), (a0 * 1.5, x1)]
+            if offset is not None:
+                offs = [offset(x, math.degrees(a)) for x, a in ((x0, a0), (x0, a1), (x1, a1), (x1, a0))]
+                if max(offs) > 1e-9:
+                    pts = [vc.pt(x, a, r + o) for (x, a, r), o in zip(((x0, a0, r0), (x0, a1, r0), (x1, a1, r1), (x1, a0, r1)), offs)]
+                    uvs = [(u, 1.0 - o / max_offset) for (u, _), o in zip(uvs, offs)]
+                    target = recess
             out = -vc.radial_dir(0.5 * (a0 + a1)) if hint == "in" else V(hint)
-            mesh.face(pts, uvs, out, group)
+            target.face(pts, uvs, out, group)
 
 
-def build_shell(cabin, profile, angles):
+def build_shell(cockpit, profile, angles):
+    """(shell, floor, recess): the inner wall of revolution; the wall cells over the [recess] (fidelity Task 7) pushed out by
+    cabin_layout.recess_offset go to `recess` (they share the shell's smooth group and seam vertices: shell + recess are closed)."""
+    cabin = cockpit["cabin"]
     prof = cabin["profile_m"]
     cut = Cut(cabin, profile)
     # profile_m: floor centre -> floor rim -> side wall up to the ceiling ring -> ceiling -> tunnel wall -> top plate
@@ -159,13 +180,14 @@ def build_shell(cabin, profile, angles):
     ceiling = refine(prof[i_ceiling], prof[i_ceiling + 1], 0.1) + [prof[i_ceiling + 1]]
     tunnel = refine(prof[i_ceiling + 1], prof[i_ceiling + 2], 0.1) + [prof[i_ceiling + 2]]
     top = refine(prof[i_ceiling + 2], prof[i_ceiling + 3], 0.1) + [prof[i_ceiling + 3]]
-    shell, floor = vc.VMesh(), vc.VMesh()
+    shell, floor, recess = vc.VMesh(), vc.VMesh(), vc.VMesh()
     lathe(floor, floor_run, (1.0, 0.0, 0.0), angles, ("floor", 0))
-    lathe(shell, wall, "in", angles, ("shell", 0), cut)
+    lathe(shell, wall, "in", angles, ("shell", 0), cut, offset=lambda x, az: cl.recess_offset(cockpit, x, az), recess=recess,
+          max_offset=cockpit["recess"]["depth_m"])
     lathe(shell, ceiling, (-1.0, 0.0, 0.0), angles, ("shell", 1))
     lathe(shell, tunnel, "in", angles, ("shell", 2))
     lathe(shell, top, (-1.0, 0.0, 0.0), angles, ("shell", 3))
-    return shell, floor
+    return shell, floor, recess
 
 
 # ---------- windows and hatch ----------
@@ -260,6 +282,14 @@ def build_hatch(cabin, profile):
 
 
 # ---------- seats, console, props ----------
+
+def frange(a, b, step):
+    out, x = [], a + step
+    while x < b - 1e-9:
+        out.append(x)
+        x += step
+    return out
+
 
 def screens_by_id(cockpit):
     return {s["id"]: s for s in cockpit["screen"]}
@@ -372,9 +402,14 @@ def build_console(cockpit):
 
     # the body: front face SCREEN_PROUD_M behind the screens, back face at hood_depth_m
     h = u1 - u0
-    verts, faces = cs.rounded_box(2.0 * half_w, h, depth, r, FILLET_SEGMENTS)
-    verts = cs.draft_sides(cs.drop_underside(verts, con["underside_profile"], h, depth), con["side_draft_deg"], 2.0 * half_w, depth)
     uc, oc = 0.5 * (u0 + u1), -SCREEN_PROUD_M - 0.5 * depth
+    # the lower ends taper in behind the front zone (fidelity Task 7, [console] end_taper): vertex rows across the flat faces so the
+    # taper plane is followed (TAPER_DEPTHS_M behind the screen plane, TAPER_U_STEP_M up the lower half)
+    z_cuts = [-d - oc for d in TAPER_DEPTHS_M]  # local z of the body at depth d behind the screen plane (o = oc + z)
+    y_cuts = [u - uc for u in frange(u0, 0.0, TAPER_U_STEP_M)]
+    verts, faces = cs.rounded_box(2.0 * half_w, h, depth, r, FILLET_SEGMENTS, cuts=((), y_cuts, z_cuts))
+    verts = cs.draft_sides(cs.drop_underside(verts, con["underside_profile"], h, depth), con["side_draft_deg"], 2.0 * half_w, depth)
+    verts = cs.taper_ends(verts, lambda y, z: cl.end_half_width(cockpit, uc + y, -(oc + z)), 2.0 * half_w)
     add_shape(None, verts, faces, lambda p: cen.at(p[0], uc + p[1], oc + p[2]), body_part, flat_or_fillet("console_body"))
     # the dark upper panel (it closes the view up toward the ceiling; its lower fillet hides in the body)
     t = con["upper_depth_m"]
@@ -541,26 +576,37 @@ def screen_mesh(s):
     return mesh
 
 
-def slab(mesh, centre, n, up, right, w, h, t):
-    """Thin plate: front face (toward +n) has UV 0..1 over w x h, centred on `centre`."""
-    c = V(centre)
-    corners = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
-    front = [c + n * (t / 2) + right * (sa * w / 2) + up * (sb * h / 2) for sa, sb in corners]
-    back = [c - n * (t / 2) + right * (sa * w / 2) + up * (sb * h / 2) for sa, sb in corners]
-    mesh.face(front, [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], n)
-    mesh.face(back, [(0, 0), (1, 0), (1, 1), (0, 1)], -n)
-    for i in range(4):
-        j = (i + 1) % 4
-        mesh.face([front[i], front[j], back[j], back[i]], [(0, 0), (1, 0), (1, 1), (0, 1)], (front[i] + front[j]) / 2.0 - c)
-
-
-def build_tablet(t):
-    n, up = V(t["normal"]), V(t["up"])
-    right = V(cl.screen_right(t))
-    mesh = vc.VMesh()
-    slab(mesh, t["centre_m"], n, up, right, t["size_m"][0], t["size_m"][1], TABLET_THICKNESS_M)
+def build_tablet(t, cen, panel_o):
+    """An iPad mini on its arm (fidelity Task 7): the body a rounded slab (TABLET_CORNER_M) with its in-plane roll (cl.tablet_axes), the front
+    face UV-mapped over the tablet maps' face region (cabin_textures: bezel, the lit placeholder screen, home button), back and sides on the
+    aluminium swatch; behind it the mount plate (arm_mount_m) and the arm (arm_radius_m) straight back to the upper panel's front at
+    panel_o (along the console normal from the screen plane), on the dark arm swatch."""
+    n, up, right = (V(a) for a in cl.tablet_axes(t))
     c = V(t["centre_m"])
-    vc.tube(mesh, c - n * (TABLET_THICKNESS_M / 2), c - n * 0.06, TABLET_POST_M, SIDES, ("tablet_post", t["id"]), cap0=False)
+    w, h = t["size_m"]
+    mesh = vc.VMesh()
+    half_t = TABLET_THICKNESS_M / 2.0
+    outline = cs.loop(cs.rounded_rect(0.0, 0.0, w / 2.0, h / 2.0, TABLET_CORNER_M, CORNER_SEGMENTS))
+    at = lambda x, y, z: c + right * x + up * y + n * z
+    fu = cl.TABLET_FACE_U
+    mesh.face([at(x, y, half_t) for x, y in outline], [(fu * (x / w + 0.5), y / h + 0.5) for x, y in outline], n)
+    back_uv = cl.TABLET_BACK_UV
+    mesh.face([at(x, y, -half_t) for x, y in outline[::-1]], [back_uv] * len(outline), -n)
+    for i in range(len(outline)):
+        (xa, ya), (xb, yb) = outline[i], outline[(i + 1) % len(outline)]
+        quad = [at(xa, ya, half_t), at(xb, yb, half_t), at(xb, yb, -half_t), at(xa, ya, -half_t)]
+        mesh.face(quad, [back_uv] * 4, at(0.5 * (xa + xb), 0.5 * (ya + yb), 0.0) - c, ("tablet_rim", t["id"]))
+    # the mount and the arm (hidden behind the iPad in every photo: [E] sizes)
+    mw, mh, mt = t["arm_mount_m"]
+    first = len(mesh.bm.faces)
+    vc.box(mesh, at(0.0, t["arm_u_m"], -half_t - mt / 2.0), n, up, right, (mt / 2.0, mh / 2.0, mw / 2.0))
+    foot = at(0.0, t["arm_u_m"], -half_t - mt)
+    to_panel = (foot - cen.o).dot(cen.n) - panel_o + KEY_EMBED_M  # from the mount's back along -normal into the panel front
+    vc.tube(mesh, foot, foot - cen.n * to_panel, t["arm_radius_m"], SIDES, ("tablet_arm", t["id"]))
+    mesh.bm.faces.ensure_lookup_table()
+    for k in range(first, len(mesh.bm.faces)):  # mount and arm on the dark arm swatch
+        for loop in mesh.bm.faces[k].loops:
+            loop[mesh.uv].uv = cl.TABLET_ARM_UV
     return mesh
 
 
@@ -599,8 +645,8 @@ def main():
     vc.common.clear_scene()
     root = vc.empty("dragon_cabin")
     parts = {}
-    angles = column_angles(cabin)
-    parts["cabin_shell"], parts["floor"] = build_shell(cabin, profile, angles)
+    angles = column_angles(cabin, cockpit["recess"])
+    parts["cabin_shell"], parts["floor"], parts["cabin_recess"] = build_shell(cockpit, profile, angles)
     parts["hatch_frame"] = build_hatch(cabin, profile)
     for ap in cl.window_apertures(cabin):
         parts[f"window_{ap['index']}"], parts[f"window_glass_{ap['index']}"] = build_window(cabin, profile, ap)
@@ -619,7 +665,7 @@ def main():
     for s in cockpit["screen"]:
         parts[f"screen_{s['id']}"] = screen_mesh(s)
     for t in cockpit["tablet"]:
-        parts[f"tablet_{t['id']}"] = build_tablet(t)
+        parts[f"tablet_{t['id']}"] = build_tablet(t, cen, -SCREEN_PROUD_M)
     for i, light in enumerate(cockpit["light"]):
         parts[f"light_{i}"] = build_light(light, Panel(scr["centre"]))
     for b in cockpit["button"]:

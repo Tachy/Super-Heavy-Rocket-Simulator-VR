@@ -118,3 +118,11 @@ armrests, palms down (it read as a shrug in the hatch shots); hands were boxes o
   across the whole lip, `console_back` 0.30 sRGB silver (metallic 0.25) with the dark vent band by shader (`CONSOLE_VENT_UP_M` -0.11..+0.07 from the centre screen centre,
   +-0.58 m; it covered the silver), the posts the same silver, `console_under` 0.10, `console_lockers` 0.02. Console UVs were the local planar (x, y) in metres.
 - Key labels: the text block was centred by the font box ("HG" x 1.15 line height), which put the ink 0.7-1.1 mm above the key centre.
+
+## Console ends, lockers and tablets before fidelity Task 7 (2026-11-21)
+- Console body: square ends at the full 1.40 m everywhere (`width_m` [E] "lower bound"); in crew1_1 the render's ends were 16-47 px inside the photo contour near
+  the top and 30-49 px outside below the lip. No wall recess: the shell was one white surface of revolution (cabin 64,368 triangles).
+- `[[locker]]` 5 / 6: centre (+-0.562 along the row, 0.216 up), 0.15 x 0.165 [E] (discovery2 120 x 125 px at 0.00132 m/px); the latch was a texture constant
+  (`cabin_textures.LATCHES` (+-0.4845, 0.217)). The ends were silver behind o -0.12 (`END_SILVER_O`).
+- `[[tablet]]`: no roll (fit 1.3 / 1.9 deg not built), a plain 8 mm slab with a 12 mm post 6 cm straight back, dark flat material (linear 0.03, rendered as black
+  slabs in discovery2).
