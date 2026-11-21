@@ -41,3 +41,23 @@ px = [3532.0, 1205.0]
 [[edge]]
 label = "front_bottom"    # mid-ramp of the dark -> light step under the button modules (column profiles at u 700 / 1100 / 1700 / 2300 / 3000)
 px = [[700.0, 1615.0], [1100.0, 1642.0], [1700.0, 1642.0], [2300.0, 1628.0], [3000.0, 1593.0]]
+
+# Task 5: the iPad mini bodies (white case outline) on 1.2x tiles with a 25 px grid; the right tablet's top runs out of the frame (bottom corners only).
+[[point]]
+label = "tab_l_tl"
+px = [732.0, 98.0]
+[[point]]
+label = "tab_l_tr"
+px = [1096.0, 29.0]
+[[point]]
+label = "tab_l_br"
+px = [1179.0, 658.0]
+[[point]]
+label = "tab_l_bl"
+px = [837.0, 696.0]
+[[point]]
+label = "tab_r_bl"
+px = [2882.0, 608.0]
+[[point]]
+label = "tab_r_br"
+px = [3246.0, 617.0]

@@ -309,29 +309,132 @@ def _extent(node, axis):
     return min(vals), max(vals)
 
 
-def test_screen_gap_is_one_to_two_centimetres(spec):
-    """Bezels nearly touch (discovery2): the gap between neighbouring active areas follows console.screen_gap_m = 1-2 cm."""
+# [S] fidelity Task 5 measurement (cabin_fit/parts/console.py --as-built with the iPad mini corners, docs/subsystems/cockpit.md "Screens and tray"):
+# glass 0.400 +- 0.013 x 0.227 +- 0.008 m, pitch 0.449 +- 0.015 m; active area = glass - 2 bezel (0.004 +- 0.003): diagonal 0.449 +- 0.014 m
+MEASURED_ACTIVE_DIAGONAL_M, ACTIVE_DIAGONAL_SIGMA_M = 0.449, 0.014
+MEASURED_SCREEN_PITCH_M, SCREEN_PITCH_SIGMA_M = 0.449, 0.015
+MEASURED_GLASS_M = (0.400, 0.227)
+
+
+def test_screen_active_area_matches_the_measured_diagonal(spec):
+    """Each screen's active area has the measured diagonal (+-sigma), the glass = active + 2 bezel_m is the fitted glass outline, the outer
+    screens sit one measured pitch from the centre one (screen_gap_m = pitch - active width); corner radius and recess are set."""
     c = spec["cockpit"]
-    gap = c["console"]["screen_gap_m"]
-    assert 0.01 <= gap <= 0.02 + 1e-9
     screens = {s["id"]: s for s in c["screen"]}
+    for sid, s in screens.items():
+        w, h = s["size_m"]
+        assert math.hypot(w, h) == pytest.approx(MEASURED_ACTIVE_DIAGONAL_M, abs=ACTIVE_DIAGONAL_SIGMA_M), sid
+        assert w + 2 * s["bezel_m"] == pytest.approx(MEASURED_GLASS_M[0], abs=0.002) and h + 2 * s["bezel_m"] == pytest.approx(MEASURED_GLASS_M[1], abs=0.002), sid
+        assert 0.0 < s["corner_radius_m"] < min(w, h) / 4 and 0.0 < s["recess_m"] < 0.02, sid
     for sid in ("left", "right"):
         lat = abs(cl.lateral(screens["centre"], screens[sid]["centre_m"]))
-        assert lat - screens["centre"]["size_m"][0] == pytest.approx(gap, abs=1e-4), sid
+        assert lat == pytest.approx(MEASURED_SCREEN_PITCH_M, abs=SCREEN_PITCH_SIGMA_M), sid
+        assert lat - screens["centre"]["size_m"][0] == pytest.approx(c["console"]["screen_gap_m"], abs=1e-4), sid
 
 
-def test_shelf_is_a_ten_centimetre_row_of_separate_modules(spec, nodes):
+def test_tray_is_one_continuous_sloped_row_with_a_lip(spec, nodes):
+    """Task 5 (replaces the Task 2 rule "a 10 cm row of separate modules"): one tray under all keys, shelf_height_m tall, its key face leaning out
+    by slope_deg, the lip proud at the bottom."""
     c = spec["cockpit"]
-    modules = cl.shelf_modules(c)
-    assert len(modules) >= 6  # clusters A, B + C (they touch), handle, right of the handle, covered panel, right cluster
-    for (a0, a1), (b0, b1) in zip(modules, modules[1:]):
-        assert b0 - a1 >= 0.003, "modules need a dark gap between them"
     centre = next(s for s in c["screen"] if s["id"] == "centre")
+    right = cl.screen_right(centre)
+    lo, hi = _extent(nodes["console_shelf"], right)
+    keys = [cl.lateral(centre, b["centre_m"]) for b in c["button"]]
+    assert lo < min(keys) - 0.01 and hi > max(keys) + 0.01
+    assert hi - lo == pytest.approx(2 * c["tray"]["half_length_m"], abs=1e-3)
+    up_lo, up_hi = _extent(nodes["console_shelf"], centre["up"])
+    assert up_hi - up_lo == pytest.approx(c["console"]["shelf_height_m"], abs=0.003)
+    # one connected piece: the body is one closed prism (+ the lip strip): two vertex islands at most
+    pos, idx = nodes["console_shelf"]["pos"], nodes["console_shelf"]["idx"]
+    parent = list(range(len(pos)))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+    key = {}
+    for i, p in enumerate(pos):
+        k = tuple(round(x * WELD) for x in p)
+        if k in key:
+            parent[find(i)] = find(key[k])
+        key[k] = i
+    for k in range(0, len(idx), 3):
+        parent[find(idx[k + 1])] = find(idx[k])
+        parent[find(idx[k + 2])] = find(idx[k])
+    assert len({find(i) for i in range(len(pos))}) <= 2
+    rows = cl.tray_rows(c)
+    slope = (cl.tray_face_o(c, rows["face_bot"]) - cl.tray_face_o(c, rows["face_top"])) / (rows["face_top"] - rows["face_bot"])
+    assert math.degrees(math.atan(slope)) == pytest.approx(c["tray"]["slope_deg"], abs=1e-6)
+    n = centre["normal"]
+    plane = sum(centre["centre_m"][i] * n[i] for i in range(3))
+    front = max(sum(p[i] * n[i] for i in range(3)) for p in pos) - plane
+    assert front == pytest.approx(cl.tray_face_o(c, rows["bottom"]) + c["tray"]["lip_height_m"] * math.cos(math.radians(c["tray"]["slope_deg"])), abs=0.002)
+
+
+HIT_TOL_M = 1e-3  # [E] the hit face's centre / size match the key's centre_m / size_m within 1 mm
+
+
+def test_every_button_has_a_hit_face_on_the_tray(spec, nodes):
+    """console_hit carries one flat quad per key (and the handle) at its face (centre_m, size_m), and behind every key's face the tray (or the
+    handle's housing) lies within the key height: the pointer hits a face that sits on the tray."""
+    c = spec["cockpit"]
+    hit = nodes["console_hit"]
+    pos, idx = hit["pos"], hit["idx"]
+    faces = cl.hit_faces(c)
+    assert len(idx) == 6 * len(faces)  # two triangles per key
+    tray_pos, tray_idx = [], []
+    for name in ("console_shelf", "console_housing"):
+        tray_idx += [len(tray_pos) + i for i in nodes[name]["idx"]]
+        tray_pos += nodes[name]["pos"]
     for b in c["button"]:
-        lat = cl.lateral(centre, b["centre_m"])
-        assert any(m0 <= lat - b["size_m"][0] / 2.0 and lat + b["size_m"][0] / 2.0 <= m1 for m0, m1 in modules), b["id"]
-    lo, hi = _extent(nodes["console_shelf"], centre["up"])
-    assert hi - lo == pytest.approx(c["console"]["shelf_height_m"], abs=0.004) and 0.09 <= hi - lo <= 0.11
+        corners = faces[b["id"]]
+        cc = [sum(p[i] for p in corners) / 4.0 for i in range(3)]
+        assert math.dist(cc, b["centre_m"]) < HIT_TOL_M, b["id"]
+        assert all(min(math.dist(corner, p) for p in pos) < HIT_TOL_M for corner in corners), f"no hit quad at {b['id']}"
+        assert math.dist(corners[0], corners[1]) == pytest.approx(b["size_m"][0], abs=HIT_TOL_M)
+        assert math.dist(corners[1], corners[2]) == pytest.approx(b["size_m"][1], abs=HIT_TOL_M)
+        if b["kind"] == "handle":
+            continue
+        e1 = [corners[1][i] - corners[0][i] for i in range(3)]
+        e2 = [corners[3][i] - corners[0][i] for i in range(3)]
+        nrm = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]
+        k = math.sqrt(sum(x * x for x in nrm))
+        nrm = [x / k for x in nrm]
+        assert sum(nrm[i] * c["screen"][0]["normal"][i] for i in range(3)) > 0.9, b["id"]  # faces the crew
+        origin = [cc[i] + 0.5 * nrm[i] for i in range(3)]
+        hits = [t for q in range(0, len(tray_idx), 3) if (t := _ray_triangle(origin, [-x for x in nrm], tray_pos[tray_idx[q]], tray_pos[tray_idx[q + 1]], tray_pos[tray_idx[q + 2]])) is not None]
+        assert hits, b["id"]
+        assert min(hits) - 0.5 == pytest.approx(cl.key_height(b), abs=1e-3), f"{b['id']}: the tray lies {(min(hits) - 0.5) * 1000:.1f} mm behind the face"
+
+
+def test_guarded_block_lies_under_its_cover(spec, nodes):
+    """Each [[guard]]'s clear cover spans its 2 x 3 keys (and only those) and stands over their faces; its red rim follows it."""
+    c = spec["cockpit"]
+    centre = next(s for s in c["screen"] if s["id"] == "centre")
+    right, up, n = cl.screen_right(centre), centre["up"], centre["normal"]
+    rel = lambda p: [sum((p[i] - centre["centre_m"][i]) * a[i] for i in range(3)) for a in (right, up, n)]  # noqa: E731
+    assert {g["id"] for g in c["guard"]} == {"l", "r"}
+    faces = cl.hit_faces(c)
+    for g in c["guard"]:
+        cpos, cidx = nodes[f"guard_{g['id']}"]["pos"], nodes[f"guard_{g['id']}"]["idx"]
+        assert len(g["buttons"]) == 6
+        cover = [rel(p) for p in nodes[f"guard_{g['id']}"]["pos"]]
+        assert nodes[f"guard_rim_{g['id']}"]["idx"]
+        lat = (min(p[0] for p in cover), max(p[0] for p in cover))
+        ups = (min(p[1] for p in cover), max(p[1] for p in cover))
+        for b in c["button"]:
+            r = rel(b["centre_m"])
+            inside = lat[0] < r[0] < lat[1] and ups[0] < r[1] < ups[1]
+            assert inside == (b["id"] in g["buttons"]) == (b.get("guard") == g["id"]), (g["id"], b["id"])
+            if inside:
+                assert lat[0] < r[0] - b["size_m"][0] / 2 and r[0] + b["size_m"][0] / 2 < lat[1]
+                q = faces[b["id"]]  # the cover's top lies over the key face along the face normal
+                e1, e2 = [q[1][i] - q[0][i] for i in range(3)], [q[3][i] - q[0][i] for i in range(3)]
+                nrm = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]
+                k = math.sqrt(sum(x * x for x in nrm))
+                hits = [t for j in range(0, len(cidx), 3) if (t := _ray_triangle(b["centre_m"], [x / k for x in nrm], cpos[cidx[j]], cpos[cidx[j + 1]], cpos[cidx[j + 2]])) is not None]
+                assert hits and max(hits) > 0.002, f"cover not over {b['id']}"
 
 
 def test_shelf_is_proud_of_the_screens_and_the_dark_panel_runs_up_to_the_ceiling(spec, nodes):
@@ -553,7 +656,9 @@ def test_generated_console_front_is_square_to_tilt_deg(spec, nodes):
     frame = cl.console_frame(c)
     n, up, right = frame["normal"], frame["up"], frame["right"]
     pts = nodes["console_housing"]["pos"]
-    on = [p for p in pts if sum(a * b for a, b in zip(p, n)) >= max(sum(a * b for a, b in zip(q, n)) for q in pts) - 1e-3]
+    # the body's front face lies SCREEN_PROUD (2 mm) behind the screen plane (Task 5: the screens' face frame stands recess_m in front of it)
+    front = sum(a * b for a, b in zip(frame["origin"], n)) - 0.002
+    on = [p for p in pts if abs(sum(a * b for a, b in zip(p, n)) - front) < 1e-3]
     span_up = [sum(a * b for a, b in zip(p, up)) for p in on]
     span_lat = [sum(a * b for a, b in zip(p, right)) for p in on]
     assert max(span_up) - min(span_up) > 0.3

@@ -22,7 +22,8 @@ import numpy as np
 from ..fit import PartModel
 
 CEILING_X_M = 3.48  # [E] = crew_dragon.toml [cabin] ceiling_x_m (round 4): the posts end on this plane
-SCREEN_HALF_M = (0.198, 0.1145)  # [D] active area 0.382 x 0.215 (crew_dragon.toml [[screen]]) + 0.007 bezel: the glass outline the photos show
+SCREEN_HALF_M = (0.198, 0.1145)  # [D] prior of the glass outline (the round-4 active area 0.382 x 0.215 + 0.007 bezel); Task 5 fits both halves (0.2000 x 0.1136)
+TABLET_M = (0.1348, 0.2032)  # [S] Apple iPad mini 7.9in body (cabin_fit/anchors.py KNOWN ipad_mini_short_m / ipad_mini_long_m, sigma 2 mm)
 PHOTOS = ("crew1_1", "discovery2", "discovery10")
 # [E] round 4 pose uncertainty (photo_cameras.toml rows); discovery10 = another frame of discovery2's fixed GoPro mount, same prior
 CAMERA_SIGMA = {"crew1_1": (0.05, 0.02, 0.02), "discovery2": (0.05, 0.035, 0.03), "discovery10": (0.05, 0.035, 0.03)}
@@ -34,7 +35,12 @@ class Console(PartModel):
             "cx": (2.512, 0.06), "cy": (-0.043, 0.06), "tilt_deg": (45.0, 4.0),
             "width_m": (1.32, 0.05), "side_draft_deg": (10.0, 15.0), "hood_depth_m": (0.15, 0.10),
             "u_top": (0.265, 0.05), "u_bot": (-0.225, 0.03), "back_drop_m": (0.0, 0.15),
-            "screen_half_w_m": (SCREEN_HALF_M[0], 0.03), "screen_pitch_m": (0.402, 0.04),
+            "screen_half_w_m": (SCREEN_HALF_M[0], 0.03), "screen_pitch_m": (0.402, 0.04), "screen_half_h_m": (SCREEN_HALF_M[1], 0.03),
+            # Task 5: the iPad minis on their mounts above the outer screens (scale anchor): body size [S] (cabin_fit.anchors ipad_mini_*), pose free
+            # in the console frame (lat, u, o = proud of the screen plane, roll in the plane); priors = crew_dragon.toml [[tablet]] (round 4) +- wide
+            "tab_w_m": (TABLET_M[0], 0.002), "tab_h_m": (TABLET_M[1], 0.002),
+            "tab_l_lat": (-0.367, 0.08), "tab_l_u": (0.228, 0.06), "tab_l_o": (0.06, 0.03), "tab_l_roll_deg": (0.0, 10.0),
+            "tab_r_lat": (0.367, 0.08), "tab_r_u": (0.228, 0.06), "tab_r_o": (0.06, 0.03), "tab_r_roll_deg": (0.0, 10.0),
             "post_z_m": (0.55, 0.08), "post_base_o_m": (0.10, 0.05),             # the top on the ceiling: radius prior = inside the ring with the collar clear of the wall (crew1_1: the collars sit ~15-20 px
             # above the dish's lower boundary at the wall; ceiling outer radius 0.997 minus a ~0.04 collar), angle prior wide
             "post_top_r_m": (0.95, 0.03), "post_top_a_deg": (35.0, 20.0),
@@ -56,7 +62,13 @@ class Console(PartModel):
             return c + right * lat + up * u + n * o
 
         out = {}
-        hw, hh = p["screen_half_w_m"], SCREEN_HALF_M[1]
+        hw, hh = p["screen_half_w_m"], p["screen_half_h_m"]
+        for side in ("l", "r"):  # tablet body corners (tl = the crew's left, top)
+            rl = math.radians(p[f"tab_{side}_roll_deg"])
+            c_r, s_r = math.cos(rl), math.sin(rl)
+            for name, (a, b) in (("tl", (-1, 1)), ("tr", (1, 1)), ("br", (1, -1)), ("bl", (-1, -1))):
+                x, y = 0.5 * a * p["tab_w_m"], 0.5 * b * p["tab_h_m"]
+                out[f"tab_{side}_{name}"] = P(p[f"tab_{side}_lat"] + c_r * x - s_r * y, p[f"tab_{side}_u"] + s_r * x + c_r * y, p[f"tab_{side}_o"])
         for sid, k in (("left", -1.0), ("centre", 0.0), ("right", 1.0)):
             lat = k * p["screen_pitch_m"]  # image tl = crew's left (-right), top (+up)
             out[f"scr_{sid}_tl"] = P(lat - hw, hh, 0.0)

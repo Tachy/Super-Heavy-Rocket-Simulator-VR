@@ -77,20 +77,89 @@ def lateral(screen, point):
     return dot3([p - c for p, c in zip(point, screen["centre_m"])], right)
 
 
-def shelf_modules(cockpit):
-    """The button shelf's light-grey modules as (lat0, lat1) in the centre screen's row: buttons (and the handle) whose edges lie closer than
-    console.module_split_m share a module; each module reaches module_margin_m past its outermost edges. Sorted by lat."""
-    con = cockpit["console"]
-    centre = next(s for s in cockpit["screen"] if s["id"] == "centre")
-    spans = sorted((lateral(centre, b["centre_m"]) - b["size_m"][0] / 2.0, lateral(centre, b["centre_m"]) + b["size_m"][0] / 2.0) for b in cockpit["button"])
-    groups = [list(spans[0])]
-    for lo, hi in spans[1:]:
-        if lo - groups[-1][1] > con["module_split_m"]:
-            groups.append([lo, hi])
+KEY_HEIGHT_M = 0.008  # [E] key faces stand 8 mm proud of the tray face (jsc2022e068617: thick keys; >= 5 mm everywhere on the 15 deg face)
+COVER_HEIGHT_M = 0.012  # [E] the covered panel (r_cover) stands 12 mm proud
+GUARD_CLEAR_M = 0.004  # [E] the clear guard's top lies this far over the key faces it covers
+GUARD_MARGIN_M = 0.004  # [E] the guard reaches this far past its outermost keys
+TRAY_BACK_M = 0.002  # [E] the tray's back face lies in the housing front (SCREEN_PROUD_M behind the screens)
+
+
+def tray_rows(cockpit):
+    """The tray's heights along the centre screen's up (from its centre): top at the housing, key face top / bottom / middle, lip bottom."""
+    con, tr = cockpit["console"], cockpit["tray"]
+    cen = next(s for s in cockpit["screen"] if s["id"] == "centre")
+    top = -cen["size_m"][1] / 2.0 - con["shelf_top_gap_m"]
+    bottom = top - con["shelf_height_m"]
+    face_top, face_bot = top - tr["deck_drop_m"], bottom + tr["lip_width_m"]
+    return {"top": top, "face_top": face_top, "face_bot": face_bot, "mid": 0.5 * (face_top + face_bot), "bottom": bottom}
+
+
+def tray_face_o(cockpit, u):
+    """The key face's distance in front of the screen plane at height u: depth_m at the face's middle, leaning out toward its bottom by slope_deg."""
+    tr = cockpit["tray"]
+    return tr["depth_m"] - (u - tray_rows(cockpit)["mid"]) * math.tan(math.radians(tr["slope_deg"]))
+
+
+def tray_axes(cockpit):
+    """(normal, up) of the key face in the centre screen's (up, o) plane: the face normal is turned up by slope_deg (toward the crew's eyes)."""
+    s = math.radians(cockpit["tray"]["slope_deg"])
+    return (math.sin(s), math.cos(s)), (math.cos(s), -math.sin(s))
+
+
+def tray_profiles(cockpit):
+    """(body, lip): convex (u, o) profiles of the tray (extruded along the row): the body = deck from the housing face to the key face, the key face
+    down to the bottom, back to the housing; the lip = a strip on the face's bottom lip_width_m, lip_height_m proud (it overlaps the body by 1 mm)."""
+    r, tr = tray_rows(cockpit), cockpit["tray"]
+    o = lambda u: tray_face_o(cockpit, u)  # noqa: E731
+    n = tray_axes(cockpit)[0]
+    body = [(r["top"], -TRAY_BACK_M), (r["face_top"], o(r["face_top"])), (r["bottom"], o(r["bottom"])), (r["bottom"], -TRAY_BACK_M)]
+    h = tr["lip_height_m"]
+    lip = [(r["face_bot"] - n[0] * 0.001, o(r["face_bot"]) - n[1] * 0.001), (r["face_bot"] + n[0] * h, o(r["face_bot"]) + n[1] * h),
+           (r["bottom"] + n[0] * h, o(r["bottom"]) + n[1] * h), (r["bottom"] - n[0] * 0.001, o(r["bottom"]) - n[1] * 0.001)]
+    return body, lip
+
+
+def key_height(b):
+    return COVER_HEIGHT_M if b["kind"] == "covered" else KEY_HEIGHT_M
+
+
+def hit_faces(cockpit):
+    """{button id: [4 corners]}: the pointer's flat hit face of every key (and the handle): its face rectangle (size_m) centred on centre_m,
+    square to the tray face normal (the handle: to its panel's normal), counter-clockwise seen from the crew."""
+    cen = next(s for s in cockpit["screen"] if s["id"] == "centre")
+    up0, n0, right = cen["up"], cen["normal"], screen_right(cen)
+    (nu, no), (tu, to) = tray_axes(cockpit)
+    out = {}
+    for b in cockpit["button"]:
+        if b["kind"] == "handle":
+            n, up = n0, up0
         else:
-            groups[-1][1] = max(groups[-1][1], hi)
-    m = con["module_margin_m"]
-    return [(lo - m, hi + m) for lo, hi in groups]
+            n = [up0[i] * nu + n0[i] * no for i in range(3)]
+            up = [up0[i] * tu + n0[i] * to for i in range(3)]
+        w, h = b["size_m"]
+        c = b["centre_m"]
+        out[b["id"]] = [tuple(c[i] + right[i] * sa * w / 2.0 + up[i] * sb * h / 2.0 for i in range(3)) for sa, sb in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+    return out
+
+
+def guards(cockpit):
+    """{guard id: {lat: (lo, hi), u: (lo, hi), height, rim_colour, hinge_edge, buttons}}: the clear cover box standing on the tray face: lat
+    along the row and u along the centre screen's up of the face points under its keys (grown by GUARD_MARGIN_M), height over the face
+    (the tallest key + GUARD_CLEAR_M)."""
+    cen = next(s for s in cockpit["screen"] if s["id"] == "centre")
+    sl = math.radians(cockpit["tray"]["slope_deg"])
+    out = {}
+    for g in cockpit.get("guard", []):
+        keys = [b for b in cockpit["button"] if b["id"] in g["buttons"]]
+        lat = [lateral(cen, b["centre_m"]) for b in keys]
+        ups = [dot3([p - c for p, c in zip(b["centre_m"], cen["centre_m"])], cen["up"]) - math.sin(sl) * key_height(b) for b in keys]  # the key's foot on the face
+        out[g["id"]] = {"lat": (min(x - b["size_m"][0] / 2.0 for x, b in zip(lat, keys)) - GUARD_MARGIN_M,
+                                max(x + b["size_m"][0] / 2.0 for x, b in zip(lat, keys)) + GUARD_MARGIN_M),
+                        "u": (min(u - b["size_m"][1] / 2.0 * math.cos(sl) for u, b in zip(ups, keys)) - GUARD_MARGIN_M,
+                              max(u + b["size_m"][1] / 2.0 * math.cos(sl) for u, b in zip(ups, keys)) + GUARD_MARGIN_M),
+                        "height": max(key_height(b) for b in keys) + GUARD_CLEAR_M, "rim_colour": list(g["rim_colour"]), "hinge_edge": g["hinge_edge"],
+                        "buttons": list(g["buttons"])}
+    return out
 
 
 def console_frame(cockpit):
@@ -132,7 +201,8 @@ def button_node(button):
 def node_names(cockpit):
     """Every mesh node of dragon_cabin.gltf, sorted."""
     names = ["cabin_shell", "floor", "hatch_frame", "console_housing", "console_back", "console_under", "console_lamps", "console_shelf", "console_lockers", "ceiling_ring_light",
-             "handle", "hotas_stick", "hotas_throttle", "tablet_l", "tablet_r"]
+             "console_bezel", "console_hit", "handle", "hotas_stick", "hotas_throttle", "tablet_l", "tablet_r"]
+    names += [n for g in cockpit.get("guard", []) for n in (f"guard_{g['id']}", f"guard_rim_{g['id']}")]
     names += [f"seat_{part}_{s['id']}" for s in cockpit["seat"] for part in SEAT_PARTS]
     names += [f"screen_{s['id']}" for s in cockpit["screen"]]
     for w in window_apertures(cockpit["cabin"]):
@@ -180,4 +250,7 @@ def cockpit_manifest(cockpit):
         "labels": {"file": LABEL_FILE, "size": list(size)},
         "button_ids": [b["id"] for b in cockpit["button"]],
         "tablets": {t["id"]: {"node": f"tablet_{t['id']}", "centre": t["centre_m"], "normal": t["normal"], "up": t["up"], "size": t["size_m"]} for t in cockpit["tablet"]},
+        "guards": {g["id"]: {"node": f"guard_{g['id']}", "rim_node": f"guard_rim_{g['id']}", "rim_colour": list(g["rim_colour"]), "hinge_edge": g["hinge_edge"],
+                             "buttons": list(g["buttons"])} for g in cockpit.get("guard", [])},
+        "hit_node": "console_hit",
     }

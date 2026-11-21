@@ -8,7 +8,10 @@ Nodes: `cabin_shell` (inner wall of revolution with the ceiling ring, the forwar
 reveals and the hatch), `floor`, `hatch_frame` (white trim, the recessed hatch inner face and its reveal), `window_<i>` (funnel from the round interior
 reveal to the exterior pane, bezel ring; i = exterior table row, +az then -az) with `window_glass_<i>`, `seat_shell|pad|rest_<s1..s4>` (white shell, black pads, black leg-rest rails
 + foot plate at the seat's foot_rest_m), `console_housing` (dark: front and ends of the filleted body across the three screens + the dark upper panel above it, console_shape), `console_back`
-(silver back face, the two ceiling posts with joint heads and funnel feet), `console_under` (dark grey underside and top), `console_lamps` (lamp strips under the console), `console_shelf` (the button shelf as separate light grey modules, cabin_layout.shelf_modules), `console_lockers` (5 / 6),
+(silver back face, the two ceiling posts with joint heads and funnel feet), `console_under` (dark grey underside and top), `console_lamps` (lamp strips under the console), `console_shelf` (the continuous sloped button tray with its lip, cabin_layout.tray_profiles), `console_lockers` (5 / 6),
+`console_bezel` (the dark glass border around each active area, rounded outer corners; the housing carries the face frame recess_m in front of the glass),
+`guard_<id>` / `guard_rim_<id>` (clear cover over a guarded key block / its red rim and hinge), `console_hit` (one flat quad per key face: the pointer's hit
+geometry, hidden in the game),
 `ceiling_ring_light` (emissive annulus), `screen_left|centre|right` (one quad, UV 0..1 over the active area,
 (0, 0) top left, +normal toward the crew), `tablet_l|r`, `button_<id>` (one node per button; the centre handle is the node `handle`), `light_<i>`
 ([[light]] rows in file order), `hotas_stick`, `hotas_throttle`.
@@ -35,9 +38,14 @@ RING_POINTS = 32  # [E] points around a window ring
 HATCH_POINTS = 64  # [E] points around the hatch outline
 HATCH_RINGS = 6  # [E] rings of the hatch's inner face (it follows the wall's curvature)
 SCREEN_PROUD_M = 0.002  # [E] the housing's front lies this far behind the screens (the screen quads sit exactly on the TOML plane)
-BUTTON_PROUD_M = 0.006  # [E] push button height over the shelf
-COVER_PROUD_M = 0.012  # [E] hinged cover height
-SHELF_TOP_GAP_M = 0.0175  # [E] the shelf's top edge lies this far under a screen's lower edge
+KEY_EMBED_M = 0.001  # [E] key bodies (and the handle pad, the guard) reach this far into the tray: no gap at their foot
+TRAY_FILLET_SEGMENTS = 3  # [E] steps per 90 deg of the tray's 4 mm fillets
+CORNER_SEGMENTS = 4  # [E] steps per screen-glass corner arc (6 mm: 2.4 mm facets)
+FRAME_ABOVE_GLASS_M = 0.03  # [E] the screens' face frame reaches this far above the glass tops (its bottom meets the tray's deck)
+FRAME_HOLE_MARGIN_M = 0.003  # [E] the frame's grid cell around each glass outline (plate_with_holes margin; under the 11 mm frame outside the outer glass)
+GUARD_RADIUS_M = 0.002  # [E] the clear cover's edge fillet
+GUARD_RIM_M = (0.003, 0.002)  # [E] red rim bar width / height on the cover's top perimeter (jsc2022e068617: a thin red outline)
+GUARD_HINGE_RADIUS_M = 0.003  # [E] hinge barrel along the hinge edge
 TABLET_THICKNESS_M = 0.008  # [E] iPad mini 6.1 mm [S] plus the case
 TABLET_POST_M = 0.012  # [E] mount post radius
 FILLET_SEGMENTS = 4  # [E] steps per 90 deg fillet of the console body (22.5 deg: smooth highlight at 0.6 m; 4 cm radius -> 1.6 cm facets)
@@ -312,11 +320,6 @@ def build_seat(seat, floor_x, pan_raise_deg=0.0):
     return shell, pad, rest
 
 
-def shelf_front_off(cockpit, cen):
-    """The shelf modules' front plane along the console normal from the centre screen: the buttons' faces minus their height."""
-    return min((V(b["centre_m"]) - cen.o).dot(cen.n) for b in cockpit["button"] if b["kind"] != "handle") - BUTTON_PROUD_M
-
-
 def add_shape(mesh, verts, faces, to_cabin, part_of, group_of):
     """Faces of a console_shape surface (local verts) into the VMeshes: to_cabin(local) -> cabin point, part_of(local normal) -> VMesh,
     group_of(local normal) -> smooth group (None = flat). UV = the local (x, y) (planar, metres)."""
@@ -347,7 +350,7 @@ def build_console(cockpit):
     u0, u1 = frame["u_bot"], frame["u_top"]
     half_w, depth, r = con["width_m"] / 2.0, con["hood_depth_m"] - SCREEN_PROUD_M, con["edge_radius_m"]
     u_panel = (con["upper_top_x_m"] - cen.o.x) / cen.up.x  # the dark upper panel's front top edge reaches this station
-    housing, back, under, shelf, lockers, lamps = vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh()
+    housing, back, under, shelf, lockers, lamps, bezel = vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh()
 
     def body_part(n):  # local normal: x right, y up, z toward the crew
         if n.z < -0.7071:
@@ -397,16 +400,112 @@ def build_console(cockpit):
         # smooth within one lathe segment (rod, head, sleeve, funnel: same axial normal component), flat caps and steps
         add_shape(back, verts, faces, lambda p: V(p), None,
                   lambda n, k=k, axis=axis: None if abs(n.dot(axis)) > 0.99 else ("post", k, round(n.dot(axis), 2)))
-    # the shelf: separate modules (clusters of buttons), dark housing showing in the gaps; the ledge stands proud of the screens
-    front = shelf_front_off(cockpit, cen)
-    s1 = -cen.h / 2.0 - con["shelf_top_gap_m"]
-    for lat0, lat1 in cl.shelf_modules(cockpit):
-        cen.box(shelf, lat0, lat1, s1 - con["shelf_height_m"], s1, front, -SCREEN_PROUD_M)
+    # the tray (fidelity Task 5): one continuous sloped tray under all keys, the deck from the housing, the key face, the lip at its bottom
+    tr = cockpit["tray"]
+    body, lip = cl.tray_profiles(cockpit)
+    for prof in (body, lip):
+        tv, tf = cs.extrude(cs.round_corners(prof, tr["radius_m"], TRAY_FILLET_SEGMENTS, only={1, 2}), -tr["half_length_m"], tr["half_length_m"])
+        add_shape(shelf, tv, tf, lambda p: cen.at(p[0], p[1], p[2]), None, lambda n, k=len(prof): None if abs(n.x) > 0.99 else ("tray", k))
+    # the screens' face frame: a plate recess_m in front of the glass with rounded holes (the glass outlines = active area + bezel), its walls
+    # down to the glass and back to the housing front; the bezel (dark glass border) around each active area at the screen plane
+    screens = cockpit["screen"]
+    rec = max(s["recess_m"] for s in screens)
+    holes = []
+    for s in screens:
+        lat = (V(s["centre_m"]) - cen.o).dot(cen.right)
+        hw, hh = s["size_m"][0] / 2.0 + s["bezel_m"], s["size_m"][1] / 2.0 + s["bezel_m"]
+        holes.append((lat, 0.0, hw, hh, s["corner_radius_m"]))
+        outer = cs.rounded_rect(lat, 0.0, hw, hh, s["corner_radius_m"], CORNER_SEGMENTS)
+        inner = cs.rounded_rect(lat, 0.0, s["size_m"][0] / 2.0, s["size_m"][1] / 2.0, 0.0, CORNER_SEGMENTS)
+        for f in cs.ring(outer, inner):
+            bezel.face([cen.at(x, y, 0.0) for x, y in f], [(x, y) for x, y in f], cen.n, None)
+        for q in cs.wall(cs.loop(outer), 0.0, rec, inward=True):
+            add_shape(housing, q, [tuple(range(4))], lambda p: cen.at(p[0], p[1], p[2]), None, lambda n: "screen_well")
+    x0, x1 = -half_w + r, half_w - r
+    y0, y1 = cl.tray_rows(cockpit)["top"], max(h[3] for h in holes) + FRAME_ABOVE_GLASS_M
+    for f in cs.plate_with_holes(x0, x1, y0, y1, holes, FRAME_HOLE_MARGIN_M, CORNER_SEGMENTS):
+        housing.face([cen.at(x, y, rec) for x, y in f], [(x, y) for x, y in f], cen.n, None)
+    for q in cs.wall([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], -SCREEN_PROUD_M, rec):
+        add_shape(housing, q, [tuple(range(4))], lambda p: cen.at(p[0], p[1], p[2]), None, lambda n: None)
     for lk in cockpit["locker"]:  # dark lockers with the placards 5 / 6 (the placard: texture)
         c = V(lk["centre_m"]) - cen.o
         cen.box(lockers, c.dot(cen.right) - lk["size_m"][0] / 2.0, c.dot(cen.right) + lk["size_m"][0] / 2.0,
                 c.dot(cen.up) - lk["size_m"][1] / 2.0, c.dot(cen.up) + lk["size_m"][1] / 2.0, con["locker_proud_m"], -SCREEN_PROUD_M)
-    return housing, back, under, shelf, lockers, lamps
+    return housing, back, under, shelf, lockers, lamps, bezel
+
+
+class TrayFrame:
+    """The tray's key face frame at a point: n = the face normal (the console normal turned up by slope_deg), up = up the face, right = the row."""
+
+    def __init__(self, cockpit, cen):
+        (nu, no), (tu, to) = cl.tray_axes(cockpit)
+        self.n = (cen.up * nu + cen.n * no).normalized()
+        self.up = (cen.up * tu + cen.n * to).normalized()
+        self.right = cen.right
+
+
+def build_button(b, tray):
+    """A key on the tray: its face at centre_m square to the tray normal, key_height proud, its foot 1 mm into the tray."""
+    c = V(b["centre_m"])
+    w, h = b["size_m"]
+    mesh = vc.VMesh()
+    height = cl.key_height(b) + KEY_EMBED_M
+    if b["shape"] == "round":
+        vc.tube(mesh, c - tray.n * height, c, 0.5 * w, SIDES, ("btn", b["id"]))
+    else:
+        vc.box(mesh, c - tray.n * (height / 2.0), tray.n, tray.up, tray.right, (height / 2.0, h / 2.0, w / 2.0))
+    return mesh
+
+
+def build_handle(cockpit, b, panel):
+    """The centre handle: a raised pad from the tray face up to centre_m with the T grip (the real recess and rim: texture)."""
+    c = V(b["centre_m"])
+    w, h = b["size_m"]
+    mesh = vc.VMesh()
+    u = (c - panel.o).dot(panel.up)
+    depth = max((c - panel.o).dot(panel.n) - cl.tray_face_o(cockpit, u) + KEY_EMBED_M, 0.004)
+    vc.box(mesh, c - panel.n * (depth / 2.0), panel.n, panel.up, panel.right, (depth / 2.0, h / 2.0, w / 2.0))
+    stem = c + panel.n * 0.03
+    vc.tube(mesh, c - panel.n * 0.002, stem, 0.008, SIDES, "handle_stem")
+    vc.tube(mesh, stem - panel.right * (w * 0.31), stem + panel.right * (w * 0.31), 0.012, SIDES, "handle_bar")
+    return mesh
+
+
+def build_guard(cockpit, g, cen, tray):
+    """(cover, rim): the clear cover over a guarded key block (a filleted box standing on the tray face) and its red rim along the top
+    perimeter with the hinge barrel on hinge_edge."""
+    lat0, lat1 = g["lat"]
+    u0, u1 = g["u"]
+    sl = math.radians(cockpit["tray"]["slope_deg"])
+    um = 0.5 * (u0 + u1)
+    foot = cen.at(0.5 * (lat0 + lat1), um, cl.tray_face_o(cockpit, um))  # the face point under the cover's middle
+    w, length, hgt = lat1 - lat0, (u1 - u0) / math.cos(sl), g["height"]
+    cover, rim = vc.VMesh(), vc.VMesh()
+    centre = foot + tray.n * (0.5 * hgt - KEY_EMBED_M)
+    verts, faces = cs.rounded_box(w, length, hgt + KEY_EMBED_M, GUARD_RADIUS_M, 2)
+    add_shape(cover, verts, faces, lambda p: centre + tray.right * p[0] + tray.up * p[1] + tray.n * p[2], None,
+              lambda n: None if max(abs(n.x), abs(n.y), abs(n.z)) > 0.99999 else "guard")
+    top = foot + tray.n * (hgt + 0.5 * GUARD_RIM_M[1])
+    hw, hl, rw = 0.5 * w, 0.5 * length, 0.5 * GUARD_RIM_M[0]
+    for sgn in (-1.0, 1.0):  # rim bars: along the row (top / bottom), across it (ends)
+        vc.box(rim, top + tray.up * (sgn * (hl - rw)), tray.n, tray.up, tray.right, (0.5 * GUARD_RIM_M[1], rw, hw))
+        vc.box(rim, top + tray.right * (sgn * (hw - rw)), tray.n, tray.up, tray.right, (0.5 * GUARD_RIM_M[1], hl - 2 * rw, rw))
+    edge = {"top": tray.up * hl, "bottom": -tray.up * hl, "left": -tray.right * hw, "right": tray.right * hw}[g["hinge_edge"]]
+    along = tray.right * hw if g["hinge_edge"] in ("top", "bottom") else tray.up * hl
+    hinge = foot + edge + tray.n * (hgt - GUARD_HINGE_RADIUS_M)
+    vc.tube(rim, hinge - along, hinge + along, GUARD_HINGE_RADIUS_M, SIDES, ("hinge", g["hinge_edge"]))
+    return cover, rim
+
+
+def build_hits(cockpit):
+    """console_hit: one flat quad per key face (cabin_layout.hit_faces), invisible in the game (the pointer's simplified hit geometry)."""
+    mesh = vc.VMesh()
+    cen = Panel(screens_by_id(cockpit)["centre"])
+    for corners in cl.hit_faces(cockpit).values():
+        pts = [V(p) for p in corners]
+        n = (pts[1] - pts[0]).cross(pts[3] - pts[0])
+        mesh.face(pts, [(0, 0), (1, 0), (1, 1), (0, 1)], n if n.dot(cen.n) > 0.0 else -n, None)
+    return mesh
 
 
 def build_ring_light(cabin):
@@ -457,31 +556,6 @@ def build_light(light, cen):
     return mesh
 
 
-def build_button(b, panel):
-    c = V(b["centre_m"])
-    w, h = b["size_m"]
-    mesh = vc.VMesh()
-    height = COVER_PROUD_M if b["kind"] == "covered" else BUTTON_PROUD_M
-    if b["shape"] == "round":
-        vc.tube(mesh, c - panel.n * height, c, 0.5 * w, SIDES, ("btn", b["id"]))
-    else:
-        vc.box(mesh, c - panel.n * (height / 2.0), panel.n, panel.up, panel.right, (height / 2.0, h / 2.0, w / 2.0))
-    return mesh
-
-
-def build_handle(b, panel, shelf_off):
-    """The centre handle: a raised pad up to centre_m with the T grip (the real recess and rim: texture)."""
-    c = V(b["centre_m"])
-    w, h = b["size_m"]
-    mesh = vc.VMesh()
-    depth = max((c - panel.o).dot(panel.n) - shelf_off, 0.004)
-    vc.box(mesh, c - panel.n * (depth / 2.0), panel.n, panel.up, panel.right, (depth / 2.0, h / 2.0, w / 2.0))
-    stem = c + panel.n * 0.03
-    vc.tube(mesh, c - panel.n * 0.002, stem, 0.008, SIDES, "handle_stem")
-    vc.tube(mesh, stem - panel.right * (w * 0.31), stem + panel.right * (w * 0.31), 0.012, SIDES, "handle_bar")
-    return mesh
-
-
 def build_stick(eye, grip):
     n, b, z = seat_axes(35.0)
     g = V(eye) + V(grip)
@@ -519,9 +593,14 @@ def main():
         for part, mesh in zip(cl.SEAT_PARTS, build_seat(seat, cabin["floor_x_m"], spec["crew_figure"]["figure"]["thigh_raise_deg"])):
             parts[f"seat_{part}_{seat['id']}"] = mesh
     (parts["console_housing"], parts["console_back"], parts["console_under"], parts["console_shelf"], parts["console_lockers"],
-     parts["console_lamps"]) = build_console(cockpit)
+     parts["console_lamps"], parts["console_bezel"]) = build_console(cockpit)
     parts["ceiling_ring_light"] = build_ring_light(cabin)
     scr = screens_by_id(cockpit)
+    cen = Panel(scr["centre"])
+    tray = TrayFrame(cockpit, cen)
+    for gid, g in cl.guards(cockpit).items():
+        parts[f"guard_{gid}"], parts[f"guard_rim_{gid}"] = build_guard(cockpit, g, cen, tray)
+    parts["console_hit"] = build_hits(cockpit)
     for s in cockpit["screen"]:
         parts[f"screen_{s['id']}"] = screen_mesh(s)
     for t in cockpit["tablet"]:
@@ -529,11 +608,10 @@ def main():
     for i, light in enumerate(cockpit["light"]):
         parts[f"light_{i}"] = build_light(light, Panel(scr["centre"]))
     for b in cockpit["button"]:
-        panel = Panel(scr[b["panel"]])
         if b["kind"] == "handle":
-            parts["handle"] = build_handle(b, panel, shelf_front_off(cockpit, panel))
+            parts["handle"] = build_handle(cockpit, b, cen)
         else:
-            parts[cl.button_node(b)] = build_button(b, panel)
+            parts[cl.button_node(b)] = build_button(b, tray)
     eye = cockpit["eye"]["position_m"]
     parts["hotas_stick"] = build_stick(eye, cockpit["hotas"]["stick_grip_m"])
     parts["hotas_throttle"] = build_throttle(eye, cockpit["hotas"]["throttle_grip_m"])

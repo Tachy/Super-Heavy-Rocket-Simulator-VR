@@ -150,3 +150,43 @@ def test_post_head_sits_flush_on_a_tilted_ceiling():
     assert signed_volume(verts, faces) > 0.0
     assert max(v[0] for v in verts) == pytest.approx(3.48, abs=1e-9)
     assert sum(1 for v in verts if abs(v[0] - 3.48) < 1e-9) == 21, "the head's top ring (20) and the cap centre lie on the ceiling"
+
+
+# ---------- fidelity Task 5: tray profile, screen frame ----------
+
+def _area(poly):
+    return sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(poly, poly[1:] + poly[:1])) / 2.0
+
+
+def test_extruded_rounded_profile_is_a_closed_prism():
+    """The tray: a convex (u, o) profile with filleted corners, extruded along the row: closed, outward, volume = profile area x length."""
+    prof = cs.round_corners([(0.0, 0.0), (0.0, 0.03), (-0.02, 0.04), (-0.09, 0.05), (-0.09, 0.0)], 0.004, 4)
+    assert _area(prof) > 0.0 and len(prof) > 5
+    verts, faces = cs.extrude(prof, -0.6, 0.6)
+    assert_closed(verts, faces)
+    assert signed_volume(verts, faces) == pytest.approx(1.2 * _area(prof), rel=1e-9)
+    sharp = cs.round_corners([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], 0.1, 4)
+    assert _area(sharp) == pytest.approx(1.0 - (4 - math.pi) * 0.01, rel=0.01)
+
+
+def test_plate_with_rounded_holes_covers_the_plate_minus_the_holes():
+    """The screen frame: the plate's faces tile the rectangle minus the rounded holes (area), no face reaches into a hole, all face +z."""
+    holes = [(-0.45, 0.0, 0.2, 0.11, 0.006), (0.0, 0.0, 0.2, 0.11, 0.006), (0.45, 0.0, 0.2, 0.11, 0.006)]
+    faces = cs.plate_with_holes(-0.66, 0.66, -0.15, 0.14, holes, 0.003, 4)
+    assert all(_area(f) > 0.0 for f in faces)
+    hole_area = 3 * (0.4 * 0.22 - (4 - math.pi) * 0.006 ** 2)
+    assert sum(_area(f) for f in faces) == pytest.approx(1.32 * 0.29 - hole_area, rel=1e-3)
+    for f in faces:
+        c = (sum(p[0] for p in f) / len(f), sum(p[1] for p in f) / len(f))
+        assert not any(abs(c[0] - hx) < hw - 0.001 and abs(c[1] - hy) < hh - 0.001 for hx, hy, hw, hh, _ in holes), c
+    with pytest.raises(ValueError):
+        cs.plate_with_holes(-0.6, 0.6, -0.15, 0.14, holes, 0.003, 4)  # the outer holes reach past the plate
+
+
+def test_ring_between_a_rounded_outline_and_a_sharp_rectangle_has_the_bezel_area():
+    outer = cs.rounded_rect(0.0, 0.0, 0.2, 0.11, 0.006, 4)
+    inner = cs.rounded_rect(0.0, 0.0, 0.196, 0.106, 0.0, 4)
+    faces = cs.ring(outer, inner)
+    area = 0.4 * 0.22 - (4 - math.pi) * 0.006 ** 2 - 0.392 * 0.212
+    assert all(_area(f) > 0.0 for f in faces)
+    assert sum(_area(f) for f in faces) == pytest.approx(area, rel=0.02)

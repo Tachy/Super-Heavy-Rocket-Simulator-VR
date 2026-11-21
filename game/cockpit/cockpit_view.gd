@@ -125,8 +125,10 @@ func build(models: Dictionary, cockpit: CockpitConfig) -> void:
 		instance.name = part
 		instance.mesh = cabin[part]
 		instance.material_override = _material_of(part)
-		if part.begins_with("window_glass") or part.begins_with("light_") or part.begins_with("screen_") or part == "ceiling_ring_light" or part == "console_lamps":
+		if part.begins_with("window_glass") or part.begins_with("light_") or part.begins_with("screen_") or part == "ceiling_ring_light" or part == "console_lamps" 				or (part.begins_with("guard_") and not part.begins_with("guard_rim_")):
 			instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if part == "console_hit":  # the pointer's flat hit faces (fidelity Task 5): geometry only, never drawn
+			instance.visible = false
 		if _on_console(part):
 			instance.layers = CONSOLE_LAYER
 		add_child(instance)
@@ -140,7 +142,7 @@ func build(models: Dictionary, cockpit: CockpitConfig) -> void:
 
 
 func _on_console(part: String) -> bool:
-	return part.begins_with("console_") or part.begins_with("tablet_") or part.begins_with("button_") or part == "handle" 			or part.begins_with("light_")
+	return part.begins_with("console_") or part.begins_with("tablet_") or part.begins_with("button_") or part == "handle" 			or part.begins_with("light_") or part.begins_with("guard_")
 
 
 ## The mesh of a screen ("left", "centre", "right").
@@ -647,6 +649,18 @@ func _material_of(part: String) -> Material:
 		return _cabin_material(Color(0.10, 0.10, 0.11).linear_to_srgb(), 0.6, 0.2, 0.0, 0.3)
 	if part == "console_lockers":
 		return _cabin_material(Color(0.02, 0.02, 0.024).linear_to_srgb(), 0.85, 0.0, 0.0, 0.03)
+	## [E] Fidelity Task 5: the screens' dark glass border (glossy black glass, jsc2022e068617), the clear key guards and their red rims
+	## (rim colour from the manifest, linear), the hidden pointer hit faces.
+	if part == "console_bezel":
+		return _cabin_material(Color(0.012, 0.012, 0.014).linear_to_srgb(), 0.15, 0.0, 0.0, 0.5)
+	if part == "console_hit":
+		return _cabin_material(Color(0.5, 0.5, 0.5), 1.0, 0.0, 0.0)
+	if part.begins_with("guard_rim_"):
+		var g: Dictionary = (_cockpit_manifest.get("guards", {}) as Dictionary).get(part.trim_prefix("guard_rim_"), {})
+		var c: Array = g.get("rim_colour", [0.55, 0.04, 0.03])
+		return _cabin_material(Color(float(c[0]), float(c[1]), float(c[2])).linear_to_srgb(), 0.4, 0.0, 0.0, 0.4)
+	if part.begins_with("guard_"):
+		return _guard_material()
 	## [E] Seats (review item 4, crew1_1): white shells, black pads and black carbon leg-rest frames.
 	if part.begins_with("seat_shell_"):
 		return _cabin_material(Color(0.82, 0.82, 0.81), 0.5, 0.0, 0.0)  # sRGB 0.82 = linear 0.64: white paint, like the walls (WALL_ALBEDO, sRGB)
@@ -669,6 +683,20 @@ func _material_of(part: String) -> Material:
 ## the sRGB uniform unconverted (0.009 linear, darker than the module); now a linear 0.03 converted like the console colours.
 func _key_base() -> ShaderMaterial:
 	return _cabin_material(Color(0.03, 0.03, 0.033).linear_to_srgb(), 0.45, 0.3, 0.0)
+
+
+## [E] The clear key guards (jsc2022e068617: a clear polycarbonate cover, the keys read through it): faint, glossy, double sided.
+func _guard_material() -> StandardMaterial3D:
+	if _materials.has("guard"):
+		return _materials["guard"]
+	var m := StandardMaterial3D.new()
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(0.6, 0.63, 0.66, 0.04)
+	m.roughness = 0.08
+	m.metallic_specular = 0.5
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_materials["guard"] = m
+	return m
 
 
 ## The shelf modules (discovery2 / conv_42860a: dark grey) with the red light strip along each module's bottom lip (mark, emission set each frame).

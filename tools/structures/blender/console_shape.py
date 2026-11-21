@@ -92,6 +92,148 @@ def draft_sides(verts, draft_deg, w, d):
     return [(x * (1.0 - (d / 2.0 - z) * t / (w / 2.0)), y, z) for x, y, z in verts]
 
 
+def _area2(poly):
+    return sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(poly, poly[1:] + poly[:1])) / 2.0
+
+
+def ccw(poly):
+    """The 2D polygon counter-clockwise (positive area)."""
+    poly = [tuple(p) for p in poly]
+    return poly if _area2(poly) > 0.0 else poly[::-1]
+
+
+def round_corners(poly, r, segments, only=None):
+    """Fillet the corners of a convex 2D polygon with radius r (`segments` steps per 90 deg, at least 1 per corner); `only`: the input indices
+    of the corners to round (default all). r <= 0: unchanged. The fillet is limited to the shorter half of the two edges at a corner.
+    Counter-clockwise out."""
+    flagged = [(tuple(p), only is None or i in only) for i, p in enumerate(poly)]
+    if _area2([p for p, _ in flagged]) < 0.0:
+        flagged = flagged[::-1]
+    poly = [p for p, _ in flagged]
+    if r <= 0.0:
+        return poly
+    out = []
+    n = len(poly)
+    for i in range(n):
+        p0, p, p1 = poly[i - 1], poly[i], poly[(i + 1) % n]
+        if not flagged[i][1]:
+            out.append(p)
+            continue
+        a = (p0[0] - p[0], p0[1] - p[1])
+        b = (p1[0] - p[0], p1[1] - p[1])
+        la, lb = math.hypot(*a), math.hypot(*b)
+        a, b = (a[0] / la, a[1] / la), (b[0] / lb, b[1] / lb)
+        cosang = max(-1.0, min(1.0, a[0] * b[0] + a[1] * b[1]))
+        ang = math.acos(cosang)  # interior angle
+        if ang > math.pi - 1e-6:
+            out.append(p)
+            continue
+        t = r / math.tan(ang / 2.0)
+        t = min(t, 0.5 * la, 0.5 * lb)
+        rr = t * math.tan(ang / 2.0)
+        s = (p[0] + a[0] * t, p[1] + a[1] * t)
+        e = (p[0] + b[0] * t, p[1] + b[1] * t)
+        bis = (a[0] + b[0], a[1] + b[1])
+        k = math.hypot(*bis)
+        c = (p[0] + bis[0] / k * rr / math.sin(ang / 2.0), p[1] + bis[1] / k * rr / math.sin(ang / 2.0))
+        a0, a1 = math.atan2(s[1] - c[1], s[0] - c[0]), math.atan2(e[1] - c[1], e[0] - c[0])
+        sweep = (a1 - a0 + math.pi) % (2.0 * math.pi) - math.pi
+        steps = max(1, math.ceil(abs(sweep) / (math.pi / 2.0) * segments))
+        out += [(c[0] + rr * math.cos(a0 + sweep * j / steps), c[1] + rr * math.sin(a0 + sweep * j / steps)) for j in range(steps + 1)]
+    return out
+
+
+def extrude(poly, x0, x1):
+    """Closed prism along x from x0 to x1 over the convex 2D profile `poly` in the (y, z) plane: flat caps, outward winding."""
+    poly = ccw(poly)
+    n = len(poly)
+    quads = []
+    for i in range(n):
+        (ya, za), (yb, zb) = poly[i], poly[(i + 1) % n]
+        quads.append([(x0, ya, za), (x0, yb, zb), (x1, yb, zb), (x1, ya, za)])
+    quads.append([(x1, y, z) for y, z in poly])
+    quads.append([(x0, y, z) for y, z in poly[::-1]])
+    return _weld(quads)
+
+
+def rounded_rect(cx, cy, hw, hh, r, segments):
+    """Rounded rectangle as four corner groups (bottom left, bottom right, top right, top left; counter-clockwise), each a list of
+    points along its arc (one point when r <= 0)."""
+    corners = ((-1, -1, math.pi), (1, -1, 1.5 * math.pi), (1, 1, 0.0), (-1, 1, 0.5 * math.pi))
+    groups = []
+    for sx, sy, a0 in corners:
+        if r <= 0.0:
+            groups.append([(cx + sx * hw, cy + sy * hh)])
+            continue
+        ox, oy = cx + sx * (hw - r), cy + sy * (hh - r)
+        groups.append([(ox + r * math.cos(a0 + 0.5 * math.pi * j / segments), oy + r * math.sin(a0 + 0.5 * math.pi * j / segments))
+                       for j in range(segments + 1)])
+    return groups
+
+
+def ring(outer, inner):
+    """2D faces (counter-clockwise) filling the region between two corner-group loops (rounded_rect), outer around inner."""
+    faces = []
+    for k in range(4):
+        go, gi = outer[k], inner[k]
+        if len(go) == len(gi) and len(go) > 1:
+            for j in range(len(go) - 1):
+                faces.append([go[j], go[j + 1], gi[j + 1], gi[j]])
+        elif len(go) == 1:
+            for j in range(len(gi) - 1):
+                faces.append([go[0], gi[j + 1], gi[j]])
+        else:  # inner sharp, outer arc
+            for j in range(len(go) - 1):
+                faces.append([go[j], go[j + 1], gi[0]])
+        nk = (k + 1) % 4
+        faces.append([go[-1], outer[nk][0], inner[nk][0], gi[-1]])
+    return [ccw(f) for f in faces if abs(_area2(f)) > 1e-14]
+
+
+def loop(groups):
+    out = []
+    for g in groups:
+        for p in g:
+            if not out or math.dist(out[-1], p) > 1e-12:
+                out.append(p)
+    return out[:-1] if math.dist(out[0], out[-1]) < 1e-12 else out
+
+
+def plate_with_holes(x0, x1, y0, y1, holes, margin, segments):
+    """2D faces (counter-clockwise) of the rectangle [x0, x1] x [y0, y1] with rounded rectangular holes (cx, cy, hw, hh, r) that share one
+    vertical band: a grid of cells whose hole cells (each hole's box grown by `margin`) are rings. Neighbouring cells share their vertices
+    (no T-junctions inside; the outer border carries the grid's break points)."""
+    holes = sorted(holes)
+    xs = [x0] + [v for cx, cy, hw, hh, r in holes for v in (cx - hw - margin, cx + hw + margin)] + [x1]
+    ylo = min(cy - hh for cx, cy, hw, hh, r in holes) - margin
+    yhi = max(cy + hh for cx, cy, hw, hh, r in holes) + margin
+    ys = [y0, ylo, yhi, y1]
+    if any(b <= a for a, b in zip(xs, xs[1:])) or any(b <= a for a, b in zip(ys, ys[1:])):
+        raise ValueError("plate_with_holes: holes overlap or reach past the plate")
+    faces = []
+    for i in range(len(xs) - 1):
+        for j in range(3):
+            hole = holes[(i - 1) // 2] if (i % 2 == 1 and j == 1) else None
+            a, b, c, d = (xs[i], ys[j]), (xs[i + 1], ys[j]), (xs[i + 1], ys[j + 1]), (xs[i], ys[j + 1])
+            if hole is None:
+                faces.append([a, b, c, d])
+            else:
+                cx, cy, hw, hh, r = hole
+                faces += ring([[a], [b], [c], [d]], rounded_rect(cx, cy, hw, hh, r, segments))
+    return faces
+
+
+def wall(loop2d, z0, z1, inward=False):
+    """Quads of the wall over a closed 2D loop (counter-clockwise) from z0 to z1: outward (away from the loop's inside) or inward."""
+    pts = ccw(loop2d)
+    quads = []
+    for i in range(len(pts)):
+        (xa, ya), (xb, yb) = pts[i], pts[(i + 1) % len(pts)]
+        q = [(xa, ya, z0), (xb, yb, z0), (xb, yb, z1), (xa, ya, z1)]  # normal = tangent x z: outward when z1 > z0
+        quads.append(q if (z1 > z0) != inward else q[::-1])
+    return quads
+
+
 def post(base, top, r, head_r, head_len, sides, foot=None, top_plane_normal=None):
     """Ceiling post from `base` (on the console) to `top` (on the ceiling): rod radius r, the cylindrical joint head (head_r, head_len)
     at the top; foot = (sleeve_r, sleeve_len, flare_r, flare_len): a funnel from flare_r at the base to the sleeve over flare_len, then

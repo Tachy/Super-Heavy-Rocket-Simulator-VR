@@ -97,3 +97,18 @@ armrests, palms down (it read as a shrug in the hatch shots); hands were boxes o
 - `photo_cameras.toml` Task 4 rows: crew1_1 (1.8568, 1.4261, 0.0047), forward (0.17176, -0.98513, 0.00301), fov_h 96.615; discovery2 (2.2102, -0.6497, -0.0327),
   forward (0.35901, 0.93322, 0.01485), fov_h 114.972.
 - Docs claim then: "render from the fitted camera lies on the photo" with 1.33 / 5.60 px rms; those were fit-model residuals, the body outline was not compared.
+
+## Screens, shelf and keys before fidelity Task 5 (2026-11-21)
+- `[[screen]]`: active area 0.382 x 0.215 [E] (training2 finger scale, 17.3 in class), aspect 1.7778, outer centres +-0.402 m (`screen_gap_m` 0.020 [D]: 2 x 0.007 bezel
+  + 0.006 seam, "bezels nearly touch" in discovery2). No bezel / corner radius / recess: the screens were bare quads 2 mm in front of the housing. Task 4 found
+  discovery2 / 10 wanting pitch 0.455 and glass half width 0.203 (outer corners 87-143 px off).
+- Shelf rule of fix round 2 (superseded): `shelf_height_m` 0.10 and `shelf_top_gap_m` 0.0175; the buttons were grouped into separate light grey modules by
+  `cabin_layout.shelf_modules` (`module_split_m` 0.012, `module_margin_m` 0.004), dark housing in the gaps; test `test_shelf_is_a_ten_centimetre_row_of_separate_modules`
+  (>= 6 modules, >= 3 mm gaps); `test_screen_gap_is_one_to_two_centimetres`.
+- `[[button]]` centres were read along the screens' edges in discovery10 as px fractions (linear, ignoring the fisheye) on the 0.402 pitch: rows 0.17 / 0.20 m below
+  the centre screen centre, faces 0.029-0.030 m proud, keys 6 mm (`BUTTON_PROUD_M`, cover 12 mm). cam1 / cam5 / r_upper_1 / r_upper_5 were round 0.016 keys; the 2 x 3
+  blocks 0.024 x 0.016; r_upper_* / r_lower_* without labels. The outermost keys sat at +-0.540 m (now +-0.605).
+- `[[tablet]]` centres +-0.367 m along the row, 0.228 up, 0.060 proud (round 4).
+- `photo_cameras.toml` Task 4 fix round 1 rows: crew1_1 (1.8362, 1.4265, 0.0035) fov 97.054; discovery2 (2.2152, -0.6499, -0.0313) fov 115.094; discovery10
+  (2.2147, -0.6291, -0.0190) fov 118.399.
+- `console_pointer_test.gd` KNOWN_REACH_GAP_M: only r_upper_5, 30.7 mm.

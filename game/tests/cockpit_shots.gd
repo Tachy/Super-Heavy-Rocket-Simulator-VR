@@ -534,7 +534,8 @@ func _define_fidelity_shots() -> void:
 ## commander's eye looking up past the screens at the posts, closeup_back_<l|r> from 1.1 m behind the console's back (hatch side, below it);
 ## composed side by side (left | right eye) into closeup_eye_stereo / closeup_back_stereo.
 const STEREO_IPD_M := 0.064
-const CLOSEUP_SHOTS := ["closeup_eye", "closeup_back"]
+const CLOSEUP_SHOTS := ["closeup_eye", "closeup_back", "closeup_tray", "closeup_tray_r"]
+const TRAY_CLOSEUP_M := 0.6  ## fidelity Task 5: the tray close-ups stand this far from the module, on the line to the commander's eye
 
 
 func _define_console_closeup_shots(eye: Transform3D) -> void:
@@ -544,7 +545,12 @@ func _define_console_closeup_shots(eye: Transform3D) -> void:
 	var normal: Vector3 = centre_screen["normal"]
 	var top_mid: Vector3 = centre_screen["centre"] + up * 0.35 - normal * 0.1
 	var back_cam: Vector3 = top_mid - normal * 1.1 - up * 0.35
-	for view: Array in [["closeup_eye", eye.origin, top_mid + up * 0.25, 80.0, eye.basis.y], ["closeup_back", back_cam, top_mid, 70.0, Vector3(1.0, 0.0, 0.0)]]:
+	var right: Vector3 = (-normal).cross(up).normalized()
+	var views := [["closeup_eye", eye.origin, top_mid + up * 0.25, 80.0, eye.basis.y], ["closeup_back", back_cam, top_mid, 70.0, Vector3(1.0, 0.0, 0.0)]]
+	for tray: Array in [["closeup_tray", -0.53], ["closeup_tray_r", 0.53]]:  # Task 5: the outer modules (guarded blocks) at VR distance
+		var target: Vector3 = centre_screen["centre"] + right * float(tray[1]) - up * 0.2 + normal * 0.03
+		views.append([tray[0], target + (eye.origin - target).normalized() * TRAY_CLOSEUP_M, target, 40.0, eye.basis.y])
+	for view: Array in views:
 		var origin: Vector3 = view[1]
 		var basis := Basis.looking_at(Vector3(view[2]) - origin, Vector3(view[4]))
 		for side: Array in [["l", -0.5], ["r", 0.5]]:

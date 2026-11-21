@@ -102,50 +102,84 @@ post_head_radius_m = 0.039          # [D] the cylindrical joint head (collar) wh
 post_head_length_m = 0.04           # [E] collar length: seen end-on from the hatch (8 px ellipse), not measurable; +-0.02
 post_foot_m = [0.022, 0.066, 0.051, 0.306]  # [E] lengths: sleeve 0.066, funnel 0.306 (crew1_1 v 145-150 / 150-172 of the post's 112-172 times the fitted 0.826 m length; foreshortened 14 mm/px, +-50 %); [D] radii: sleeve 0.022 (10-11 px at 2.2 m), funnel foot 0.051 (28-29 px at 1.9 m), +-0.004; the real funnel flares outboard only
 
-screen_gap_m = 0.020                # [D] gap between the active areas of neighbouring screens: 2 x 0.007 bezel + 0.006 seam of the housing (discovery2: bezels nearly touch, review item 3 says 1-2 cm; the earlier 0.045 was read from discovery10's 90 px active gap and is superseded); left / right screen centres = 0.382 + 0.020 = 0.402 m from the centre
-shelf_height_m = 0.10               # [D] button shelf (modules) height: discovery2 module row ~160 px of 415 px screen height (0.215 m) = 0.083 m + 0.015 m lip (review item 3: ~0.10)
-shelf_top_gap_m = 0.0175            # [E] the shelf's top edge lies this far under the screens' lower edge (housing seam)
-module_split_m = 0.012              # [E] buttons whose edges lie further apart than this start a new module (discovery2: clusters A, B, C, handle, right clusters, each a light grey module with dark gaps between)
-module_margin_m = 0.004             # [E] a module's face extends this far past its outermost buttons
+screen_gap_m = 0.057                # [D] gap between the active areas of neighbouring screens = screen pitch 0.449 - active width 0.392 (fidelity Task 5 fit; discovery10 shows ~4.5 cm of dark housing between the glass edges); was 0.020 (bezels read as touching)
+shelf_height_m = 0.088              # [D] the tray from its top at the housing face (u -0.149) to the lip's front bottom edge (u -0.237): discovery10 column u 1450 back-projected through the fitted camera (deck start v 1375 on o 0; lip bottom v 1630 on the lip front, o 0.040); +-0.006
+shelf_top_gap_m = 0.0395            # [D] the tray starts this far under the screens' active lower edge (u -0.1095): discovery10 dark housing v 1292-1375 under the centre glass, back-projected; +-0.005
 upper_top_x_m = 2.845               # [D] the dark upper panel above the housing reaches this station at its front top edge: 0.47 m up the console from the centre screen centre (covers the lamp panels at 0.43; discovery2 dark to the frame top); crew1_1 shows the dish over the console from the hatch, so the panel does not run to the ceiling (round 4)
 upper_depth_m = 0.04                # [E] thickness of the upper panel (it only closes the view up to the ceiling; crew1_1 / discovery2: dark grey structure up to the frame top)
 locker_proud_m = 0.012              # [E] the lockers 5 / 6 stand this far proud of the housing front (discovery2)
 
+[tray]
+# The button tray (fidelity Task 5): ONE continuous sloped tray under all three screens (discovery10: one grey band from the left to the right module;
+# jsc2022e068617: the grey deck, the dark key faces, the lip at the low front edge), replacing the separate shelf modules. Profile in the centre screen's
+# frame (u up, o toward the crew): the deck runs from the housing face at u_top = -(active height / 2) - shelf_top_gap_m down and out to the key face; the
+# key face slopes out toward its bottom (its normal turned up by slope_deg, toward the crew's eyes, which sit 0.23 m up the console); the lip stands
+# proud at the bottom edge (u_top - shelf_height_m). cabin_layout.tray_face_o / tray_profile; the key faces stand KEY_HEIGHT_M proud of it.
+depth_m = 0.024                     # [D] key face 2.4 cm in front of the screen plane at the face's mid height: the key-face plane of the round-4 buttons (0.029-0.030) less their 6 mm height; discovery10 back-projection at o 0.024 puts the face top at u -0.168, bottom -0.235; +-0.006
+slope_deg = 15.0                    # [E] the key face leans out toward its bottom (a tray): jsc2022e068617 shows the deck and the key faces at different angles to the screens; single views only (no camera for 068617), +-10
+deck_drop_m = 0.019                 # [D] the deck falls from u -0.149 at the housing to the key face's top at u -0.168 (discovery10 v 1375 -> 1452 back-projected); +-0.005
+lip_width_m = 0.010                 # [D] the lip's height along the face at the bottom: discovery10 v 1600 -> 1630 (u -0.235 -> -0.245); +-0.004
+lip_height_m = 0.006                # [E] the lip stands this far proud of the key face (jsc2022e068617: the red-lit rim at the module bottom, a few mm proud); +-0.004
+radius_m = 0.004                    # [E] fillet of the tray's edges (deck front, lip): jsc2022e068617 soft highlights, no sharp edge; +-0.003
+half_length_m = 0.625               # [D] the tray runs +-0.625 m along the row: discovery10 band x 215-1350 of 1600 (just inside the outer glass edges at +-0.649), past the outermost keys (+-0.605); +-0.02
+
+# Guards: hinged clear covers with a red rim over the 2 x 3 key blocks of both outer modules (jsc2022e068617: the right module, red-outlined clear cover
+# over EMERGENCY DEORBIT / BREAKOUT / ... ; discovery10: the same block in the left and right module). A button with guard = "<id>" lies under it.
+[[guard]]
+id = "l"                            # [E] the commander's module (cluster A, discovery10 left end)
+buttons = ["cam2", "cam3", "cam4", "cam11", "cam12", "cam13"]  # [E] discovery10: the 2 x 3 block between CANCEL and EXECUTE
+hinge_edge = "top"                  # [E] jsc2022e068617: the cover's red rim runs along its top edge into the module frame (hinge side); the lower edge is free
+rim_colour = [0.55, 0.04, 0.03]     # [E] linear albedo of the red rim, jsc2022e068617 (red outline, dark under the cabin light)
+
+[[guard]]
+id = "r"                            # [E] the pilot's module (right end), jsc2022e068617
+buttons = ["r_upper_2", "r_upper_3", "r_upper_4", "r_lower_1", "r_lower_2", "r_lower_3"]  # [E] jsc2022e068617: the 2 x 3 block between CANCEL and EXECUTE
+hinge_edge = "top"                  # [E] see l
+rim_colour = [0.55, 0.04, 0.03]     # [E] see l
+
 [[screen]]
 id = "left"                         # [S] spec 2026-11-07: left screen = external cameras
-centre_m = [2.5120, -0.0430, 0.4020]  # [D] centre + (0.382/2 + 0.020 + 0.382/2) = 0.402 m along the row (console screen_gap_m), coplanar with the centre screen (fold 0) (round 4: console block moved rigidly with the joint fit, docs/subsystems/cockpit.md "Fix round 4")
+centre_m = [2.5120, -0.0430, 0.4490]  # [D] fidelity Task 5: centre screen centre -+ screen pitch 0.449 +- 0.015 along the row (cabin_fit/parts/console.py --as-built with the iPad corners: screen_pitch_m, data-constrained; Task 4 0.455 without the iPads; was 0.402)
 normal = [-0.70711, -0.70711, 0.0]   # [D] = centre screen normal (fold 0)
 up = [0.70711, -0.70711, 0.0]        # [D] = eye up
-size_m = [0.382, 0.215]             # [E] active area: training2 finger scale (index finger ~0.072 m on the screen) gives 0.35-0.40 wide; 16:9 (17.3 in class); +-15 %
-aspect = 1.7778                     # [E] discovery10 1.88, training2 1.76 (perspective): 16:9
+size_m = [0.392, 0.219]             # [D] active area = glass 0.400 x 0.227 (fit screen_half_w_m 0.2000 +- 0.0067, screen_half_h_m 0.1136 +- 0.0038, data-constrained, scale from the camera priors and the iPad mini bodies) - 2 bezel_m; diagonal 0.449 +- 0.014 m (17.7 in); was 0.382 x 0.215
+aspect = 1.79                       # [D] 0.392 / 0.219 (16:9 = 1.778 within sigma)
+bezel_m = 0.004                     # [E] dark glass border around the lit area: discovery10 0-5 px at 0.36 mm/px, jsc2022e068617 ~8 px at 0.43 mm/px (lit corner (3180, 392) to the glass line); +-0.003
+corner_radius_m = 0.006             # [E] glass outline corner radius: discovery10 lit corner rounds over ~8-10 px (3-4 mm), the glass outline a little more; +-0.004
+recess_m = 0.005                    # [E] the glass lies this far behind the housing face frame (jsc2022e068617 side view: a thin frame lip around the near screen); +-0.004
 
 [[screen]]
 id = "centre"                       # [S] spec 2026-11-07
 centre_m = [2.5120, -0.0430, 0.0000]  # [E] round 4 joint fit on crew1_1: back lip (2.450, 0.229) + 0.15 m along the normal + 0.235 m up; residual of the lip / post points 2-7 px of 1200; +-0.06
 normal = [-0.70711, -0.70711, 0.0]   # [E] round 4 fit: console up 44.7 deg from +X (rounded 45), from the back face's lip and post bases in crew1_1; +-4 deg
 up = [0.70711, -0.70711, 0.0]        # [D] = eye up
-size_m = [0.382, 0.215]             # [E] see left
-aspect = 1.7778                     # [E] see left
+size_m = [0.392, 0.219]             # [D] active area = glass 0.400 x 0.227 (fit screen_half_w_m 0.2000 +- 0.0067, screen_half_h_m 0.1136 +- 0.0038, data-constrained, scale from the camera priors and the iPad mini bodies) - 2 bezel_m; diagonal 0.449 +- 0.014 m (17.7 in); was 0.382 x 0.215
+aspect = 1.79                       # [D] 0.392 / 0.219 (16:9 = 1.778 within sigma)
+bezel_m = 0.004                     # [E] dark glass border around the lit area: discovery10 0-5 px at 0.36 mm/px, jsc2022e068617 ~8 px at 0.43 mm/px (lit corner (3180, 392) to the glass line); +-0.003
+corner_radius_m = 0.006             # [E] glass outline corner radius: discovery10 lit corner rounds over ~8-10 px (3-4 mm), the glass outline a little more; +-0.004
+recess_m = 0.005                    # [E] the glass lies this far behind the housing face frame (jsc2022e068617 side view: a thin frame lip around the near screen); +-0.004
 
 [[screen]]
 id = "right"                        # [S] spec 2026-11-07
-centre_m = [2.5120, -0.0430, -0.4020]  # [D] mirror of left (round 4: console block moved rigidly with the joint fit, docs/subsystems/cockpit.md "Fix round 4")
+centre_m = [2.5120, -0.0430, -0.4490] # [D] fidelity Task 5: centre screen centre -+ screen pitch 0.449 +- 0.015 along the row (cabin_fit/parts/console.py --as-built with the iPad corners: screen_pitch_m, data-constrained; Task 4 0.455 without the iPads; was 0.402)
 normal = [-0.70711, -0.70711, 0.0]   # [D] = centre screen normal (fold 0)
 up = [0.70711, -0.70711, 0.0]        # [D] = eye up
-size_m = [0.382, 0.215]             # [E] see left
-aspect = 1.7778                     # [E] see left
-# Screen gap 0.020 m [D] (console screen_gap_m): bezels nearly touch in discovery2; supersedes the 0.045 m of discovery10 (90 px of 780 px active gap, which includes the glass border).
+size_m = [0.392, 0.219]             # [D] active area = glass 0.400 x 0.227 (fit screen_half_w_m 0.2000 +- 0.0067, screen_half_h_m 0.1136 +- 0.0038, data-constrained, scale from the camera priors and the iPad mini bodies) - 2 bezel_m; diagonal 0.449 +- 0.014 m (17.7 in); was 0.382 x 0.215
+aspect = 1.79                       # [D] 0.392 / 0.219 (16:9 = 1.778 within sigma)
+bezel_m = 0.004                     # [E] dark glass border around the lit area: discovery10 0-5 px at 0.36 mm/px, jsc2022e068617 ~8 px at 0.43 mm/px (lit corner (3180, 392) to the glass line); +-0.003
+corner_radius_m = 0.006             # [E] glass outline corner radius: discovery10 lit corner rounds over ~8-10 px (3-4 mm), the glass outline a little more; +-0.004
+recess_m = 0.005                    # [E] the glass lies this far behind the housing face frame (jsc2022e068617 side view: a thin frame lip around the near screen); +-0.004
 
 [[tablet]]
 id = "l"                            # [E] procedure tablets on mounts above the outer screens, discovery1..15
-centre_m = [2.6311, -0.2464, 0.3670]  # [E] lower edge on the left screen's top bezel, 0.035 inboard of its centre (was 0.045 with the 0.427 screen row) (discovery10: at 0.61 of its width), 0.06 proud on the mount
+centre_m = [2.6514, -0.2251, 0.3209]  # [D] fidelity Task 5 fit of the iPad mini body corners in discovery10 (cabin_fit/parts/console.py, body size [S] as the scale anchor): lat -0.321 +- 0.005, u 0.227 +- 0.007 [D]; o 0.030 +- 0.017 [E] (prior-dominated); roll 1.4 +- 0.7 deg not built; was +-0.367 / 0.228 / 0.060 (round 4)
 normal = [-0.70711, -0.70711, 0.0]   # [D] = left screen normal = centre normal (fold 0)
 up = [0.70711, -0.70711, 0.0]        # [D] portrait, = eye up
 size_m = [0.1348, 0.2032]           # [S] Apple iPad mini (5th gen) 134.8 x 203.2 mm; model assumed from the shape in discovery1..15 [E]
 
 [[tablet]]
 id = "r"                            # [E] see l
-centre_m = [2.6311, -0.2464, -0.3670]  # [E] mirror of l (discovery10: right tablet at 0.34 of the right screen's width)
+centre_m = [2.6396, -0.2413, -0.3342] # [D] fidelity Task 5 fit of the iPad mini body corners in discovery10 (cabin_fit/parts/console.py, body size [S] as the scale anchor): lat 0.334 +- 0.010, u 0.230 +- 0.008 [D]; o 0.050 +- 0.019 [E] (prior-dominated); roll 2.0 +- 1.4 deg not built; was +-0.367 / 0.228 / 0.060 (round 4)
 normal = [-0.70711, -0.70711, 0.0]   # [D] = right screen normal = centre normal (fold 0)
 up = [0.70711, -0.70711, 0.0]        # [D] = eye up
 size_m = [0.1348, 0.2032]           # [S] see l
@@ -184,13 +218,13 @@ size_m = [0.15, 0.165]              # [E] see 5
 # the same 5 + 3 / 5 + 5 / 4 + 3 key layout as discovery10); keys without `label` get a blank key face.
 
 [[button]]
-id = "cam1"                         # [E] cluster A upper row, round
+id = "cam1"                         # [E] cluster A upper row, end key
 label = "CANCEL"                  # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, round key at its left end
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3697, 0.0558, 0.5450]   # [E] shifted 0.025 with the screen row; discovery10 x 402 px on the left screen's edge 340-830
-size_m = [0.016, 0.016]             # [E] round, ~0.6 of the 0.027 m pitch
-shape = "round"                     # [E] discovery10
+centre_m = [2.3617, 0.0668, 0.5918]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.5918 +- 0.0072 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.026]             # [E] jsc2022e068617: square end key (CANCEL / EXECUTE, ring symbol on the face), 1.2 x the block pitch less the gap; +-0.004
+shape = "rect"                      # [E] jsc2022e068617: square key with a ring symbol (was round)
 kind = "push"                       # [E] discovery10
 function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
 evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
@@ -200,10 +234,11 @@ id = "cam2"                         # [E] cluster A upper row
 label = "WATER DEORBIT"           # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3705, 0.0569, 0.5240]   # [E] shifted 0.025 with the screen row; discovery10 x 429 px
-size_m = [0.024, 0.016]             # [E] labelled key, pitch 0.027-0.035
+centre_m = [2.3617, 0.0668, 0.5589]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.5589 +- 0.0068 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.024]             # [E] jsc2022e068617: the guarded block keys fill their 0.030 x 0.028 pitch (discovery10 rows / columns) with ~4 mm gaps; +-0.003
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
+guard = "l"                         # [E] under the hinged clear cover with the red rim (jsc2022e068617; discovery10 both outer modules)
 function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
 evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
@@ -212,10 +247,11 @@ id = "cam3"                         # [E] cluster A upper row
 label = "DEORBIT NOW"             # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3705, 0.0569, 0.4990]   # [E] shifted 0.025 with the screen row; discovery10 x 460 px
-size_m = [0.024, 0.016]             # [E] see cam2
+centre_m = [2.3617, 0.0668, 0.5316]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.5316 +- 0.0065 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.024]             # [E] jsc2022e068617: the guarded block keys fill their 0.030 x 0.028 pitch (discovery10 rows / columns) with ~4 mm gaps; +-0.003
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
+guard = "l"                         # [E] under the hinged clear cover with the red rim (jsc2022e068617; discovery10 both outer modules)
 function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
 evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
@@ -224,21 +260,22 @@ id = "cam4"                         # [E] cluster A upper row
 label = "BREAKOUT"                # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3705, 0.0569, 0.4720]   # [E] shifted 0.025 with the screen row; discovery10 x 496 px
-size_m = [0.024, 0.016]             # [E] see cam2
+centre_m = [2.3617, 0.0668, 0.5008]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.5008 +- 0.0062 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.024]             # [E] jsc2022e068617: the guarded block keys fill their 0.030 x 0.028 pitch (discovery10 rows / columns) with ~4 mm gaps; +-0.003
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
+guard = "l"                         # [E] under the hinged clear cover with the red rim (jsc2022e068617; discovery10 both outer modules)
 function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
 evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
 [[button]]
-id = "cam5"                         # [E] cluster A upper row, round
+id = "cam5"                         # [E] cluster A upper row, end key
 label = "EXECUTE"                 # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, round key at its right end
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3697, 0.0558, 0.4440]   # [E] shifted 0.025 with the screen row; discovery10 x 531 px
-size_m = [0.016, 0.016]             # [E] see cam1
-shape = "round"                     # [E] discovery10
+centre_m = [2.3617, 0.0668, 0.4733]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.4733 +- 0.0059 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.026]             # [E] jsc2022e068617: square end key (CANCEL / EXECUTE, ring symbol on the face), 1.2 x the block pitch less the gap; +-0.004
+shape = "rect"                      # [E] jsc2022e068617: square key with a ring symbol (was round)
 kind = "push"                       # [E] discovery10
 function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
 evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
@@ -248,7 +285,7 @@ id = "cam6"                         # [E] cluster B upper row, round
 label = "POWER 1"                 # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, round key
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3705, 0.0569, 0.4060]   # [E] shifted 0.025 with the screen row; discovery10 x 580 px
+centre_m = [2.3617, 0.0668, 0.4324]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.4324 +- 0.0055 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -260,7 +297,7 @@ id = "cam7"                         # [E] cluster B upper row
 label = "STRING 1A"               # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3707, 0.0560, 0.3780]   # [E] shifted 0.025 with the screen row; discovery10 x 616 px
+centre_m = [2.3617, 0.0668, 0.4021]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.4021 +- 0.0052 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -272,7 +309,7 @@ id = "cam8"                         # [E] cluster B upper row
 label = "STRING 1B"               # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3705, 0.0569, 0.3470]   # [E] shifted 0.025 with the screen row; discovery10 x 656 px
+centre_m = [2.3617, 0.0668, 0.3725]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.3725 +- 0.0050 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -284,7 +321,7 @@ id = "cam9"                         # [E] cluster B upper row
 label = "STRING 1C"               # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, upper row
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3695, 0.0568, 0.3150]   # [E] shifted 0.025 with the screen row; discovery10 x 696 px
+centre_m = [2.3617, 0.0668, 0.3444]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.3444 +- 0.0047 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -296,7 +333,7 @@ id = "cam10"                        # [E] cluster B upper row, round
 label = "RESET 1"                 # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, round key
 panel = "left"                      # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3695, 0.0568, 0.2810]   # [E] shifted 0.025 with the screen row; discovery10 x 741 px
+centre_m = [2.3617, 0.0668, 0.3159]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.3159 +- 0.0045 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -308,10 +345,11 @@ id = "cam11"                        # [E] cluster A lower row
 label = "DEPRESS RESPONSE"        # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3496, 0.0776, 0.5110]   # [E] shifted 0.025 with the screen row; discovery10 x 446 px
-size_m = [0.024, 0.016]             # [E] see cam2
+centre_m = [2.3366, 0.0813, 0.5617]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.5617 +- 0.0069 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.024]             # [E] jsc2022e068617: the guarded block keys fill their 0.030 x 0.028 pitch (discovery10 rows / columns) with ~4 mm gaps; +-0.003
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
+guard = "l"                         # [E] under the hinged clear cover with the red rim (jsc2022e068617; discovery10 both outer modules)
 function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
 evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
@@ -320,10 +358,11 @@ id = "cam12"                        # [E] cluster A lower row
 label = "SUPPRESS FIRE"           # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3496, 0.0776, 0.4880]   # [E] shifted 0.025 with the screen row; discovery10 x 475 px
-size_m = [0.024, 0.016]             # [E] see cam2
+centre_m = [2.3366, 0.0813, 0.5294]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.5293 +- 0.0065 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.024]             # [E] jsc2022e068617: the guarded block keys fill their 0.030 x 0.028 pitch (discovery10 rows / columns) with ~4 mm gaps; +-0.003
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
+guard = "l"                         # [E] under the hinged clear cover with the red rim (jsc2022e068617; discovery10 both outer modules)
 function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
 evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
@@ -332,10 +371,11 @@ id = "cam13"                        # [E] cluster A lower row
 label = "FIRE RESPONSE"           # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), left module, lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3486, 0.0775, 0.4620]   # [E] shifted 0.025 with the screen row; discovery10 x 509 px
-size_m = [0.024, 0.016]             # [E] see cam2
+centre_m = [2.3366, 0.0813, 0.4984]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.4984 +- 0.0062 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.024]             # [E] jsc2022e068617: the guarded block keys fill their 0.030 x 0.028 pitch (discovery10 rows / columns) with ~4 mm gaps; +-0.003
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
+guard = "l"                         # [E] under the hinged clear cover with the red rim (jsc2022e068617; discovery10 both outer modules)
 function = "none"                   # [S] user decision 2026-11-09: camera selection moved to the unlabelled keys; this key carries a real label, tap animates only until its function is implemented
 evidence = "label read in the photos; user decision 2026-11-09: camera on unlabelled keys, this key has function none until implemented"  # [S]
 
@@ -344,7 +384,7 @@ id = "cam14"                        # [E] cluster B lower row, round
 label = "POWER 2"                 # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, round key
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3496, 0.0776, 0.3950]   # [E] shifted 0.025 with the screen row; discovery10 x 594 px
+centre_m = [2.3366, 0.0813, 0.4329]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.4329 +- 0.0056 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -356,7 +396,7 @@ id = "cam15"                        # [E] cluster B lower row
 label = "STRING 2A"               # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3486, 0.0775, 0.3680]   # [E] shifted 0.025 with the screen row; discovery10 x 629 px
+centre_m = [2.3366, 0.0813, 0.4022]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.4022 +- 0.0053 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -368,7 +408,7 @@ id = "cam16"                        # [E] cluster B lower row
 label = "STRING 2B"               # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3484, 0.0784, 0.3390]   # [E] shifted 0.025 with the screen row; discovery10 x 667 px
+centre_m = [2.3366, 0.0813, 0.3736]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.3736 +- 0.0050 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -380,7 +420,7 @@ id = "cam17"                        # [E] cluster B lower row
 label = "STRING 2C"               # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, lower row
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3496, 0.0776, 0.3060]   # [E] shifted 0.025 with the screen row; discovery10 x 708 px
+centre_m = [2.3366, 0.0813, 0.3446]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.3446 +- 0.0047 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -392,7 +432,7 @@ id = "cam18"                        # [E] cluster B lower row, round
 label = "RESET 2"                 # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), middle module, round key
 panel = "left"                      # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3494, 0.0786, 0.2720]   # [E] shifted 0.025 with the screen row; discovery10 x 752 px
+centre_m = [2.3366, 0.0813, 0.3135]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.3135 +- 0.0045 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -405,7 +445,7 @@ evidence = "label read in the photos; user decision 2026-11-09: camera on unlabe
 id = "c_upper_1"                    # [E] cluster C upper row
 panel = "centre"                    # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3697, 0.0558, 0.2520]   # [E] discovery10 x 792 px, centre screen edge 905-1615 extrapolated
+centre_m = [2.3617, 0.0668, 0.2751]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.2750 +- 0.0041 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -417,7 +457,7 @@ evidence = "user decision 2026-11-09 (second): camera on the four unlabelled key
 id = "c_upper_2"                    # [E] cluster C upper row
 panel = "centre"                    # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3697, 0.0558, 0.2240]   # [E] discovery10 x 844 px
+centre_m = [2.3617, 0.0668, 0.2476]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.2476 +- 0.0039 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -430,7 +470,7 @@ id = "c_mains_only"                 # [E] cluster C upper row
 label = "MAINS ONLY"              # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), right module, upper row (training2 the same)
 panel = "centre"                    # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3697, 0.0558, 0.2000]   # [E] discovery10 x 888 px
+centre_m = [2.3617, 0.0668, 0.2209]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.2209 +- 0.0037 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -442,7 +482,7 @@ id = "c_drogues_mains"              # [E] cluster C upper row
 label = "DROGUES & MAINS"         # [E] key label: conv_42860a (Crew Dragon 2020 module row, same layout as discovery10), right module, upper row (training2 the same)
 panel = "centre"                    # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3697, 0.0558, 0.1730]   # [E] discovery10 x 938 px
+centre_m = [2.3617, 0.0668, 0.1873]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.1873 +- 0.0035 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -453,7 +493,7 @@ evidence = "label DROGUES & MAINS: training2 (Engadget 2018 mock-up, readable); 
 id = "c_lower_1"                    # [E] cluster C lower row
 panel = "centre"                    # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3486, 0.0775, 0.2420]   # [E] discovery10 x 810 px
+centre_m = [2.3366, 0.0813, 0.2728]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.2728 +- 0.0042 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -465,7 +505,7 @@ evidence = "user decision 2026-11-09 (second): camera on the four unlabelled key
 id = "c_lower_2"                    # [E] cluster C lower row
 panel = "centre"                    # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3486, 0.0775, 0.2180]   # [E] discovery10 x 855 px
+centre_m = [2.3366, 0.0813, 0.2467]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.2467 +- 0.0040 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -477,7 +517,7 @@ evidence = "user decision 2026-11-09 (second): camera on the four unlabelled key
 id = "c_lower_round"                # [E] cluster C lower row, round, at the cluster's right end
 panel = "centre"                    # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3486, 0.0775, 0.1430]   # [E] discovery10 x 995 px
+centre_m = [2.3366, 0.0813, 0.1585]   # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat -0.1585 +- 0.0034 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.016, 0.016]             # [E] see cam1
 shape = "round"                     # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -502,7 +542,7 @@ id = "r_backup_g_meter"             # [E] three-line label right of the handle
 label = "ENABLE BACKUP G-METER"   # [E] key label: training2 mock-up label right of the handle (Task 1)
 panel = "centre"                    # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3486, 0.0775, -0.1460]  # [E] discovery10 x 1531 px
+centre_m = [2.3366, 0.0813, -0.1605]  # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat +0.1605 +- 0.0032 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.024, 0.016]             # [E] see cam2
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -513,7 +553,7 @@ evidence = "training2 (2018 mock-up) ENABLE BACKUP G-METER right of the handle; 
 id = "r_led_1"                      # [E] lit (blue) push button
 panel = "centre"                    # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3486, 0.0775, -0.1740]  # [E] discovery10 x 1584 px
+centre_m = [2.3366, 0.0813, -0.1959]  # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat +0.1959 +- 0.0034 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.020, 0.016]             # [E] discovery10, smaller lit key
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -524,7 +564,7 @@ evidence = "discovery10 blue lit key, no readable label"  # [E]
 id = "r_led_2"                      # [E] see r_led_1
 panel = "centre"                    # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3486, 0.0775, -0.2000]  # [E] discovery10 x 1632 px
+centre_m = [2.3366, 0.0813, -0.2251]  # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat +0.2251 +- 0.0036 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.020, 0.016]             # [E] see r_led_1
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -535,7 +575,7 @@ evidence = "discovery10 blue lit key, no readable label"  # [E]
 id = "r_led_3"                      # [E] see r_led_1
 panel = "centre"                    # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3486, 0.0775, -0.2260]  # [E] discovery10 x 1680 px
+centre_m = [2.3366, 0.0813, -0.2552]  # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat +0.2552 +- 0.0038 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.020, 0.016]             # [E] see r_led_1
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
@@ -548,7 +588,7 @@ evidence = "discovery10 blue lit key, no readable label"  # [E]
 id = "r_cover"                      # [E] dark covered panel with a round knob, under the right screen's inner half
 panel = "right"                     # [E] discovery10
 row = 1                             # [E] spans both rows
-centre_m = [2.3595, 0.0672, -0.3370]  # [E] shifted 0.025 with the screen row; discovery10 x 1771-1983 px, between the rows (0.185 below the screen centre)
+centre_m = [2.3471, 0.0706, -0.3803]  # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat +0.3803 +- 0.0048 m; row between the rows at u -0.200 (row mean of the read u, +-0.01); face 12 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
 size_m = [0.11, 0.05]               # [E] discovery10, 212 px of the right screen's 540
 shape = "rect"                      # [E] discovery10
 kind = "covered"                    # [E] discovery10: hinged dark cover
@@ -556,92 +596,104 @@ function = "none"                   # [E] function not known
 evidence = "discovery10 covered panel, no label readable"  # [E]
 
 [[button]]
-id = "r_upper_1"                    # [E] right cluster upper row, round (mirror of cluster A)
+id = "r_upper_1"                    # [E] right cluster upper row, end key (mirror of cluster A)
+label = "CANCEL"                  # [E] key label: jsc2022e068617 (Hawthorne trainer, the right module legible)
 panel = "right"                     # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3705, 0.0569, -0.4310]  # [E] shifted 0.025 with the screen row; discovery10 x 2011 px on the right screen's edge 1700-2240
-size_m = [0.016, 0.016]             # [E] see cam1
-shape = "round"                     # [E] discovery10
+centre_m = [2.3617, 0.0668, -0.4734]  # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat +0.4734 +- 0.0056 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.026]             # [E] jsc2022e068617: square end key (CANCEL / EXECUTE, ring symbol on the face), 1.2 x the block pitch less the gap; +-0.004
+shape = "rect"                      # [E] jsc2022e068617: square key with a ring symbol (was round)
 kind = "push"                       # [E] discovery10
 function = "none"                   # [E] label unreadable
-evidence = "discovery10 label unreadable"  # [E]
+evidence = "label CANCEL: jsc2022e068617 (Hawthorne trainer, right module legible); discovery10 same key, blurred"  # [E]
 
 [[button]]
 id = "r_upper_2"                    # [E] right cluster upper row
 panel = "right"                     # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3705, 0.0569, -0.4580]  # [E] shifted 0.025 with the screen row; discovery10 x 2050 px
-size_m = [0.024, 0.016]             # [E] see cam2
+centre_m = [2.3617, 0.0668, -0.5017]  # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat +0.5017 +- 0.0059 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.024]             # [E] jsc2022e068617: the guarded block keys fill their 0.030 x 0.028 pitch (discovery10 rows / columns) with ~4 mm gaps; +-0.003
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
+guard = "r"                         # [E] under the hinged clear cover with the red rim (jsc2022e068617; discovery10 both outer modules)
 function = "none"                   # [E] label unreadable
 evidence = "discovery10 label unreadable"  # [E]
 
 [[button]]
 id = "r_upper_3"                    # [E] right cluster upper row
+label = "EMERGENCY DEORBIT"       # [E] key label: jsc2022e068617 (Hawthorne trainer, the right module legible)
 panel = "right"                     # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3705, 0.0569, -0.4830]  # [E] shifted 0.025 with the screen row; discovery10 x 2084 px
-size_m = [0.024, 0.016]             # [E] see cam2
+centre_m = [2.3617, 0.0668, -0.5323]  # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat +0.5323 +- 0.0062 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.024]             # [E] jsc2022e068617: the guarded block keys fill their 0.030 x 0.028 pitch (discovery10 rows / columns) with ~4 mm gaps; +-0.003
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
+guard = "r"                         # [E] under the hinged clear cover with the red rim (jsc2022e068617; discovery10 both outer modules)
 function = "none"                   # [E] label unreadable
-evidence = "discovery10 label unreadable"  # [E]
+evidence = "label EMERGENCY DEORBIT: jsc2022e068617 (Hawthorne trainer, right module legible); discovery10 same key, blurred"  # [E]
 
 [[button]]
 id = "r_upper_4"                    # [E] right cluster upper row
+label = "BREAKOUT"                # [E] key label: jsc2022e068617 (Hawthorne trainer, the right module legible)
 panel = "right"                     # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3705, 0.0569, -0.5060]  # [E] shifted 0.025 with the screen row; discovery10 x 2117 px
-size_m = [0.024, 0.016]             # [E] see cam2
+centre_m = [2.3617, 0.0668, -0.5652]  # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat +0.5652 +- 0.0066 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.024]             # [E] jsc2022e068617: the guarded block keys fill their 0.030 x 0.028 pitch (discovery10 rows / columns) with ~4 mm gaps; +-0.003
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
+guard = "r"                         # [E] under the hinged clear cover with the red rim (jsc2022e068617; discovery10 both outer modules)
 function = "none"                   # [E] label unreadable
-evidence = "discovery10 label unreadable"  # [E]
+evidence = "label BREAKOUT: jsc2022e068617 (Hawthorne trainer, right module legible); discovery10 same key, blurred"  # [E]
 
 [[button]]
-id = "r_upper_5"                    # [E] right cluster upper row, round
+id = "r_upper_5"                    # [E] right cluster upper row, end key
+label = "EXECUTE"                 # [E] key label: jsc2022e068617 (Hawthorne trainer, the right module legible)
 panel = "right"                     # [E] discovery10
 row = 1                             # [E] discovery10
-centre_m = [2.3695, 0.0568, -0.5320]  # [E] shifted 0.025 with the screen row; discovery10 x 2154 px
-size_m = [0.016, 0.016]             # [E] see cam1
-shape = "round"                     # [E] discovery10
+centre_m = [2.3617, 0.0668, -0.5922]  # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat +0.5922 +- 0.0068 m; row 1 at u -0.186 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.026]             # [E] jsc2022e068617: square end key (CANCEL / EXECUTE, ring symbol on the face), 1.2 x the block pitch less the gap; +-0.004
+shape = "rect"                      # [E] jsc2022e068617: square key with a ring symbol (was round)
 kind = "push"                       # [E] discovery10
 function = "none"                   # [E] label unreadable
-evidence = "discovery10 label unreadable"  # [E]
+evidence = "label EXECUTE: jsc2022e068617 (Hawthorne trainer, right module legible); discovery10 same key, blurred"  # [E]
 
 [[button]]
 id = "r_lower_1"                    # [E] right cluster lower row
 panel = "right"                     # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3486, 0.0775, -0.4490]  # [E] shifted 0.025 with the screen row; discovery10 x 2036 px
-size_m = [0.024, 0.016]             # [E] see cam2
+centre_m = [2.3366, 0.0813, -0.5038]  # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat +0.5038 +- 0.0060 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.024]             # [E] jsc2022e068617: the guarded block keys fill their 0.030 x 0.028 pitch (discovery10 rows / columns) with ~4 mm gaps; +-0.003
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
+guard = "r"                         # [E] under the hinged clear cover with the red rim (jsc2022e068617; discovery10 both outer modules)
 function = "none"                   # [E] label unreadable
 evidence = "discovery10 label unreadable"  # [E]
 
 [[button]]
 id = "r_lower_2"                    # [E] right cluster lower row
+label = "SUPPRESS FIRE"           # [E] key label: jsc2022e068617 (Hawthorne trainer, the right module legible)
 panel = "right"                     # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3496, 0.0776, -0.4760]  # [E] shifted 0.025 with the screen row; discovery10 x 2074 px
-size_m = [0.024, 0.016]             # [E] see cam2
+centre_m = [2.3366, 0.0813, -0.5335]  # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat +0.5335 +- 0.0063 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.024]             # [E] jsc2022e068617: the guarded block keys fill their 0.030 x 0.028 pitch (discovery10 rows / columns) with ~4 mm gaps; +-0.003
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
+guard = "r"                         # [E] under the hinged clear cover with the red rim (jsc2022e068617; discovery10 both outer modules)
 function = "none"                   # [E] label unreadable
-evidence = "discovery10 label unreadable"  # [E]
+evidence = "label SUPPRESS FIRE: jsc2022e068617 (Hawthorne trainer, right module legible); discovery10 same key, blurred"  # [E]
 
 [[button]]
 id = "r_lower_3"                    # [E] right cluster lower row
+label = "FIRE RESPONSE"           # [E] key label: jsc2022e068617 (Hawthorne trainer, the right module legible)
 panel = "right"                     # [E] discovery10
 row = 2                             # [E] discovery10
-centre_m = [2.3496, 0.0776, -0.5000]  # [E] shifted 0.025 with the screen row; discovery10 x 2108 px
-size_m = [0.024, 0.016]             # [E] see cam2
+centre_m = [2.3366, 0.0813, -0.5657]  # [D] fidelity Task 5: discovery10 key centre back-projected through the fitted camera onto the key plane (cabin_fit/parts/keys.py): lat +0.5657 +- 0.0066 m; row 2 at u -0.214 (row mean of the read u, +-0.01); face 8 mm proud of the sloped tray (cabin_layout.tray_face_o, KEY_HEIGHT_M)
+size_m = [0.026, 0.024]             # [E] jsc2022e068617: the guarded block keys fill their 0.030 x 0.028 pitch (discovery10 rows / columns) with ~4 mm gaps; +-0.003
 shape = "rect"                      # [E] discovery10
 kind = "push"                       # [E] discovery10
+guard = "r"                         # [E] under the hinged clear cover with the red rim (jsc2022e068617; discovery10 both outer modules)
 function = "none"                   # [E] label unreadable
-evidence = "discovery10 label unreadable"  # [E]
+evidence = "label FIRE RESPONSE: jsc2022e068617 (Hawthorne trainer, right module legible); discovery10 same key, blurred"  # [E]
 
 # External cameras of the left screen (spec 2026-11-07 "External cameras", proposal accepted by the user). Configuration, not code:
 # `stage` = the stage id the camera is mounted on (the camera rides the body that carries it; a camera whose stage no longer exists is

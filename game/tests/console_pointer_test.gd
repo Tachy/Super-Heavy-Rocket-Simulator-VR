@@ -8,7 +8,10 @@ const DT := 1.0 / 90.0
 ## KNOWN GAP (not a tolerance): keys the commander's index tip cannot touch even with the torso lean at its limit, with the
 ## measured shortfall in m. The pointer clamps to the reach (finite pose, the click still fires). Task 9 calibrates the seat /
 ## eye position and the HOTAS grips, which moves the shoulder; re-measure this table then (cockpit.md "Console pointer").
-const KNOWN_REACH_GAP_M := {"button:r_upper_5": 0.0307}
+## Fidelity Task 5: the keys moved to their measured places (discovery10 back-projection; the pilot's module now ends at +0.605 m along the row, was
+## +0.540): the commander's right hand falls short of the pilot's outer keys at the lean limit (was r_upper_5 30.7 mm). Task 9 re-measures after the
+## seat / eye calibration; the real commander does not reach the pilot's module either (it is the pilot's).
+const KNOWN_REACH_GAP_M := {"button:r_upper_5": 0.0615, "button:r_upper_3": 0.0318, "button:r_lower_3": 0.0457}
 const REACH_GAP_TOLERANCE_M := 0.002  ## the measured shortfall must stay within 2 mm of the table: a change shows up
 
 var _failures := 0

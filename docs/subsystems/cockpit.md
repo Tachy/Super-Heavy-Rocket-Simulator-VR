@@ -182,7 +182,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   the apertures so the cut edge hides under the bezel). `vehicle_spec.load_dragon` loads and validates `config/cockpits/<[vehicle] cockpit>.toml` into
   `spec["cockpit"]` (hashed into the manifest; `VehicleModels` staleness includes the cockpit TOML). Capsule stage frame.
   Nodes: `cabin_shell`, `floor`, `hatch_frame`, `window_<i>` / `window_glass_<i>` (i = exterior table row, +az then -az: 0 = +33.3, 1 = -33.3,
-  2 = +90, 3 = -90), `seat_s1..s4`, `console_housing` (the filleted body's front and ends + the dark upper panel, `console_shape.rounded_box`; `console_back` = its back face + the two ceiling posts, `console_under` = its underside and top; the shelf modules in front of it; the shelf front plane is the lowest button face minus its height; tested: every button stands >= 5 mm proud of the housing, the three screens are coplanar within 1 mm / 0.1 deg), `screen_left|centre|right`
+  2 = +90, 3 = -90), `seat_s1..s4`, `console_housing` (the filleted body's front and ends + the dark upper panel, `console_shape.rounded_box`; `console_back` = its back face + the two ceiling posts, `console_under` = its underside and top; `console_shelf` = the continuous sloped tray with its lip, `console_bezel` the screens' dark glass borders, `guard_<id>` / `guard_rim_<id>` the clear key guards and their red rims, `console_hit` the hidden flat key hit faces (fidelity Task 5); tested: every button stands >= 5 mm proud of the housing, the three screens are coplanar within 1 mm / 0.1 deg), `screen_left|centre|right`
   (one quad each, exactly the TOML centre / size, UV 0..1 with (0, 0) top left, +normal toward the crew), `tablet_l|r` (`[[tablet]]` ids l / r),
   `button_<id>` (one node per button; the centre handle is the node `handle`, no `button_handle`), `light_<i>` (`[[light]]` rows in file order),
   `hotas_stick`, `hotas_throttle`. Manifest `cockpit`: `nodes`, `screens[id] = {centre, normal, up, size}`, `buttons[id] = {centre, size}` (all 39 incl.
@@ -191,7 +191,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   Window well = funnel from the round interior reveal (`window_reveal_radius_m`) to the exterior ellipse 2 cm under the outer skin (glass there), 6 mm bezel
   ring (`window_bezel_m`). Hatch: super-ellipse opening (exponent 4 as the exterior), door inner face recessed 3 cm, white trim `hatch_trim_m`.
 - Simplifications (silhouette only, texture later): the handle is a raised pad with a T grip (not a recess); buttons are boxes / cylinders 6 mm proud (cover
-  12 mm) on the shelf, whose front plane is derived from the buttons' own offset from the screens' plane (about 0.024 m proud), one shelf for all panels; seats are
+  12 mm) on the tray (fidelity Task 5); seats are
   boxes (back, headrest, pan, lower-leg support, armrests) at the tabled hips, pan along the chest normal, shin support not measured; the HOTAS props
   are a base, shaft and grip at the grip offsets (calibrated in Task 9). `test_dragon_cabin.py` compares the windows with the exterior table (glass
   centre carried back along the normal: 2.5 cm / 0.55 deg, the Task 1 gate).
@@ -220,8 +220,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   Test: `cockpit_view_test.gd` (needs models; in `$needsGpuOrModels`).
 
 ### Fix round 2 (geometry and material fidelity)
-- Console: `[console]` carries `screen_gap_m` 0.020 (active-area gap, 2 x 0.007 bezel + 0.006 seam), `shelf_height_m` 0.10 (modules, top 0.0175 under the screens, proud of them by ~2.5 cm),
-  `module_split_m` / `module_margin_m` (buttons are grouped into light grey modules by `cabin_layout.shelf_modules`, dark housing shows in the gaps), housing 0.1575 above the screens plus a
+- Console: (screens, shelf and keys: see "Screens and tray (fidelity Task 5)"), housing 0.1575 above the screens plus a
   dark upper panel (`upper_top_x_m` 3.30, `upper_depth_m` 0.04) up to the ceiling, `[[locker]]` 5 / 6 (0.15 x 0.165, outboard of the tablets), the lamp panels moved to the
   upper panel's top corners, light grey `console_back` (back, underside, two posts). Nodes added: `console_back`, `console_shelf`, `console_lockers`, `ceiling_ring_light` (emissive annulus r 0.50-0.85,
   `[cabin] ring_light_radii_m`; the game's ring omnis sit on its mid radius). Buttons of the left / right panels moved 0.025 m toward the centre with their screens.
@@ -364,6 +363,41 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
 - Shots: `cockpit_shots.gd --console_closeup` (stereo pairs `closeup_eye_*`, `closeup_back_*` + `_stereo` sheets, IPD 64 mm); `--fidelity` now also renders
   `fid_discovery10`.
 - GPU (stereo pimax, cockpit view, 120 frames): median 23.36 ms, p99 29.9 ms (fix round 1; Task 4: 24.08 / 23.58; baseline 24.43 / 23.41): no change.
+
+### Screens and tray (fidelity Task 5)
+- Measurement: `cabin_fit/parts/console.py --as-built` now also frees `screen_half_h_m` and fits the two iPad mini bodies (6 corners in
+  `annotations/discovery10.toml`; body 0.1348 x 0.2032 [S] as prior = scale anchor; pose lat / u / o / roll free). Result (sigma, data-constrained
+  unless noted): glass 0.400 +- 0.013 x 0.227 +- 0.008 m, pitch 0.449 +- 0.015 m, tablets l (-0.321, 0.227) / r (0.334, 0.230) +- 0.005-0.010 (o prior-dominated [E]).
+  Residuals 1.18 / 6.25 / 6.23 px rms (crew1_1 / discovery2 / discovery10), chi2 77 / dof 52. The three camera rows of `photo_cameras.toml` were rewritten from
+  this fit, each component tagged by `constrained_by_data` ([E] for crew1_1 x / pitch / f and discovery2 f).
+- Keys: `cabin_fit/parts/keys.py` back-projects 38 key centres read in discovery10 through its fitted camera onto the key plane (o 0.030): every key lies
+  1.5-6 cm further out than the old px-fraction reading (cluster A -0.592..-0.473, the pilot's module +0.473..+0.592: mirror-symmetric within 0.4 mm), rows
+  at u -0.186 / -0.214 (row means; were -0.171 / -0.201). Sigma per key 3-7 mm (read 8 px + o +-5 mm) plus the camera's ~1 cm common mode.
+- Screens: active 0.392 x 0.219 (diagonal 0.449 +- 0.014 m, 17.7 in, 16:9) = glass - 2 `bezel_m` 0.004 [E]; `corner_radius_m` 0.006 [E], `recess_m` 0.005 [E];
+  `screen_gap_m` 0.057 [D]. Built: `console_bezel` (dark glossy ring between the square active quad and the rounded glass outline, at the screen plane), and in
+  `console_housing` a face frame `recess_m` in front of the glass (`console_shape.plate_with_holes`, rounded holes, walls down to the glass and back to the body).
+  Node ids and the screen quads (UV, centre, size) unchanged.
+- Tray (`[tray]`, replaces the separate shelf modules; old rule in `docs/history/cockpit.md`): one prism (`cabin_layout.tray_profiles`, `console_shape.extrude` +
+  `round_corners`) along +-`half_length_m` 0.625 in `console_shelf`: deck from the housing at u -0.149 (`shelf_top_gap_m` 0.0395 [D]) down `deck_drop_m` 0.019 [D] to
+  the key face, which leans out toward its bottom by `slope_deg` 15 [E] (normal turned up toward the crew's eyes; `depth_m` 0.024 [D] at mid face), the lip
+  (`lip_width_m` 0.010 [D], `lip_height_m` 0.006 [E]) down to u -0.237 (`shelf_height_m` 0.088 [D]); fillets `radius_m` 0.004 on the front edges only. The red strip
+  mark of `console_shelf` sits on the lip.
+- Keys stand `KEY_HEIGHT_M` 8 mm (cover 12 mm) proud of the tray face along its normal (`centre_m` = face centre, re-seated from lat / row whenever the tray
+  changes); the four end keys (CANCEL / EXECUTE, both outer modules) are square 0.026 rect keys, the 2 x 3 blocks 0.026 x 0.024 (jsc2022e068617). Labels added on
+  the pilot's module from jsc2022e068617 (trainer): CANCEL, EMERGENCY DEORBIT, BREAKOUT, EXECUTE, SUPPRESS FIRE, FIRE RESPONSE (r_upper_2 / r_lower_1 stay blank).
+- Guards (`[[guard]]` l / r; `[[button]] guard`): clear cover (`guard_<id>`, filleted box 4 mm over the key faces, `GUARD_MARGIN_M` 4 mm past the keys) and red
+  rim + hinge barrel on `hinge_edge` (`guard_rim_<id>`, colour `rim_colour` via the manifest `guards` block). Game: transparent StandardMaterial3D (alpha 0.04).
+- Pointer hit geometry: `console_hit` (one flat quad per key face, `cabin_layout.hit_faces`; the handle square to its panel) is hidden in the game; the pointer
+  itself still works on `ConsoleStrip` (config rectangles), so every key keeps a hit face at its visible face.
+- Render vs photo (as built, written cameras): screen glass corners discovery2 6.2 / 6.5 / 3.1 px rms (left / centre / right; Task 4: 87-143 px at the outer
+  screens), discovery10 4.5 / 3.4 / 4.3; tablets 17 / 12 px (roll not built); keys 12 px rms, max 31 (row means, slope); tray deck start -0.7 px, lip bottom +1.2 px
+  (column u 1450). Front bottom edge of the body unchanged (28-49 px, the 4 cm fillet; per-edge radius still open).
+- Reach: the outer keys moved out; the commander's right hand stays short of the pilot's module at the lean limit (r_upper_3 31.8 mm, r_lower_3 45.7 mm,
+  r_upper_5 61.5 mm: `console_pointer_test.gd` KNOWN_REACH_GAP_M; the pointer reaches them all). Task 9 re-measures.
+- Cabin 64,368 triangles; GPU (stereo pimax, cockpit view, 120 frames) median 24.07 / 23.70 ms (Task 4: 23.36): no change.
+- Shots: `--console_closeup` adds `closeup_tray` / `closeup_tray_r` (the outer modules from 0.6 m on the line to the eye, stereo, IPD 64 mm).
+- [E] / under-constrained (listed for the user): tray slope (no camera for jsc2022e068617), lip height, bezel, corner radius, recess, key sizes (ratios in the
+  trainer photo), the hinge side, tablet depth and roll.
 
 ## Camera mode and toggle
 State after plan Task 6 (code: `game/cockpit/cockpit_camera.gd`, `hotas_buttons.gd`, `World.toggle_cockpit`).

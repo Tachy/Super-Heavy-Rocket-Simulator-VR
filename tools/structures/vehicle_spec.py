@@ -291,9 +291,11 @@ COCKPIT_KEYS = {
     "cockpit": ("capsule_stage",),
     "cabin": ("wall_m", "floor_x_m", "ceiling_x_m", "tunnel_radius_m", "tunnel_top_x_m", "profile_m", "windows", "hatch", "window_reveal_radius_m", "window_bezel_m", "hatch_trim_m", "ring_light_radii_m"),
     "eye": ("position_m", "forward", "up"),
-    "console": ("centre_m", "normal", "up", "tilt_deg", "width_m", "height_m", "hood_depth_m", "edge_radius_m", "side_draft_deg", "underside_profile", "fold_deg", "strut_z_m", "post_top_m", "post_radius_m", "post_head_radius_m", "post_head_length_m", "post_foot_m", "screen_gap_m", "shelf_height_m", "shelf_top_gap_m", "module_split_m", "module_margin_m", "upper_top_x_m", "upper_depth_m", "locker_proud_m"),
+    "console": ("centre_m", "normal", "up", "tilt_deg", "width_m", "height_m", "hood_depth_m", "edge_radius_m", "side_draft_deg", "underside_profile", "fold_deg", "strut_z_m", "post_top_m", "post_radius_m", "post_head_radius_m", "post_head_length_m", "post_foot_m", "screen_gap_m", "shelf_height_m", "shelf_top_gap_m", "upper_top_x_m", "upper_depth_m", "locker_proud_m"),
+    "tray": ("depth_m", "slope_deg", "deck_drop_m", "lip_width_m", "lip_height_m", "radius_m", "half_length_m"),
     "hotas": ("props", "stick_grip_m", "throttle_grip_m"),
 }
+COCKPIT_GUARD_EDGES = ("top", "bottom", "left", "right")
 COCKPIT_SCREENS = ("left", "centre", "right")
 COCKPIT_SEATS = ("s1", "s2", "s3", "s4")
 COCKPIT_BUTTON_KINDS = ("push", "covered", "handle")
@@ -337,7 +339,7 @@ def validate_cockpit(cockpit: dict) -> None:
     for sid, s in screens.items():
         unit(f"screen {sid} normal", s["normal"])
         unit(f"screen {sid} up", s["up"])
-        for k in ("centre_m", "size_m"):
+        for k in ("centre_m", "size_m", "bezel_m", "corner_radius_m", "recess_m"):
             if k not in s:
                 raise VehicleSpecError(f"cockpit screen {sid}: missing key '{k}'")
     for t in cockpit["tablet"]:
@@ -356,6 +358,21 @@ def validate_cockpit(cockpit: dict) -> None:
             raise VehicleSpecError(f"cockpit button {b['id']}: unknown kind {b['kind']} / shape {b['shape']}")
     if "handle" not in ids:
         raise VehicleSpecError("cockpit: no [[button]] with id handle")
+    guards = {}
+    for g in cockpit.get("guard", []):
+        for k in ("id", "buttons", "hinge_edge", "rim_colour"):
+            if k not in g:
+                raise VehicleSpecError(f"cockpit guard {g.get('id', '?')}: missing key '{k}'")
+        if g["hinge_edge"] not in COCKPIT_GUARD_EDGES:
+            raise VehicleSpecError(f"cockpit guard {g['id']}: hinge_edge must be one of {COCKPIT_GUARD_EDGES}")
+        guards[g["id"]] = set(g["buttons"])
+    for g, ks in guards.items():
+        if not ks <= ids:
+            raise VehicleSpecError(f"cockpit guard {g}: unknown buttons {sorted(ks - ids)}")
+    for b in cockpit.get("button", []):
+        gid = b.get("guard")
+        if (gid is not None and b["id"] not in guards.get(gid, ())) or any(b["id"] in ks and gid != g for g, ks in guards.items()):
+            raise VehicleSpecError(f"cockpit button {b['id']}: guard {gid!r} does not match the [[guard]] button lists")
 
 
 def load_cockpit(cockpit_id: str, cockpits_dir: Path = COCKPITS) -> dict:
