@@ -34,8 +34,9 @@ ROOT = HERE.parents[1]
 LAMP_LUMENS = 3000.0  # [D] = CockpitView.LAMP_LUMENS (game/cockpit/cockpit_view.gd)
 LAMP_DROP_M = 0.08  # [D] = CockpitView.LAMP_DROP_M
 RING_LUMENS = 6000.0  # [D] = CockpitView.RING_LUMENS, over RING_LAMPS omnis
-RING_LAMPS = 8  # [D] = CockpitView.RING_LAMPS
-RING_DROP_M = 0.10  # [D] = CockpitView.RING_DROP_M (Task 9: in from the side wall at the cove light)
+RING_LAMPS = 16  # [D] = CockpitView.RING_LAMPS
+RING_DROP_M = 0.30  # [D] = CockpitView.RING_DROP_M (Task 9 fix 1: under the cove light)
+RING_IN_M = 0.25  # [D] = CockpitView.RING_IN_M (in from the side wall)
 FILL_LUMENS = 7000.0  # [D] = CockpitView.FILL_LUMENS (fill_ceiling, fill_seats)
 FILL_LUX = 450.0  # [D] = CockpitView.FILL_LUX: the walls' bounced light as a flat illuminance
 
@@ -101,11 +102,11 @@ def sample(img: np.ndarray, px: np.ndarray) -> np.ndarray:
 
 
 def cove_ring(cab) -> tuple:
-    """(x, r) of the ring omnis = CockpitView.cove_ring: RING_DROP_M below the middle of [cabin] cove_light_x_m and RING_DROP_M in from the side
+    """(x, r) of the ring omnis = CockpitView.cove_ring: RING_DROP_M below the middle of [cabin] cove_light_x_m and RING_IN_M in from the side
     wall there (fidelity Task 9)."""
     x = 0.5 * sum(cab["cove_light_x_m"])
     run = [p for p in cab["profile_m"][1:] if p[0] <= cab["ceiling_x_m"] + 1e-9]
-    return x - RING_DROP_M, float(np.interp(x, [p[0] for p in run], [p[1] for p in run])) - RING_DROP_M
+    return x - RING_DROP_M, float(np.interp(x, [p[0] for p in run], [p[1] for p in run])) - RING_IN_M
 
 
 def cabin_lights(cockpit) -> list:

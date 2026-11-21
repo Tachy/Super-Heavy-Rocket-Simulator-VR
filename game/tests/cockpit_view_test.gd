@@ -195,6 +195,16 @@ func _check_eye(cockpit: CockpitView) -> void:
 	var ring := cockpit.cabin_node("ceiling_ring_light")
 	_check(ring != null and ring.material_override.shader.resource_path.ends_with("display_colour.gdshader") and ring.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF,
 			"ceiling ring light: an emissive (display-referred) mesh")
+	var handles := cockpit.cabin_node("tunnel_handles")
+	var red: Color = (handles.material_override as ShaderMaterial).get_shader_parameter("albedo").srgb_to_linear() if handles != null else Color.BLACK
+	_check(handles != null and red.is_equal_approx(CockpitView.HANDLE_RED) and red.r > 3.0 * red.g, "tunnel hand-holds: red (HANDLE_RED, linear %s)" % [red])
+	var cabin_cfg: Dictionary = cockpit.config.cabin
+	var ring_at := CockpitView.cove_ring(cabin_cfg)
+	var off := cabin_cfg.duplicate(true)
+	off["cove_light_x_m"] = [9.0, 9.2]  # beyond the side-wall run: clamped to its last point (like photo_delight.cove_ring), never r < 0
+	var clamped := CockpitView.cove_ring(off)
+	_check(ring_at.y > 0.3 and clamped.y > 0.3 and clamped.x <= float(cabin_cfg["ceiling_x_m"]) - CockpitView.RING_DROP_M + 1.0e-9,
+			"cove_ring: inside the cabin (r %.3f) and clamped to the wall run when the span is outside it (x %.3f, r %.3f)" % [ring_at.y, clamped.x, clamped.y])
 	var shell := cockpit.cabin_node("seat_shell_s2")
 	var pad := cockpit.cabin_node("seat_pad_s2")
 	_check(shell != null and pad != null and shell.material_override != pad.material_override, "seats: shell and pad are separate nodes with separate materials")

@@ -27,11 +27,12 @@ const WALL_ALBEDO := Color(0.8, 0.8, 0.79)
 ## Lamp offset in front of its panel on the console (toward the crew, along the console normal).
 const LAMP_DROP_M := 0.08
 ## [E] The cove light all round the side wall under the ceiling corner (fidelity Task 9; was a ceiling annulus r 0.50-0.85): RING_LAMPS omnis
-## RING_DROP_M below the middle of [cabin] cove_light_x_m and RING_DROP_M in from the wall (cove_ring), RING_LUMENS in total (an area light's stand-in; its emissive band
+## RING_DROP_M below the middle of [cabin] cove_light_x_m and RING_IN_M in from the wall (cove_ring), RING_LUMENS in total (an area light's stand-in; its emissive band
 ## `ceiling_ring_light` is the generator's). tools/structures/photo_delight.cove_ring uses the same rule.
-const RING_LAMPS := 8
+const RING_LAMPS := 16
 const RING_LUMENS := 6000.0
-const RING_DROP_M := 0.10
+const RING_DROP_M := 0.30
+const RING_IN_M := 0.25
 ## Fidelity Task 9 room colours (linear albedo). [D] ratios to a white neighbour in the same photo x the white's albedo, [E] where shaded:
 ## the closed forward hatch (crew1_1: 0.032 of the lit wall; dark grey, partly in shade -> 0.04 [E]); the tunnel hand-holds' red
 ## (jsc2024e000258: R / G / B 0.43 / 0.11 / 0.12 of the white tunnel ring, albedo ~0.6 -> 0.26 / 0.07 / 0.07 [D]); the vent grilles (same photo:
@@ -538,21 +539,29 @@ func _build_lights() -> void:
 
 
 ## (x, r) of the ring omnis: RING_DROP_M below the middle of [cabin] cove_light_x_m and RING_DROP_M in from the side wall there (profile_m up to the
-## ceiling corner): 0.10 under the ceiling plane they lit it in hot spots (Task 9 r1 shots).
+## ceiling corner): 0.10 under the ceiling plane and 0.10 from the wall they lit it in hot spots (Task 9 r1 shots), so the ring hangs
+## 0.30 under it and 0.25 in. The middle of the span is clamped to the profile's side-wall run (the same rule as photo_delight.cove_ring, np.interp).
 static func cove_ring(cabin: Dictionary) -> Vector2:
 	var span: Array = cabin.get("cove_light_x_m", [3.42, 3.47])
 	var x := 0.5 * (float(span[0]) + float(span[1]))
 	var ceiling_x := float(cabin.get("ceiling_x_m", 3.48))
 	var profile: Array = cabin.get("profile_m", [])
-	var r := 0.0
-	for i in range(1, profile.size() - 1):
-		var a: Array = profile[i]
-		var b: Array = profile[i + 1]
-		if float(b[0]) > ceiling_x + 1.0e-9:
+	var run: Array = []
+	for i in range(1, profile.size()):
+		if float(profile[i][0]) > ceiling_x + 1.0e-9:
 			break
-		if x >= float(a[0]) and x <= float(b[0]) and float(b[0]) > float(a[0]):
+		run.append(profile[i])
+	if run.is_empty():
+		return Vector2(x - RING_DROP_M, 0.0)
+	x = clampf(x, float(run[0][0]), float(run[run.size() - 1][0]))
+	var r := float(run[run.size() - 1][1])
+	for i in range(run.size() - 1):
+		var a: Array = run[i]
+		var b: Array = run[i + 1]
+		if x <= float(b[0]) and float(b[0]) > float(a[0]):
 			r = lerpf(float(a[1]), float(b[1]), (x - float(a[0])) / (float(b[0]) - float(a[0])))
-	return Vector2(x - RING_DROP_M, r - RING_DROP_M)
+			break
+	return Vector2(x - RING_DROP_M, r - RING_IN_M)
 
 
 func _console_normal() -> Vector3:

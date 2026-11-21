@@ -192,8 +192,9 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   `hotas_stick`, `hotas_throttle`. Manifest `cockpit`: `nodes`, `screens[id] = {centre, normal, up, size}`, `buttons[id] = {centre, size}` (all 39 incl.
   `handle`), `button_ids`, `tablets`. No materials in the manifest yet (the game side assigns them).
 - Wall: the inner surface is the exterior meridian offset by `wall_m` along its outward normal; windows / hatch are cut in that chart (`cabin_layout.at_depth`).
-  Window well = funnel from the round interior reveal (`window_reveal_radius_m`) to the exterior ellipse 2 cm under the outer skin (glass there), 6 mm bezel
-  ring (`window_bezel_m`). Hatch: super-ellipse opening (exponent 4 as the exterior), door inner face recessed 3 cm, white trim `hatch_trim_m`.
+  Window well = funnel from the round interior reveal (`window_reveal_radius_m`) to the exterior ellipse 2 cm under the outer skin (glass there); since
+  Task 9 the reveal carries a rounded white rim and a black gasket (see "Room (fidelity Task 9)"). Hatch: super-ellipse opening (exponent 4 as the
+  exterior), door inner face recessed 3 cm, black seal frame (Task 9).
 - Simplifications (silhouette only, texture later): the handle is a raised pad with a T grip (not a recess); buttons are boxes / cylinders 6 mm proud (cover
   12 mm) on the tray (fidelity Task 5); seats are
   boxes (back, headrest, pan, lower-leg support, armrests) at the tabled hips, pan along the chest normal, shin support not measured; the HOTAS props
@@ -213,10 +214,10 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   housing near black; walls white matte.
 - Lighting (fix round 1): the cabin has no GI, so each cabin surface gets a flat bounced-light term in the shader (`fill` = `FILL_LUX` 450 lx / pi x
   `scene_per_cd_m2`, emission albedo x fill, set every frame; scene-referred like the lamps) on top of the lamps and the sky-AO remainder; the two ceiling lamps cast
-  shadows; a ring of 8 omnis (6000 lm) stands in for the cove light (Task 9: 0.10 below the middle of `cove_light_x_m` and 0.10 in from the wall; its
+  shadows; a ring of 16 omnis (6000 lm) stands in for the cove light (Task 9 fix 1: 0.30 below the middle of `cove_light_x_m` and 0.25 in from the wall, `CockpitView.cove_ring` clamps to the wall run like `photo_delight.cove_ring`; at 0.10 / 0.10 and 8 lamps they left bright spots on the ceiling panels; its
   emissive band `ceiling_ring_light` comes with the generator). The scene-referred eye adaptation meters the cabin to 18 % grey whatever the light level, so flux alone cannot make it white: `Atmosphere.field_key`
-  (default `EyeAdaptation.FIELD_MID_GREY` 0.18) is the field's grey; the shots set 1.2 ([call], `--field_key`) and measure white wall p90 0.82-0.87 sRGB
-  (pilot_eye 0.87, gopro 0.82, hatch 0.86; at key 0.18 they were 0.56-0.62, at 0.40: 0.67-0.74). Whoever puts the player camera in the cabin (Task 8/9) must set `field_key`.
+  (default `EyeAdaptation.FIELD_MID_GREY` 0.18) is the field's grey; the shots set 1.2 ([call], `--field_key`) and measure white wall p90 0.82-0.83 sRGB
+  (pilot_eye 0.83, gopro 0.82, hatch 0.83 after the Task 9 fix 1 cove ring, before it 0.87 / 0.82 / 0.86; at key 0.18 they were 0.56-0.62, at 0.40: 0.67-0.74). Whoever puts the player camera in the cabin (Task 8/9) must set `field_key`.
   Open: a sound way to set the key (cabin-local high-key rule) is a decision for the eye-adaptation subsystem.
 - Shots: `game/tests/cockpit_shots.gd` (GPU, 2560 x 1440 window) writes `pilot_eye` (our own view, no photo pair), `gopro_discovery2` (the photographers' GoPro, rendered 140 deg
   rectilinear and remapped to the equidistant fisheye, 1600 x 900), `hatch_crew1_1` (3:2) and side-by-side / overlay PNGs (`gopro_vs_discovery2`, `gopro_overlay_discovery2`,
