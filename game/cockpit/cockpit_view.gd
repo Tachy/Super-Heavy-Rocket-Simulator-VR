@@ -26,12 +26,20 @@ const FILL_LUX := 450.0
 const WALL_ALBEDO := Color(0.8, 0.8, 0.79)
 ## Lamp offset in front of its panel on the console (toward the crew, along the console normal).
 const LAMP_DROP_M := 0.08
-## [E] The ceiling ring light around the forward tunnel (crew1_1: a bright white annulus, r ~0.45..0.9 m at the ceiling):
-## RING_LAMPS omnis on the mid radius of [cabin] ring_light_radii_m, RING_LUMENS in total (an area light's stand-in; its emissive mesh `ceiling_ring_light` is the generator's).
+## [E] The cove light all round the side wall under the ceiling corner (fidelity Task 9; was a ceiling annulus r 0.50-0.85): RING_LAMPS omnis
+## RING_DROP_M below the middle of [cabin] cove_light_x_m and RING_DROP_M in from the wall (cove_ring), RING_LUMENS in total (an area light's stand-in; its emissive band
+## `ceiling_ring_light` is the generator's). tools/structures/photo_delight.cove_ring uses the same rule.
 const RING_LAMPS := 8
-const RING_RADIUS_FALLBACK_M := 0.675
 const RING_LUMENS := 6000.0
 const RING_DROP_M := 0.10
+## Fidelity Task 9 room colours (linear albedo). [D] ratios to a white neighbour in the same photo x the white's albedo, [E] where shaded:
+## the closed forward hatch (crew1_1: 0.032 of the lit wall; dark grey, partly in shade -> 0.04 [E]); the tunnel hand-holds' red
+## (jsc2024e000258: R / G / B 0.43 / 0.11 / 0.12 of the white tunnel ring, albedo ~0.6 -> 0.26 / 0.07 / 0.07 [D]); the vent grilles (same photo:
+## 0.056 of the ring -> 0.03); the window gaskets and the hatch seal (nasatour_0420 / crew1_1 / nasatour_0500: black -> 0.03 [E]).
+const FORWARD_HATCH_ALBEDO := Color(0.04, 0.04, 0.045)
+const HANDLE_RED := Color(0.26, 0.07, 0.07)
+const VENT_ALBEDO := Color(0.03, 0.03, 0.03)
+const SEAL_ALBEDO := Color(0.03, 0.03, 0.032)
 ## [E] Screen placeholder: a dark Dragon-blue UI background, display-referred (no exposure, as every emitter).
 const SCREEN_COLOUR := Color(0.025, 0.07, 0.17)
 ## Render layer of the console parts (round 4): the two console lamps hang 8 cm in front of the console face and light it only at grazing
@@ -521,13 +529,30 @@ func _build_lights() -> void:
 		lamp.shadow_normal_bias = 3.0
 		lamp.light_cull_mask &= ~CONSOLE_LAYER
 	var ceiling_x := float(config.cabin.get("ceiling_x_m", 3.35))
-	var radii: Array = config.cabin.get("ring_light_radii_m", [])
-	var ring_r := 0.5 * (float(radii[0]) + float(radii[1])) if radii.size() == 2 else RING_RADIUS_FALLBACK_M
+	var ring := cove_ring(config.cabin)
 	for k in RING_LAMPS:
 		var az := TAU * float(k) / RING_LAMPS
-		_add_omni("ring_%d" % k, Vector3(ceiling_x - RING_DROP_M, ring_r * cos(az), ring_r * sin(az)), RING_LUMENS / RING_LAMPS)
+		_add_omni("ring_%d" % k, Vector3(ring.x, ring.y * cos(az), ring.y * sin(az)), RING_LUMENS / RING_LAMPS)
 	_add_omni("fill_ceiling", Vector3(ceiling_x - 0.25, 0.0, 0.0), FILL_LUMENS)  # 0.25 m under the ceiling plane (was 3.1 for the ceiling at 3.35)
 	_add_omni("fill_seats", Vector3(2.0, 0.55, 0.0), FILL_LUMENS)
+
+
+## (x, r) of the ring omnis: RING_DROP_M below the middle of [cabin] cove_light_x_m and RING_DROP_M in from the side wall there (profile_m up to the
+## ceiling corner): 0.10 under the ceiling plane they lit it in hot spots (Task 9 r1 shots).
+static func cove_ring(cabin: Dictionary) -> Vector2:
+	var span: Array = cabin.get("cove_light_x_m", [3.42, 3.47])
+	var x := 0.5 * (float(span[0]) + float(span[1]))
+	var ceiling_x := float(cabin.get("ceiling_x_m", 3.48))
+	var profile: Array = cabin.get("profile_m", [])
+	var r := 0.0
+	for i in range(1, profile.size() - 1):
+		var a: Array = profile[i]
+		var b: Array = profile[i + 1]
+		if float(b[0]) > ceiling_x + 1.0e-9:
+			break
+		if x >= float(a[0]) and x <= float(b[0]) and float(b[0]) > float(a[0]):
+			r = lerpf(float(a[1]), float(b[1]), (x - float(a[0])) / (float(b[0]) - float(a[0])))
+	return Vector2(x - RING_DROP_M, r - RING_DROP_M)
 
 
 func _console_normal() -> Vector3:
@@ -663,11 +688,21 @@ func _material_of(part: String) -> Material:
 	if part.begins_with("light_") or part == "ceiling_ring_light" or part == "console_lamps":
 		return _display(Color(0.95, 0.95, 0.9))
 	if part == "cabin_shell":
-		return _cabin_material(WALL_ALBEDO, 0.85, 0.0, 0.5)
+		return _shell_material()
 	if part == "cabin_recess":
 		return _recess_material()
-	if part == "floor" or part == "hatch_frame" or part.begins_with("window_"):
+	## Fidelity Task 9: the window wells' gasket band and the hatch's seal frame are the faces with glTF UV.y 1 (the generator's strip_uv):
+	## tinted dark, the rest white.
+	if part == "hatch_frame" or part.begins_with("window_"):
+		return _two_tone_material("trim_" + part.get_slice("_", 0), SEAL_ALBEDO)
+	if part == "floor":
 		return _cabin_material(WALL_ALBEDO, 0.8, 0.0, 0.0)
+	if part == "forward_hatch":
+		return _cabin_material(FORWARD_HATCH_ALBEDO.linear_to_srgb(), 0.6, 0.0, 0.0)
+	if part == "tunnel_handles":
+		return _cabin_material(HANDLE_RED.linear_to_srgb(), 0.45, 0.0, 0.0)
+	if part == "ceiling_vents":
+		return _cabin_material(VENT_ALBEDO.linear_to_srgb(), 0.9, 0.0, 0.0)
 	## Fidelity Task 6: the console body, back with the posts, underside, tray and lockers share one material on the baked console atlas
 	## (tools/structures/cabin_textures.py: colours, seams, screws, placards, vent, plates, the red lip strip; docs/subsystems/cockpit.md).
 	if part in ATLAS_NODES:
@@ -820,10 +855,34 @@ func _apply_seat_maps(m: ShaderMaterial) -> void:
 
 ## The wall recess (fidelity Task 7): white at the panel edge, RECESS_ALBEDO from RECESS_TINT_FROM of the way down the bevel (the generator writes
 ## the recess fraction into UV.y; the shader's tint split follows it smoothly across the wall grid).
+## The wall panels (fidelity Task 9): white, seams along meridians at [cabin] seam_phase_deg + k x seam_pitch_deg (crew1_1's ceiling ring seams).
+func _shell_material() -> ShaderMaterial:
+	if _materials.has("shell"):
+		return _materials["shell"]
+	var m := _cabin_material(WALL_ALBEDO, 0.85, 0.0, 0.5).duplicate() as ShaderMaterial
+	m.set_shader_parameter("seam_polar_pitch_deg", float(config.cabin.get("seam_pitch_deg", 30.0)))
+	m.set_shader_parameter("seam_polar_phase_deg", float(config.cabin.get("seam_phase_deg", 15.0)))
+	_materials["shell"] = m
+	return m
+
+
+## White wall material whose glTF UV.y > 0.5 faces take `low` (linear albedo): window gaskets, the hatch seal (fidelity Task 9).
+func _two_tone_material(key: String, low: Color) -> ShaderMaterial:
+	if _materials.has(key):
+		return _materials[key]
+	var m := _cabin_material(WALL_ALBEDO, 0.8, 0.0, 0.0).duplicate() as ShaderMaterial
+	m.set_shader_parameter("tint_split", 0.5)
+	m.set_shader_parameter("albedo_low", low.linear_to_srgb())
+	m.set_shader_parameter("roughness_low", 0.6)
+	m.set_shader_parameter("metallic_low", 0.0)
+	_materials[key] = m
+	return m
+
+
 func _recess_material() -> ShaderMaterial:
 	if _materials.has("recess"):
 		return _materials["recess"]
-	var m := _cabin_material(WALL_ALBEDO, 0.85, 0.0, 0.5).duplicate() as ShaderMaterial
+	var m := _shell_material().duplicate() as ShaderMaterial
 	m.set_shader_parameter("tint_split", RECESS_TINT_FROM)
 	m.set_shader_parameter("albedo_low", RECESS_ALBEDO)
 	m.set_shader_parameter("roughness_low", 0.85)

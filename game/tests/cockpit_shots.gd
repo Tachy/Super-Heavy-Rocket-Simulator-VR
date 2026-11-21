@@ -27,7 +27,8 @@
 #   --fidelity: instead of the cabin shots, one shot fid_<id> per row of config/cockpits/photo_cameras.toml (the photo's fitted camera and framing) with
 #   fid_<id>_vs (side by side) and fid_<id>_overlay (50 % blend + our edges in red); --photo=<ids> limits the rows. The left screen's feed is shown in every shot.
 #   --console_closeup: stereo pairs of the console body and its ceiling posts (fidelity Task 4): closeup_eye_l/_r, closeup_back_l/_r + *_stereo sheets;
-#   closeup_tray / _tray_r (Task 5), closeup_tablet (the left iPad at 0.5 m) and closeup_recess (the left wall recess beside the console end, Task 7)
+#   closeup_tray / _tray_r (Task 5), closeup_tablet (the left iPad at 0.5 m) and closeup_recess (the left wall recess beside the console end, Task 7);
+#   closeup_window / closeup_tunnel / closeup_hatch (Task 9: window rim and gasket, red tunnel handles and vents, the side hatch's seal frame)
 #   --tone=agx (Godot's AgX alone, no display tone step), --hunt=day (the Hunt factor against L_day, as before look fixes T5)
 extends SceneTree
 
@@ -536,7 +537,15 @@ func _define_fidelity_shots() -> void:
 ## composed side by side (left | right eye) into closeup_eye_stereo / closeup_back_stereo.
 const STEREO_IPD_M := 0.064
 const CLOSEUP_SHOTS := ["closeup_eye", "closeup_back", "closeup_tray", "closeup_tray_r", "closeup_tablet", "closeup_recess", "closeup_seat",
-		"closeup_seat_legs", "closeup_seat_frame", "closeup_figure"]
+		"closeup_seat_legs", "closeup_seat_frame", "closeup_figure", "closeup_window", "closeup_tunnel", "closeup_hatch"]
+## fidelity Task 9: the +33 deg window (crew's left of the hatch; its centre on the inner wall) from WINDOW_CLOSEUP_M along the line to the
+## commander's eye; the forward tunnel's mouth (red handles, vents, closed docking hatch) from below; the side hatch's seal frame from the seats
+const WINDOW_CLOSEUP_AT := Vector3(2.321, 1.218, 0.8)
+const WINDOW_CLOSEUP_M := 0.7
+const TUNNEL_CLOSEUP_FROM := Vector3(2.75, -0.15, 0.55)
+const TUNNEL_CLOSEUP_AT := Vector3(3.5, 0.0, 0.25)
+const HATCH_CLOSEUP_FROM := Vector3(2.0, 0.2, 0.3)
+const HATCH_CLOSEUP_AT := Vector3(2.286, 1.469, 0.0)
 ## fidelity Task 8: the empty outer seat s1 seen from in front (camera SEAT_CLOSEUP_FROM in its seat frame: up the back, chest normal, lateral), its
 ## back / headrest wings and its leg support; the pilot figure's (s3) helmet / neck ring and shoulder at SEAT_FIGURE_CLOSEUP_M from the commander's
 ## eye side (the crack check of the figure meshes)
@@ -582,6 +591,10 @@ func _define_console_closeup_shots(eye: Transform3D) -> void:
 	var f3: Array = seat_frames["s3"]
 	var neck := Vector3(f3[0]) + Vector3(f3[1]) * 0.66 + Vector3(f3[2]) * 0.14 + Vector3(0.0, 0.0, 0.08)  # helmet's lower edge, neck ring, left shoulder
 	views.append(["closeup_figure", neck + (eye.origin - neck).normalized() * SEAT_FIGURE_CLOSEUP_M, neck, 45.0, Vector3(f3[1])])
+	views.append(["closeup_window", WINDOW_CLOSEUP_AT + (eye.origin - WINDOW_CLOSEUP_AT).normalized() * WINDOW_CLOSEUP_M, WINDOW_CLOSEUP_AT, 50.0,
+			Vector3(1.0, 0.0, 0.0), true])
+	views.append(["closeup_tunnel", TUNNEL_CLOSEUP_FROM, TUNNEL_CLOSEUP_AT, 70.0, Vector3(0.0, 1.0, 0.0)])
+	views.append(["closeup_hatch", HATCH_CLOSEUP_FROM, HATCH_CLOSEUP_AT, 75.0, Vector3(1.0, 0.0, 0.0), true])
 	for view: Array in views:
 		var origin: Vector3 = view[1]
 		var basis := Basis.looking_at(Vector3(view[2]) - origin, Vector3(view[4]))

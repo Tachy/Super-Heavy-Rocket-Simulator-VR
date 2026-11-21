@@ -289,7 +289,9 @@ def validate_dragon_detail(detail: dict) -> None:
 
 COCKPIT_KEYS = {
     "cockpit": ("capsule_stage",),
-    "cabin": ("wall_m", "floor_x_m", "ceiling_x_m", "tunnel_radius_m", "tunnel_top_x_m", "profile_m", "windows", "hatch", "window_reveal_radius_m", "window_bezel_m", "hatch_trim_m", "ring_light_radii_m"),
+    "cabin": ("wall_m", "floor_x_m", "ceiling_x_m", "tunnel_radius_m", "tunnel_top_x_m", "profile_m", "windows", "hatch", "window_reveal_radius_m", "window_bezel_m", "window_rim_height_m", "window_gasket_m", "hatch_trim_m",
+              "cove_light_x_m", "handle_az_deg", "handle_arc_deg", "handle_standoff_m", "handle_rise_m", "handle_bar_radius_m", "vent_radii_m", "vent_az_deg",
+              "seam_pitch_deg", "seam_phase_deg"),
     "eye": ("position_m", "forward", "up"),
     "console": ("centre_m", "normal", "up", "tilt_deg", "width_m", "height_m", "hood_depth_m", "edge_radius_m", "side_draft_deg", "underside_profile", "fold_deg", "strut_z_m", "post_top_m", "post_radius_m", "post_head_radius_m", "post_head_length_m", "post_foot_m", "screen_gap_m", "shelf_height_m", "shelf_top_gap_m", "upper_top_x_m", "upper_depth_m", "locker_proud_m", "end_taper", "end_taper_from_m", "end_ramp"),
     "recess": ("x_ref_m", "depth_m", "edge_out_deg", "out_x_m", "edge_in_deg", "in_x_m", "bottom_x_m", "bottom_bevel_m", "top_bevel_m"),

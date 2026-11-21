@@ -135,6 +135,14 @@ armrests, palms down (it read as a shrug in the hatch shots); hands were boxes o
   230-260, +-0.015 / 0.025 / 0.057, rms 1.6 mm. Values unchanged by the refit (now [E], an upper bound).
 - `RECESS_TINT_FROM` 0.15 (the colour line 2-8 px inside the photo's panel edge). The cabin glTF loaded with Godot's default mesh compression (seam sparkle).
 
+## Room before fidelity Task 9 (2026-11-21)
+- Windows: `window_reveal_radius_m` 0.24 [E] (crew1_1 helmet scale, +-25 %), `window_bezel_m` 0.06 [E]: a flat white ring LIFT_M proud and a light grey
+  funnel straight to the glass; replaced by the crew1_1 fit (0.184 / 0.069), a rounded rim and a dark gasket band.
+- Ceiling: an emissive annulus `ring_light_radii_m` [0.50, 0.85] 15 mm under the ceiling plane ("bright white annulus" read in crew1_1; that area is grey
+  panelling), the 8 ring omnis on r 0.675 at `ceiling_x_m` - 0.10; replaced by the cove band `cove_light_x_m` and its omnis.
+- The shell's seams were a box grid (0.42 x 0.30 m in the mesh's axes, never measured); now meridional seams at 15 + k 30 deg.
+- The docking hatch plate was white (part of `cabin_shell`); the side hatch's trim white.
+
 ## Seat leg support and armrests before Task 8 fix round 1 (2026-11-21)
 - Leg support: two straight carbon rails (0.027 x 0.045) from under the pan front to the foot plate's heel end (0.34 m), plus the flat foot plate between them:
   read as a stool; the photos (crew1_1, KSC-20211110-0003) show one closed U-frame reaching past the soles. Replaced by the swept U-frame (`frame_end_m`,

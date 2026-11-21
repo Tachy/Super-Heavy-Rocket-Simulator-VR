@@ -195,7 +195,7 @@ def test_shell_has_no_hole_except_the_apertures(spec, nodes):
     cabin = cockpit["cabin"]
     edges, owner = collections.Counter(), {}
     assert nodes["cabin_recess"]["idx"], "the wall recess around the console (fidelity Task 7) has faces"
-    for name in ("cabin_shell", "cabin_recess", "floor", "hatch_frame", *(n for n in nodes if n.startswith("window_"))):
+    for name in ("cabin_shell", "cabin_recess", "forward_hatch", "floor", "hatch_frame", *(n for n in nodes if n.startswith("window_"))):
         pos, idx = nodes[name]["pos"], nodes[name]["idx"]
         key = [tuple(round(c * WELD) for c in p) for p in pos]
         for t in range(0, len(idx), 3):
@@ -480,13 +480,18 @@ def test_lockers_5_and_6_flank_the_tablets(spec, nodes):
     assert "console_lockers" in nodes
 
 
-def test_ring_light_is_an_annulus_at_the_ceiling(spec, nodes):
-    c = spec["cockpit"]
-    r0, r1 = c["cabin"]["ring_light_radii_m"]
+def test_cove_light_is_a_band_under_the_ceiling_corner(spec, nodes):
+    """Fidelity Task 9: the emissive band runs all round the side wall over [cabin] cove_light_x_m, 15 mm in front of the wall."""
+    cab = spec["cockpit"]["cabin"]
+    x0, x1 = cab["cove_light_x_m"]
+    run = [p for p in cab["profile_m"][1:] if p[0] <= cab["ceiling_x_m"] + 1e-9]
     pos = nodes["ceiling_ring_light"]["pos"]
-    radii = [math.hypot(p[1], p[2]) for p in pos]
-    assert min(radii) == pytest.approx(r0, abs=1e-3) and max(radii) == pytest.approx(r1, abs=1e-3)
-    assert {round(p[0], 3) for p in pos} == {round(c["cabin"]["ceiling_x_m"] - 0.015, 3)}
+    xs = [p[0] for p in pos]
+    assert min(xs) == pytest.approx(x0, abs=1e-3) and max(xs) == pytest.approx(x1, abs=1e-3)
+    for p in pos:
+        assert cl.lerp(run, p[0]) - math.hypot(p[1], p[2]) == pytest.approx(0.015, abs=1e-3)
+    azs = [math.degrees(math.atan2(p[2], p[1])) for p in pos]
+    assert max(azs) - min(azs) > 350.0
 
 
 def test_seats_are_split_into_white_shell_and_black_pads(spec, nodes):

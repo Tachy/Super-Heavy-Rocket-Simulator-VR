@@ -447,7 +447,7 @@ def button_node(button):
 
 def node_names(cockpit):
     """Every mesh node of dragon_cabin.gltf, sorted."""
-    names = ["cabin_shell", "cabin_recess", "floor", "hatch_frame", "console_housing", "console_back", "console_under", "console_lamps", "console_shelf", "console_lockers", "ceiling_ring_light",
+    names = ["cabin_shell", "cabin_recess", "floor", "hatch_frame", "forward_hatch", "tunnel_handles", "ceiling_vents", "console_housing", "console_back", "console_under", "console_lamps", "console_shelf", "console_lockers", "ceiling_ring_light",
              "console_bezel", "console_hit", "handle", "hotas_stick", "hotas_throttle", "tablet_l", "tablet_r"]
     names += [n for g in cockpit.get("guard", []) for n in (f"guard_{g['id']}", f"guard_rim_{g['id']}")]
     names += [f"seat_{part}_{s['id']}" for s in cockpit["seat"] for part in SEAT_PARTS]

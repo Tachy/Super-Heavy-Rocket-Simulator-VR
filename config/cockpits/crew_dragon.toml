@@ -25,16 +25,27 @@ wall_m = 0.18                  # [E] side wall normal thickness (backshell TPS +
 floor_x_m = 1.15               # [E] floor panels: Wikimedia photo, cargo C5-C7 (bags ~0.45 m) under the seat pans; 0.5 m below the hatch sill (x 1.70 exterior); +-0.15
 ceiling_x_m = 3.48             # [E] upper bulkhead trim around the forward tunnel: round 4 joint fit on crew1_1 (tunnel far rim at v 55 px, the dish's far edge at v 147 px of 800, residual 2-3 px); round 3's 3.00 had read the far rim as the near rim; +-0.08
 tunnel_radius_m = 0.45         # [E] forward-hatch tunnel trim: IDSS passage 0.8 m [S: IDSS IDD Rev E] + trim; dragon_crew12_portrait (four heads in the opening)
-ring_light_radii_m = [0.50, 0.85]   # [E] ceiling ring light around the forward tunnel: crew1_1, bright white annulus r ~0.45..0.9 m at the ceiling (review item 2); the lamp ring of the game lies on its mid radius
 tunnel_top_x_m = 3.66          # [D] forward hatch face: exterior recess floor 3.74 (detail file neck_m) - 0.08 hatch plate
 # Inner wall of revolution [x, r], floor centre -> side wall -> ceiling -> tunnel -> forward hatch centre. Side wall = exterior profile_m offset inward by wall_m along the meridian normal.
 profile_m = [[1.15, 0.0], [1.15, 1.756], [1.4, 1.716], [1.6, 1.675], [1.8, 1.622], [2.0, 1.562], [2.2, 1.499], [2.4, 1.429], [2.6, 1.356], [2.8, 1.276], [3.0, 1.196], [3.2, 1.116], [3.4, 1.033], [3.48, 0.997], [3.48, 0.45], [3.66, 0.45], [3.66, 0.0]]  # [D] wall_m offset of the exterior profile_m (cabin_layout.to_outer_chart / ext_normal; closest exterior point 0.094 m), floor_x_m, ceiling_x_m, tunnel_*
 # Windows and hatch in the EXTERIOR table's convention (outer surface: [az deg, x, half x, half az deg]); the generator carries them through the wall along the local wall normal (x shifts -0.06 m on the inner face).
 windows = [[33.3, 2.38, 0.255, 5.5], [90.0, 2.385, 0.245, 5.6]]  # [D] = detail/crew_dragon.toml windows (mirrored to -az); photos agree within their +-20 % / +-10 deg resolution (cockpit.md "Windows and hatch")
 hatch = [0.0, 2.345, 0.645, 19.0]  # [D] = detail/crew_dragon.toml hatch; interior side seen only in part (discovery10 under the console)
-window_reveal_radius_m = 0.24  # [E] round interior reveal (white bezel, dark well): crew1_1 opening ~0.46 x 0.50 m at the az 90 windows (helmet-scaled, +-25 %); dragon_cockpit_crew11 round bezel
-window_bezel_m = 0.06          # [E] white bezel ring width around the reveal, dragon_cockpit_crew11 (ring ~1/4 of the reveal radius)
-hatch_trim_m = 0.05            # [E] white trim frame around the hatch's inner face, discovery10
+window_reveal_radius_m = 0.184 # [D] the reveal's edge (the rim's crest) round the window axis: fidelity Task 9, crew1_1 (cabin_fit/parts/room.py fit_windows): the az +-90 windows' black openings (shade covers at the reveal) against the generator's rings through the fitted camera, 0.184 +- 0.008 (rms 11.4 px of 1200, both windows; round 2 had 0.24 [E] from the helmet scale); a free aspect fits 1.17 +- 0.12 (not significant: built round)
+window_bezel_m = 0.069         # [D] the white rim's width from its crest out to its foot on the wall: same fit, the surround's outer edge, 0.069 +- 0.010 (round 2: 0.06 [E]); nasatour_0420 / iss064e006442 agree (glass / rim outer width 0.60 / 0.67, built 0.31 / 0.51 = 0.61)
+window_rim_height_m = 0.02     # [E] the rim stands this far proud at its crest (a quarter ellipse down to the foot): iss067e075554 / iss064e006442 (strong shading across a thick rounded surround); no fitted side view; +-0.01
+window_gasket_m = 0.010        # [E] the dark gasket band round the glass, along the funnel: nasatour_0420 (3-4 px of the 128 px glass width, the glass 0.31 m wide); +-0.005
+hatch_trim_m = 0.05            # [E] the black seal frame round the hatch's inner face (fidelity Task 9: black, nasatour_0500 / 0520 / 0600; was white), discovery10 (width)
+cove_light_x_m = [3.42, 3.47]  # [E] the cove light (fidelity Task 9): an emissive band all round the side wall right under the ceiling corner (x 3.48): crew1_1, the bright line under the ceiling's panel band reads on the wall at the sides (its ends u 390 / 815 lie below the ceiling corner's projection) and above the console; nasatour_0400-0540: a glowing band along the ceiling edge above windows and hatch. Height +-0.03; replaces the ceiling annulus ring_light_radii_m [0.50, 0.85] of round 2 (crew1_1 shows grey panels there, not a light). The game's ring omnis stand at its middle
+handle_az_deg = 90.0           # [E] the two red hand-holds in the forward tunnel's mouth (jsc2024e000258: one each side of the docking hatch opening as seen from the side hatch); +-15
+handle_arc_deg = 36.0          # [E] their grip arc: jsc2024e000258, ~0.25 m along the rim (the 0.80 m passage [S] = ~890 px at the rim: ~1 mm per px laterally); +-8
+handle_standoff_m = 0.05       # [E] the grip stands this far in from the tunnel wall (jsc2024e000258: grip centre at ~0.85 of the rim's half width); +-0.03
+handle_rise_m = 0.04           # [E] the grip's station above the ceiling plane, just inside the tunnel's mouth (jsc2024e000258); +-0.03
+handle_bar_radius_m = 0.015    # [E] the grip's section (jsc2024e000258: ~35-45 px wide at ~1 mm per px, a flat bar, built round); +-0.005
+vent_radii_m = [0.47, 0.53]    # [E] the two dark vent grilles on the ceiling ring just outside the tunnel rim (jsc2024e000258: black curved grilles outboard of the handles, ~60 px wide); +-0.03
+vent_az_deg = [60.0, 120.0]    # [E] their azimuth span, mirrored (jsc2024e000258: from beside the handles' tops to past their feet); +-15
+seam_pitch_deg = 30.0          # [D] the panel seams of the ceiling ring and the side wall run along meridians every 30 deg: fidelity Task 9, crew1_1 band seams back-projected onto the ceiling plane at |az| 157-165 and 128-136 (pitch 30 +- 3; the middle panel over the console spans 36 deg); the wall's meridional seams [E] (nasatour stills: vertical seams on the upper cone, no fitted camera) continue them
+seam_phase_deg = 15.0          # [D] the seams lie at phase + k x pitch: crew1_1 |az| 162 +- 3 and 132 +- 3 -> 15 (mod 30); mirror-symmetric about az 0
 
 [[seat]]
 id = "s1"                      # [D] S1..S4 from the crew's left: Wikimedia interior photo labels (S1 on the crew's left = +Z)

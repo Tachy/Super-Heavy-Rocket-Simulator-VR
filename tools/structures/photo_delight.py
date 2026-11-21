@@ -35,7 +35,7 @@ LAMP_LUMENS = 3000.0  # [D] = CockpitView.LAMP_LUMENS (game/cockpit/cockpit_view
 LAMP_DROP_M = 0.08  # [D] = CockpitView.LAMP_DROP_M
 RING_LUMENS = 6000.0  # [D] = CockpitView.RING_LUMENS, over RING_LAMPS omnis
 RING_LAMPS = 8  # [D] = CockpitView.RING_LAMPS
-RING_DROP_M = 0.10  # [D] = CockpitView.RING_DROP_M
+RING_DROP_M = 0.10  # [D] = CockpitView.RING_DROP_M (Task 9: in from the side wall at the cove light)
 FILL_LUMENS = 7000.0  # [D] = CockpitView.FILL_LUMENS (fill_ceiling, fill_seats)
 FILL_LUX = 450.0  # [D] = CockpitView.FILL_LUX: the walls' bounced light as a flat illuminance
 
@@ -100,6 +100,14 @@ def sample(img: np.ndarray, px: np.ndarray) -> np.ndarray:
     return np.where(ok[..., None] if img.ndim == 3 else ok, v, nan)
 
 
+def cove_ring(cab) -> tuple:
+    """(x, r) of the ring omnis = CockpitView.cove_ring: RING_DROP_M below the middle of [cabin] cove_light_x_m and RING_DROP_M in from the side
+    wall there (fidelity Task 9)."""
+    x = 0.5 * sum(cab["cove_light_x_m"])
+    run = [p for p in cab["profile_m"][1:] if p[0] <= cab["ceiling_x_m"] + 1e-9]
+    return x - RING_DROP_M, float(np.interp(x, [p[0] for p in run], [p[1] for p in run])) - RING_DROP_M
+
+
 def cabin_lights(cockpit) -> list:
     """[(position (3,), luminous intensity cd)] of CockpitView's omni set (isotropic: I = lumens / 4 pi)."""
     out = []
@@ -107,10 +115,10 @@ def cabin_lights(cockpit) -> list:
     for row in cockpit["light"]:
         out.append((np.asarray(row["position_m"], float) + n * LAMP_DROP_M, LAMP_LUMENS / (4 * math.pi)))
     cab = cockpit["cabin"]
-    ring_r = 0.5 * sum(cab["ring_light_radii_m"])
+    ring_x, ring_r = cove_ring(cab)
     for k in range(RING_LAMPS):
         az = 2 * math.pi * k / RING_LAMPS
-        out.append((np.array([cab["ceiling_x_m"] - RING_DROP_M, ring_r * math.cos(az), ring_r * math.sin(az)]), RING_LUMENS / RING_LAMPS / (4 * math.pi)))
+        out.append((np.array([ring_x, ring_r * math.cos(az), ring_r * math.sin(az)]), RING_LUMENS / RING_LAMPS / (4 * math.pi)))
     out.append((np.array([cab["ceiling_x_m"] - 0.25, 0.0, 0.0]), FILL_LUMENS / (4 * math.pi)))
     out.append((np.array([2.0, 0.55, 0.0]), FILL_LUMENS / (4 * math.pi)))
     return out

@@ -41,6 +41,8 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 | Console tilt | `tilt_deg` 45.0: up axis from +X toward -Y; the generator builds the body on it (`cabin_layout.console_frame`, refused if the centre screen differs > 0.5 deg) | D | Task 4 free fit 46.3 +-1.2 deg (data-constrained), built 45 within 1.1 sigma | +-1.2 deg |
 | Console body | 1.40 x 0.542 m, back face 0.221 behind the screen plane, all edges filleted r 0.04, square sides, underside falls 0.059 to the back lip; the lower back ends taper in to the measured contour (end_taper, Task 7: 0.53 at the lip, an upper bound below it) | E / D | Task 4 fit ("Console (fidelity Task 4)"), tags by `constrained_by_data`: hood depth 0.221 +-0.011 and u_bot -0.2772 +-0.0021 [D]; width (confirmed at mid height by Task 7; the end taper [E] upper bound, equal at the right silhouette rows and the lip, its front zone / chamfer [E]), u_top 0.265, underside drop (0.059 +-0.036, crew1_1 lip only), fillet r, draft [E] | width +-0.06, u_top +-0.05, drop +-0.04, r +-0.02 |
 | Ceiling posts | bases Z +-0.555 on the body top, tops on the ceiling ring at (Y -0.579, Z +-0.747); rod r 0.017, collar r 0.039 x 0.04, sleeve r 0.022 x 0.066, funnel foot r 0.051 x 0.306 | D / E | Task 4 fit on crew1_1 (the only photo showing them): base Z +-0.008, top angle 52.2 +-0.7 deg, radii from px widths [D]; top radius 0.945 [E] (along crew1_1's ray; set so the collar stays inside the ring's outer radius 0.997), collar / sleeve / funnel lengths [E] | radii +-0.003-0.004, top radius +-0.03, lengths +-50 % |
+| Windows (interior) | reveal edge r 0.184, rounded white rim 0.069 wide / 0.02 proud, dark gasket 0.010 at the glass; centres = the exterior table | D / E | Task 9 (`cabin_fit/parts/room.py`): crew1_1, the az +-90 windows' surround and dark opening against the generator's rings (rms 11.4 px of 1200); the photo puts both windows 0.064 +- 0.007 m higher (not separable from the camera's prior-dominated pitch; the exterior table is not changed, see "Room") | r +-0.008, rim +-0.010, height / gasket +-0.01 / 0.005 |
+| Ceiling ring / tunnel | tunnel rim (x 3.48, r 0.45) and the closed docking hatch (x 3.66) as round 4; panel seams along meridians every 30 deg at 15 + k 30; red hand-holds and dark vents at the tunnel mouth; cove light under the ceiling corner (x 3.42-3.47) | D / E | Task 9: crew1_1 middle column 2.2 / 0.1 px; seams back-projected (|az| 157-165, 128-136); handles / vents from jsc2024e000258 (no fitted camera) | seams +-3 deg; handles / vents +-15 deg, +-0.03 m |
 | Tablets | 0.1348 x 0.2032 m, roll 1.31 / 1.93 deg, on a mount and arm into the upper panel | S / D / E | Apple iPad mini spec; roll from the Task 5 fit; mount / arm unseen [E] (Task 7) | roll +-0.7 / 1.4 deg |
 | Lockers / wall recess | door 0.198 x 0.139 at (-0.558, 0.214), latch (-0.474, 0.219); recess bevel edges on the upper cone (azimuth 91-138 deg off the hatch, x 2.8-3.1) | D / E | Task 7: discovery2 / 10 door corners; crew1_1 bevel lines back-projected onto the wall | +-0.008 m; edges +-0.3-0.5 deg |
 | Button positions | rows 0.17 / 0.20 m below the screen centres | E | discovery10 x along the screens' lower edges (fisheye: fractions per screen) | +-0.02 along, +-0.03 across |
@@ -183,7 +185,7 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   `dragon_cabin.gltf` into the Crew Dragon model set (last generator; 61.6k triangles, `cabin_shell` 52.6k of them, rows 2 cm / columns 0.75 deg around
   the apertures so the cut edge hides under the bezel). `vehicle_spec.load_dragon` loads and validates `config/cockpits/<[vehicle] cockpit>.toml` into
   `spec["cockpit"]` (hashed into the manifest; `VehicleModels` staleness includes the cockpit TOML). Capsule stage frame.
-  Nodes: `cabin_shell`, `cabin_recess` (Task 7: the wall recess around the console), `floor`, `hatch_frame`, `window_<i>` / `window_glass_<i>` (i = exterior table row, +az then -az: 0 = +33.3, 1 = -33.3,
+  Nodes: `cabin_shell`, `cabin_recess` (Task 7: the wall recess around the console), `floor`, `hatch_frame`, `forward_hatch`, `tunnel_handles`, `ceiling_vents` (Task 9), `window_<i>` / `window_glass_<i>` (i = exterior table row, +az then -az: 0 = +33.3, 1 = -33.3,
   2 = +90, 3 = -90), `seat_s1..s4`, `console_housing` (the filleted body's front and ends + the dark upper panel, `console_shape.rounded_box`; `console_back` = its back face + the two ceiling posts, `console_under` = its underside and top; `console_shelf` = the continuous sloped tray with its lip, `console_bezel` the screens' dark glass borders, `guard_<id>` / `guard_rim_<id>` the clear key guards and their red rims, `console_hit` the hidden flat key hit faces (fidelity Task 5); tested: every button stands >= 5 mm proud of the housing, the three screens are coplanar within 1 mm / 0.1 deg), `screen_left|centre|right`
   (one quad each, exactly the TOML centre / size, UV 0..1 with (0, 0) top left, +normal toward the crew), `tablet_l|r` (`[[tablet]]` ids l / r),
   `button_<id>` (one node per button; the centre handle is the node `handle`, no `button_handle`), `light_<i>` (`[[light]]` rows in file order),
@@ -211,8 +213,8 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
   housing near black; walls white matte.
 - Lighting (fix round 1): the cabin has no GI, so each cabin surface gets a flat bounced-light term in the shader (`fill` = `FILL_LUX` 450 lx / pi x
   `scene_per_cd_m2`, emission albedo x fill, set every frame; scene-referred like the lamps) on top of the lamps and the sky-AO remainder; the two ceiling lamps cast
-  shadows; a ceiling ring light (8 omnis on r 0.72 m at `ceiling_x_m` - 0.10, 6000 lm, [E] crew1_1 annulus r 0.45..0.9 m) stands in for the annulus (its emissive mesh
-  comes with the generator). The scene-referred eye adaptation meters the cabin to 18 % grey whatever the light level, so flux alone cannot make it white: `Atmosphere.field_key`
+  shadows; a ring of 8 omnis (6000 lm) stands in for the cove light (Task 9: 0.10 below the middle of `cove_light_x_m` and 0.10 in from the wall; its
+  emissive band `ceiling_ring_light` comes with the generator). The scene-referred eye adaptation meters the cabin to 18 % grey whatever the light level, so flux alone cannot make it white: `Atmosphere.field_key`
   (default `EyeAdaptation.FIELD_MID_GREY` 0.18) is the field's grey; the shots set 1.2 ([call], `--field_key`) and measure white wall p90 0.82-0.87 sRGB
   (pilot_eye 0.87, gopro 0.82, hatch 0.86; at key 0.18 they were 0.56-0.62, at 0.40: 0.67-0.74). Whoever puts the player camera in the cabin (Task 8/9) must set `field_key`.
   Open: a sound way to set the key (cabin-local high-key rule) is a decision for the eye-adaptation subsystem.
@@ -224,8 +226,8 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 ### Fix round 2 (geometry and material fidelity)
 - Console: (screens, shelf and keys: see "Screens and tray (fidelity Task 5)"), housing 0.1575 above the screens plus a
   dark upper panel (`upper_top_x_m` 3.30, `upper_depth_m` 0.04) up to the ceiling, `[[locker]]` 5 / 6 (0.15 x 0.165, outboard of the tablets), the lamp panels moved to the
-  upper panel's top corners, light grey `console_back` (back, underside, two posts). Nodes added: `console_back`, `console_shelf`, `console_lockers`, `ceiling_ring_light` (emissive annulus r 0.50-0.85,
-  `[cabin] ring_light_radii_m`; the game's ring omnis sit on its mid radius). Buttons of the left / right panels moved 0.025 m toward the centre with their screens.
+  upper panel's top corners, light grey `console_back` (back, underside, two posts). Nodes added: `console_back`, `console_shelf`, `console_lockers`, `ceiling_ring_light` (since Task 9 the cove
+  band under the ceiling corner, `[cabin] cove_light_x_m`; the round-2 annulus is in the history). Buttons of the left / right panels moved 0.025 m toward the centre with their screens.
 - Seats: `seat_shell_<id>` (white), `seat_pad_<id>` and `seat_rest_<id>` (black pads and armrest blocks / carbon U-frame + foot plate); shapes and materials since fidelity Task 8: "Seats (fidelity Task 8)". `[[seat]]` carries `foot_rest_m` / `foot_rest_normal` ([D], from the figure bones; tested under the ankles).
 - Shots: `helmet_closeup` (pilot, other figures / seats / console hidden) and `helmet_vs_detail2` in `screenshots/m7-cockpit/look/`.
 - Open: boots read grey (exposure of the high-key cabin), screens are still empty blue, visor shows the lamp blobs, the real visor opening above a dark face aperture is not modelled (closed by decision).
@@ -556,6 +558,47 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
 - Open / [E]: heights, wing depths and the pan / armrest shapes (no fitted side view: a public-domain side photo with cabin-fixed points would measure them);
   the frame width from one view; the pitch itself [E] (scales every width); the strut legs under the seats are not built; the harness is drawn on the empty
   seat (the figures do not wear straps; crew figure scope).
+
+### Room (fidelity Task 9): window reveals, ceiling ring, hatches, cove light
+- Windows (`gen_dragon_cabin.build_window`): a rounded white rim (quarter ellipse from its foot on the wall at r `window_reveal_radius_m` +
+  `window_bezel_m` up to its crest `window_rim_height_m` proud at r `window_reveal_radius_m`), the white funnel from the crest to the exterior glass, and
+  a dark gasket band `window_gasket_m` wide along the funnel at the glass. The faces carry UV v rows (`strip_uv`): CockpitView `_two_tone_material` tints
+  glTF UV.y > 0.5 `SEAL_ALBEDO` (linear 0.03). Measurement `cabin_fit/parts/room.py` (`python -m cabin_fit.parts.room`): crew1_1's az +-90 windows, the
+  white surround's outer edge = the rim's foot, the black opening's edges (shade covers in the reveal) = the crest ring, both through the fitted camera;
+  fit rho0 0.184 +- 0.008, bezel 0.069 +- 0.010 with nuisance centre shifts, rms 11.4 px of 1200 (26 reads; sigma inflated by sqrt(chi2/dof)); a free
+  aspect 1.17 +- 0.12 is not significant (built round). Cross-check: nasatour_0420 / iss064e006442 give glass / rim outer width 0.60 / 0.67, built 0.61.
+- Window centres: the same fit wants both windows 0.064 +- 0.007 m higher (d_x), 1.3 +- 0.3 deg toward -az (both, same sign: camera yaw-like) and
+  0.7 +- 0.3 deg further out. The centres stay the exterior table's ([cabin] `windows` = `config/vehicles/detail/crew_dragon.toml`, [E] from the M2 model):
+  a vehicle-config change needs the user's decision, and the crew1_1 camera's pitch is prior-dominated (+-0.7 deg = 2.3 cm at the windows) and has no lens
+  distortion term. Residual as built (table centres): rms 33.1 px (round 2's 0.24 / 0.06 reveal: 41.1).
+- Ceiling ring: crew1_1's middle column puts the tunnel's far rim (the dark step line, v 91.5) and the closed docking hatch's far edge (v 52) on the built
+  circles (x 3.48 / 3.66, r 0.45) within 2.2 / 0.1 px; the neighbouring columns 6-10 px: away from the middle the photo's ceiling arcs are flatter than any
+  circle about the axis through this camera (both fitted hatch views look along the same rays, x and r of an edge are not separable, no lens term), so
+  the panel band's lower edge (the bright line above the console, the recess top) is not used for geometry. The ceiling between the tunnel rim and the
+  corner is panelled: the band's radial seams back-projected onto the ceiling plane lie at |az| 157-165 and 128-136 -> `seam_pitch_deg` 30, `seam_phase_deg`
+  15 ([D] +-3 deg); the cabin shader draws them as meridional seams (`seam_polar_pitch_deg`, radial on the ceiling, vertical on the wall; the wall's
+  continuation is [E]). They replace round 2's unmeasured box grid on the shell.
+- Forward (docking) hatch: the tunnel's top plate is its own node `forward_hatch`, dark (`FORWARD_HATCH_ALBEDO` linear 0.04: crew1_1 0.032 of the lit
+  wall, [E] in shade). Two red hand-holds `tunnel_handles` in the tunnel's mouth (jsc2024e000258: red C-grips at both sides of the docking hatch opening):
+  round bar r 0.015 `handle_standoff_m` 0.05 in from the tunnel wall, `handle_rise_m` 0.04 above the ceiling plane, 36 deg long, on two radial feet, at
+  +-90 deg; colour `HANDLE_RED` linear (0.26, 0.07, 0.07) [D] (ratio to the white tunnel ring in the same photo). Two dark vent grilles `ceiling_vents`
+  (r 0.47-0.53, |az| 60-120) just outside the rim. All [E] (no fitted camera on jsc2024e000258; ~1 mm per px laterally from the 0.80 m passage). crew1_1
+  shows dark loops at the same place in the tunnel's top corners (flight vehicle: the grips read dark there).
+- Side hatch: its trim (`hatch_trim_m` 0.05) is now the black seal frame (nasatour_0500 / 0520 / 0600); door and reveal stay white.
+- Cove light: `ceiling_ring_light` is an emissive band all round the side wall over `cove_light_x_m` [3.42, 3.47], 15 mm in front of the wall (crew1_1:
+  the bright line under the panel band and the lit upper wall; nasatour_0400-0540: a glowing band along the ceiling's edge). The ring omnis stand 0.10
+  below its middle and 0.10 in from the wall (`CockpitView.cove_ring` = `photo_delight.cove_ring`; at 0.035 under the ceiling they made hot spots).
+  Round 2's emissive annulus r 0.50-0.85 on the ceiling is gone (crew1_1 shows grey panels there).
+- Shots: `cockpit_shots.gd --console_closeup` adds `closeup_window` (+33 deg window at 0.7 m on the line to the commander's eye), `closeup_tunnel` (the
+  tunnel's mouth from below), `closeup_hatch` (the side hatch's seal frame). PNGs `screenshots/m7-cockpit/fidelity/t9/`.
+- Tests: `tools/structures/tests/test_cabin_room.py` (window fit within sigma, ceiling steps on crew1_1, `test_hatch_handles_exist`, forward hatch /
+  vents nodes, window rim height and gasket band), `test_cove_light_is_a_band_under_the_ceiling_corner`; `test_shell_has_no_hole_except_the_apertures`
+  with `forward_hatch`. GPU (render_check --stereo, same session): 24.26 / 24.26 ms before, 23.78 / 23.73 and 23.86 / 23.85 after; cabin 110,060 ->
+  114,384 triangles.
+- Left (under-constrained or not built): window centres vs the exterior table (above); the az +-33 windows not seen in a fitted photo; the ceiling's
+  panel band as a step / cone (single-view degenerate: built flat at x 3.48 with seams); handles / vents / cove height [E] (one unfitted photo each);
+  screws, placards and the wall's horizontal seams (no fitted view); the hatch's inner mechanism; the window shade covers (crew1_1 shows them
+  closed); wall cameras and the small grab handles beside the windows (nasatour stills).
 
 ## Camera mode and toggle
 State after plan Task 6 (code: `game/cockpit/cockpit_camera.gd`, `hotas_buttons.gd`, `World.toggle_cockpit`).

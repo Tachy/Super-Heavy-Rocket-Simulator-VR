@@ -20,6 +20,10 @@ uniform float fill_surround = 0.0;  // scene luminance of the walls the glossy p
 uniform float seam_depth : hint_range(0.0, 1.0) = 0.0;
 uniform vec2 seam_pitch_m = vec2(0.42, 0.30);
 uniform float seam_width_m = 0.0015;
+// Polar seams (fidelity Task 9, the cabin shell): seam_polar_pitch_deg > 0 draws seams along meridians of the capsule axis (local x) at
+// azimuth seam_polar_phase_deg + k x pitch (radial lines on the ceiling ring, vertical ones on the wall) instead of the grid.
+uniform float seam_polar_pitch_deg = 0.0;
+uniform float seam_polar_phase_deg = 0.0;
 // (4) Two-tone surface by UV.y (the visor: copper-tinted top, dark clear glass below; UV.y = 0 at its top edge): tint_split < 0 = off.
 uniform float tint_split = -1.0;
 uniform vec4 albedo_low : source_color = vec4(0.0, 0.0, 0.0, 1.0);
@@ -98,12 +102,19 @@ vec3 env_brdf(vec3 f0, float rough, float n_dot_v) {
 }
 
 float seam(vec3 p, vec3 n) {
+	float w = max(seam_width_m, 1.0e-5);
+	if (seam_polar_pitch_deg > 0.0) {
+		float r = length(p.yz);
+		float pitch = radians(seam_polar_pitch_deg);
+		float a = atan(p.z, p.y) - radians(seam_polar_phase_deg);
+		float d = abs(a - pitch * round(a / pitch)) * r;
+		return 1.0 - smoothstep(0.5 * w, 1.5 * w, d);
+	}
 	// Two grids along the two axes the surface is not facing.
 	vec3 a = abs(n);
 	vec2 q = a.x > 0.7 ? p.yz : (a.y > 0.7 ? p.xz : p.xy);
 	vec2 cell = q / seam_pitch_m;
 	vec2 d = abs(fract(cell + 0.5) - 0.5) * seam_pitch_m;
-	float w = max(seam_width_m, 1.0e-5);
 	vec2 line = 1.0 - smoothstep(vec2(0.5 * w), vec2(1.5 * w), d);
 	return max(line.x, line.y);
 }

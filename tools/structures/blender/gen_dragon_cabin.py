@@ -5,14 +5,15 @@ Frame = the capsule stage body frame of gen_dragon.py / dragon_capsule.gltf (X s
 Z = az +90 = the crew's left). Silhouette only: panel lines, labels and placards come later by texture.
 
 Nodes: `cabin_shell` (inner wall of revolution with the ceiling ring, the forward tunnel and the top plate; normals into the cabin; cut at the window
-reveals and the hatch), `cabin_recess` (the wall cells over the trapezoid recess around the console, pushed out by [recess] depth_m: Task 7), `floor`, `hatch_frame` (white trim, the recessed hatch inner face and its reveal), `window_<i>` (funnel from the round interior
-reveal to the exterior pane, bezel ring; i = exterior table row, +az then -az) with `window_glass_<i>`, `seat_shell|pad|rest_<s1..s4>` (seat_shape, Task 8: white outer shell and pan side
+reveals and the hatch), `cabin_recess` (the wall cells over the trapezoid recess around the console, pushed out by [recess] depth_m: Task 7), `floor`, `hatch_frame` (the black seal frame (UV.y 1), the recessed white hatch inner face and its reveal), `forward_hatch` (the closed docking hatch at the
+tunnel's top, dark), `tunnel_handles` (two red grips at the tunnel rim), `ceiling_vents` (two dark grilles on the ceiling ring), `window_<i>` (rounded white rim,
+the white funnel to the exterior pane and its dark gasket band (UV.y 1); i = exterior table row, +az then -az) with `window_glass_<i>`, `seat_shell|pad|rest_<s1..s4>` (seat_shape, Task 8: white outer shell and pan side
 panels, the moulded black cushion body with its wings, the carbon leg support + foot plate at the seat's foot_rest_m and the armrests), `console_housing` (dark: front and ends of the filleted body across the three screens + the dark upper panel above it, console_shape), `console_back`
 (silver back face, the two ceiling posts with joint heads and funnel feet), `console_under` (dark grey underside and top), `console_lamps` (lamp strips under the console), `console_shelf` (the continuous sloped button tray with its lip, cabin_layout.tray_profiles), `console_lockers` (5 / 6),
 `console_bezel` (the dark glass border around each active area, rounded outer corners; the housing carries the face frame recess_m in front of the glass),
 `guard_<id>` / `guard_rim_<id>` (clear cover over a guarded key block / its red rim and hinge), `console_hit` (one flat quad per key face: the pointer's hit
 geometry, hidden in the game),
-`ceiling_ring_light` (emissive annulus), `screen_left|centre|right` (one quad, UV 0..1 over the active area,
+`ceiling_ring_light` (the emissive cove band under the ceiling corner, Task 9), `screen_left|centre|right` (one quad, UV 0..1 over the active area,
 (0, 0) top left, +normal toward the crew), `tablet_l|r` (the iPad on its mount and arm, roll built), `button_<id>` (one node per button; the centre handle is the node `handle`), `light_<i>`
 ([[light]] rows in file order), `hotas_stick`, `hotas_throttle`.
 The cabin layout helpers (apertures, node names, manifest block) live in cabin_layout.py; the wall is the exterior meridian offset along its normal.
@@ -56,8 +57,11 @@ FILLET_SEGMENTS = 4  # [E] steps per 90 deg fillet of the console body (22.5 deg
 POST_SIDES = 20  # [E] sides of the ceiling posts (the 3.9 cm collar: 1.2 cm facets)
 SIDES = 16  # [E] sides of round parts
 LIGHT_PROUD_M = 0.006  # [E] lamp panel height over the console front
-RING_LIFT_M = 0.015  # [E] the ring light stands this far under the ceiling plane (0.004 z-fought with the ceiling: concentric banding in pilot_eye)
-RING_STEP_DEG = 3.0  # [E] segments of the ring light
+RING_LIFT_M = 0.015  # [E] the cove light stands this far in front of the wall (0.004 z-fought with the ceiling: concentric banding in pilot_eye)
+RING_STEP_DEG = 3.0  # [E] segments of the cove light and the vents
+WINDOW_RIM_STEPS = 6  # [E] steps of the window rim's quarter-ellipse profile (15 deg: smooth highlight at 0.5-1 m)
+HANDLE_STEPS = 8  # [E] segments of a tunnel handle's grip arc
+VENT_DROP_M = 0.003  # [E] the vent grilles stand this far under the ceiling plane (no z-fight)
 # [E] crew1_1 (round 4): two groups of light rectangles on the console's underside along its back lip, at u 400-500 and 640-790 px of the 350-855 px back
 # (1.32 m): lateral ranges from the centre (mirrored), and one strip's (width along the console normal, height under the underside, inset from the start of
 # the back lip's fillet: Task 4 crew1_1 shows the strips right under the lip, v 228-232 against the lip edge at 226.5 px)
@@ -159,7 +163,7 @@ def lathe(mesh, run, hint, angles, group, cut=None, offset=None, recess=None, ma
 
 
 def build_shell(cockpit, profile, angles):
-    """(shell, floor, recess): the inner wall of revolution; the wall cells over the [recess] (fidelity Task 7) pushed out by
+    """(shell, floor, recess, forward_hatch): the inner wall of revolution; the wall cells over the [recess] (fidelity Task 7) pushed out by
     cabin_layout.recess_offset go to `recess` (they share the shell's smooth group and seam vertices: shell + recess are closed)."""
     cabin = cockpit["cabin"]
     prof = cabin["profile_m"]
@@ -176,14 +180,14 @@ def build_shell(cockpit, profile, angles):
     ceiling = refine(prof[i_ceiling], prof[i_ceiling + 1], 0.1) + [prof[i_ceiling + 1]]
     tunnel = refine(prof[i_ceiling + 1], prof[i_ceiling + 2], 0.1) + [prof[i_ceiling + 2]]
     top = refine(prof[i_ceiling + 2], prof[i_ceiling + 3], 0.1) + [prof[i_ceiling + 3]]
-    shell, floor, recess = vc.VMesh(), vc.VMesh(), vc.VMesh()
+    shell, floor, recess, door = vc.VMesh(), vc.VMesh(), vc.VMesh(), vc.VMesh()
     lathe(floor, floor_run, (1.0, 0.0, 0.0), angles, ("floor", 0))
     lathe(shell, wall, "in", angles, ("shell", 0), cut, offset=lambda x, az: cl.recess_offset(cockpit, x, az), recess=recess,
           max_offset=cockpit["recess"]["depth_m"])
     lathe(shell, ceiling, (-1.0, 0.0, 0.0), angles, ("shell", 1))
     lathe(shell, tunnel, "in", angles, ("shell", 2))
-    lathe(shell, top, (-1.0, 0.0, 0.0), angles, ("shell", 3))
-    return shell, floor, recess
+    lathe(door, top, (-1.0, 0.0, 0.0), angles, ("door", 0))  # the closed forward (docking) hatch at the tunnel's top: node forward_hatch (dark, Task 9)
+    return shell, floor, recess, door
 
 
 # ---------- windows and hatch ----------
@@ -193,15 +197,6 @@ def inward(profile, x_o, az_deg):
     nx, nr = cl.ext_normal(profile, x_o)
     a = math.radians(az_deg)
     return V((-nx, -nr * math.cos(a), -nr * math.sin(a)))
-
-
-def strip(mesh, ring_a, ring_b, hint_fn, group, closed=True):
-    n = len(ring_a)
-    for i in range(n if closed else n - 1):
-        j = (i + 1) % n
-        pts = [ring_a[i], ring_a[j], ring_b[j], ring_b[i]]
-        centre = sum(pts, V()) / 4.0
-        mesh.face(pts, [(0, 0), (1, 0), (1, 1), (0, 1)], hint_fn(centre), group)
 
 
 def window_rings(cabin, profile, ap):
@@ -226,22 +221,38 @@ def window_rings(cabin, profile, ap):
 
 
 def build_window(cabin, profile, ap):
-    wall, rho0 = cabin["wall_m"], cabin["window_reveal_radius_m"]
+    """Fidelity Task 9: the white surround is a rounded rim (window_rim_height_m proud at the reveal's edge, a quarter ellipse over
+    window_bezel_m out to its foot on the wall: crew1_1 / iss064e006442 / iss067e075554 show a thick rounded surround), the white reveal
+    funnel from the rim's crest down to the glass, and a dark gasket band window_gasket_m wide around the glass (nasatour_0420: a thin dark
+    ring at the glass edge). UV v (Blender) = 1 on the white faces, 0 on the gasket: the game tints glTF UV.y > 0.5 dark (CockpitView)."""
+    wall, rho0, bezel = cabin["wall_m"], cabin["window_reveal_radius_m"], cabin["window_bezel_m"]
+    h, gasket = cabin["window_rim_height_m"], cabin["window_gasket_m"]
     reveal, glass, centre = window_rings(cabin, profile, ap)
     into = inward(profile, ap["x_m"], ap["az_deg"])
     well, pane = vc.VMesh(), vc.VMesh()
-    ring_wall = reveal(rho0, wall)
-    ring_a_top, ring_b_top = reveal(rho0, wall + cl.LIFT_M), reveal(rho0 + cabin["window_bezel_m"], wall + cl.LIFT_M)
-    ring_b_base = reveal(rho0 + cabin["window_bezel_m"], wall)
     axis_end = sum(glass, V()) / len(glass)
-    strip(well, ring_wall, glass, lambda c: axis_end - c, ("well", ap["index"]))  # the funnel: lit side faces the window axis
-    strip(well, ring_a_top, ring_b_top, lambda c: into, ("bezel", ap["index"], 0))
-    strip(well, ring_b_top, ring_b_base, lambda c: c - centre, ("bezel", ap["index"], 1))
-    strip(well, ring_a_top, ring_wall, lambda c: centre - c, ("bezel", ap["index"], 2))
+    rim = [reveal(rho0 + bezel * math.cos(t), wall + h * math.sin(t))
+           for t in (0.5 * math.pi * k / WINDOW_RIM_STEPS for k in range(WINDOW_RIM_STEPS + 1))]  # foot on the wall -> crest at the reveal edge
+    crest = rim[-1]
+    for a, b in zip(rim, rim[1:]):  # the rim's rounded face: lit side toward the cabin and away from the window axis
+        strip_uv(well, b, a, lambda c: into + (c - centre).normalized(), ("bezel", ap["index"]), 1.0)
+    edge = [c + (g - c) * max(0.0, 1.0 - gasket / max((g - c).length, 1e-6)) for c, g in zip(crest, glass)]
+    strip_uv(well, crest, edge, lambda c: axis_end - c, ("well", ap["index"]), 1.0)  # the white funnel: lit side faces the window axis
+    strip_uv(well, edge, glass, lambda c: axis_end - c, ("well", ap["index"]), 0.0)  # the dark gasket band
     for i in range(RING_POINTS):  # the glass: a fan on its ring, facing the cabin
         j = (i + 1) % RING_POINTS
         pane.face([axis_end, glass[i], glass[j]], [(0.5, 0.5), (0, 0), (1, 0)], into, ("glass", ap["index"]))
     return well, pane
+
+
+def strip_uv(mesh, ring_a, ring_b, hint_fn, group, v):
+    """A closed strip between two rings with every UV on the row v (Blender): the window / hatch tint by UV.y."""
+    n = len(ring_a)
+    for i in range(n):
+        j = (i + 1) % n
+        pts = [ring_a[i], ring_a[j], ring_b[j], ring_b[i]]
+        centre = sum(pts, V()) / 4.0
+        mesh.face(pts, [(i / n, v), ((i + 1) / n, v), ((i + 1) / n, v), (i / n, v)], hint_fn(centre), group)
 
 
 def hatch_outline(cabin, profile, add_m, depth, scale=1.0):
@@ -265,15 +276,17 @@ def build_hatch(cabin, profile):
     opening_wall = hatch_outline(cabin, profile, 0.0, wall)
     opening_door = hatch_outline(cabin, profile, 0.0, wall - cl.HATCH_RECESS_M)
     door_centre = V(cl.at_depth(profile, h_x, h_az, wall - cl.HATCH_RECESS_M))
-    strip(mesh, opening_wall, opening_door, lambda c: door_centre - c, "hatch_reveal")
+    strip_uv(mesh, opening_wall, opening_door, lambda c: door_centre - c, "hatch_reveal", 1.0)
     rings = [[door_centre] * HATCH_POINTS] + [hatch_outline(cabin, profile, 0.0, wall - cl.HATCH_RECESS_M, k / HATCH_RINGS) for k in range(1, HATCH_RINGS + 1)]
     for a, b in zip(rings, rings[1:]):
-        strip(mesh, a, b, lambda c: into, "hatch_door")
+        strip_uv(mesh, a, b, lambda c: into, "hatch_door", 1.0)
     top_a, top_b = hatch_outline(cabin, profile, 0.0, wall + cl.LIFT_M), hatch_outline(cabin, profile, trim, wall + cl.LIFT_M)
     base_b = hatch_outline(cabin, profile, trim, wall)
-    strip(mesh, top_a, top_b, lambda c: into, ("hatch_trim", 0))
-    strip(mesh, top_b, base_b, lambda c: c - centre_pt, ("hatch_trim", 1))
-    strip(mesh, top_a, opening_wall, lambda c: centre_pt - c, ("hatch_trim", 2))
+    # fidelity Task 9: the trim is the hatch's black seal frame (nasatour_0500 / 0520 / 0600: a black rounded outline round the white door):
+    # UV v 0 (glTF UV.y 1) -> tinted dark by CockpitView; the reveal and the door stay white (v 1)
+    strip_uv(mesh, top_a, top_b, lambda c: into, ("hatch_trim", 0), 0.0)
+    strip_uv(mesh, top_b, base_b, lambda c: c - centre_pt, ("hatch_trim", 1), 0.0)
+    strip_uv(mesh, top_a, opening_wall, lambda c: centre_pt - c, ("hatch_trim", 2), 0.0)
     return mesh
 
 
@@ -541,11 +554,58 @@ def build_hits(cockpit):
 
 
 def build_ring_light(cabin):
-    """The ceiling ring light: an emissive annulus around the forward tunnel, facing into the cabin (crew1_1)."""
-    r0, r1 = cabin["ring_light_radii_m"]
+    """The cove light (fidelity Task 9): an emissive band all round the side wall right under the ceiling corner, cove_light_x_m, lifted
+    RING_LIFT_M into the cabin (crew1_1: the bright line under the ceiling ring's panels and the lit upper wall beside the recess;
+    nasatour_0400-0540: a glowing band along the ceiling's edge above the windows and the hatch). Replaces the ceiling annulus of round 2."""
+    x0, x1 = cabin["cove_light_x_m"]
+    run = [(x, wall_r(cabin, x) - RING_LIFT_M) for x in (x0, 0.5 * (x0 + x1), x1)]
     mesh = vc.VMesh()
-    x = cabin["ceiling_x_m"] - RING_LIFT_M
-    lathe(mesh, [(x, r0), (x, r1)], (-1.0, 0.0, 0.0), [k * RING_STEP_DEG for k in range(int(360.0 / RING_STEP_DEG))], ("ring", 0))
+    lathe(mesh, run, "in", [k * RING_STEP_DEG for k in range(int(360.0 / RING_STEP_DEG))], ("ring", 0))
+    return mesh
+
+
+def wall_r(cabin, x):
+    """Inner wall radius at station x on the side wall (profile_m from the floor rim up to the ceiling corner)."""
+    run = [p for p in cabin["profile_m"][1:] if p[0] <= cabin["ceiling_x_m"] + 1e-9]
+    return cl.lerp(run, x)
+
+
+def build_tunnel_handles(cabin):
+    """Two hand-holds in the forward tunnel's mouth (fidelity Task 9, jsc2024e000258: red C-shaped grips at the docking hatch opening, one each
+    side, following the rim): a round bar handle_standoff_m in from the tunnel wall over handle_arc_deg, handle_rise_m above the ceiling
+    plane, on two radial feet into the tunnel wall; at +-handle_az_deg."""
+    mesh = vc.VMesh()
+    x_h, r_t, arc = cabin["ceiling_x_m"] + cabin["handle_rise_m"], cabin["tunnel_radius_m"], cabin["handle_arc_deg"]
+    r, bar = r_t - cabin["handle_standoff_m"], cabin["handle_bar_radius_m"]
+    for k, sign in enumerate((1.0, -1.0)):
+        az0 = sign * cabin["handle_az_deg"]
+        angles = [az0 - arc / 2.0 + arc * i / HANDLE_STEPS for i in range(HANDLE_STEPS + 1)]
+        path = [vc.pt(x_h, math.radians(a), r) for a in angles]
+        feet = [vc.pt(x_h, math.radians(angles[0]), r_t + KEY_EMBED_M), vc.pt(x_h, math.radians(angles[-1]), r_t + KEY_EMBED_M)]
+        pts = [feet[0]] + path + [feet[1]]
+        for i in range(len(pts) - 1):
+            d = (pts[i + 1] - pts[i]).normalized()
+            a = pts[i] - d * (bar if i else 0.0)  # every inner segment overlaps its neighbours by the bar radius: closed corners
+            b = pts[i + 1] + d * (bar if i < len(pts) - 2 else 0.0)
+            vc.tube(mesh, a, b, bar, SIDES, ("handle", k, i))
+    return mesh
+
+
+def build_ceiling_vents(cabin):
+    """The two dark vent grilles on the ceiling ring outside the handles (fidelity Task 9, jsc2024e000258: black curved grilles beside the
+    docking hatch's handles): annular bands vent_radii_m over vent_az_deg (mirrored), VENT_DROP_M under the ceiling plane."""
+    mesh = vc.VMesh()
+    r0, r1 = cabin["vent_radii_m"]
+    a0, a1 = cabin["vent_az_deg"]
+    x = cabin["ceiling_x_m"] - VENT_DROP_M
+    for sign in (1.0, -1.0):
+        lo, hi = sorted((sign * a0, sign * a1))
+        n = max(2, int(math.ceil((hi - lo) / RING_STEP_DEG)))
+        angles = [lo + (hi - lo) * i / n for i in range(n + 1)]
+        for i in range(n):
+            b0, b1 = math.radians(angles[i]), math.radians(angles[i + 1])
+            pts = [vc.pt(x, b0, r0), vc.pt(x, b1, r0), vc.pt(x, b1, r1), vc.pt(x, b0, r1)]
+            mesh.face(pts, [(0, 0), (1, 0), (1, 1), (0, 1)], V((-1.0, 0.0, 0.0)), ("vent", sign))
     return mesh
 
 
@@ -628,7 +688,9 @@ def main():
     root = vc.empty("dragon_cabin")
     parts = {}
     angles = column_angles(cabin, cockpit["recess"])
-    parts["cabin_shell"], parts["floor"], parts["cabin_recess"] = build_shell(cockpit, profile, angles)
+    parts["cabin_shell"], parts["floor"], parts["cabin_recess"], parts["forward_hatch"] = build_shell(cockpit, profile, angles)
+    parts["tunnel_handles"] = build_tunnel_handles(cabin)
+    parts["ceiling_vents"] = build_ceiling_vents(cabin)
     parts["hatch_frame"] = build_hatch(cabin, profile)
     for ap in cl.window_apertures(cabin):
         parts[f"window_{ap['index']}"], parts[f"window_glass_{ap['index']}"] = build_window(cabin, profile, ap)
