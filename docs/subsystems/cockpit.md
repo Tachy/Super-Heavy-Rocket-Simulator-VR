@@ -293,6 +293,12 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
   (`pivot_el_deg` -30) 9 deg (Task 5b; round 5: 13) behind the opening edge (jsc2024e066389: 19 mm disc ~0.09 m below eye level, ~25 mm behind the seal); `helmet_side_vs_jsc066389`.
 - Debug options of `cockpit_shots.gd`: `--no_shadows`, `--lights_off=<patterns|sun>`, `--no_sky_light`, `--agx_contrast=<c>`.
 
+### Photo fit toolkit (fidelity plan Task 3)
+- `tools/structures/cabin_fit/` replaces the session scratch fits (`fit4.py`): `camera.py` (pinhole / equidistant fisheye with optional k, `Camera.from_row` / `to_row` of `config/cockpits/photo_cameras.toml`),
+  `fit.py` (`fit(photos, PartModel, anchors)`: part parameters shared, per photo pose 6 + ln f (+ k1), soft-L1, anchors and priors as residuals, sigma from (J^T J)^-1 scaled by max(1, chi2/dof); an unconstrained parameter returns its prior with sigma = prior_sigma),
+  `annotations.py` (`annotations/<photo_id>.toml`: `[[point]] label, px`, `[[edge]] label, px = [[u,v],...]`, `sigma_px`), `anchors.py` (known lengths: IDSS passage 0.800 m [S], iPad mini 0.2032 x 0.1348 m [S], window axial extent 0.51 m [E], ANSUR II hand / head medians [S]).
+  Tests: `python -m pytest tools/structures/tests -q -k cabin_fit`.
+
 ## Camera mode and toggle
 State after plan Task 6 (code: `game/cockpit/cockpit_camera.gd`, `hotas_buttons.gd`, `World.toggle_cockpit`).
 - `OrbitCamera.Mode.COCKPIT`: the pose is the head (`position_gcrf_m`, `free_basis`) that `World._update_camera` takes from `CockpitCamera`;
