@@ -20,6 +20,9 @@ from .camera import Camera, project, rotvec_to_matrix
 
 BEHIND_PX = 1.0e4  # residual for a point behind the camera
 EDGE_SAMPLES = 24
+# A parameter counts as constrained by the data when its posterior sigma is below this fraction of its prior sigma, i.e.
+# the data carry clearly more information than the prior (at 0.5 the data weigh >= 3x the prior in the precision).
+DATA_DOMINATES_PRIOR = 0.5
 
 
 class PartModel:
@@ -52,7 +55,7 @@ class FitResult:
     cameras: dict
     chi2: float = 0.0   # data rows only (image + anchors)
     dof: int = 0        # data rows - rank of the data Jacobian (priors excluded); may be <= 0
-    constrained_by_data: dict = field(default_factory=dict)  # name -> False: only a prior (or nothing) fixes it: tag [E]
+    constrained_by_data: dict = field(default_factory=dict)  # name -> False: prior dominates (sigma >= 0.5 prior sigma) or nothing fixes it: tag [E]
     anchor_residuals: list = field(default_factory=list)  # (source, (length - length_m) / sigma_m) per anchor
 
 
@@ -78,6 +81,8 @@ def _polyline_distance(pts: np.ndarray, poly: np.ndarray) -> np.ndarray:
 
 
 def fit(photos: list[PhotoObs], model: PartModel, anchors: list[Anchor], loss: str = "soft_l1", f_scale: float = 2.0) -> FitResult:
+    if loss not in ("soft_l1", "linear"):
+        raise ValueError(f"unsupported loss {loss!r}: use 'soft_l1' or 'linear'")
     photos = list(photos)
     names = list(model.params)
     nP = len(names)
@@ -156,7 +161,13 @@ def fit(photos: list[PhotoObs], model: PartModel, anchors: list[Anchor], loss: s
     r, per_photo, arow, nd = residuals(x, detail=True)
     J = _jacobian(residuals, x)
     m, n = J.shape
-    sd, data_flag, rank_d = _sigma(J, nd, psig)
+    all_psig = np.full(nX, np.inf)
+    all_psig[:nP] = psig
+    for ph, (o, n) in zip(photos, blocks):
+        if ph.camera_sigma is not None:
+            sp, sa, sf = ph.camera_sigma
+            all_psig[o:o + 7] = [sp, sp, sp, sa, sa, sa, sf]
+    sd, data_flag, rank_d = _sigma(J, nd, all_psig)
     dof = nd - rank_d
     chi2 = float(r[:nd] @ r[:nd])
     scale = max(1.0, chi2 / dof) if dof > 0 else 1.0
@@ -173,12 +184,14 @@ def fit(photos: list[PhotoObs], model: PartModel, anchors: list[Anchor], loss: s
                      anchor_residuals=[(a.source, float(v)) for a, v in zip(anchors, arow)], constrained_by_data=flags)
 
 
-def _sigma(J: np.ndarray, nd: int, psig: np.ndarray, rel_tol: float = 1e-9):
-    """Rank-aware sigma per unknown: (sd, constrained_by_data, rank of the data Jacobian). nd = number of data rows (first rows of J)."""
+def _sigma(J: np.ndarray, nd: int, prior_sigma: np.ndarray, rel_tol: float = 1e-9):
+    """Rank-aware sigma per unknown: (sd, constrained_by_data, rank of the data Jacobian). nd = number of data rows (first rows of J).
+    prior_sigma: prior sigma per unknown (inf where there is no prior)."""
     cn = np.linalg.norm(J, axis=0)
     cn[cn == 0] = 1.0
     Js = J / cn
-    _, s, vt = np.linalg.svd(Js, full_matrices=False)
+    _, s, vt = np.linalg.svd(Js, full_matrices=True)  # full: with fewer rows than unknowns the null space must be complete
+    s = np.concatenate([s, np.zeros(vt.shape[0] - len(s))])
     keep = s > rel_tol * s[0]
     var_s = np.zeros(J.shape[1])
     for sj, vj, k in zip(s, vt, keep):
@@ -187,10 +200,14 @@ def _sigma(J: np.ndarray, nd: int, psig: np.ndarray, rel_tol: float = 1e-9):
         else:
             var_s[vj ** 2 > 1e-8] = np.inf
     sd = np.sqrt(var_s) / cn
-    _, sd_, vd = np.linalg.svd(J[:nd] / cn, full_matrices=False) if nd > 0 else (None, np.zeros(1), np.zeros((1, J.shape[1])))
-    kd = sd_ > rel_tol * max(sd_[0], 1e-300)
-    P = (vd[kd] ** 2).sum(0) if kd.any() else np.zeros(J.shape[1])  # diag of the row-space projector of the data Jacobian
-    return sd, P > 0.5, int(kd.sum())
+    if nd > 0:
+        sd_ = np.linalg.svd(J[:nd] / cn, compute_uv=False)
+        rank_d = int((sd_ > rel_tol * max(sd_[0], 1e-300)).sum())
+    else:
+        rank_d = 0
+    # data outweigh the prior: posterior sigma clearly below the prior sigma; no prior (inf): any finite sigma
+    constrained = np.where(np.isfinite(prior_sigma), sd < DATA_DOMINATES_PRIOR * prior_sigma, np.isfinite(sd))
+    return sd, constrained, rank_d
 
 
 def _jacobian(fun, x, eps=1e-7):

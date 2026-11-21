@@ -206,3 +206,29 @@ def test_annotation_load_optional_fit_k_and_camera_sigma(tmp_path):
                     'fov_h_deg = 90.0\nmodel = "fisheye_equidistant"\n')
     obs = annotations.load("ph", tmp_path, cams)
     assert obs.fit_k is True and obs.camera_sigma == (0.05, 0.02, 0.01)
+
+
+def _one_photo_three_points():
+    ph = _photos(np.random.default_rng(4))[0]
+    keep = ("c000", "c111", "c101")
+    return annotations.PhotoObs("p0", ph.camera, {k: ph.points[k] for k in keep}, sigma_px=0.5)
+
+
+def test_underdetermined_fit_reports_null_directions_and_empty_camera_inf():
+    ph = _one_photo_three_points()
+    empty = annotations.PhotoObs("empty", ph.camera, {}, sigma_px=0.5)
+    res = fit([ph, empty], Box((1.1, 0.6, 0.25)), [])
+    assert all(res.sigma[f"cam.empty.{k}"] == float("inf") for k in ("x", "y", "z", "rx", "ry", "rz", "lnf"))
+    assert not any(res.constrained_by_data[f"cam.empty.{k}"] for k in ("x", "y", "z", "rx", "ry", "rz", "lnf"))
+    assert any(np.isinf(v) for k, v in res.sigma.items() if k.startswith("cam.p0."))  # 9 rows < 10 camera+part unknowns
+
+
+def test_constrained_means_data_outweigh_prior():
+    res = fit([_one_photo_three_points()], Box((1.1, 0.6, 0.25)), [])  # no anchor: no absolute scale
+    assert res.constrained_by_data["d"] is False and res.constrained_by_data["h"] is False
+    assert res.sigma["d"] >= 0.5 * 0.5 and res.sigma["h"] >= 0.5 * 0.5
+
+
+def test_unknown_loss_raises():
+    with pytest.raises(ValueError):
+        fit(_photos(np.random.default_rng(1)), Box(), [], loss="huber")
