@@ -20,7 +20,7 @@ class KnownLength:
 KNOWN = {
     # IDSS Interface Definition Document revision E, Fig 3.1.1.1-2: transfer passageway (also config/vehicles/detail/crew_dragon.toml petal_tip_diameter_m)
     "idss_passage_m": KnownLength(0.800, 0.002, "IDSS IDD E Fig 3.1.1.1-2 transfer passageway 800 mm", "S"),
-    # Apple iPad mini (7.9 in, 1st-3rd gen) body 200.1/203.2 x 134.7 mm: the cabin tablets in photos are iPad minis
+    # Apple iPad mini 4/5 (7.9 in) body 203.2 x 134.8 mm (1st-3rd gen: 200 x 134.7 mm); which generation the cabin photos show is not established, the 3 mm difference is inside sigma
     "ipad_mini_long_m": KnownLength(0.2032, 0.002, "Apple iPad mini 7.9in body 203.2 mm", "S"),
     "ipad_mini_short_m": KnownLength(0.1348, 0.002, "Apple iPad mini 7.9in body 134.8 mm", "S"),
     # Exterior window extent along the capsule axis: 2 x 0.255 (config/vehicles/detail/crew_dragon.toml windows, [E] M2 'okno')

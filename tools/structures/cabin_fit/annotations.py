@@ -1,6 +1,8 @@
 """Per-photo annotations: tools/structures/cabin_fit/annotations/<photo_id>.toml.
 
     sigma_px = 1.5                      # optional, default 1.0
+    fit_k = true                        # optional (fisheye): also fit k1
+    camera_sigma = [0.05, 0.02, 0.02]   # optional prior: position m, angle rad, ln(f)
     [[point]]
     label = "top_left_corner"
     px = [412.0, 230.5]
@@ -48,4 +50,6 @@ def load(photo_id: str, annotation_dir: Path | None = None, camera_file: Path | 
     cam = Camera.from_row(camera_row(photo_id, camera_file))
     pts = {p["label"]: (float(p["px"][0]), float(p["px"][1])) for p in data.get("point", [])}
     edges = {e["label"]: [(float(u), float(v)) for u, v in e["px"]] for e in data.get("edge", [])}
-    return PhotoObs(photo_id, cam, pts, edges, float(data.get("sigma_px", 1.0)))
+    cs = data.get("camera_sigma")  # optional prior [position_m, angle_rad, f_rel] around the initial camera
+    return PhotoObs(photo_id, cam, pts, edges, float(data.get("sigma_px", 1.0)), bool(data.get("fit_k", False)),
+                    tuple(float(v) for v in cs) if cs is not None else None)

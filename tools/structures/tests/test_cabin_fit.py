@@ -155,3 +155,54 @@ def test_anchor_table_matches_ansur_csv():
         assert anchors.KNOWN[name].length_m == pytest.approx(med, abs=1e-9)
     a = anchors.anchor("idss_passage_m", "p", "q")
     assert a.length_m == 0.8 and a.source.startswith("[S]")
+
+
+def _unseen_box(prior_sigma):
+    box = Box((1.1, 0.6, 0.25), extra=True)
+    box.params["unused"] = (0.37, prior_sigma)
+    return box
+
+
+def test_unseen_parameter_wide_prior_keeps_prior_sigma_and_flag():
+    res = fit(_photos(np.random.default_rng(4)), _unseen_box(1e4), [Anchor("c000", "c100", 1.2, 0.001, "synthetic")])
+    assert res.sigma["unused"] == pytest.approx(1e4, rel=1e-6)
+    assert res.constrained_by_data["unused"] is False
+    assert all(res.constrained_by_data[k] for k in ("w", "d", "h"))
+
+
+def test_unseen_parameter_not_inflated_by_overdispersed_data():
+    rng = np.random.default_rng(4)
+    photos = _photos(rng, noise=2.0)  # actual 2 px noise, claimed 0.5 px
+    res = fit(photos, _unseen_box(0.12), [Anchor("c000", "c100", 1.2, 0.001, "synthetic")])
+    assert res.chi2 / res.dof > 4
+    assert res.sigma["unused"] == pytest.approx(0.12, rel=1e-6)
+    assert res.constrained_by_data["unused"] is False
+    assert res.sigma["d"] > 0
+
+
+def test_photo_without_observations_has_no_confident_camera():
+    rng = np.random.default_rng(4)
+    photos = _photos(rng)
+    photos.append(annotations.PhotoObs("empty", photos[0].camera, {}, sigma_px=0.5))
+    res = fit(photos, Box((1.1, 0.6, 0.25)), [Anchor("c000", "c100", 1.2, 0.001, "synthetic")])
+    assert res.sigma["cam.empty.x"] == float("inf")
+    assert res.constrained_by_data["cam.empty.x"] is False
+
+
+def test_anchor_row_stays_quadratic_under_robust_loss():
+    # an anchor 5 sigma off the points' scale must pull with its full (quadratic) weight, not as L1
+    rng = np.random.default_rng(0)
+    photos = _photos(rng, noise=0.0, perturb=False)
+    res = fit(photos, Box((1.2, 0.5, 0.3), sigma=10.0), [Anchor("c000", "c100", 1.2, 0.0005, "synthetic")])
+    assert res.params["w"] == pytest.approx(1.2, abs=2e-4)
+    (_, rv), = res.anchor_residuals
+    assert abs(rv) < 0.5
+
+
+def test_annotation_load_optional_fit_k_and_camera_sigma(tmp_path):
+    (tmp_path / "ph.toml").write_text('fit_k = true\ncamera_sigma = [0.05, 0.02, 0.01]\n')
+    cams = tmp_path / "cams.toml"
+    cams.write_text('[[photo]]\nid = "ph"\nfile = "x"\nsize_px = [100, 50]\nposition_m = [0,0,0]\nforward = [1,0,0]\nup = [0,0,1]\n'
+                    'fov_h_deg = 90.0\nmodel = "fisheye_equidistant"\n')
+    obs = annotations.load("ph", tmp_path, cams)
+    assert obs.fit_k is True and obs.camera_sigma == (0.05, 0.02, 0.01)

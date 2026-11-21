@@ -295,7 +295,7 @@ seats, eye, console, ceiling and both shot cameras together (scratch scripts `fi
 
 ### Photo fit toolkit (fidelity plan Task 3)
 - `tools/structures/cabin_fit/` replaces the session scratch fits (`fit4.py`): `camera.py` (pinhole / equidistant fisheye with optional k, `Camera.from_row` / `to_row` of `config/cockpits/photo_cameras.toml`),
-  `fit.py` (`fit(photos, PartModel, anchors)`: part parameters shared, per photo pose 6 + ln f (+ k1), soft-L1, anchors and priors as residuals, sigma from (J^T J)^-1 scaled by max(1, chi2/dof); an unconstrained parameter returns its prior with sigma = prior_sigma),
+  `fit.py` (`fit(photos, PartModel, anchors)`: part parameters shared, per photo pose 6 + ln f (+ k1), soft-L1 on image rows only (anchors and priors stay quadratic), sigma from a rank-aware SVD of (J^T J)^-1 scaled by max(1, chi2/dof) for data-constrained parameters only (data dof); `FitResult.constrained_by_data[name]` False = only the prior fixes it (tag [E]): sigma == prior_sigma exactly, inf without a prior or for an unobserved camera),
   `annotations.py` (`annotations/<photo_id>.toml`: `[[point]] label, px`, `[[edge]] label, px = [[u,v],...]`, `sigma_px`), `anchors.py` (known lengths: IDSS passage 0.800 m [S], iPad mini 0.2032 x 0.1348 m [S], window axial extent 0.51 m [E], ANSUR II hand / head medians [S]).
   Tests: `python -m pytest tools/structures/tests -q -k cabin_fit`.
 
