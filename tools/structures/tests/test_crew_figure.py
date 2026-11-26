@@ -138,8 +138,9 @@ def test_bone_set_is_the_brief_list_and_parents_close(cfg):
 
 @pytest.mark.parametrize("side", ["l", "r"])
 def test_arm_length_shoulder_to_index_tip_matches_the_table(cfg, side):
+    """Drillis and Contini measure from the acromion: the bone chain from the glenohumeral centre plus its drop under the acromion."""
     table = cfg["figure"]["arm_reach_fraction"] * cfg["figure"]["stature_m"]
-    assert fl.arm_reach_m(cfg, side) == pytest.approx(table, abs=ARM_TOL_M)
+    assert fl.arm_reach_m(cfg, side) + cfg["figure"]["shoulder_joint_drop_m"] == pytest.approx(table, abs=ARM_TOL_M)
 
 
 def test_left_is_plus_z_and_the_sides_mirror(cfg):
@@ -484,8 +485,9 @@ def test_body_meets_the_ansur_measures_within_1_cm(cfg, body):
         assert fm.limb(cfg, body, p, part, t) == pytest.approx(a[key], abs=ANSUR_TOL_M), (part, key)
     b = fl.bones(cfg)
     seg = lambda n: fl.length(fl.sub(b[n]["tail"], b[n]["head"]))
-    for bone, key in (("upper_arm_l", "upper_arm_length"), ("forearm_r", "forearm_length")):
-        assert seg(bone) == pytest.approx(a[key], abs=1e-6)
+    drop = cfg["figure"]["shoulder_joint_drop_m"]  # the upper arm bone starts at the glenohumeral centre, drop under the acromion
+    for bone, key, extra in (("upper_arm_l", "upper_arm_length", drop), ("forearm_r", "forearm_length", 0.0)):
+        assert seg(bone) + extra == pytest.approx(a[key], abs=1e-6)
     assert seg("thigh_l") == pytest.approx(a["trochanter_height"] - a["knee_height"], abs=1e-6)
     assert seg("shin_r") == pytest.approx(a["knee_height"] - a["ankle_height"], abs=1e-6)
     assert 2.0 * abs(b["upper_arm_l"]["head"][2]) == pytest.approx(a["biacromial_breadth"], abs=ANSUR_TOL_M)
@@ -549,23 +551,35 @@ def test_weights_are_smooth_normalised_and_at_most_four(suit):
     assert blended >= 30  # the elbow blends two bones over its loops (no rigid crease)
 
 
+def _volume_change(suit, cfg, part, joint, theta, corrected=True):
+    """The closed suit's volume change in a pose as a share of the limb's rest volume (fix 9vr-c: the shoulder's port loop moves with the
+    arm, so the limb volume from its root loop is no measure; the whole hull's change is the limb's)."""
+    import figure_body as fb
+    h = suit["hull"]
+    v_limb = fb.part_volume(h, suit["rest"], part, suit["refs"][part])
+    return (fb.hull_volume(h, fb.posed(suit, cfg, {joint: theta}, corrected)) - fb.hull_volume(h, suit["rest"])) / v_limb
+
+
 @pytest.mark.parametrize("part,joint,theta", [("arm_l", "elbow_l", 90.0), ("arm_r", "elbow_r", 0.0), ("arm_l", "elbow_l", 140.0),
                                               ("leg_l", "knee_l", 90.0), ("leg_r", "knee_r", 135.0), ("arm_r", "shoulder_r", 120.0)])
 def test_joint_volume_is_kept_by_the_corrective_shapes(cfg, suit, part, joint, theta):
     """A 90 deg elbow / knee and a 120 deg shoulder raise keep the limb's volume (LBS of rest + the corrective shapes, as the game skins it)."""
-    import figure_body as fb
-    h, ref = suit["hull"], suit["refs"][part]
-    v_rest = fb.part_volume(h, suit["rest"], part, ref)
-    v = fb.part_volume(h, fb.posed(suit, cfg, {joint: theta}), part, ref)
-    assert abs(v / v_rest - 1.0) < VOLUME_TOL, (joint, theta, v / v_rest)
+    dv = _volume_change(suit, cfg, part, joint, theta)
+    assert abs(dv) < VOLUME_TOL, (joint, theta, dv)
+
+
+SHOULDER_SWEEP_TOL = 0.025  # [E] fix 9vr-c: between its bake angles (rest, mid 75, full 130) the shoulder's volume stays within 2.5 % (measured max 2.2 % at 100 deg)
+
+
+def test_shoulder_volume_over_the_whole_raise(cfg, suit):
+    """The mid shape keeps the raise from overshooting between the bakes (one flex shape alone: up to +11 % at 60-90 deg)."""
+    for theta in range(30, 131, 10):
+        assert abs(_volume_change(suit, cfg, "arm_r", "shoulder_r", float(theta))) < SHOULDER_SWEEP_TOL, theta
 
 
 def test_plain_linear_skinning_would_lose_the_shoulder(cfg, suit):
     """Why the shapes exist: plain LBS changes the arm's volume by more than 2 % at the 120 deg raise (the corrected pose keeps it within 1 %)."""
-    import figure_body as fb
-    h, ref = suit["hull"], suit["refs"]["arm_l"]
-    v_rest = fb.part_volume(h, suit["rest"], "arm_l", ref)
-    assert abs(fb.part_volume(h, fb.posed(suit, cfg, {"shoulder_l": 120.0}, corrected=False), "arm_l", ref) / v_rest - 1.0) > 0.02
+    assert abs(_volume_change(suit, cfg, "arm_l", "shoulder_l", 120.0, corrected=False)) > 0.02
 
 
 def test_wrinkle_weight_is_0_straight_and_1_at_full_bend(cfg):
@@ -614,7 +628,7 @@ def test_torso_uv_runs_along_the_arc(cfg):
 def test_no_nan_in_the_mesh_shapes_and_poses(cfg, suit):
     import figure_body as fb
     assert np.isfinite(suit["rest"]).all()
-    assert all(np.isfinite(d).all() for d in suit["shapes"].values()) and len(suit["shapes"]) == 16
+    assert all(np.isfinite(d).all() for d in suit["shapes"].values()) and len(suit["shapes"]) == 20  # 16 flex / ext + 4 mid (fix 9vr-c)
     p = fb.posed(suit, cfg, {"elbow_l": 140.0, "knee_r": 135.0, "shoulder_r": 130.0, "hip_l": 110.0, "elbow_r": 0.0})
     assert np.isfinite(p).all()
 
@@ -652,6 +666,74 @@ def test_gltf_suit_has_shapes_mask_uv_and_smooth_skin(mesh):
     doc, node, _ = mesh
     m = doc["meshes"][node["mesh"]]
     names = m.get("extras", {}).get("targetNames", [])
-    assert sorted(names) == sorted(f"{j}_{k}" for j in fl.joint_names() for k in ("flex", "ext"))
+    mids = [f"{j}_mid" for j in fl.joint_names() if j.startswith(("shoulder", "elbow"))]  # fix 9vr-c: mid shapes of the arm joints
+    assert sorted(names) == sorted([f"{j}_{k}" for j in fl.joint_names() for k in ("flex", "ext")] + mids)
     suit_prim = next(p for p in m["primitives"] if doc["materials"][p["material"]]["name"] == "suit")
-    assert "TEXCOORD_1" in suit_prim["attributes"] and len(suit_prim["targets"]) == 16
+    assert "TEXCOORD_1" in suit_prim["attributes"] and len(suit_prim["targets"]) == 20
+
+
+# ---------- fix 9vr-c: the shoulder deforms without turning triangles over ----------
+
+POSES = Path(__file__).with_name("crew_arm_poses.json")
+RAISE_RESIDUAL = 2  # [E] measured: 2 triangles per side at the anterior axillary fold at a 120 deg raise (0 up to 100 deg = ArmIk.MAX_SHOULDER_DEG)
+
+
+@pytest.mark.parametrize("pose", ["idle", "left", "centre", "right", "r_upper_5", "back", "raise"])
+def test_game_arm_poses_turn_no_suit_triangle_over(cfg, suit, pose):
+    """The commander's arm poses of the game (HOTAS idle, reaches to the screens and the far key, the backward swing, the raise to the
+    shoulder limit; crew_arm_poses.json) skinned as figure_deform.gd does: no suit triangle turns over (was 69-119 per pose, 16-73 of them
+    at the shoulder port, before the redesign)."""
+    import figure_skin as fs
+    rotations = {n: np.array(r).reshape(3, 3) for n, r in json.loads(POSES.read_text())["poses"][pose].items()}
+    assert fs.inverted_count(suit, cfg, fs.chain_pose(cfg, rotations)) == 0
+
+
+@pytest.mark.parametrize("side", ["l", "r"])
+def test_shoulder_swings_turn_no_suit_triangle_over(cfg, suit, side):
+    """Backward swings to 60 deg and forward raises to 100 deg (the IK limit): none; 110-120 deg: at most the measured residual."""
+    import figure_skin as fs
+    for theta in (30.0, 45.0, 60.0):
+        assert fs.inverted_count(suit, cfg, fs.swing_pose(cfg, side, theta, backward=True)) == 0, ("back", theta)
+    for theta in (60.0, 90.0, 100.0):
+        assert fs.inverted_count(suit, cfg, fs.swing_pose(cfg, side, theta)) == 0, ("raise", theta)
+    for theta in (110.0, 120.0):
+        assert fs.inverted_count(suit, cfg, fs.swing_pose(cfg, side, theta)) <= RAISE_RESIDUAL, ("raise", theta)
+
+
+def test_inverted_triangle_counter_sees_a_fold(cfg, suit):
+    """The counter is not blind: the old thin ramp (upper-arm weight 0 -> 1 across the port band) turns triangles over at a 45 deg
+    backward swing, the counter finds them."""
+    import figure_body as fb
+    import figure_skin as fs
+    w = np.array(suit["w"])
+    names = suit["names"]
+    ua, ch = names.index("upper_arm_r"), names.index("chest")
+    band = (w[:, ua] > 0.0) & (w[:, ua] < 0.9) & (w[:, names.index("forearm_r")] == 0.0)
+    step = np.where(w[band, ua] > 0.5, 1.0, 0.0)  # a hard step instead of the harmonic blend
+    w[np.where(band)[0], ch] += w[band, ua] - step
+    w[np.where(band)[0], ua] = step
+    mesh = dict(suit, w=w, shapes={k: np.zeros_like(v) for k, v in suit["shapes"].items()})
+    assert fs.inverted_count(mesh, cfg, fs.swing_pose(cfg, "r", 45.0, backward=True)) > 0
+
+
+def test_mid_shape_weights_hat_over_rest_mid_full(cfg):
+    """Shoulder / elbow mid shapes: weight 0 at rest, 1 at the mid angle, 0 at full; the flex shape starts at the mid angle."""
+    table = fl.joint_table(cfg)
+    for name, joint in table.items():
+        if name.startswith(("shoulder", "elbow")):
+            assert joint["shape_mid"] == f"{name}_mid" and joint["rest_deg"] < joint["mid_deg"] < joint["full_deg"], name
+            assert fl.mid_weight(joint, joint["rest_deg"]) == 0.0 and fl.mid_weight(joint, joint["mid_deg"]) == 1.0
+            assert fl.mid_weight(joint, joint["full_deg"]) == 0.0
+            assert fl.bend_weights(joint, joint["mid_deg"])[0] == 0.0 and fl.bend_weights(joint, joint["full_deg"])[0] == 1.0
+        else:
+            assert joint["shape_mid"] == "" and fl.mid_weight(joint, joint["full_deg"]) == 0.0, name
+
+
+@pytest.mark.skipif(not GENERATED, reason="Dragon models not generated (python tools/structures/build_models.py --vehicle crew_dragon)")
+def test_gltf_morph_targets_are_sparse_and_the_bin_small():
+    """Fix 9vr-c: the 20 corrective shapes as sparse accessors (only the joint zones' rows): the figure's .bin stays under 3.2 MB."""
+    doc = json.loads(GLTF.read_text(encoding="utf-8"))
+    targets = [a for m in doc["meshes"] for p in m["primitives"] for t in p.get("targets", []) for a in t.values()]
+    assert targets and all("bufferView" not in doc["accessors"][a] for a in targets)
+    assert all(doc["accessors"][a].get("sparse", {"count": 0})["count"] < doc["accessors"][a]["count"] for a in targets)
+    assert (GLTF.parent / doc["buffers"][0]["uri"]).stat().st_size < 3.2e6

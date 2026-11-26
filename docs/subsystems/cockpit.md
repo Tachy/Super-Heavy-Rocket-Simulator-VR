@@ -43,7 +43,8 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 
 ### Crew figure (Task 4, body and suit Task 8b)
 - `config/cockpits/crew_figure.toml` (every value tagged), generator `tools/structures/blender/gen_crew_figure.py` with the pure modules `figure_layout.py`
-  (bones, seat basis, joints, manifest block), `figure_body.py` (the body / suit hull), `figure_measure.py` (tape measures) and the baker
+  (bones, seat basis, joints, manifest block), `figure_body.py` (the body / suit hull), `figure_measure.py` (tape measures), `figure_skin.py` (the game's
+  skinning mirrored for the tests: poses, corrective weights, turned-over triangles), `gltf_sparse.py` (morph targets -> sparse accessors after the export) and the baker
   `tools/structures/suit_textures.py`; writes `crew_figure.gltf`, `suit_albedo.png`, `suit_wrinkle.png` into the Crew Dragon set. `vehicle_spec.load_dragon`
   loads the TOML into `spec["crew_figure"]`; `VehicleModels` returns the meshes under `"crew_figure"` and counts the TOML for staleness; manifest block
   `crew_figure` (`bones`, `eye_m`, `materials`, `frame`, `joints`, `joint_order`, `suit_material`, `suit_maps`, helmet / visor entries). Skinned mesh
@@ -86,17 +87,24 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 ### Crew body and suit (Task 8b)
 - Measures: ANSUR II (2012 U.S. Army survey, male public database, 4082 subjects, public domain; `sources.toml` `ansur2_male`, CSV in
   `data/anthropometry/`): the **median (50th percentile) of each measure**, `[anthropometry]` in metres (stature 1.755; per-measure medians, not one person).
-  Segment lengths: upper arm = acromion-radiale 0.335 (the bone starts at the acromion), forearm = radiale-stylion 0.267, thigh = trochanter - knee
-  0.408, shin = knee - malleolus 0.418, torso = acromion - trochanter 0.540. Arm reach shoulder to index tip 0.802 m.
+  Segment lengths: upper arm = acromion-radiale 0.335 minus `shoulder_joint_drop_m` 0.04 = 0.295 (fix 9vr-c: the bone starts at the glenohumeral centre
+  0.04 under the acromion [E]: acromion ~7 mm + subacromial gap ~10 mm + humeral head radius ~23 mm; the elbow stays where ANSUR puts it; the arm tables
+  `arm_sections_m` and the ring stations still run from the acromion, `figure_body.arm_rows`), forearm = radiale-stylion 0.267, thigh = trochanter - knee
+  0.408, shin = knee - malleolus 0.418, torso = acromion - trochanter 0.540. Arm reach joint to index tip 0.738 m (+ the 0.04 drop = 0.778 from the acromion).
 - Topology: the edge-loop layout of Blender Studio's Human Base Meshes (CC0, reference only, `blender_human_base_meshes`; no file downloaded, no vertex
   data): one torso tube (32 columns, `[body] torso_levels_m`: superellipse sections with the exponent fitted to the ANSUR girths), its bottom ring split into two
   leg loops by a 3-vertex crotch bridge, an arm port cut out of the torso's side from the axilla to the shoulder top (loop down the anterior axillary fold,
   under the axilla, up the posterior fold, over the shoulder: 18 vertices), 3 transition rings per port (deltoid cap pushed to >= `deltoid_radius_m`
   laterally / gluteal fold), five loops at the elbow and the knee; the cage gets one Catmull-Clark step (`figure_body.subdivide`); `girth_factors` corrects
   the cage's girths so the SUBDIVIDED body has the ANSUR girths (three fixed-point passes, cached).
-- Build pose -> rest: the hull is modelled in a build pose (arms straight in a 35 deg A-pose, legs straight 6 deg apart; `build_pose`: one rigid transform
+- Build pose -> rest: the hull is modelled in a build pose (arms straight in a 28 deg A-pose, legs straight 6 deg apart; `build_pose`: one rigid transform
   per bone), skinned with smooth weights (two bones across each joint, <= 4 influences) and posed into the seated rest by dual-quaternion skinning (no
-  collapse). The exported mesh is that rest mesh.
+  collapse). The exported mesh is that rest mesh. (Fix 9vr-c: 35 deg bent the wide shoulder blend's arm root out, bideltoid 0.530; 28 deg gives 0.518, ANSUR 0.509.)
+- Shoulder weights (fix 9vr-c, `figure_body.shoulder_weights`): the upper arm's weight is a HARMONIC function on the cage (graph Laplacian, edge weights
+  1 / length): 0 on the torso beyond `shoulder_blend_radius_m` 0.20 of the joint, the tube's value on the arm from `shoulder_blend_end_m` 0.22 down the arm,
+  solved in between (port loop, transition rings, first arm rings, torso around the port; the rest to the torso bones by height). The old ramp (0 -> 1 across
+  the thin port band in the pivot's lateral plane) turned that band over at every swing. The elbow's upper arm -> forearm blend spans +-0.10 m (`ELBOW_BLEND_M`;
+  +-0.07 turned ~29 inner-elbow triangles per arm over at the HOTAS grip's 118 deg bend).
 - Suit = its own hull: the body sections plus the `[suit]` ease (torso 14 mm, upper arm 16, forearm 7, thigh 16, shank 6: loose at the thighs and upper
   arms, tight at the forearm and shank, eva_suit_newatlas / crew1_1); the body itself is not exported (covered). Geometry for the silhouette only: suit hull,
   glove lock rings, gloves (palm, index, middle / ring / little, thumb), boot shafts over the suit's lower legs and the feet, the helmet as before.
@@ -111,44 +119,56 @@ Spec `docs/superpowers/specs/2026-11-07-m7-cockpit-crew-dragon-design.md`, plan
 - Dynamic folds: (a) `suit_wrinkle.png` (2.5 mm texel): compression folds per joint zone at full bend (RG = height slopes, B = cavity; pitch 28 mm, depth
   6 mm, strongest on the compressed side); every suit vertex carries its zone (UV2: slot + 1, mask). `game/shaders/crew_suit.gdshader` blends them by the
   joint's wrinkle weight (instance uniforms `wrinkle_l` / `wrinkle_r` = shoulder, elbow, hip, knee), the normal through the surface gradient of the height
-  (no tangents needed), the cavity darkens the albedo (`cavity_shade` 0.25). The elbow's upper arm -> forearm weight blend spans +-0.07 m (`ELBOW_BLEND_M`,
-  fix round 1: +-0.05 left a hard inner-elbow crease). (b) 16 corrective blend shapes `<joint>_<side>_flex` / `_ext`: the bind-space offsets that make
-  the game's linear skinning equal the dual-quaternion pose at full bend / the extension limit, with the joint zone pushed out along its normals until the
-  limb keeps its rest volume (cloth bunching instead of a collapse). No cloth simulation.
+  (no tangents needed), the cavity darkens the albedo (`cavity_shade` 0.25). (b) 20 corrective blend shapes `<joint>_<side>_flex` / `_ext` plus
+  `shoulder_<side>_mid` / `elbow_<side>_mid` (fix 9vr-c, `[joints] shoulder_mid_deg` 75, `elbow_mid_deg` 110): the bind-space offsets that make the game's
+  linear skinning equal the dual-quaternion pose at full bend / the extension limit / the mid angle, with the joint zone pushed out along its normals until the
+  closed suit keeps its rest volume (`figure_body.hull_volume`; cloth bunching instead of a collapse). No cloth simulation.
 - `game/cockpit/figure_deform.gd` (`FigureDeform`, one per figure, `CockpitView.figure_deform(seat)`): theta = the angle between the reference direction
   (shoulder / hip: minus the chest / hips bone; elbow / knee: the parent bone) and the child bone, measured between bone heads; flex weight ramps from the
-  rest angle to `[joints]` full, ext weight from the rest angle to the extension limit, wrinkle weight 0 at the straight joint and 1 at full bend
-  (`figure_layout.bend_weights` mirrors it). Swing gate (fix round 1): the shoulder / hip flex shapes are baked for ONE swing direction (manifest joint
+  rest angle (with a mid shape: from the mid angle) to `[joints]` full, the mid shape's weight is a hat rest -> mid -> full (0, 1, 0; `FigureDeform.mid_weight`,
+  gated like the flex shape), ext weight from the rest angle to the extension limit, wrinkle weight 0 at the straight joint and 1 at full bend
+  (`figure_layout.bend_weights` / `mid_weight` mirror it). Swing gate (fix round 1): the shoulder / hip flex shapes are baked for ONE swing direction (manifest joint
   `plane`, `figure_layout.bake_direction`: shoulder forward + 25 % out, hip forward), so their weight is multiplied by `swing_gate` (1 within 25 deg of
   that direction, 0 beyond 65 deg, smoothstep; `figure_layout.swing_gate` mirrors `FigureDeform.swing_gate`); the plane rides with the reference bone's
   pose. Measured: commander's right shoulder at the HOTAS grip (swung back, 39 deg) gate 0 (was a forward bulge at 0.2 weight = the crumpled shoulder),
   reaching to the centre screen gate 1. Updated after every `pose_arms` (the commander) and once at build (the others are static); only the suit mesh
   node gets a deformer.
-- Volumes (part volume from the fixed rest port loop, `figure_body.part_volume`): with the shapes the arm / leg keeps its rest volume within 0.5 % at a
-  90 deg elbow and knee, a straight elbow, a 140 deg elbow, a 135 deg knee and a 120 deg shoulder raise; plain LBS changes the arm by ~3-5 % at the 120 deg
-  raise. The shoulder shapes are baked for a forward raise (toward the console, 25 % outward); other swing directions are gated off (plain skinning).
+- Volumes (fix 9vr-c: the closed suit's volume change as a share of the limb's rest volume; the shoulder's port loop moves with the arm, so the old
+  fixed-root limb volume is no measure): within 1 % at a 90 deg elbow (0.38 %) and knee, a straight and a 140 deg elbow, a 135 deg knee and a 120 deg shoulder
+  raise (0.75 %); over the whole raise 30-130 deg within 2.5 % (max ~2.2 % near 100 deg; one flex shape alone overshot by up to 11 % at 60-90 deg, hence the mid
+  shape); plain LBS loses ~36 % at the 120 deg raise. The shoulder shapes are baked for a forward raise (toward the console, 25 % outward); other swing
+  directions are gated off (plain skinning: -4 to -6 % at a 30-40 deg backward swing).
 - Seated launch pose (all figures): hands on the thighs; the commander's idle hands on the HOTAS grips while the props are shown (`CockpitView.idle_tip`:
   `[hotas] *_grip_m` + 0.09 m along the chest normal to the index tip, `GRIP_TIP_AHEAD_M`; the fingers close by `ArmIk.FIST_CURL_DEG` x grip; Task 9
   calibrates the grips). Pointing hand (fix round 1): while the index is extended (reach / tap) the middle / ring / little fingers fold in by
   `ArmIk.POINT_CURL_DEG` 45 per joint (cap `MAX_FINGER_CURL_DEG` 65). The commander's IK elbow pole is `ELBOW_POLE` (down the seat back, a little back and out).
 - Budget: 28.1k triangles per figure (suit 14.2k, helmet / visor / beads ~9k, gloves, boots), ~112k for four figures. Morph targets (fix round 1) only on
-  the suit primitive (7966 vertices x 16 targets, POSITION + NORMAL); the rigid parts (15.3k vertices) are a separate mesh without targets: `crew_figure.bin`
-  4.5 MB (was 10.5 MB with the targets on every primitive), morphed vertex-target pairs 127k per figure (was 373k, -66 %), 0.51M for four. VR check in Task 9.
+  the suit primitive (7966 vertices x 20 targets, POSITION + NORMAL); the rigid parts (15.3k vertices) are a separate mesh without targets. Fix 9vr-c:
+  `gltf_sparse.sparsify_targets` rewrites the exported targets as sparse accessors (only the joint zones' rows): `crew_figure.bin` 2.85 MB (5.39 MB before
+  fix C with 16 dense targets and both helmets; 6.16 MB dense with 20). Godot expands sparse accessors at import, so the morph cost at run time is that of
+  20 dense targets (159k vertex-target pairs per figure). VR check in Task 9.
 - Tests: `tools/structures/tests/test_crew_figure.py` (ANSUR rows = the CSV medians; body measures within 1 cm: buttock / waist / chest girths, breadths
   and depths, neck base, thigh, lower thigh, calf, ankle, wrist girths, segment lengths, biacromial and bideltoid breadths; eye contract; suit = body + ease;
-  closed hull with the four ports; weights; joint volumes; wrinkle weights; swing gate; torso arc-length UV; no NaN; maps; glTF shapes and mask UV; morph
-  targets only on the suit, .bin < 6 MB), `test_dragon_cabin.py` (knee / shin in the photo bands with margin, knees apart, foot plate), `console_pointer_test.gd`
+  closed hull with the four ports; weights; joint volumes and the shoulder sweep; wrinkle weights; mid-shape hats; swing gate; torso arc-length UV; no NaN;
+  maps; glTF shapes and mask UV; morph targets only on the suit and sparse, .bin < 3.2 MB; turned-over triangles per pose, see "Shoulder" below), `test_dragon_cabin.py` (knee / shin in the photo bands with margin, knees apart, foot plate), `console_pointer_test.gd`
   (`_check_figure_deform`), `cockpit_view_test.gd` (35 bones). Shots: `cockpit_shots.gd --body` (`screenshots/m7-cockpit/body/`: `body_side`, `body_34`,
   `body_arm_bent`, `body_arm_raised`, `body_elbow_bent`, `body_elbow_straight`, `*_vs_<photo>`).
-- Shoulder hole (user VR run 2026-11-11, Task 9 VR fix B): the arm port's transition rings (port loop on the torso -> first arm ring 0.10 m below the acromion, three
-  rings chest -> upper arm) form a thin band almost in the pivot's lateral plane; a forward or backward swing turns its thin triangles over (inverted triangles, measured
-  with the blended skinning matrices: 0 at rest, 19 / 35 at a 30 / 45 deg backward swing, 49-90 at a 60-120 deg forward raise, in DQS as well as LBS; also at the HOTAS idle
-  pose). With back-face culling the inverted triangles were a see-through hole into the hollow hull. `crew_suit.gdshader` is now `cull_disabled` (Godot flips NORMAL on back
-  faces), so a fold reads as a crease, no hole (`screenshots/m7-cockpit-vrfix/after/ba_idle_top_r.png`). Remapping the transition weights (linear, power curves,
-  spreading arm weight into the torso) does not remove the inversions (measured, same or more); the fold itself (ruling O crumple) stays until the port transition is
-  redesigned (longer transition / pivot nearer the glenohumeral centre). Diagnosis shots: `cockpit_shots.gd --shoulder` (six arm poses x eye / out / top x side).
-- Open: a backward / sideways shoulder swing gets plain skinning (no corrective baked for it; a soft front-shoulder fold remains at the HOTAS grip); the reach
-  to the centre screen needs a near-straight arm (round-4 fit, 0.69 of 0.80 m); the knee bellows are shading only; no face inside the helmet; the gloves'
+- Shoulder (fix 9vr-c, user decision 2026-11-26: rework the arm port; history: `docs/history/cockpit.md` "Shoulder crumple and hole"): three changes together.
+  (1) The upper arm pivots at the glenohumeral centre 0.04 under the acromion (above). (2) Harmonic shoulder weights (above). (3) The shoulder girdle
+  (`shoulder_<side>` bone, neck base -> joint) swings in `CockpitView.pose_arms` when a target is still beyond 97 % of the reach after the torso lean, by at most
+  `MAX_GIRDLE_DEG` 20 [E] (the clavicle elevates / protracts ~30 deg): the joint rises / comes forward up to ~5 cm and gives back the reach the lower pivot took
+  (right screen 12.8 deg, r_upper_5 at the 20 deg limit). Turned-over suit triangles (`figure_body.inverted_triangles`: posed normal against the rest normal carried
+  by the triangle's blended skinning matrix; `figure_skin.game_skin` mirrors `figure_deform.gd`), before -> after: game poses (`crew_arm_poses.json`, recorded from
+  `pose_arms`) idle 74 -> 0, left 102 -> 0, centre 75 -> 0, right 69 -> 0, r_upper_5 69 -> 0, back 119 -> 0, raise (both arms to ArmIk's 100 deg) 114 -> 0 (old mesh skinned with the new pose's rotations); swings per side:
+  backward 30 / 45 / 60 deg 16 / 32 / 45 -> 0, forward raise 60 / 90 / 120 deg 56 / 84 / 102 -> 0 / 0 / 2 (2 small triangles at the anterior axillary fold's port
+  corner from 110 deg, beyond the IK's 100 deg limit; tested <= 2). Before, ~29 per arm of the pose counts sat at the inner elbow (bent 118 deg at the grip).
+  Measured and rejected: the pivot drop alone (0.02-0.06, with the old ramp: same or more), an inset of the pivot (0.01-0.02: inversions at the raise), an
+  untangle relaxation of the corrective targets (does not converge at the full-bend elbow / knee). Back-face culling: the suit stays `cull_disabled` as a safety
+  net for poses outside the tested set (A/B 2026-11-26, cockpit stereo GPU time, three alternating rounds: culled 23.14 ms, double-sided 23.20 ms median of the
+  run medians, +0.06 ms = noise). Shots: `cockpit_shots.gd --shoulder` (seven poses incl. `raise` x eye / out / top x side),
+  `screenshots/m7-cockpit-vrfix/armport/{before,after}/`, sheets `sheet_eye.png`, `sheet_out.png`, `sheet_top.png`.
+- Open: a backward / sideways shoulder swing gets plain skinning (no corrective baked for it; volume -4 to -6 % at 30-40 deg, no turned-over triangle); the reach
+  to the centre screen needs a near-straight arm (round-4 fit); the knee bellows are shading only; no face inside the helmet; the gloves'
   fingers are separate rigid capsules per phalanx; the non-player figures' hands rest on the thighs (no armrest grips modelled).
 
 ### Windows and hatch against the exterior table
@@ -714,9 +734,9 @@ State after plan Task 8 (code: `game/cockpit/console_strip.gd`, `console_pointer
   towards the pole (`CockpitView.ELBOW_POLE`, Task 8b), tip clamped to the reach (`reached` false), no NaN. Bones are set as rest-pose-derived global transforms (upper arm, forearm, hand, three index bones; thumb and
   fingers follow the hand). `extend` 0 = relaxed grip curl (28 deg per joint), 1 = index straight, smoothed like the hand.
 - `CockpitView.pose_arms({l|r: {tip, extend}})`, `idle_tip(side)` (the rest hand), `posed_tip`, `arm_result`: the torso leans about the waist (spine bone, <= 22 deg [E], 4 passes) when the
-  target is beyond 97 % of the straight reach. Measured (centre screen at 0.69 m from the eye): centre and left screen and all left keys need no lean and are touched to < 1 mm; the right
-  screen centre needs 14.5 deg; with the Task 5 key positions the pilot's module (outboard of ~0.5 m) is out of the commander's reach at the lean limit: KNOWN GAPS `r_upper_3` 31.8 mm,
-  `r_lower_3` 45.7 mm, `r_upper_5` 61.5 mm (tip clamped, the click still fires; sampled keys only, the other pilot-module keys are short too), stated in `console_pointer_test.gd`
+  target is beyond 97 % of the straight reach; then the shoulder girdle swings (fix 9vr-c, `MAX_GIRDLE_DEG` 20, see "Shoulder"). Measured (centre screen at 0.69 m from the eye): centre and left screen and all left keys need no lean and are touched to < 1 mm; the right
+  screen centre needs the 22 deg lean plus a 12.8 deg girdle swing; the pilot's module (outboard of ~0.5 m) is out of the commander's reach at both limits: KNOWN GAPS `r_upper_3` 35.9 mm,
+  `r_lower_3` 53.8 mm, `r_upper_5` 71.2 mm (fix 9vr-c re-measure; were 31.8 / 45.7 / 61.5 with the pivot at the acromion; tip clamped, the click still fires; sampled keys only, the other pilot-module keys are short too), stated in `console_pointer_test.gd`
   `KNOWN_REACH_GAP_M` (the test fails when a shortfall moves by more than 2 mm); Task 9 re-measures after the seat / eye calibration.
 - Tap plane (Task 5 fix): the keys lean (`[tray] slope_deg`), so `ConsoleStrip` gives every key its own face frame (normal / up from `tray_axes`, the manifest `button_frame` and `hit_faces` use the
   same), its strip rectangle is the face seen along the console normal, and the pointer's hover / tap move along that face normal. `console_hit` stays hidden geometry; the pointer test checks
@@ -756,6 +776,7 @@ State after plan Task 8 (code: `game/cockpit/console_strip.gd`, `console_pointer
 | 2026-11-09 | user | Anatomical crew body from ANSUR II measures, suit hull with texture detail, folds by wrinkle maps + corrective shapes (no cloth simulation). |
 | 2026-11-09 | ruling O | Shoulder / upper-chest crumple on a backward arm swing (plain skinning) is a documented known limit, judged by the user in the VR run; the raised arm is near-straight (photo-fitted reach, jsc066391). |
 | 2026-11-11 | user | The player's figure (commander) has the visor open (raised over the crown); the other crew keep the closed copper visor. A visible hole in the suit is not acceptable (supersedes ruling O for holes only; the crumple stays a known limit). |
+| 2026-11-26 | user | Rework the arm port properly (supersedes ruling O): fix 9vr-c (glenohumeral pivot, harmonic shoulder weights, shoulder girdle, mid shapes); no turned-over suit triangle in the game's arm poses. |
 | 2026-11-09 | ruling D | Default button indices `cockpit_toggle = 2`, `camera_next = 3` [E], verified in the VR run. |
 
 ## Validation
@@ -785,11 +806,11 @@ State after plan Task 8 (code: `game/cockpit/console_strip.gd`, `console_pointer
 - **Cabin build hitch in VR (final review)**: the first cabin build and the rebuild at every stage-signature change run on the main thread (numbers: Performance; `docs/known-issues.md`).
   Real fix (keep the CockpitView while the capsule's own stage did not change; load tablet maps, seat detail tiles and the label atlas on the worker path) belongs to M7 Task 9.
 - **VR acceptance (M7 Task 9 Step 3) pending**: HOTAS grip points [E], stick / camera button indices [E], stick axis signs (pitch > 0 forward, roll > 0 right), the VR pointer feel
-  (0.6 mm/count), frame budget of the screen feed (`update_hz` / `size_px`) and of the morphs (untimed), shoulder backward crumple (ruling O).
+  (0.6 mm/count), frame budget of the screen feed (`update_hz` / `size_px`) and of the morphs (untimed), the reworked shoulder (fix 9vr-c) in VR.
 - **Window height (user decision pending)**: the crew1_1 fit puts both az +-90 windows 0.064 +- 0.007 m higher (1.3 +- 0.3 deg toward -az, 0.7 +- 0.3 deg out) than the exterior
   table (33.1 px rms as built against 11.4 px fitted). The cabin keeps the exterior table; `config/vehicles/detail/crew_dragon.toml` is unchanged until the user decides.
-- **Commander reach gaps**: the right hand stays short of the pilot's module at the 22 deg lean limit (`console_pointer_test.gd` `KNOWN_REACH_GAP_M`: `r_upper_3` 31.8 mm,
-  `r_lower_3` 45.7 mm, `r_upper_5` 61.5 mm; pinned +-2 mm; the pointer still reaches every key). Not re-measured since Task 5 (seat and eye unchanged); a seat / eye re-calibration
+- **Commander reach gaps**: the right hand stays short of the pilot's module at the 22 deg lean and 20 deg girdle limits (`console_pointer_test.gd` `KNOWN_REACH_GAP_M`: `r_upper_3` 35.9 mm,
+  `r_lower_3` 53.8 mm, `r_upper_5` 71.2 mm; pinned +-2 mm; the pointer still reaches every key). Re-measured in fix 9vr-c (lower shoulder pivot); a seat / eye re-calibration
   from the VR run is the lever.
 - **Seat placement and recline unmeasured**: the hatch photos (crew1_1, KSC) show the seats in the ingress position ~0.3 m up the back, so `hip_m` and the 35 deg recline stay
   the launch posture under the reach-fitted eye; the real seats reportedly tilt between phases; outer seats may be toed in (crew1_1); heights, wing depths, pan and armrest

@@ -22,8 +22,8 @@ knee_angle_deg = 102.0           # [E] interior knee angle (thigh to shin; 180 =
 thigh_raise_deg = -21.0          # [E] thigh angle above the SEAT PAN plane (the pan is 35 deg above the hatch axis with the seat back at 35 deg): -21 with knee_out_deg puts the thighs 12.3 deg above the hatch axis as the hatch camera sees them (crew1_1 fit: 10-20; was -25 = exactly 10, the band edge), the shins 62 deg below it; +-10
 knee_out_deg = 20.0              # [E] the knee swings out about the hip-ankle line (ankle and knee angle kept): crew1_1 shows the knees apart (about shoulder width) and the boots side by side on the tray; 20 deg puts the knees 0.35 m apart, the ankles stay 0.18 m apart; +-10
 arm_reach_fraction = 0.44        # [S] Drillis and Contini 1966: shoulder (acromion) to the tip of the middle finger, fraction of stature; the ANSUR chain is tested against it, +-0.05 m
-shoulder_joint_drop_m = 0.0      # [D] the upper-arm bone starts at the acromion: its length is ANSUR acromion-radiale (measured from the acromion), as the round-4 reach fit of crew_dragon.toml assumes; the deltoid cap rounds the mesh around it
-shoulder_joint_inset_m = 0.0     # [D] see shoulder_joint_drop_m: at the acromion tip (biacromial_breadth / 2)
+shoulder_joint_drop_m = 0.040    # [E] fix 9vr-c: the upper-arm bone pivots at the glenohumeral centre, not the acromion: acromion thickness ~7 mm + acromiohumeral (subacromial) gap ~10 mm + humeral head radius ~23 mm under the acromion's upper surface; +-0.01. The upper-arm bone is ANSUR acromion-radiale minus this (the elbow stays where ANSUR puts it); the arm tables (arm_sections_m, figure_body stations) still run from the acromion
+shoulder_joint_inset_m = 0.0     # [E] the glenohumeral centre lies under the acromion tip (biacromial_breadth / 2): the humeral head's lateral bulge under the deltoid reaches about as far out as the acromion; measured: an inset of 0.02 brings shoulder inversions back (fix 9vr-c report)
 
 [anthropometry]
 # ANSUR II male medians (mm / 1000). Heights are standing heights above the floor; the generator uses differences of them.
@@ -86,7 +86,7 @@ arm_port_rows = [8, 11]          # [D] torso level indices of the arm port's bot
 arm_port_columns = 3             # [E] the port spans this many columns either side of the side column (32 columns around): 7 vertices front to back
 torso_columns = 32               # [E] vertices around the torso (16 per half: each leg loop takes one half plus the crotch bridge)
 crotch_bridge = 3                # [E] vertices on the crotch line between the two leg loops
-# Limb sections [t = distance from the proximal joint along the limb, lateral half width, front-back half depth, girth (0 = none: as typed;
+# Limb sections [t = distance from the proximal joint along the limb (arm: from the acromion; the shoulder joint sits shoulder_joint_drop_m below it), lateral half width, front-back half depth, girth (0 = none: as typed;
 # otherwise the lateral half width is fitted so the ellipse's perimeter equals it)].
 arm_sections_m = [  # [D] one row per section, each tagged
   [0.10, 0.048, 0.058, 0.0],     # [E] upper arm at the axilla: girth ~0.335 (ANSUR bicepscircumferenceflexed 0.357 x ~0.93 relaxed), flatter across (bideltoid_breadth with the arms hanging, tested)
@@ -106,10 +106,12 @@ leg_sections_m = [  # [D] one row per section, each tagged
   [0.68, 0.0, 0.048, 0.290],     # [E] lower shin
   [0.80, 0.0, 0.034, 0.228]]     # [S] ankle_circumference just above the malleolus
 thigh_lateral_offset_m = 0.012   # [E] the thigh section's centre sits this far lateral of the bone axis near the hip (gluteal / vastus mass), fading to 0 at the knee
-build_arm_abduction_deg = 35.0   # [E] build pose (the mesh is modelled in it, then posed to the seated rest): arms 35 deg out from the torso (A-pose, base-mesh convention)
+build_arm_abduction_deg = 28.0   # [E] build pose (the mesh is modelled in it, then posed to the seated rest): arms 28 deg out from the torso (A-pose, base-mesh convention); fix 9vr-c: with the harmonic shoulder blend the build -> rest swing bends the arm root out, 35 deg gave a bideltoid breadth of 0.530 (ANSUR 0.509), 28 gives 0.518
 build_leg_abduction_deg = 6.0    # [E] build pose: legs straight down, 6 deg apart (the thighs clear each other at the crotch)
 deltoid_radius_m = 0.070         # [E] the shoulder cap keeps at least this distance from the shoulder joint (the acromion) on its outer side: tested against bideltoid_breadth with the arms hanging
 port_transition_rings = 3        # [E] rings between a port loop and the first limb section (deltoid / gluteal fold)
+shoulder_blend_radius_m = 0.20   # [E] fix 9vr-c: torso cage vertices within this of the shoulder joint carry a share of the upper arm's (harmonic) weight; measured: 0.15-0.25 all give zero shoulder inversions with the 0.04 joint drop
+shoulder_blend_end_m = 0.22      # [E] fix 9vr-c: the upper arm's weight is 1 from this far down the arm from the joint (the blend runs from the torso over the port into the upper arm; elbow loops start at upper arm - 0.05)
 
 [pose]
 # Seated rest pose (KSC-20190731-PH_SPX01_0002, crew1_1): forearms down beside the torso, hands resting on the thighs, palms down. Left side
@@ -165,7 +167,9 @@ neck_radius_m = 0.080            # [E] neck ring (suit collar) radius under the 
 # extension limit]: the wrinkle weight is 0 at `neutral` (straight joint, the build pose) and 1 at `full`; corrective shapes are baked for
 # the rest pose -> full bend (flex) and rest -> extension limit (ext).
 shoulder_deg = [0.0, 130.0, 0.0]  # [E] arm hanging = 0; raised to the top screen row ~120 deg (brief: 120 deg raise keeps volume)
+shoulder_mid_deg = 75.0          # [E] fix 9vr-c: a second shoulder corrective shape is baked here (console reach range); the flex shape alone overshot the volume by up to +11 % between rest and full (measured); the shapes blend piecewise linearly rest -> mid -> full
 elbow_deg = [0.0, 140.0, 0.0]    # [E] straight arm = 0; full flexion of a suited elbow ~140
+elbow_mid_deg = 110.0            # [E] fix 9vr-c: the elbow's mid corrective shape (the HOTAS grip bends it ~118 deg): with the wider elbow blend the flex shape alone left +1.04 % volume at 90 deg (measured)
 hip_deg = [0.0, 110.0, 0.0]      # [E] standing = 0; seated recline 65; the deepest crouch the suit allows ~110
 knee_deg = [0.0, 135.0, 0.0]     # [E] straight leg = 0; seated 75; full knee flexion in the suit ~135
 fold_pitch_m = 0.028             # [E] spacing of the compression folds (crew1_1 knees, demo1_1 elbows: 2-4 cm)

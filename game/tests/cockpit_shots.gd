@@ -22,7 +22,7 @@
 #   screen), body_elbow_bent / body_elbow_straight (the commander's right elbow at the HOTAS grip and reaching); + *_vs_<photo> sheets
 #   --hotas: instead of the cabin shots, the commander with the HOTAS props (Task 9): hotas_eye_down / hotas_eye_forward (pilot eye), hotas_hatch /
 #   hotas_hatch_deflected (hatch camera, stick and lever deflected)
-#   --shoulder: the commander's shoulders at six arm poses (Task 9 VR fix B; shoulder_<pose>_eye/out/top_<side>)
+#   --shoulder: the commander's shoulders at seven arm poses (Task 9 VR fix B, raise: fix C; shoulder_<pose>_eye/out/top_<side>)
 #   --visor: the commander's open helmet (helmet_open_*) and the pilot's own view turned up / left / right / down (pilot_eye_*), Task 9 VR fix B
 #   --fidelity: instead of the cabin shots, one shot fid_<id> per row of config/cockpits/photo_cameras.toml (the photo's fitted camera and framing) with
 #   fid_<id>_vs (side by side) and fid_<id>_overlay (50 % blend + our edges in red); --photo=<ids> limits the rows. The left screen's feed is shown in every shot.
@@ -450,7 +450,7 @@ func _define_body_shots(s3: Dictionary) -> void:
 
 
 ## Task 9 VR fix B: the commander's shoulders at several arm poses (idle on the HOTAS, pointing left / centre / right, the far key r_upper_5,
-## a backward swing of the right hand beside the hip): from the pilot's eye at each shoulder (with the own head as the game shows it) and
+## a backward swing of the right hand beside the hip, both arms raised forward to the shoulder limit): from the pilot's eye at each shoulder (with the own head as the game shows it) and
 ## from outside (front-right / front-left of the commander), the figure isolated.
 func _define_shoulder_shots() -> void:
 	_pointer = ConsolePointer.new()
@@ -467,11 +467,12 @@ func _define_shoulder_shots() -> void:
 	var up2 := Vector3(cos(back2), -sin(back2), 0.0)
 	var chest2 := Vector3(sin(back2), cos(back2), 0.0)
 	var poses := [["idle", [["goto", "idle", 0], ["wait", 40]]], ["left", [["goto", "left", 0], ["wait", 40]]], ["centre", [["goto", "centre", 0], ["wait", 40]]],
-			["right", [["goto", "right", 0], ["wait", 40]]], ["r_upper_5", [["goto", "button:r_upper_5", 0], ["wait", 40]]], ["back", [["pose_back"]]]]
+			["right", [["goto", "right", 0], ["wait", 40]]], ["r_upper_5", [["goto", "button:r_upper_5", 0], ["wait", 40]]], ["back", [["pose_back"]]],
+			["raise", [["pose_raise"]]]]
 	_shots.clear()
 	for pose: Array in poses:
 		var ops: Array = pose[1]
-		var again: Array = ops if pose[0] == "back" else []
+		var again: Array = ops if pose[0] in ["back", "raise"] else []
 		for side: String in ["r", "l"]:
 			_shots.append({"name": "shoulder_%s_eye_%s" % [pose[0], side], "local": Transform3D(Basis.IDENTITY, _cockpit.config.eye.origin + up2 * 0.001),
 					"fov": 90.0, "eye_at": _cockpit.config.eye.origin + up2 * 0.001, "aim_bone": "upper_arm_" + side, "hide_exterior": true,
@@ -667,6 +668,20 @@ func _run_pointer_ops(ops: Array) -> void:
 				var up_back := _cockpit._skeleton_to_cabin().basis.x.normalized()
 				var chest := _cockpit._skeleton_to_cabin().basis.y.normalized()
 				_cockpit.pose_arms({"l": {"tip": _cockpit.idle_tip("l")}, "r": {"tip": shoulder - up_back * 0.45 - chest * 0.02 + Vector3(0.0, 0.0, -0.14)}})
+				return
+			"pose_raise":  # fix 9vr-c: both arms raised forward to the shoulder limit (ArmIk.MAX_SHOULDER_DEG from hanging), index straight
+				var skeleton := _cockpit.figure_skeleton("s2")
+				var up_back := _cockpit._skeleton_to_cabin().basis.x.normalized()
+				var chest := _cockpit._skeleton_to_cabin().basis.y.normalized()
+				var lateral := _cockpit._skeleton_to_cabin().basis.z.normalized()
+				var raise := deg_to_rad(ArmIk.MAX_SHOULDER_DEG)
+				var pose := {}
+				for side: String in ["l", "r"]:
+					var shoulder: Vector3 = _cockpit._skeleton_to_cabin() * skeleton.get_bone_global_rest(skeleton.find_bone("upper_arm_" + side)).origin
+					var out := lateral * (0.15 if side == "l" else -0.15)
+					var reach := (-up_back * cos(raise) + chest * sin(raise) + out).normalized() * 0.70
+					pose[side] = {"tip": shoulder + reach, "extend": 1.0}
+				_cockpit.pose_arms(pose)
 				return
 	var frames := 1
 	for op: Array in ops:

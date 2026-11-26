@@ -11,7 +11,9 @@ const DT := 1.0 / 90.0
 ## Fidelity Task 5: the keys moved to their measured places (discovery10 back-projection; the pilot's module now ends at +0.605 m along the row, was
 ## +0.540): the commander's right hand falls short of the pilot's outer keys at the lean limit (was r_upper_5 30.7 mm). Task 9 re-measures after the
 ## seat / eye calibration; the real commander does not reach the pilot's module either (it is the pilot's).
-const KNOWN_REACH_GAP_M := {"button:r_upper_5": 0.0615, "button:r_upper_3": 0.0318, "button:r_lower_3": 0.0457}
+## Fix 9vr-c: the shoulder joint moved 0.04 down to the glenohumeral centre (upper arm 0.04 shorter, elbow kept); the shoulder girdle
+## (MAX_GIRDLE_DEG) gives most of the reach back: re-measured (was r_upper_5 61.5, r_upper_3 31.8, r_lower_3 45.7 mm).
+const KNOWN_REACH_GAP_M := {"button:r_upper_5": 0.0712, "button:r_upper_3": 0.0359, "button:r_lower_3": 0.0538}
 const REACH_GAP_TOLERANCE_M := 0.002  ## the measured shortfall must stay within 2 mm of the table: a change shows up
 
 var _failures := 0
@@ -535,7 +537,7 @@ func _check_figure_arms(config: CockpitConfig) -> void:
 
 
 ## Task 8b: the joint folds follow the pose: the wrinkle weight is 0 at the straight joint and 1 at full bend; the player's elbow bend
-## drives its corrective blend shapes and wrinkle weight; every figure has a deformer and the suit mesh carries the 16 shapes.
+## drives its corrective blend shapes and wrinkle weight; every figure has a deformer and the suit mesh carries the 20 shapes.
 func _check_figure_deform(view: CockpitView) -> void:
 	var joint := {"rest_deg": 73.6, "full_deg": 140.0, "ext_deg": 0.0, "neutral_deg": 0.0}
 	var w0 := FigureDeform.bend_weights(joint, 0.0)
@@ -549,7 +551,7 @@ func _check_figure_deform(view: CockpitView) -> void:
 	if deform == null:
 		return
 	var mesh: MeshInstance3D = deform._mesh
-	_check(mesh.mesh.get_blend_shape_count() == 16, "the suit carries 16 corrective shapes (%d)" % mesh.mesh.get_blend_shape_count())
+	_check(mesh.mesh.get_blend_shape_count() == 20, "the suit carries 20 corrective shapes (16 flex / ext + 4 mid, fix 9vr-c) (%d)" % mesh.mesh.get_blend_shape_count())
 	var strip := ConsoleStrip.from_config(view.config)
 	var far: Vector3 = strip.surface("centre")["centre"]
 	var near := {"l": {"tip": view.idle_tip("l"), "extend": 0.0}, "r": {"tip": view.idle_tip("r"), "extend": 0.0}}
@@ -559,6 +561,8 @@ func _check_figure_deform(view: CockpitView) -> void:
 	var bent_theta := deform.theta_deg[elbow_r]
 	var flex_index := mesh.find_blend_shape_by_name(&"elbow_r_flex")
 	var bent_flex := mesh.get_blend_shape_value(flex_index) if flex_index >= 0 else -1.0
+	var mid_index := mesh.find_blend_shape_by_name(&"elbow_r_mid")
+	var bent_mid := mesh.get_blend_shape_value(mid_index) if mid_index >= 0 else -1.0
 	near["r"] = {"tip": far, "extend": 1.0}
 	view.pose_arms(near)
 	var reached := deform.wrinkle[elbow_r]
@@ -568,10 +572,14 @@ func _check_figure_deform(view: CockpitView) -> void:
 	for k in deform.wrinkle.size():
 		finite = finite and is_finite(deform.wrinkle[k]) and deform.wrinkle[k] >= 0.0 and deform.wrinkle[k] <= 1.0
 	_check(finite, "wrinkle weights finite and within 0..1: %s" % [deform.wrinkle])
-	var rest_theta := float((view._figure_joints().get("elbow_r", {}) as Dictionary).get("rest_deg", 0.0))
-	var expect := clampf((bent_theta - rest_theta) / (140.0 - rest_theta), 0.0, 1.0)
-	_check(flex_index >= 0 and absf(bent_flex - expect) < 0.02 and (bent_theta <= rest_theta or bent_flex > 0.0),
-			"the elbow bent beyond its rest angle (%.0f > %.0f deg) weights its flex shape %.2f (expected %.2f)" % [bent_theta, rest_theta, bent_flex, expect])
+	var elbow_joint: Dictionary = view._figure_joints().get("elbow_r", {})
+	var rest_theta := float(elbow_joint.get("rest_deg", 0.0))
+	var mid_theta := float(elbow_joint.get("mid_deg", 0.0))  # fix 9vr-c: the flex shape ramps from the mid angle, the mid shape over rest -> mid -> full
+	var expect := clampf((bent_theta - mid_theta) / (140.0 - mid_theta), 0.0, 1.0)
+	var expect_mid := clampf((bent_theta - rest_theta) / (mid_theta - rest_theta), 0.0, 1.0) if bent_theta <= mid_theta else 1.0 - expect
+	_check(flex_index >= 0 and mid_index >= 0 and rest_theta < mid_theta and absf(bent_flex - expect) < 0.02 and absf(bent_mid - expect_mid) < 0.02
+			and (bent_theta <= rest_theta or bent_flex + bent_mid > 0.0),
+			"the elbow bent beyond its rest angle (%.0f > %.0f deg, mid %.0f) weights its flex / mid shapes %.2f / %.2f (expected %.2f / %.2f)" % [bent_theta, rest_theta, mid_theta, bent_flex, bent_mid, expect, expect_mid])
 	# fix round 1: swing gate (mirrors figure_layout.swing_gate): the shoulder's forward-baked shape acts only near its baked swing direction
 	var gated := {"gated": true}
 	_check(FigureDeform.swing_gate(gated, 1.0) == 1.0 and FigureDeform.swing_gate(gated, cos(deg_to_rad(20.0))) == 1.0

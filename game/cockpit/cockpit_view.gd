@@ -80,6 +80,11 @@ const LABEL_ALBEDO := Color(0.80, 0.80, 0.80)
 const LEAN_REACH_SHARE := 0.97
 const MAX_LEAN_DEG := 22.0
 const LEAN_PASSES := 4
+## [E] Fix 9vr-c: the shoulder girdle (clavicle / scapula, the bone shoulder_<side> from the neck base to the glenohumeral centre) swings
+## towards a target still beyond LEAN_REACH_SHARE of the reach after the lean, by at most this much (the clavicle elevates / protracts
+## ~30 deg; kept inside it): the joint sits 0.04 under the acromion (crew_figure.toml shoulder_joint_drop_m), the girdle gives the reach
+## back. Measured: up to 20 deg the suit turns no triangle over (tools/structures/tests/test_crew_figure.py, fix 9vr-c report).
+const MAX_GIRDLE_DEG := 20.0
 ## [E] Task 8b: the elbow hangs down the seat back, a little back and out (skeleton frame, crew's left; mirrored for the right): the rest pole
 ## of the hands-on-thighs pose points the elbow sideways, which flares the arm at the HOTAS grip (KSC-20190731, demo1_1: elbows by the sides)
 const ELBOW_POLE := Vector3(-0.8, -0.45, 0.4)
@@ -269,7 +274,7 @@ func pose_arms(pose: Dictionary) -> void:
 	_apply_lean(skeleton, arms, targets)
 	for side: String in ["l", "r"]:
 		var arm: ArmIk = arms[side]
-		var shoulder: Vector3 = _waist() + _lean * (arm.shoulder_rest - _waist())
+		var shoulder: Vector3 = _apply_girdle(skeleton, side, _waist() + _lean * (arm.shoulder_rest - _waist()), targets[side], arm.reach_m())
 		var result := arm.solve(shoulder, targets[side], _lean * Vector3(ELBOW_POLE.x, ELBOW_POLE.y, ELBOW_POLE.z * (1.0 if side == "l" else -1.0)))
 		var extend := float(pose[side].get("extend", 0.0))
 		arm.apply(skeleton, result, extend, (1.0 - extend) if hotas_grip(side) else 0.0)
@@ -281,6 +286,33 @@ func pose_arms(pose: Dictionary) -> void:
 func _waist() -> Vector3:
 	var bone := (_skeletons[CREW_ORDER[0]] as Skeleton3D).find_bone("spine")
 	return (_skeletons[CREW_ORDER[0]] as Skeleton3D).get_bone_global_rest(bone).origin
+
+
+## Fix 9vr-c: swings the side's shoulder girdle (bone shoulder_<side>, about its head at the neck base, after the lean) so the joint comes
+## up to LEAN_REACH_SHARE of the reach from the target, by at most MAX_GIRDLE_DEG; identity when the target is within it. Returns the moved
+## shoulder joint (skeleton frame).
+func _apply_girdle(skeleton: Skeleton3D, side: String, shoulder: Vector3, target: Vector3, reach: float) -> Vector3:
+	var bone := skeleton.find_bone("shoulder_" + side)
+	if bone < 0:
+		return shoulder
+	var head: Vector3 = _waist() + _lean * (skeleton.get_bone_global_rest(bone).origin - _waist())
+	var swing := Quaternion.IDENTITY
+	var limit := deg_to_rad(MAX_GIRDLE_DEG)
+	for pass_index in LEAN_PASSES:
+		var joint := head + swing * (shoulder - head)
+		var excess := target.distance_to(joint) - LEAN_REACH_SHARE * reach
+		if excess <= 0.0:
+			break
+		var v := joint - head
+		swing = ArmIk._arc(v.normalized(), (v + (target - joint).normalized() * excess).normalized()) * swing
+		if swing.get_angle() > limit:
+			swing = Quaternion.IDENTITY.slerp(swing, limit / swing.get_angle())
+	var parent := skeleton.get_bone_parent(bone)
+	var rest_global := skeleton.get_bone_global_rest(bone).basis.orthonormalized()
+	var global_basis := Basis(swing * _lean) * rest_global
+	var local := skeleton.get_bone_global_pose(parent).basis.orthonormalized().inverse() * global_basis
+	skeleton.set_bone_pose_rotation(bone, local.get_rotation_quaternion())
+	return head + swing * (shoulder - head)
 
 
 ## The torso's lean: the rotation about the waist that brings the farther shoulder towards its target, limited and smooth in the target.

@@ -45,6 +45,7 @@ static func for_figure(skeleton: Skeleton3D, mesh: MeshInstance3D, joints: Dicti
 		j["plane_skeleton"] = (to_figure.inverse() * Vector3(float(plane[0]), float(plane[1]), float(plane[2]))).normalized()
 		j["flex_index"] = mesh.find_blend_shape_by_name(StringName(String(j.get("shape_flex", ""))))
 		j["ext_index"] = mesh.find_blend_shape_by_name(StringName(String(j.get("shape_ext", ""))))
+		j["mid_index"] = mesh.find_blend_shape_by_name(StringName(String(j.get("shape_mid", "")))) if String(j.get("shape_mid", "")) != "" else -1
 		d._joints.append(j)
 	d.wrinkle.resize(d._joints.size())
 	d.theta_deg.resize(d._joints.size())
@@ -52,16 +53,36 @@ static func for_figure(skeleton: Skeleton3D, mesh: MeshInstance3D, joints: Dicti
 	return d
 
 
-## (flex, ext, wrinkle): the corrective shapes ramp from the rest angle to the full bend / the extension limit; the wrinkle weight is 0
-## at the neutral (straight) angle and 1 at the full bend (figure_layout.bend_weights).
+## (flex, ext, wrinkle): the corrective shapes ramp from the rest angle (or the mid angle of a joint with a mid shape) to the full bend /
+## the extension limit; the wrinkle weight is 0 at the neutral (straight) angle and 1 at the full bend (figure_layout.bend_weights).
 static func bend_weights(joint: Dictionary, theta: float) -> Vector3:
 	var rest := float(joint["rest_deg"])
 	var full := float(joint["full_deg"])
 	var ext := float(joint["ext_deg"])
 	var neutral := float(joint["neutral_deg"])
-	var flex := clampf((theta - rest) / (full - rest), 0.0, 1.0) if full > rest else 0.0
+	var start := _mid(joint) if _mid(joint) > 0.0 else rest
+	var flex := clampf((theta - start) / (full - start), 0.0, 1.0) if full > start else 0.0
 	var extw := clampf((rest - theta) / (rest - ext), 0.0, 1.0) if rest > ext else 0.0
 	return Vector3(flex, extw, clampf((theta - neutral) / (full - neutral), 0.0, 1.0))
+
+
+## Fix 9vr-c: the joint's mid shape angle (shoulders, elbows: manifest shape_mid / mid_deg), 0 without one (figure_layout._mid).
+static func _mid(joint: Dictionary) -> float:
+	var mid := float(joint.get("mid_deg", 0.0))
+	var ok := String(joint.get("shape_mid", "")) != "" and float(joint["rest_deg"]) < mid and mid < float(joint["full_deg"])
+	return mid if ok else 0.0
+
+
+## Weight of the mid corrective shape: a hat rest -> mid -> full (0, 1, 0), mirrors figure_layout.mid_weight; 0 without a mid shape.
+static func mid_weight(joint: Dictionary, theta: float) -> float:
+	var mid := _mid(joint)
+	if mid <= 0.0:
+		return 0.0
+	var rest := float(joint["rest_deg"])
+	var full := float(joint["full_deg"])
+	if theta <= mid:
+		return clampf((theta - rest) / (mid - rest), 0.0, 1.0)
+	return 1.0 - clampf((theta - mid) / (full - mid), 0.0, 1.0)
 
 
 ## Factor on a swing joint's (shoulder, hip: manifest `gated`) flex shape, mirrors figure_layout.swing_gate: the shape is baked for one
@@ -98,6 +119,8 @@ func update() -> void:
 			_mesh.set_blend_shape_value(int(j["flex_index"]), w.x)
 		if int(j["ext_index"]) >= 0:
 			_mesh.set_blend_shape_value(int(j["ext_index"]), w.y)
+		if int(j["mid_index"]) >= 0:
+			_mesh.set_blend_shape_value(int(j["mid_index"]), mid_weight(j, theta) * g)
 		var slot := int(j["slot"])
 		if slot >= 0 and slot < 8:
 			slots[slot] = w.z

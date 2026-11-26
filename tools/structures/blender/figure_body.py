@@ -4,7 +4,8 @@ Our own procedural mesh (no third-party vertex data). Measures: ANSUR II male me
 the edge-loop layout of the Blender Studio Human Base Meshes (CC0, reference only): one torso tube whose bottom ring splits into two leg
 loops along a crotch bridge, an arm port cut out of the torso's side between the axilla and the shoulder top (its loop runs down the
 anterior axillary fold, under the axilla, up the posterior fold and over the shoulder), transition rings from each port to the limb
-(deltoid cap / gluteal fold), dense loops at the elbow and the knee.
+(deltoid cap / gluteal fold), dense loops at the elbow and the knee. Fix 9vr-c: the upper arm's weight over the shoulder is harmonic on the cage
+(`shoulder_weights`: no thin 0 -> 1 band at the port that a swing turns over); the arm pivots at the glenohumeral centre under the acromion.
 
 Pipeline:
 1. The BUILD pose: the rest skeleton (figure_layout.bones: seated, hands on the thighs) with the arms straightened in an A-pose and the
@@ -25,12 +26,12 @@ import numpy as np
 
 import figure_layout as fl
 
-ARM_STATIONS = (0.10, 0.16, 0.22, 0.28)  # [E] upper-arm rings (t from the shoulder joint) before the elbow loops
+ARM_STATIONS = (0.10, 0.16, 0.22, 0.28)  # [E] upper-arm rings (t from the acromion, as arm_sections_m) before the elbow loops
 ELBOW_LOOPS = (-0.05, -0.025, 0.0, 0.025, 0.05)  # [E] five loops around the elbow (base-mesh layout: three plus two support loops)
-FOREARM_STATIONS = (0.43, 0.50, 0.56)  # [E] forearm rings before the wrist ring
+FOREARM_STATIONS = (0.43, 0.50, 0.56)  # [E] forearm rings before the wrist ring (t from the acromion)
 LEG_STATIONS = (0.10, 0.16, 0.22, 0.30)
 KNEE_LOOPS = (-0.06, -0.03, 0.0, 0.03, 0.06)
-ELBOW_BLEND_M = 0.07  # [E] half width of the upper arm -> forearm weight blend (fix round 1: 0.05 left a hard inner-elbow crease at 90 deg)
+ELBOW_BLEND_M = 0.10  # [E] half width of the upper arm -> forearm weight blend (fix round 1: 0.05 left a hard inner-elbow crease at 90 deg; fix 9vr-c: 0.07 inverted ~29 inner-elbow triangles per arm at the HOTAS grip's 118 deg bend, 0.10 none)
 SHIN_STATIONS = (0.53, 0.62, 0.71, 0.80)
 TUBE_TAIL_M = 0.03  # [E] the sleeve / leg runs on past the wrist / ankle into the glove lock / boot (the wrist ring is no end ring)
 CROTCH_SAG_M = 0.012  # [E] the crotch bridge dips this far below the bottom ring
@@ -220,6 +221,13 @@ def torso_sections(cfg, ease, k=None):
     return out
 
 
+def arm_rows(cfg):
+    """[body] arm_sections_m with t from the shoulder JOINT: the table's t runs from the acromion (ANSUR measures from it), the joint
+    (glenohumeral centre) sits shoulder_joint_drop_m below it."""
+    t0 = cfg["figure"]["shoulder_joint_drop_m"]
+    return [[r[0] - t0] + list(r[1:]) for r in cfg["body"]["arm_sections_m"]]
+
+
 def _fit_rows(rows, k=None):
     """Limb sections with the girth (times the row's factor k) fitted: [(t, a, b)]."""
     out = []
@@ -343,8 +351,10 @@ def hull(cfg, ease=True, factors=None):
         thumb = g[f"hand_{side}"][:3, :3] @ np.array(fl.hand_frame(cfg, side)[2])
         ua = _n(thumb - axis * (thumb @ axis))
         ub = np.cross(axis, ua)
-        stations = list(ARM_STATIONS) + [ln["upper_arm"] + d for d in ELBOW_LOOPS] + list(FOREARM_STATIONS) + [ln["upper_arm"] + ln["forearm"], ln["upper_arm"] + ln["forearm"] + TUBE_TAIL_M]
-        rows_a = _fit_rows(body["arm_sections_m"], factors.get("arm"))
+        t0 = fig["shoulder_joint_drop_m"]  # the arm tables run from the acromion, the tube from the joint below it
+        stations = ([t - t0 for t in ARM_STATIONS] + [ln["upper_arm"] + d for d in ELBOW_LOOPS] + [t - t0 for t in FOREARM_STATIONS]
+                    + [ln["upper_arm"] + ln["forearm"], ln["upper_arm"] + ln["forearm"] + TUBE_TAIL_M])
+        rows_a = _fit_rows(arm_rows(cfg), factors.get("arm"))
         elbow_t = ln["upper_arm"]
 
         def arm_ease(t):
@@ -481,7 +491,59 @@ def hull(cfg, ease=True, factors=None):
                                 "u_in": u_of(np.array([0.0, 1.0, 0.0])), "slot": hp})
         layout["zones"].append({"joint": f"knee_{side}", "part": f"leg_{side}", "v": _v_at(v_st, ring_t, knee_t), "reach": reach[3],
                                 "u_in": u_of(np.array([0.0, -1.0, 0.0])), "slot": kn})
+    shoulder_weights(h, cfg, built)
     return h, layout
+
+
+def _cage_neighbours(h):
+    nbr = [set() for _ in h.v]
+    for f in h.faces:
+        for k in range(len(f)):
+            a, b = f[k], f[(k + 1) % len(f)]
+            nbr[a].add(b)
+            nbr[b].add(a)
+    return nbr
+
+
+def shoulder_weights(h, cfg, built):
+    """Fix 9vr-c: the upper arm's weight over the shoulder as a HARMONIC function on the cage (graph Laplacian, edge weights 1 / length):
+    fixed 0 on the torso beyond shoulder_blend_radius_m of the joint, fixed at its tube value on the arm from shoulder_blend_end_m down the
+    arm, solved in between (the port loop, its transition rings, the first upper-arm rings and the torso around the port). The weight then
+    falls off as smoothly as the cage allows in every direction around the glenohumeral centre, so no swing (forward raise, backward swing,
+    reach across) compresses a band faster than it rotates: no inverted triangles (the old ramp ran 0 -> 1 across the thin port band in
+    the pivot's lateral plane). The remaining weight goes to the torso bones by height (as the torso grid)."""
+    body = cfg["body"]
+    radius, end_t = body["shoulder_blend_radius_m"], body["shoulder_blend_end_m"]
+    pts = h.positions()
+    nbr = _cage_neighbours(h)
+    torso = ("hips", "spine", "chest")
+    for side in fl.SIDES:
+        ua = f"upper_arm_{side}"
+        lower = (f"forearm_{side}", f"hand_{side}")
+        joint = built[ua][0]
+        axis = _n(built[ua][1] - joint)
+        val = np.array([w.get(ua, 0.0) + sum(w.get(k, 0.0) for k in lower) for w in h.w])
+        free = [i for i, w in enumerate(h.w) if nbr[i] and (  # (the torso grid's vertices inside a port have no faces)
+                (val[i] > 0.0 and not any(k in w for k in lower) and (pts[i] - joint) @ axis < end_t)
+                or (all(k in torso for k in w) and np.linalg.norm(pts[i] - joint) < radius))]
+        idx = {v: k for k, v in enumerate(free)}
+        a = np.zeros((len(free), len(free)))
+        rhs = np.zeros(len(free))
+        for v in free:
+            r = idx[v]
+            for u in nbr[v]:
+                c = 1.0 / max(float(np.linalg.norm(pts[u] - pts[v])), 1e-4)
+                a[r, r] += c
+                if u in idx:
+                    a[r, idx[u]] -= c
+                else:
+                    rhs[r] += c * val[u]
+        x = np.clip(np.linalg.solve(a, rhs), 0.0, 1.0)
+        hip_up = cfg["figure"]["hip_joint_up_m"]
+        for v in free:
+            w = {k: (1.0 - x[idx[v]]) * q for k, q in _torso_weights(pts[v][0] - hip_up).items()}
+            w[ua] = float(x[idx[v]])
+            h.w[v] = {k: q for k, q in w.items() if q > 1e-4}
 
 
 def _u_of(e1, e2, uni):
@@ -728,7 +790,7 @@ def girth_factors(cfg):
             if row[4] > 0.0:
                 f["torso"][i] *= row[4] / fm.torso(h, p, cfg, row[0])[0]
         for name, part in (("arm", "arm_l"), ("leg", "leg_l")):
-            for i, row in enumerate(body[f"{name}_sections_m"]):
+            for i, row in enumerate(arm_rows(cfg) if name == "arm" else body["leg_sections_m"]):
                 if row[3] > 0.0:
                     f[name][i] *= row[3] / fm.limb(cfg, h, p, part, row[0])
     _FACTORS[key] = f
@@ -757,11 +819,11 @@ def suit_mesh(cfg, ease=True):
     for jname, joint in fl.joint_table(cfg).items():
         part = ("arm_" if jname.startswith(("shoulder", "elbow")) else "leg_") + jname[-1]
         zone = np.array([m[1] if m[0] == joint["slot"] else 0.0 for m in h.mask])
-        ref = refs[part]
-        v_rest = part_volume(h, rest, part, ref)
-        for key, theta in (("shape_flex", joint["full_deg"]), ("shape_ext", joint["ext_deg"])):
+        v_rest = hull_volume(h, rest)
+        bakes = [("shape_flex", joint["full_deg"]), ("shape_ext", joint["ext_deg"])] + ([("shape_mid", joint["mid_deg"])] if fl._mid(joint) else [])
+        for key, theta in bakes:
             target, pose = posed_target(cfg, joint, theta, w, names, g, build)
-            target = bulge(h, target, part, zone, v_rest, ref)
+            target = bulge(h, target, part, zone, v_rest)
             shapes[joint[key]] = corrective(target, pose, w, names, rest)
     return {"hull": h, "layout": layout, "names": names, "w": w, "build": build, "rest": rest, "shapes": shapes, "g": g, "refs": refs}
 
@@ -786,18 +848,30 @@ def vertex_normals(h, points, part):
     return np.where(ln > 0.0, nrm / np.maximum(ln, 1e-12), 0.0), area
 
 
-def bulge(h, target, part, zone, volume, ref):
-    """Cloth instead of a collapse: the joint zone (wrinkle mask) pushed out along its normals until the limb's volume equals `volume`
-    (the rest pose's): the fabric over a bent elbow / knee bunches outward."""
+def bulge(h, target, part, zone, volume):
+    """Cloth instead of a collapse: the joint zone (wrinkle mask) pushed out along its normals until the closed suit's volume equals
+    `volume` (the rest pose's): the fabric over a bent elbow / knee bunches outward. Fix 9vr-c: the whole hull's volume, not the limb's
+    from its root loop - the shoulder's port loop now moves with the arm (harmonic weights), so a fixed-root limb volume is no measure."""
     out = np.array(target)
     for _ in range(3):
         nrm, area = vertex_normals(h, out, part)
-        deficit = volume - part_volume(h, out, part, ref)
+        deficit = volume - hull_volume(h, out)
         gain = float(np.sum(zone * area))
         if gain <= 0.0 or abs(deficit) < 1e-9:
             break
         out = out + nrm * (zone * deficit / gain)[:, None]
     return out
+
+
+def inverted_triangles(h, rest, points, w, transforms):
+    """Triangles of the hull turned over by a pose: the posed normal points against the rest normal carried by the triangle's blended
+    skinning matrix (mean of its corners' LBS matrices). Rows of h.triangles() (n, 3)."""
+    tris = h.triangles()
+    rest, points = np.asarray(rest), np.asarray(points)
+    m = lbs_matrices(w, transforms)[:, :, :3][tris].mean(axis=1)
+    n0 = np.cross(rest[tris[:, 1]] - rest[tris[:, 0]], rest[tris[:, 2]] - rest[tris[:, 0]])
+    n1 = np.cross(points[tris[:, 1]] - points[tris[:, 0]], points[tris[:, 2]] - points[tris[:, 0]])
+    return tris[np.einsum("ni,ni->n", np.einsum("nij,nj->ni", m, n0), n1) < 0.0]
 
 
 def corrective(target, pose, w, names, rest):
@@ -824,7 +898,17 @@ def posed(mesh, cfg, thetas, corrected=True):
         flex, ext, _ = fl.bend_weights(joint, theta)
         if corrected:
             offs = offs + flex * mesh["shapes"][joint["shape_flex"]] + ext * mesh["shapes"][joint["shape_ext"]]
+            if fl._mid(joint):
+                offs = offs + fl.mid_weight(joint, theta) * mesh["shapes"][joint["shape_mid"]]
     return lbs(mesh["rest"] + offs, mesh["w"], [pose[n] for n in names])
+
+
+def hull_volume(h, points):
+    """Volume enclosed by the closed hull (all faces; the divergence sum, independent of the origin)."""
+    tris = h.triangles()
+    p = np.asarray(points)
+    a, b, c = p[tris[:, 0]], p[tris[:, 1]], p[tris[:, 2]]
+    return float(np.sum(np.einsum("ij,ij->i", a, np.cross(b, c))) / 6.0)
 
 
 def part_volume(h, points, part, ref=None):

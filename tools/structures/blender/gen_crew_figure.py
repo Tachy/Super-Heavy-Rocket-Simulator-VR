@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bpy  # noqa: E402
 import figure_body as fb  # noqa: E402
 import figure_layout as fl  # noqa: E402
+import gltf_sparse  # noqa: E402
 import vehicle_common as vc  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
@@ -574,6 +575,8 @@ def main():
     vc.common.clear_scene()
     rig, fig, tris = assemble(spec["crew_figure"])
     vc.export_selected(Path(args["out"]) / "crew_figure.gltf", [rig])
+    before, after = gltf_sparse.sparsify_targets(Path(args["out"]) / "crew_figure.gltf")  # fix 9vr-c: the 20 corrective shapes as sparse accessors
+    print(f"crew_figure.bin {before} -> {after} bytes (sparse morph targets)")
     vc.report_triangles("crew_figure", tris)
 
 

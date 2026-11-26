@@ -204,3 +204,17 @@ armrests, palms down (it read as a shrug in the hatch shots); hands were boxes o
   projected (`recess.recess_outline_px`): out 2.0 / 2.2 px rms (max 6.1 / 6.2), in (clean rows) 1.4 / 1.6 px rms (max 2.6 / 2.3).
 
 - Provenance-table rows replaced by the Measurements table (Task 10): screens 0.382 x 0.215 m (training2 finger scale, +-15 %), screen gap 0.020 (fix round 2; was 0.045), seat shape / console body / posts / interior windows / ceiling ring / tablets / lockers rows as of Tasks 4-9 (current values: "Fidelity rebuild" / Measurements).
+
+## Shoulder crumple and hole (ruling O, Task 9 VR fix B; superseded by fix 9vr-c, 2026-11-26)
+- Model until fix C: the upper arm pivoted at the acromion (`shoulder_joint_drop_m` 0, upper arm = acromion-radiale 0.335, reach shoulder to index tip 0.778);
+  build A-pose 35 deg; the arm port's transition (port loop on the torso -> first arm ring 0.10 m below the acromion, three rings) carried a chest -> upper arm
+  ramp 0 -> 1 (smoothstep over the rings, 0.06 chest on the first ring); elbow blend +-0.07 m; 16 corrective shapes (flex / ext), the bulge kept the limb's volume
+  from its fixed root loop (0.5 % at the tested angles); dense morph targets, `crew_figure.bin` 4.5 MB (16 targets) / 5.39 MB with both helmets (fix B).
+- Ruling O (2026-11-09): the shoulder / upper-chest crumple on a backward arm swing is a documented known limit. User VR run 2026-11-11: a see-through hole in the
+  shoulder. Fix B (commit 6ba048ad) measured the cause: the port transition is a thin band almost in the pivot's lateral plane; arm swings turn its triangles over
+  (0 at rest; 19 / 35 at a 30 / 45 deg backward swing, the HOTAS idle pose swung back ~39 deg; 49-90 at a 60-120 deg forward raise; the same in DQS and LBS). With
+  back-face culling the inverted triangles were a hole into the hollow hull; fix B made `crew_suit.gdshader` `cull_disabled` (the fold reads as a crease).
+  Tried there and rejected: linear / power remaps of the transition weights, spreading arm weight 2-4 rings into the torso (more inversions).
+- Fix C re-measure of the old mesh with the game's skinning (figure_deform weights): idle 74, left 102, centre 75, right 69, r_upper_5 69, back 119 turned-over
+  triangles (16-73 of them at the shoulder, ~29 per bent arm at the inner elbow); swings per side backward 30 / 45 / 60 deg 16 / 32 / 45, raise 60 / 90 / 120 deg
+  56 / 84 / 102. Console reach gaps then: r_upper_3 31.8, r_lower_3 45.7, r_upper_5 61.5 mm.

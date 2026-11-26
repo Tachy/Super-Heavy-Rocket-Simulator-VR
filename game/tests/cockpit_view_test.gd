@@ -357,8 +357,8 @@ func _check_helmets(cockpit: CockpitView, config: CockpitConfig) -> void:
 	_check(not cockpit.figure_helmet_open("s3") and not cockpit.figure_helmet_open("s1") and not cockpit.figure_helmet_open("s4"),
 			"the other crew keep the closed (copper) visor")
 	var skeleton := cockpit.figure_skeleton("s2")
-	# the suit is drawn from both sides: plain skinning folds the arm port's transition through itself at arm swings (docs/subsystems/cockpit.md);
-	# culled, the folded triangles were a see-through hole in the shoulder (user VR run 2026-11-11)
+	# the suit is drawn from both sides: culled, folded triangles were a see-through hole in the shoulder (user VR run 2026-11-11); fix 9vr-c removed
+	# the folds of the game's arm poses, the double-sided suit stays as a safety net (docs/subsystems/cockpit.md "Shoulder")
 	var suit := skeleton.get_parent().find_child("crew_figure", true, false) as MeshInstance3D if skeleton != null else null
 	var suit_material := suit.get_surface_override_material(0) as ShaderMaterial if suit != null else null
 	_check(suit_material != null and suit_material.shader.code.contains("cull_disabled"), "the suit material is double-sided (no see-through hole at a fold)")

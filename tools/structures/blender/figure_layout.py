@@ -290,9 +290,10 @@ def curl(f, d, deg):
 
 
 def chain_lengths(cfg):
-    """Segment lengths (m) from the ANSUR II medians ([anthropometry])."""
+    """Segment lengths (m) from the ANSUR II medians ([anthropometry]). The upper arm bone runs from the glenohumeral centre, which sits
+    shoulder_joint_drop_m under the acromion: its length is ANSUR acromion-radiale minus that drop (the elbow stays where ANSUR puts it)."""
     a = cfg["anthropometry"]
-    return {"upper_arm": a["upper_arm_length"], "forearm": a["forearm_length"], "thigh": a["trochanter_height"] - a["knee_height"],
+    return {"upper_arm": a["upper_arm_length"] - cfg["figure"]["shoulder_joint_drop_m"], "forearm": a["forearm_length"], "thigh": a["trochanter_height"] - a["knee_height"],
             "shin": a["knee_height"] - a["ankle_height"], "torso": a["acromial_height"] - a["trochanter_height"]}
 
 
@@ -386,7 +387,7 @@ def bones(cfg):
 
 
 def arm_reach_m(cfg, side="l"):
-    """Shoulder joint to the index tip along the bones (upper arm, forearm, hand, three index phalanges)."""
+    """Shoulder joint (glenohumeral centre) to the index tip along the bones (upper arm, forearm, hand, three index phalanges)."""
     b = bones(cfg)
     names = [f"upper_arm_{side}", f"forearm_{side}", f"hand_{side}", f"index_1_{side}", f"index_2_{side}", f"index_3_{side}"]
     return sum(length(sub(b[n]["tail"], b[n]["head"])) for n in names)
@@ -453,9 +454,11 @@ def joint_table(cfg):
         rd = mul(norm(sub(b[ref_bone]["tail"], b[ref_bone]["head"])), sign)
         cd = norm(sub(b[child_bone]["tail"], b[child_bone]["head"]))
         rest = math.degrees(math.acos(max(-1.0, min(1.0, dot(rd, cd)))))
+        mid = cfg["joints"].get(f"{kind}_mid_deg", 0.0)
         out[name] = {"child": child_bone, "child_tail": _tail_bone(b, child_bone), "ref": ref_bone, "ref_tail": _tail_bone(b, ref_bone),
-                     "ref_sign": sign, "neutral_deg": neutral, "full_deg": full, "ext_deg": ext,
+                     "ref_sign": sign, "neutral_deg": neutral, "full_deg": full, "ext_deg": ext, "mid_deg": mid,
                      "rest_deg": rest, "slot": slot, "shape_flex": f"{name}_flex", "shape_ext": f"{name}_ext",
+                     "shape_mid": f"{name}_mid" if mid > 0.0 else "",
                      "plane": list(bake_direction(kind, side, rd, cd)), "gated": kind in ("shoulder", "hip")}
     return out
 
@@ -465,10 +468,29 @@ def bend_weights(joint, theta_deg):
     the extension limit; the wrinkle weight is 0 at the neutral (straight) angle and 1 at the full bend."""
     rest, full, ext, neutral = joint["rest_deg"], joint["full_deg"], joint["ext_deg"], joint["neutral_deg"]
     clamp = lambda v: max(0.0, min(1.0, v))
-    flex = clamp((theta_deg - rest) / (full - rest)) if full > rest else 0.0
+    start = _mid(joint) or rest  # with a mid shape the flex shape ramps from the mid angle (mid_weight takes rest -> mid)
+    flex = clamp((theta_deg - start) / (full - start)) if full > start else 0.0
     extw = clamp((rest - theta_deg) / (rest - ext)) if rest > ext else 0.0
     wrinkle = clamp((theta_deg - neutral) / (full - neutral))
     return flex, extw, wrinkle
+
+
+def _mid(joint):
+    """The joint's mid shape angle (deg) when it has one (shape_mid; rest < mid < full), else None."""
+    mid = joint.get("mid_deg", 0.0)
+    return mid if joint.get("shape_mid") and joint["rest_deg"] < mid < joint["full_deg"] else None
+
+
+def mid_weight(joint, theta_deg):
+    """Weight of the mid corrective shape (fix 9vr-c, shoulders): a hat over rest -> mid -> full (0 at rest, 1 at mid, 0 at full), so
+    rest -> mid blends the mid shape in and mid -> full hands over to the flex shape (bend_weights); 0 for a joint without one."""
+    mid = _mid(joint)
+    if mid is None:
+        return 0.0
+    rest, full = joint["rest_deg"], joint["full_deg"]
+    if theta_deg <= mid:
+        return max(0.0, min(1.0, (theta_deg - rest) / (mid - rest)))
+    return 1.0 - max(0.0, min(1.0, (theta_deg - mid) / (full - mid)))
 
 
 def figure_manifest(cfg):
