@@ -12,7 +12,8 @@ const DT := 1.0 / 90.0
 ## +0.540): the commander's right hand falls short of the pilot's outer keys at the lean limit (was r_upper_5 30.7 mm). Task 9 re-measures after the
 ## seat / eye calibration; the real commander does not reach the pilot's module either (it is the pilot's).
 ## Fix 9vr-c: the shoulder joint moved 0.04 down to the glenohumeral centre (upper arm 0.04 shorter, elbow kept); the shoulder girdle
-## (MAX_GIRDLE_DEG) gives most of the reach back: re-measured (was r_upper_5 61.5, r_upper_3 31.8, r_lower_3 45.7 mm).
+## (MAX_GIRDLE_DEG) gives back most of the 4 cm loss, but the gaps are still 4-10 mm LARGER than before the shoulder drop: re-measured
+## (was r_upper_5 61.5, r_upper_3 31.8, r_lower_3 45.7 mm; now 71.2, 35.9, 53.8 mm).
 const KNOWN_REACH_GAP_M := {"button:r_upper_5": 0.0712, "button:r_upper_3": 0.0359, "button:r_lower_3": 0.0538}
 const REACH_GAP_TOLERANCE_M := 0.002  ## the measured shortfall must stay within 2 mm of the table: a change shows up
 
@@ -506,6 +507,7 @@ func _check_figure_arms(config: CockpitConfig) -> void:
 	_check(view.posed_tip("r").distance_to(view.idle_tip("r")) < 1e-3, "the rest target is met (%s m)" % view.posed_tip("r").distance_to(view.idle_tip("r")))
 	# a point on every screen's centre and on a few keys: which are reached by which hand
 	var report := []
+	var girdle_max := 0.0
 	var targets := {"centre": "r", "left": "l", "right": "r", "button:cam3": "l", "button:c_upper_2": "l", "button:r_upper_3": "r", "button:r_upper_5": "r", "button:cam1": "l", "button:cam10": "l", "button:r_lower_3": "r"}
 	for id: String in targets:
 		var s := strip.surface(id)
@@ -519,6 +521,7 @@ func _check_figure_arms(config: CockpitConfig) -> void:
 		var res := view.arm_result(side)
 		report.append("%s %s err %.1f mm bend %.1f deg lean %.1f deg" % [id, side, err * 1000.0, rad_to_deg(float(res["wrist_bend_rad"])), rad_to_deg(view._lean.get_angle())])
 		_check(res["tip"].is_finite() and view.cabin_node("screen_centre") != null, "%s: finite pose" % id)
+		girdle_max = maxf(girdle_max, _girdle_deg(view, side))
 		if KNOWN_REACH_GAP_M.has(id):
 			# known gap: the key lies beyond the reach even with the lean at its limit; the tip stops short (clamped, finite pose)
 			var gap: float = KNOWN_REACH_GAP_M[id]
@@ -527,6 +530,10 @@ func _check_figure_arms(config: CockpitConfig) -> void:
 			_check(err < 0.002, "%s is touched by the %s hand (error %.1f mm)" % [id, side, err * 1000.0])
 	for line in report:
 		print("  ", line)
+	# the shoulder girdle limit (MAX_GIRDLE_DEG = 20 deg) is pinned: the far key r_upper_5 drives the girdle to it, never past it
+	_check(is_equal_approx(view.MAX_GIRDLE_DEG, 20.0), "the girdle limit is 20 deg (is %.2f)" % view.MAX_GIRDLE_DEG)
+	_check(girdle_max <= 20.0 + 0.05, "no key swings the girdle past 20 deg (max %.2f deg)" % girdle_max)
+	_check(girdle_max > 19.0, "the far keys reach the girdle limit (max %.2f deg)" % girdle_max)
 	var skeleton := view.figure_skeleton("s2")
 	var poses_ok := true
 	for b in skeleton.get_bone_count():
@@ -534,6 +541,16 @@ func _check_figure_arms(config: CockpitConfig) -> void:
 	_check(poses_ok, "every bone pose is finite after the arm poses")
 	_check_figure_deform(view)
 	view.free()
+
+
+## The girdle swing of the side's shoulder bone in degrees: its global pose against the rest, with the torso lean taken out.
+func _girdle_deg(view, side: String) -> float:
+	var skeleton: Skeleton3D = view.figure_skeleton("s2")
+	var bone := skeleton.find_bone("shoulder_" + side)
+	var pose := skeleton.get_bone_global_pose(bone).basis.orthonormalized()
+	var rest := skeleton.get_bone_global_rest(bone).basis.orthonormalized()
+	var swing := (pose * rest.inverse()).get_rotation_quaternion() * (view._lean as Quaternion).inverse()
+	return rad_to_deg(swing.get_angle())
 
 
 ## Task 8b: the joint folds follow the pose: the wrinkle weight is 0 at the straight joint and 1 at full bend; the player's elbow bend

@@ -737,3 +737,29 @@ def test_gltf_morph_targets_are_sparse_and_the_bin_small():
     assert targets and all("bufferView" not in doc["accessors"][a] for a in targets)
     assert all(doc["accessors"][a].get("sparse", {"count": 0})["count"] < doc["accessors"][a]["count"] for a in targets)
     assert (GLTF.parent / doc["buffers"][0]["uri"]).stat().st_size < 3.2e6
+
+
+@pytest.mark.skipif(not GENERATED, reason="Dragon models not generated (python tools/structures/build_models.py --vehicle crew_dragon)")
+def test_sparse_morph_targets_round_trip_to_the_dense_shapes(cfg, suit):
+    """Fix 9vr-c fix round 1: the sparse accessors in the written glTF/.bin decode (gltf_sparse.target_rows) to the Python shapes within float32.
+    The exporter splits vertices at UV / normal seams, so each glTF vertex is matched to its Python vertex by the rest position."""
+    spatial = pytest.importorskip("scipy.spatial")
+    import gltf_sparse
+    doc = json.loads(GLTF.read_text(encoding="utf-8"))
+    data = (GLTF.parent / doc["buffers"][0]["uri"]).read_bytes()
+    node = next(n for n in doc["nodes"] if n.get("name") == "crew_figure")
+    m = doc["meshes"][node["mesh"]]
+    prim = next(p for p in m["primitives"] if doc["materials"][p["material"]]["name"] == "suit")
+    names = m["extras"]["targetNames"]
+    assert sorted(names) == sorted(suit["shapes"]) and len(prim["targets"]) == 20
+    position = gltf_sparse.target_rows(doc, data, doc["accessors"][prim["attributes"]["POSITION"]])
+    distance, source = spatial.cKDTree(suit["rest"]).query(position)
+    assert distance.max() < 1e-6  # every glTF vertex is a Python vertex (split at seams, not moved)
+    sparse_used = 0
+    for name, target in zip(names, prim["targets"]):
+        acc = doc["accessors"][target["POSITION"]]
+        sparse_used += "sparse" in acc
+        dense = gltf_sparse.target_rows(doc, data, acc)
+        assert dense.shape == (len(position), 3), name
+        assert np.abs(dense - suit["shapes"][name][source]).max() < 1e-6, name  # float32 of offsets of ~1e-2 m
+    assert sparse_used == 20
